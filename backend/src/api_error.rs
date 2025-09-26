@@ -3,6 +3,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ApiError {
     #[error("Internal server error")]
     InternalServerError,

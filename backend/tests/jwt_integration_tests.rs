@@ -6,7 +6,6 @@ use anyhow::Result;
 use chrono::{Duration, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
 use std::env;
-use tokio;
 
 use backend::auth::{JwtConfig, JwtError, JwtService, SessionInfo, TokenType};
 
@@ -33,7 +32,7 @@ fn get_test_jwt_service() -> Result<JwtService> {
 async fn cleanup_redis() -> Result<(), redis::RedisError> {
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     let client = RedisClient::open(redis_url)?;
-    let mut conn = client.get_async_connection().await?;
+    let mut conn = client.get_multiplexed_async_connection().await?;
 
     // Clean up test data
     let session_keys: Vec<String> = conn.keys("session:*").await.unwrap_or_default();
@@ -54,7 +53,7 @@ async fn redis_available() -> bool {
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     match RedisClient::open(redis_url) {
         Ok(client) => {
-            if let Ok(mut conn) = client.get_async_connection().await {
+            if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
                 // Try a simple operation instead of ping
                 let _: Result<String, redis::RedisError> = conn.set("test_key", "test_value").await;
                 true

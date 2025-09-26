@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
@@ -364,7 +365,7 @@ impl JwtService {
 
     /// Blacklist a token
     pub async fn blacklist_token(&mut self, token: &str) -> Result<(), JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Extract JTI from token for efficient storage
         let jti = self.extract_jti_from_token(token)?;
@@ -373,7 +374,7 @@ impl JwtService {
         let key = format!("blacklisted:{}", jti);
         let expiry = self.config.refresh_token_expiry.num_seconds() as u64;
 
-        conn.set_ex(&key, "1", expiry).await?;
+        conn.set_ex::<_, _, ()>(&key, "1", expiry).await?;
 
         self.analytics.blacklisted_tokens += 1;
         info!("Token blacklisted: {}", jti);
@@ -383,7 +384,7 @@ impl JwtService {
 
     /// Check if token is blacklisted
     pub async fn is_token_blacklisted(&self, token: &str) -> Result<bool, JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         let jti = self.extract_jti_from_token(token)?;
         let key = format!("blacklisted:{}", jti);
@@ -394,14 +395,14 @@ impl JwtService {
 
     /// Create or update session
     pub async fn create_session(&mut self, session_info: &SessionInfo) -> Result<(), JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         let key = format!("session:{}", session_info.session_id);
         let session_data = serde_json::to_string(session_info)
             .map_err(|e| JwtError::InvalidClaims(e.to_string()))?;
 
         let expiry = self.config.refresh_token_expiry.num_seconds() as u64;
-        conn.set_ex(&key, session_data, expiry).await?;
+        conn.set_ex::<_, _, ()>(&key, session_data, expiry).await?;
 
         self.analytics.active_sessions += 1;
 
@@ -410,7 +411,7 @@ impl JwtService {
 
     /// Get session information
     pub async fn get_session(&self, session_id: &str) -> Result<SessionInfo, JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         let key = format!("session:{}", session_id);
         let session_data: Option<String> = conn.get(&key).await?;
@@ -430,23 +431,23 @@ impl JwtService {
         let mut session = self.get_session(session_id).await?;
         session.last_accessed = Utc::now();
 
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
         let key = format!("session:{}", session_id);
         let session_data =
             serde_json::to_string(&session).map_err(|e| JwtError::InvalidClaims(e.to_string()))?;
 
         let expiry = self.config.refresh_token_expiry.num_seconds() as u64;
-        conn.set_ex(&key, session_data, expiry).await?;
+        conn.set_ex::<_, _, ()>(&key, session_data, expiry).await?;
 
         Ok(())
     }
 
     /// Invalidate session
     pub async fn invalidate_session(&mut self, session_id: &str) -> Result<(), JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         let key = format!("session:{}", session_id);
-        conn.del(&key).await?;
+        conn.del::<_, ()>(&key).await?;
 
         self.analytics.active_sessions = self.analytics.active_sessions.saturating_sub(1);
 
@@ -456,7 +457,7 @@ impl JwtService {
 
     /// Get user sessions
     pub async fn get_user_sessions(&self, user_id: &str) -> Result<Vec<SessionInfo>, JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         let pattern = "session:*";
         let keys: Vec<String> = conn.keys(pattern).await?;
@@ -464,7 +465,7 @@ impl JwtService {
         let mut user_sessions = Vec::new();
 
         for key in keys {
-            if let Ok(session_data) = conn.get::<_, String>(&key).await {
+            if let Ok(session_data) = conn.get::<String, String>(key).await {
                 if let Ok(session) = serde_json::from_str::<SessionInfo>(&session_data) {
                     if session.user_id == user_id && session.is_active {
                         user_sessions.push(session);
@@ -518,7 +519,7 @@ impl JwtService {
 
     /// Update analytics from Redis
     pub async fn refresh_analytics(&mut self) -> Result<(), JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Count active sessions
         let session_keys: Vec<String> = conn.keys("session:*").await?;
@@ -535,7 +536,7 @@ impl JwtService {
 
     /// Cleanup expired tokens and sessions
     pub async fn cleanup_expired(&mut self) -> Result<u32, JwtError> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Redis automatically handles expiration, but we can clean up manually
         let mut cleaned = 0;
@@ -543,11 +544,12 @@ impl JwtService {
         // Clean up expired sessions
         let session_keys: Vec<String> = conn.keys("session:*").await?;
         for key in session_keys {
-            if let Ok(session_data) = conn.get::<_, String>(&key).await {
+            let key_clone = key.clone();
+            if let Ok(session_data) = conn.get::<String, String>(key).await {
                 if let Ok(session) = serde_json::from_str::<SessionInfo>(&session_data) {
                     let age = Utc::now() - session.last_accessed;
                     if age > self.config.refresh_token_expiry {
-                        conn.del(&key).await?;
+                        conn.del::<String, ()>(key_clone).await?;
                         cleaned += 1;
                     }
                 }
