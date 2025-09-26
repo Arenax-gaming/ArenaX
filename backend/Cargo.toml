@@ -16,7 +16,8 @@ thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std"] }
 actix-cors = "0.6"
-jsonwebtoken = "9.0"
+jsonwebtoken = "9.2"
 dotenvy = "0.15"
 uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 stellar-rs = "1.0.0"
