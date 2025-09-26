@@ -1,14 +1,7 @@
 pub mod jwt_service;
 
 pub use jwt_service::{
-    Claims,
-    JwtConfig,
-    JwtError,
-    JwtService,
-    SessionInfo,
-    TokenPair,
-    TokenType,
-    TokenAnalytics,
+    Claims, JwtConfig, JwtError, JwtService, SessionInfo, TokenAnalytics, TokenPair, TokenType,
 };
 
 // Re-export common functionality

@@ -8,9 +8,7 @@ use redis::{AsyncCommands, Client as RedisClient};
 use std::env;
 use tokio;
 
-use backend::auth::{
-    JwtConfig, JwtError, JwtService, SessionInfo, TokenType,
-};
+use backend::auth::{JwtConfig, JwtError, JwtService, SessionInfo, TokenType};
 
 // Test configuration
 fn get_test_config() -> JwtConfig {
@@ -87,7 +85,10 @@ async fn test_token_validation_with_redis() {
 
     let validation_result = jwt_service.validate_token(&token_pair.access_token).await;
 
-    assert!(validation_result.is_ok(), "Should be able to validate access token");
+    assert!(
+        validation_result.is_ok(),
+        "Should be able to validate access token"
+    );
 
     let claims = validation_result.unwrap();
     assert_eq!(claims.sub, user_id);
@@ -113,18 +114,27 @@ async fn test_token_blacklisting_with_redis() {
 
     // Token should be valid initially
     let validation_result = jwt_service.validate_token(&token_pair.access_token).await;
-    assert!(validation_result.is_ok(), "Token should be valid before blacklisting");
+    assert!(
+        validation_result.is_ok(),
+        "Token should be valid before blacklisting"
+    );
 
     // Blacklist the token
     let blacklist_result = jwt_service.blacklist_token(&token_pair.access_token).await;
-    assert!(blacklist_result.is_ok(), "Should be able to blacklist token");
+    assert!(
+        blacklist_result.is_ok(),
+        "Should be able to blacklist token"
+    );
 
     // Token should be invalid after blacklisting
     let validation_result = jwt_service.validate_token(&token_pair.access_token).await;
-    assert!(validation_result.is_err(), "Token should be invalid after blacklisting");
+    assert!(
+        validation_result.is_err(),
+        "Token should be invalid after blacklisting"
+    );
 
     match validation_result.unwrap_err() {
-        JwtError::TokenBlacklisted => {}, // Expected
+        JwtError::TokenBlacklisted => {} // Expected
         other => panic!("Expected TokenBlacklisted error, got: {:?}", other),
     }
 }
@@ -163,16 +173,29 @@ async fn test_session_management_with_redis() {
     assert_eq!(retrieved_session.device_id, session_info.device_id);
 
     // Update session access
-    let update_result = jwt_service.update_session_access(&session_info.session_id).await;
-    assert!(update_result.is_ok(), "Should be able to update session access");
+    let update_result = jwt_service
+        .update_session_access(&session_info.session_id)
+        .await;
+    assert!(
+        update_result.is_ok(),
+        "Should be able to update session access"
+    );
 
     // Invalidate session
-    let invalidate_result = jwt_service.invalidate_session(&session_info.session_id).await;
-    assert!(invalidate_result.is_ok(), "Should be able to invalidate session");
+    let invalidate_result = jwt_service
+        .invalidate_session(&session_info.session_id)
+        .await;
+    assert!(
+        invalidate_result.is_ok(),
+        "Should be able to invalidate session"
+    );
 
     // Session should not be found after invalidation
     let get_result = jwt_service.get_session(&session_info.session_id).await;
-    assert!(get_result.is_err(), "Session should not be found after invalidation");
+    assert!(
+        get_result.is_err(),
+        "Session should not be found after invalidation"
+    );
 }
 
 #[tokio::test]
@@ -192,15 +215,23 @@ async fn test_token_refresh_with_redis() {
         .generate_token_pair(user_id, None, permissions)
         .expect("Failed to generate token pair");
 
-    let refresh_result = jwt_service.refresh_token(&original_token_pair.refresh_token).await;
+    let refresh_result = jwt_service
+        .refresh_token(&original_token_pair.refresh_token)
+        .await;
 
     assert!(refresh_result.is_ok(), "Should be able to refresh token");
 
     let new_token_pair = refresh_result.unwrap();
     assert!(!new_token_pair.access_token.is_empty());
     assert!(!new_token_pair.refresh_token.is_empty());
-    assert_ne!(new_token_pair.access_token, original_token_pair.access_token);
-    assert_ne!(new_token_pair.refresh_token, original_token_pair.refresh_token);
+    assert_ne!(
+        new_token_pair.access_token,
+        original_token_pair.access_token
+    );
+    assert_ne!(
+        new_token_pair.refresh_token,
+        original_token_pair.refresh_token
+    );
 }
 
 #[tokio::test]
@@ -236,8 +267,14 @@ async fn test_user_sessions_with_redis() {
         is_active: true,
     };
 
-    jwt_service.create_session(&session1).await.expect("Failed to create session 1");
-    jwt_service.create_session(&session2).await.expect("Failed to create session 2");
+    jwt_service
+        .create_session(&session1)
+        .await
+        .expect("Failed to create session 1");
+    jwt_service
+        .create_session(&session2)
+        .await
+        .expect("Failed to create session 2");
 
     // Get user sessions
     let user_sessions = jwt_service.get_user_sessions(user_id).await;
@@ -248,14 +285,28 @@ async fn test_user_sessions_with_redis() {
 
     // Invalidate all user sessions
     let invalidated_count = jwt_service.invalidate_all_user_sessions(user_id).await;
-    assert!(invalidated_count.is_ok(), "Should be able to invalidate all sessions");
-    assert_eq!(invalidated_count.unwrap(), 2, "Should have invalidated 2 sessions");
+    assert!(
+        invalidated_count.is_ok(),
+        "Should be able to invalidate all sessions"
+    );
+    assert_eq!(
+        invalidated_count.unwrap(),
+        2,
+        "Should have invalidated 2 sessions"
+    );
 
     // Check that sessions are gone
     let user_sessions = jwt_service.get_user_sessions(user_id).await;
-    assert!(user_sessions.is_ok(), "Should be able to query user sessions");
+    assert!(
+        user_sessions.is_ok(),
+        "Should be able to query user sessions"
+    );
     let sessions = user_sessions.unwrap();
-    assert_eq!(sessions.len(), 0, "Should have no sessions after invalidation");
+    assert_eq!(
+        sessions.len(),
+        0,
+        "Should have no sessions after invalidation"
+    );
 }
 
 #[tokio::test]
@@ -279,22 +330,37 @@ async fn test_analytics_refresh_with_redis() {
         is_active: true,
     };
 
-    jwt_service.create_session(&session_info).await.expect("Failed to create session");
+    jwt_service
+        .create_session(&session_info)
+        .await
+        .expect("Failed to create session");
 
     // Generate and blacklist a token
     let token_pair = jwt_service
         .generate_token_pair("test-user", None, vec!["read".to_string()])
         .expect("Failed to generate token pair");
 
-    jwt_service.blacklist_token(&token_pair.access_token).await.expect("Failed to blacklist token");
+    jwt_service
+        .blacklist_token(&token_pair.access_token)
+        .await
+        .expect("Failed to blacklist token");
 
     // Refresh analytics from Redis
     let refresh_result = jwt_service.refresh_analytics().await;
-    assert!(refresh_result.is_ok(), "Should be able to refresh analytics");
+    assert!(
+        refresh_result.is_ok(),
+        "Should be able to refresh analytics"
+    );
 
     let analytics = jwt_service.get_analytics();
-    assert!(analytics.active_sessions > 0, "Should have at least one active session");
-    assert!(analytics.blacklisted_tokens > 0, "Should have at least one blacklisted token");
+    assert!(
+        analytics.active_sessions > 0,
+        "Should have at least one active session"
+    );
+    assert!(
+        analytics.blacklisted_tokens > 0,
+        "Should have at least one blacklisted token"
+    );
 }
 
 #[tokio::test]
@@ -377,8 +443,13 @@ async fn test_complete_flow_with_redis() {
     assert_eq!(new_access_claims.refresh_count, 1);
 
     // Step 6: Clean up
-    let invalidate_result = jwt_service.invalidate_session(&access_claims.session_id).await;
-    assert!(invalidate_result.is_ok(), "Should be able to invalidate session");
+    let invalidate_result = jwt_service
+        .invalidate_session(&access_claims.session_id)
+        .await;
+    assert!(
+        invalidate_result.is_ok(),
+        "Should be able to invalidate session"
+    );
 
     println!("✅ Complete Redis integration flow test passed!");
 }

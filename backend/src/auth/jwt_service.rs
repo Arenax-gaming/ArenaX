@@ -71,17 +71,17 @@ pub enum JwtError {
 // JWT Claims structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,           // Subject (user ID)
-    pub exp: i64,              // Expiration time
-    pub iat: i64,              // Issued at
-    pub iss: String,           // Issuer
-    pub aud: String,           // Audience
-    pub jti: String,           // JWT ID
-    pub token_type: TokenType, // Token type
-    pub session_id: String,    // Session identifier
+    pub sub: String,               // Subject (user ID)
+    pub exp: i64,                  // Expiration time
+    pub iat: i64,                  // Issued at
+    pub iss: String,               // Issuer
+    pub aud: String,               // Audience
+    pub jti: String,               // JWT ID
+    pub token_type: TokenType,     // Token type
+    pub session_id: String,        // Session identifier
     pub device_id: Option<String>, // Device identifier
-    pub refresh_count: u32,    // Number of times refreshed
-    pub permissions: Vec<String>, // User permissions
+    pub refresh_count: u32,        // Number of times refreshed
+    pub permissions: Vec<String>,  // User permissions
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -420,7 +420,7 @@ impl JwtService {
                 let session: SessionInfo = serde_json::from_str(&data)
                     .map_err(|e| JwtError::InvalidClaims(e.to_string()))?;
                 Ok(session)
-            },
+            }
             None => Err(JwtError::SessionNotFound),
         }
     }
@@ -432,8 +432,8 @@ impl JwtService {
 
         let mut conn = self.redis_client.get_async_connection().await?;
         let key = format!("session:{}", session_id);
-        let session_data = serde_json::to_string(&session)
-            .map_err(|e| JwtError::InvalidClaims(e.to_string()))?;
+        let session_data =
+            serde_json::to_string(&session).map_err(|e| JwtError::InvalidClaims(e.to_string()))?;
 
         let expiry = self.config.refresh_token_expiry.num_seconds() as u64;
         conn.set_ex(&key, session_data, expiry).await?;
@@ -487,7 +487,10 @@ impl JwtService {
             }
         }
 
-        info!("Invalidated {} sessions for user: {}", invalidated_count, user_id);
+        info!(
+            "Invalidated {} sessions for user: {}",
+            invalidated_count, user_id
+        );
         Ok(invalidated_count)
     }
 
@@ -598,7 +601,10 @@ impl JwtService {
 
         // Validate permissions
         if claims.permissions.is_empty() {
-            warn!("Token generated with no permissions for user: {}", claims.sub);
+            warn!(
+                "Token generated with no permissions for user: {}",
+                claims.sub
+            );
         }
 
         // Check refresh count
@@ -615,17 +621,25 @@ impl JwtService {
 
         // Check for too many concurrent sessions
         if sessions.len() > 10 {
-            warn!("User {} has {} concurrent sessions", user_id, sessions.len());
+            warn!(
+                "User {} has {} concurrent sessions",
+                user_id,
+                sessions.len()
+            );
             return Ok(true);
         }
 
         // Check for rapid token refresh
-        let recent_sessions = sessions.iter()
+        let recent_sessions = sessions
+            .iter()
             .filter(|s| Utc::now() - s.last_accessed < Duration::minutes(5))
             .count();
 
         if recent_sessions > 5 {
-            warn!("User {} has {} recent sessions (potential token abuse)", user_id, recent_sessions);
+            warn!(
+                "User {} has {} recent sessions (potential token abuse)",
+                user_id, recent_sessions
+            );
             return Ok(true);
         }
 

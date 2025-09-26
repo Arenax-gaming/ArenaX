@@ -1,6 +1,6 @@
-use sqlx::{PgPool, postgres::PgPoolOptions};
-use crate::config::Config;
 use crate::api_error::ApiError;
+use crate::config::Config;
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
 pub type DbPool = PgPool;
 
