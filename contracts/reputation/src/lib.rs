@@ -1,6 +1,7 @@
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, Map, Symbol, Val, IntoVal, TryFromVal};
+use soroban_sdk::{
+    contract, contractimpl, Address, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
+};
 
-// Storage keys
 const ADMIN_KEY: Symbol = Symbol::short("ADMIN");
 const PAUSED_KEY: Symbol = Symbol::short("PAUSED");
 const PLAYER_REPUTATION_KEY: Symbol = Symbol::short("PLAYER_REP");
@@ -8,7 +9,6 @@ const PLAYER_INFO_KEY: Symbol = Symbol::short("PLAYER_INFO");
 const REPUTATION_HISTORY_KEY: Symbol = Symbol::short("REP_HISTORY");
 const LEADERBOARD_KEY: Symbol = Symbol::short("LEADERBOARD");
 
-// Constants
 const INITIAL_REPUTATION: i128 = 100;
 const MAX_REPUTATION: i128 = 10000;
 const MIN_REPUTATION: i128 = 0;
@@ -17,18 +17,16 @@ const MAX_HISTORY_EVENTS: u32 = 1000;
 #[contract]
 pub struct ReputationContract;
 
-// Reputation tiers
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReputationTier {
-    Beginner,      // 0-100 points
-    Novice,        // 101-500 points
-    Intermediate,  // 501-1000 points
-    Advanced,      // 1001-2000 points
-    Expert,        // 2001-5000 points
-    Master,        // 5001+ points
+    Beginner,
+    Novice,
+    Intermediate,
+    Advanced,
+    Expert,
+    Master,
 }
 
-// Reputation event types
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReputationEventType {
     MatchWin,
@@ -42,16 +40,14 @@ pub enum ReputationEventType {
     CommunityContribution,
 }
 
-// Penalty severity levels
 #[derive(Clone, Debug, PartialEq)]
 pub enum PenaltySeverity {
-    Minor,    // -10 to -50 points
-    Moderate, // -51 to -200 points
-    Major,    // -201 to -500 points
-    Severe,   // -501+ points
+    Minor,
+    Moderate,
+    Major,
+    Severe,
 }
 
-// Reputation information for a player
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReputationInfo {
     pub player: Address,
@@ -66,7 +62,6 @@ pub struct ReputationInfo {
     pub penalties: u32,
 }
 
-// Reputation event
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReputationEvent {
     pub event_type: ReputationEventType,
@@ -77,7 +72,6 @@ pub struct ReputationEvent {
     pub match_id: Option<u64>,
 }
 
-// Reputation requirements for tournaments
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReputationRequirement {
     pub min_reputation: i128,
@@ -86,34 +80,23 @@ pub struct ReputationRequirement {
     pub min_matches: u32,
 }
 
-// Error types
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    // General errors
     Unauthorized,
     ContractPaused,
     InvalidParameter,
-    
-    // Player errors
     PlayerNotFound,
     PlayerAlreadyExists,
     InvalidReputationAmount,
-    
-    // Reputation errors
     InsufficientReputation,
     ReputationUpdateFailed,
     InvalidReputationTier,
-    
-    // Event errors
     InvalidEventType,
     EventRecordingFailed,
-    
-    // Requirement errors
     RequirementNotMet,
     InvalidRequirement,
 }
 
-// Implement conversion traits for storage
 impl IntoVal<Env, Val> for ReputationTier {
     fn into_val(self, env: &Env) -> Val {
         match self {
@@ -129,7 +112,7 @@ impl IntoVal<Env, Val> for ReputationTier {
 
 impl TryFromVal<Env, Val> for ReputationTier {
     type Error = Error;
-    
+
     fn try_from_val(env: &Env, val: Val) -> Result<Self, Self::Error> {
         let tier_val: i32 = val.try_into().map_err(|_| Error::InvalidParameter)?;
         match tier_val {
@@ -162,7 +145,7 @@ impl IntoVal<Env, Val> for ReputationEventType {
 
 impl TryFromVal<Env, Val> for ReputationEventType {
     type Error = Error;
-    
+
     fn try_from_val(env: &Env, val: Val) -> Result<Self, Self::Error> {
         let event_val: i32 = val.try_into().map_err(|_| Error::InvalidParameter)?;
         match event_val {
@@ -193,7 +176,7 @@ impl IntoVal<Env, Val> for PenaltySeverity {
 
 impl TryFromVal<Env, Val> for PenaltySeverity {
     type Error = Error;
-    
+
     fn try_from_val(env: &Env, val: Val) -> Result<Self, Self::Error> {
         let severity_val: i32 = val.try_into().map_err(|_| Error::InvalidParameter)?;
         match severity_val {
@@ -220,10 +203,7 @@ impl ReputationContract {
     }
 
     fn is_paused(env: &Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&PAUSED_KEY)
-            .unwrap_or(false)
+        env.storage().instance().get(&PAUSED_KEY).unwrap_or(false)
     }
 
     fn set_paused(env: &Env, paused: bool) {
@@ -282,14 +262,13 @@ impl ReputationContract {
 
     fn add_reputation_event(env: &Env, player: &Address, event: ReputationEvent) {
         let mut history = Self::get_reputation_history(env, player);
-        
-        // Limit history size to prevent storage bloat
+
         if history.len() >= MAX_HISTORY_EVENTS {
-            history.remove(0); // Remove oldest event
+            history.remove(0);
         }
-        
+
         history.push_back(event);
-        
+
         let key = (REPUTATION_HISTORY_KEY, player);
         env.storage().persistent().set(&key, &history);
     }
@@ -314,52 +293,75 @@ impl ReputationContract {
             ReputationEventType::MatchWin => (base_amount as f64 * multiplier) as i128,
             ReputationEventType::MatchLoss => -(base_amount as f64 * multiplier * 0.1) as i128,
             ReputationEventType::TournamentWin => (base_amount as f64 * multiplier * 2.0) as i128,
-            ReputationEventType::TournamentParticipation => (base_amount as f64 * multiplier * 0.5) as i128,
-            ReputationEventType::DisputeResolution => -(base_amount as f64 * multiplier * 0.3) as i128,
-            ReputationEventType::CheatingPenalty => -(base_amount as f64 * multiplier * 5.0) as i128,
+            ReputationEventType::TournamentParticipation => {
+                (base_amount as f64 * multiplier * 0.5) as i128
+            }
+            ReputationEventType::DisputeResolution => {
+                -(base_amount as f64 * multiplier * 0.3) as i128
+            }
+            ReputationEventType::CheatingPenalty => {
+                -(base_amount as f64 * multiplier * 5.0) as i128
+            }
             ReputationEventType::FairPlayReward => (base_amount as f64 * multiplier * 1.5) as i128,
             ReputationEventType::LongStreakBonus => (base_amount as f64 * multiplier * 3.0) as i128,
-            ReputationEventType::CommunityContribution => (base_amount as f64 * multiplier * 2.5) as i128,
+            ReputationEventType::CommunityContribution => {
+                (base_amount as f64 * multiplier * 2.5) as i128
+            }
         }
     }
 
     fn emit_reputation_issued(env: &Env, player: Address, amount: i128) {
-        env.events().publish((Symbol::new(env, "reputation_issued"), player), amount);
+        env.events()
+            .publish((Symbol::new(env, "reputation_issued"), player), amount);
     }
 
     fn emit_reputation_updated(env: &Env, player: Address, change: i128, new_total: i128) {
-        env.events().publish((Symbol::new(env, "reputation_updated"), player), (change, new_total));
+        env.events().publish(
+            (Symbol::new(env, "reputation_updated"), player),
+            (change, new_total),
+        );
     }
 
     fn emit_penalty_applied(env: &Env, player: Address, penalty: i128, reason: String) {
-        env.events().publish((Symbol::new(env, "penalty_applied"), player), (penalty, reason));
+        env.events().publish(
+            (Symbol::new(env, "penalty_applied"), player),
+            (penalty, reason),
+        );
     }
 
-    fn emit_tier_changed(env: &Env, player: Address, old_tier: ReputationTier, new_tier: ReputationTier) {
-        env.events().publish((Symbol::new(env, "tier_changed"), player), (old_tier, new_tier));
+    fn emit_tier_changed(
+        env: &Env,
+        player: Address,
+        old_tier: ReputationTier,
+        new_tier: ReputationTier,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "tier_changed"), player),
+            (old_tier, new_tier),
+        );
     }
 
     fn emit_reputation_transferred(env: &Env, from: Address, to: Address, amount: i128) {
-        env.events().publish((Symbol::new(env, "reputation_transferred"), from), (to, amount));
+        env.events().publish(
+            (Symbol::new(env, "reputation_transferred"), from),
+            (to, amount),
+        );
     }
 }
 
 #[contractimpl]
 impl ReputationContract {
-    // Initialize the contract
     pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
-        // Check if already initialized
         if env.storage().instance().has(&ADMIN_KEY) {
             return Err(Error::InvalidParameter);
         }
 
         Self::set_admin(&env, &admin);
         Self::set_paused(&env, false);
-        
+
         Ok(())
     }
 
-    // Issue initial reputation to new player
     pub fn issue_reputation(
         env: Env,
         player: Address,
@@ -367,13 +369,12 @@ impl ReputationContract {
     ) -> Result<(), Error> {
         Self::require_not_paused(&env)?;
 
-        // Check if player already exists
         if Self::get_player_reputation(&env, &player).is_ok() {
             return Err(Error::PlayerAlreadyExists);
         }
 
         let amount = initial_amount.unwrap_or(INITIAL_REPUTATION);
-        
+
         if amount < MIN_REPUTATION || amount > MAX_REPUTATION {
             return Err(Error::InvalidReputationAmount);
         }
@@ -397,7 +398,6 @@ impl ReputationContract {
         Self::set_player_reputation(&env, &player, amount);
         Self::set_player_info(&env, &player, &reputation_info);
 
-        // Record initial reputation event
         let event = ReputationEvent {
             event_type: ReputationEventType::CommunityContribution,
             amount,
@@ -413,7 +413,6 @@ impl ReputationContract {
         Ok(())
     }
 
-    // Update reputation after match/tournament
     pub fn update_reputation(
         env: Env,
         player: Address,
@@ -429,11 +428,11 @@ impl ReputationContract {
         let mut player_info = Self::get_player_info(&env, &player)?;
 
         let new_reputation = current_reputation + change;
-        
+
         if new_reputation < MIN_REPUTATION {
             return Err(Error::InsufficientReputation);
         }
-        
+
         if new_reputation > MAX_REPUTATION {
             return Err(Error::InvalidReputationAmount);
         }
@@ -441,23 +440,22 @@ impl ReputationContract {
         let old_tier = player_info.reputation_tier.clone();
         let new_tier = Self::calculate_tier(new_reputation);
 
-        // Update player statistics based on event type
         match event_type {
             ReputationEventType::MatchWin => {
                 player_info.wins += 1;
                 player_info.total_matches += 1;
-            },
+            }
             ReputationEventType::MatchLoss => {
                 player_info.losses += 1;
                 player_info.total_matches += 1;
-            },
+            }
             ReputationEventType::DisputeResolution => {
                 player_info.disputes += 1;
-            },
+            }
             ReputationEventType::CheatingPenalty => {
                 player_info.penalties += 1;
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         player_info.current_reputation = new_reputation;
@@ -468,7 +466,6 @@ impl ReputationContract {
         Self::set_player_reputation(&env, &player, new_reputation);
         Self::set_player_info(&env, &player, &player_info);
 
-        // Record reputation event
         let event = ReputationEvent {
             event_type: event_type.clone(),
             amount: change,
@@ -481,7 +478,6 @@ impl ReputationContract {
         Self::add_reputation_event(&env, &player, event);
         Self::emit_reputation_updated(&env, player.clone(), change, new_reputation);
 
-        // Emit tier change event if tier changed
         if old_tier != new_tier {
             Self::emit_tier_changed(&env, player, old_tier, new_tier);
         }
@@ -489,7 +485,6 @@ impl ReputationContract {
         Ok(())
     }
 
-    // Apply penalty for cheating or bad behavior
     pub fn apply_penalty(
         env: Env,
         player: Address,
@@ -507,7 +502,7 @@ impl ReputationContract {
         let mut player_info = Self::get_player_info(&env, &player)?;
 
         let new_reputation = current_reputation + penalty_amount;
-        
+
         if new_reputation < MIN_REPUTATION {
             return Err(Error::InsufficientReputation);
         }
@@ -523,7 +518,6 @@ impl ReputationContract {
         Self::set_player_reputation(&env, &player, new_reputation);
         Self::set_player_info(&env, &player, &player_info);
 
-        // Record penalty event
         let event = ReputationEvent {
             event_type: ReputationEventType::CheatingPenalty,
             amount: penalty_amount,
@@ -536,7 +530,6 @@ impl ReputationContract {
         Self::add_reputation_event(&env, &player, event);
         Self::emit_penalty_applied(&env, player.clone(), penalty_amount, reason);
 
-        // Emit tier change event if tier changed
         if old_tier != new_tier {
             Self::emit_tier_changed(&env, player, old_tier, new_tier);
         }
@@ -544,58 +537,53 @@ impl ReputationContract {
         Ok(())
     }
 
-    // Get current reputation balance
     pub fn get_reputation(env: Env, player: Address) -> Result<i128, Error> {
         Self::get_player_reputation(&env, &player)
     }
 
-    // Get detailed reputation information
     pub fn get_reputation_info(env: Env, player: Address) -> Result<ReputationInfo, Error> {
         Self::get_player_info(&env, &player)
     }
 
-    // Get reputation history
     pub fn get_reputation_history(
         env: Env,
         player: Address,
         limit: Option<u32>,
     ) -> Result<Vec<ReputationEvent>, Error> {
         let mut history = Self::get_reputation_history(&env, &player);
-        
+
         if let Some(limit) = limit {
             let start_idx = if history.len() > limit {
                 history.len() - limit
             } else {
                 0
             };
-            
+
             let mut limited_history = Vec::new(&env);
             for i in start_idx..history.len() {
                 limited_history.push_back(history.get(i).unwrap());
             }
             history = limited_history;
         }
-        
+
         Ok(history)
     }
 
-    // Check if player meets reputation requirement
     pub fn check_reputation_requirement(
         env: Env,
         player: Address,
         requirement: ReputationRequirement,
     ) -> Result<bool, Error> {
         let player_info = Self::get_player_info(&env, &player)?;
-        
+
         let meets_reputation = player_info.current_reputation >= requirement.min_reputation;
         let meets_tier = player_info.reputation_tier as i32 >= requirement.min_tier as i32;
         let meets_penalty_limit = player_info.penalties <= requirement.max_penalties;
         let meets_match_minimum = player_info.total_matches >= requirement.min_matches;
-        
+
         Ok(meets_reputation && meets_tier && meets_penalty_limit && meets_match_minimum)
     }
 
-    // Transfer reputation (admin only, for special cases)
     pub fn transfer_reputation(
         env: Env,
         from: Address,
@@ -615,10 +603,9 @@ impl ReputationContract {
             return Err(Error::InsufficientReputation);
         }
 
-        // Check if recipient exists, create if not
         let to_reputation = Self::get_player_reputation(&env, &to).unwrap_or(0);
         let new_to_reputation = to_reputation + amount;
-        
+
         if new_to_reputation > MAX_REPUTATION {
             return Err(Error::InvalidReputationAmount);
         }
@@ -628,16 +615,13 @@ impl ReputationContract {
         Self::set_player_reputation(&env, &from, new_from_reputation);
         Self::set_player_reputation(&env, &to, new_to_reputation);
 
-        // Update player info for both players
         let mut from_info = Self::get_player_info(&env, &from)?;
         from_info.current_reputation = new_from_reputation;
         from_info.reputation_tier = Self::calculate_tier(new_from_reputation);
         from_info.last_updated = env.ledger().timestamp();
         Self::set_player_info(&env, &from, &from_info);
 
-        // Handle recipient info
         if to_reputation == 0 {
-            // New player, create initial info
             let to_info = ReputationInfo {
                 player: to.clone(),
                 total_reputation: amount,
@@ -652,7 +636,6 @@ impl ReputationContract {
             };
             Self::set_player_info(&env, &to, &to_info);
         } else {
-            // Existing player, update info
             let mut to_info = Self::get_player_info(&env, &to)?;
             to_info.current_reputation = new_to_reputation;
             to_info.total_reputation += amount;
@@ -665,42 +648,26 @@ impl ReputationContract {
         Ok(())
     }
 
-    // Get reputation leaderboard
     pub fn get_reputation_leaderboard(
         env: Env,
         limit: Option<u32>,
         tier: Option<ReputationTier>,
     ) -> Result<Vec<ReputationInfo>, Error> {
-        // This is a simplified implementation
-        // In a real implementation, you'd want to maintain a sorted list
-        // or use a more efficient data structure for leaderboards
         let limit = limit.unwrap_or(10);
         let mut leaderboard = Vec::new(&env);
-        
-        // Note: This is a placeholder implementation
-        // A real implementation would need to iterate through all players
-        // and sort them by reputation, which is expensive on-chain
-        // Consider using off-chain indexing for leaderboards
-        
         Ok(leaderboard)
     }
 
-    // Calculate reputation tier
     pub fn calculate_tier(env: Env, reputation: i128) -> ReputationTier {
         Self::calculate_tier(reputation)
     }
 
-    // Emergency reset reputation (admin only)
-    pub fn reset_reputation(
-        env: Env,
-        player: Address,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn reset_reputation(env: Env, player: Address, reason: String) -> Result<(), Error> {
         Self::require_admin(&env)?;
         Self::require_not_paused(&env)?;
 
         let mut player_info = Self::get_player_info(&env, &player)?;
-        
+
         player_info.current_reputation = 0;
         player_info.total_reputation = 0;
         player_info.reputation_tier = ReputationTier::Beginner;
@@ -709,7 +676,6 @@ impl ReputationContract {
         Self::set_player_reputation(&env, &player, 0);
         Self::set_player_info(&env, &player, &player_info);
 
-        // Record reset event
         let event = ReputationEvent {
             event_type: ReputationEventType::CheatingPenalty,
             amount: -player_info.current_reputation,
@@ -725,7 +691,6 @@ impl ReputationContract {
         Ok(())
     }
 
-    // Admin functions
     pub fn pause_contract(env: Env) -> Result<(), Error> {
         Self::require_admin(&env)?;
         Self::set_paused(&env, true);
@@ -754,13 +719,13 @@ impl ReputationContract {
     }
 
     pub fn get_player_count(env: Env) -> Result<u32, Error> {
-        // This would require maintaining a counter
-        // For now, return 0 as placeholder
         Ok(0)
     }
 
-    // Analytics functions
-    pub fn get_reputation_stats(env: Env, player: Address) -> Result<(i128, i128, u32, u32, u32, u32), Error> {
+    pub fn get_reputation_stats(
+        env: Env,
+        player: Address,
+    ) -> Result<(i128, i128, u32, u32, u32, u32), Error> {
         let player_info = Self::get_player_info(&env, &player)?;
         Ok((
             player_info.current_reputation,
@@ -791,8 +756,8 @@ impl ReputationContract {
     pub fn get_reputation_trend(env: Env, player: Address, days: u32) -> Result<i128, Error> {
         let history = Self::get_reputation_history(&env, &player, None)?;
         let current_time = env.ledger().timestamp();
-        let cutoff_time = current_time - (days as u64 * 24 * 60 * 60); // Approximate days to seconds
-        
+        let cutoff_time = current_time - (days as u64 * 24 * 60 * 60);
+
         let mut trend = 0i128;
         for i in 0..history.len() {
             let event = history.get(i).unwrap();
@@ -800,25 +765,24 @@ impl ReputationContract {
                 trend += event.amount;
             }
         }
-        
+
         Ok(trend)
     }
 
-    pub fn get_top_performers_by_tier(env: Env, tier: ReputationTier, limit: u32) -> Result<Vec<Address>, Error> {
-        // This is a placeholder implementation
-        // In a real implementation, you'd maintain sorted lists or use efficient data structures
+    pub fn get_top_performers_by_tier(
+        env: Env,
+        tier: ReputationTier,
+        limit: u32,
+    ) -> Result<Vec<Address>, Error> {
         let mut performers = Vec::new(&env);
         Ok(performers)
     }
 
     pub fn get_reputation_distribution(env: Env) -> Result<(u32, u32, u32, u32, u32, u32), Error> {
-        // This would require iterating through all players
-        // For now, return placeholder values
-        Ok((0, 0, 0, 0, 0, 0)) // (Beginner, Novice, Intermediate, Advanced, Expert, Master)
+        Ok((0, 0, 0, 0, 0, 0))
     }
 
     pub fn get_average_reputation_by_tier(env: Env, tier: ReputationTier) -> Result<i128, Error> {
-        // Placeholder implementation
         match tier {
             ReputationTier::Beginner => Ok(50),
             ReputationTier::Novice => Ok(300),
@@ -833,7 +797,7 @@ impl ReputationContract {
         let history = Self::get_reputation_history(&env, &player, None)?;
         let current_time = env.ledger().timestamp();
         let cutoff_time = current_time - (days as u64 * 24 * 60 * 60);
-        
+
         let mut changes = Vec::new(&env);
         for i in 0..history.len() {
             let event = history.get(i).unwrap();
@@ -841,87 +805,69 @@ impl ReputationContract {
                 changes.push_back(event.amount);
             }
         }
-        
+
         if changes.len() == 0 {
             return Ok(0.0);
         }
-        
-        // Calculate variance (simplified)
         let mut sum = 0i128;
         for i in 0..changes.len() {
             sum += changes.get(i).unwrap();
         }
         let mean = sum as f64 / changes.len() as f64;
-        
+
         let mut variance_sum = 0.0;
         for i in 0..changes.len() {
             let diff = changes.get(i).unwrap() as f64 - mean;
             variance_sum += diff * diff;
         }
-        
+
         let variance = variance_sum / changes.len() as f64;
         Ok(variance.sqrt())
     }
 
     pub fn get_most_active_players(env: Env, limit: u32) -> Result<Vec<Address>, Error> {
-        // Placeholder implementation
-        let mut players = Vec::new(&env);
-        Ok(players)
+        Ok(Vec::new(&env))
     }
 
     pub fn get_penalty_leaders(env: Env, limit: u32) -> Result<Vec<Address>, Error> {
-        // Placeholder implementation
-        let mut players = Vec::new(&env);
-        Ok(players)
+        Ok(Vec::new(&env))
     }
 
     pub fn get_fair_play_leaders(env: Env, limit: u32) -> Result<Vec<Address>, Error> {
-        // Placeholder implementation
-        let mut players = Vec::new(&env);
-        Ok(players)
+        Ok(Vec::new(&env))
     }
 
     pub fn get_reputation_health_score(env: Env, player: Address) -> Result<f64, Error> {
         let player_info = Self::get_player_info(&env, &player)?;
-        
-        // Calculate health score based on multiple factors
+
         let win_rate = if player_info.total_matches > 0 {
             player_info.wins as f64 / player_info.total_matches as f64
         } else {
             0.0
         };
-        
+
         let penalty_rate = if player_info.total_matches > 0 {
             player_info.penalties as f64 / player_info.total_matches as f64
         } else {
             0.0
         };
-        
+
         let dispute_rate = if player_info.total_matches > 0 {
             player_info.disputes as f64 / player_info.total_matches as f64
         } else {
             0.0
         };
-        
-        // Health score calculation (0.0 to 1.0)
-        let mut score = 0.5; // Base score
-        
-        // Win rate contribution (0.3 weight)
+
+        let mut score = 0.5;
         score += win_rate * 0.3;
-        
-        // Penalty penalty (-0.4 weight)
         score -= penalty_rate * 0.4;
-        
-        // Dispute penalty (-0.2 weight)
         score -= dispute_rate * 0.2;
-        
-        // Ensure score is between 0.0 and 1.0
         if score < 0.0 {
             score = 0.0;
         } else if score > 1.0 {
             score = 1.0;
         }
-        
+
         Ok(score)
     }
 }

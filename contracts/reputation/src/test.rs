@@ -1,5 +1,8 @@
-use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec, Symbol};
-use reputation::{ReputationContract, ReputationContractClient, ReputationTier, ReputationEventType, PenaltySeverity, ReputationRequirement, Error};
+use reputation::{
+    Error, PenaltySeverity, ReputationContract, ReputationContractClient, ReputationEventType,
+    ReputationRequirement, ReputationTier,
+};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol, Vec};
 
 fn create_test_env() -> Env {
     let env = Env::default();
@@ -18,14 +21,11 @@ fn test_initialize_contract() {
     let contract = create_test_contract(&env);
     let admin = Address::generate(&env);
 
-    // Initialize contract
     contract.initialize(&admin);
-    
-    // Verify admin is set
+
     let stored_admin = contract.get_admin();
     assert_eq!(stored_admin, admin);
-    
-    // Verify contract is not paused
+
     let is_paused = contract.is_contract_paused();
     assert_eq!(is_paused, false);
 }
@@ -36,10 +36,8 @@ fn test_initialize_twice_fails() {
     let contract = create_test_contract(&env);
     let admin = Address::generate(&env);
 
-    // Initialize contract
     contract.initialize(&admin);
-    
-    // Try to initialize again - should fail
+
     let result = contract.try_initialize(&admin);
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::InvalidParameter);
@@ -53,15 +51,11 @@ fn test_issue_reputation() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
-    // Issue initial reputation
+
     contract.issue_reputation(&player, &None);
-    
-    // Verify reputation was issued
+
     let reputation = contract.get_reputation(&player);
-    assert_eq!(reputation, 100); // Default initial reputation
-    
-    // Verify player info
+    assert_eq!(reputation, 100);
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.player, player);
     assert_eq!(player_info.current_reputation, 100);
@@ -81,14 +75,14 @@ fn test_issue_reputation_custom_amount() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
+
     // Issue custom initial reputation
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Verify reputation was issued
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 500);
-    
+
     // Verify tier calculation
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.reputation_tier, ReputationTier::Novice);
@@ -102,10 +96,10 @@ fn test_issue_reputation_duplicate_player() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
+
     // Issue initial reputation
     contract.issue_reputation(&player, &None);
-    
+
     // Try to issue again - should fail
     let result = contract.try_issue_reputation(&player, &None);
     assert!(result.is_err());
@@ -121,7 +115,7 @@ fn test_update_reputation_match_win() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &None);
-    
+
     // Update reputation for match win
     contract.update_reputation(
         &player,
@@ -131,11 +125,11 @@ fn test_update_reputation_match_win() {
         &None,
         &Some(1),
     );
-    
+
     // Verify reputation updated
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 150);
-    
+
     // Verify player stats updated
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.wins, 1);
@@ -152,7 +146,7 @@ fn test_update_reputation_match_loss() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(200));
-    
+
     // Update reputation for match loss
     contract.update_reputation(
         &player,
@@ -162,11 +156,11 @@ fn test_update_reputation_match_loss() {
         &None,
         &Some(1),
     );
-    
+
     // Verify reputation updated
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 190);
-    
+
     // Verify player stats updated
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.losses, 1);
@@ -182,7 +176,7 @@ fn test_update_reputation_tournament_win() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(100));
-    
+
     // Update reputation for tournament win
     contract.update_reputation(
         &player,
@@ -192,11 +186,11 @@ fn test_update_reputation_tournament_win() {
         &Some(1),
         &None,
     );
-    
+
     // Verify reputation updated
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 300);
-    
+
     // Verify tier changed
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.reputation_tier, ReputationTier::Novice);
@@ -211,7 +205,7 @@ fn test_apply_penalty() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Apply penalty
     contract.apply_penalty(
         &player,
@@ -219,11 +213,11 @@ fn test_apply_penalty() {
         &String::from_str(&env, "Cheating detected"),
         &PenaltySeverity::Moderate,
     );
-    
+
     // Verify penalty applied
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 400);
-    
+
     // Verify penalty count updated
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.penalties, 1);
@@ -238,7 +232,7 @@ fn test_apply_penalty_positive_amount_fails() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Try to apply positive penalty - should fail
     let result = contract.try_apply_penalty(
         &player,
@@ -259,7 +253,7 @@ fn test_reputation_history() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(100));
-    
+
     // Add some reputation events
     contract.update_reputation(
         &player,
@@ -269,7 +263,7 @@ fn test_reputation_history() {
         &None,
         &Some(1),
     );
-    
+
     contract.update_reputation(
         &player,
         &-10,
@@ -278,22 +272,25 @@ fn test_reputation_history() {
         &None,
         &Some(2),
     );
-    
+
     // Get reputation history
     let history = contract.get_reputation_history(&player, &Some(10));
     assert_eq!(history.len(), 3); // Initial + 2 updates
-    
+
     // Verify first event (initial)
     let first_event = history.get(0).unwrap();
-    assert_eq!(first_event.event_type, ReputationEventType::CommunityContribution);
+    assert_eq!(
+        first_event.event_type,
+        ReputationEventType::CommunityContribution
+    );
     assert_eq!(first_event.amount, 100);
-    
+
     // Verify second event (match win)
     let second_event = history.get(1).unwrap();
     assert_eq!(second_event.event_type, ReputationEventType::MatchWin);
     assert_eq!(second_event.amount, 50);
     assert_eq!(second_event.match_id, Some(1));
-    
+
     // Verify third event (match loss)
     let third_event = history.get(2).unwrap();
     assert_eq!(third_event.event_type, ReputationEventType::MatchLoss);
@@ -310,7 +307,7 @@ fn test_check_reputation_requirement() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Add some matches
     contract.update_reputation(
         &player,
@@ -320,7 +317,7 @@ fn test_check_reputation_requirement() {
         &None,
         &Some(1),
     );
-    
+
     contract.update_reputation(
         &player,
         &50,
@@ -329,7 +326,7 @@ fn test_check_reputation_requirement() {
         &None,
         &Some(2),
     );
-    
+
     // Create requirement
     let requirement = ReputationRequirement {
         min_reputation: 400,
@@ -337,11 +334,11 @@ fn test_check_reputation_requirement() {
         max_penalties: 0,
         min_matches: 2,
     };
-    
+
     // Check requirement - should pass
     let meets_requirement = contract.check_reputation_requirement(&player, &requirement);
     assert_eq!(meets_requirement, true);
-    
+
     // Create stricter requirement
     let strict_requirement = ReputationRequirement {
         min_reputation: 1000,
@@ -349,9 +346,10 @@ fn test_check_reputation_requirement() {
         max_penalties: 0,
         min_matches: 2,
     };
-    
+
     // Check requirement - should fail
-    let meets_strict_requirement = contract.check_reputation_requirement(&player, &strict_requirement);
+    let meets_strict_requirement =
+        contract.check_reputation_requirement(&player, &strict_requirement);
     assert_eq!(meets_strict_requirement, false);
 }
 
@@ -365,7 +363,7 @@ fn test_transfer_reputation() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player1, &Some(500));
-    
+
     // Transfer reputation from player1 to player2
     contract.transfer_reputation(
         &player1,
@@ -373,14 +371,14 @@ fn test_transfer_reputation() {
         &100,
         &String::from_str(&env, "Transfer"),
     );
-    
+
     // Verify transfer
     let player1_reputation = contract.get_reputation(&player1);
     let player2_reputation = contract.get_reputation(&player2);
-    
+
     assert_eq!(player1_reputation, 400);
     assert_eq!(player2_reputation, 100);
-    
+
     // Verify player2 info was created
     let player2_info = contract.get_reputation_info(&player2);
     assert_eq!(player2_info.player, player2);
@@ -398,7 +396,7 @@ fn test_transfer_reputation_insufficient_balance() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player1, &Some(100));
-    
+
     // Try to transfer more than available - should fail
     let result = contract.try_transfer_reputation(
         &player1,
@@ -414,7 +412,7 @@ fn test_transfer_reputation_insufficient_balance() {
 fn test_calculate_tier() {
     let env = create_test_env();
     let contract = create_test_contract(&env);
-    
+
     // Test tier calculations
     assert_eq!(contract.calculate_tier(&0), ReputationTier::Beginner);
     assert_eq!(contract.calculate_tier(&100), ReputationTier::Beginner);
@@ -438,7 +436,7 @@ fn test_reset_reputation() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Add some reputation
     contract.update_reputation(
         &player,
@@ -448,14 +446,14 @@ fn test_reset_reputation() {
         &None,
         &Some(1),
     );
-    
+
     // Reset reputation
     contract.reset_reputation(&player, &String::from_str(&env, "Reset for testing"));
-    
+
     // Verify reset
     let reputation = contract.get_reputation(&player);
     assert_eq!(reputation, 0);
-    
+
     let player_info = contract.get_reputation_info(&player);
     assert_eq!(player_info.current_reputation, 0);
     assert_eq!(player_info.reputation_tier, ReputationTier::Beginner);
@@ -469,20 +467,20 @@ fn test_pause_unpause_contract() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
+
     // Pause contract
     contract.pause_contract();
     assert_eq!(contract.is_contract_paused(), true);
-    
+
     // Try to issue reputation while paused - should fail
     let result = contract.try_issue_reputation(&player, &None);
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::ContractPaused);
-    
+
     // Unpause contract
     contract.unpause_contract();
     assert_eq!(contract.is_contract_paused(), false);
-    
+
     // Now should work
     contract.issue_reputation(&player, &None);
     let reputation = contract.get_reputation(&player);
@@ -497,10 +495,10 @@ fn test_change_admin() {
     let admin2 = Address::generate(&env);
 
     contract.initialize(&admin1);
-    
+
     // Change admin
     contract.change_admin(&admin2);
-    
+
     // Verify admin changed
     let current_admin = contract.get_admin();
     assert_eq!(current_admin, admin2);
@@ -516,12 +514,12 @@ fn test_unauthorized_access() {
 
     contract.initialize(&admin);
     contract.issue_reputation(&player, &Some(500));
-    
+
     // Try to pause contract as non-admin - should fail
     let result = contract.try_pause_contract();
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::Unauthorized);
-    
+
     // Try to reset reputation as non-admin - should fail
     let result = contract.try_reset_reputation(&player, &String::from_str(&env, "Reset"));
     assert!(result.is_err());
@@ -536,12 +534,12 @@ fn test_player_not_found() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
+
     // Try to get reputation for non-existent player - should fail
     let result = contract.try_get_reputation(&player);
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::PlayerNotFound);
-    
+
     // Try to update reputation for non-existent player - should fail
     let result = contract.try_update_reputation(
         &player,
@@ -563,20 +561,20 @@ fn test_reputation_bounds() {
     let player = Address::generate(&env);
 
     contract.initialize(&admin);
-    
+
     // Try to issue negative reputation - should fail
     let result = contract.try_issue_reputation(&player, &Some(-100));
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::InvalidReputationAmount);
-    
+
     // Try to issue too much reputation - should fail
     let result = contract.try_issue_reputation(&player, &Some(20000));
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), Error::InvalidReputationAmount);
-    
+
     // Issue normal reputation
     contract.issue_reputation(&player, &Some(100));
-    
+
     // Try to update to negative reputation - should fail
     let result = contract.try_update_reputation(
         &player,
