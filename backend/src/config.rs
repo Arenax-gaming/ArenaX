@@ -93,54 +93,56 @@ impl Config {
         let database_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://user:pass@localhost:5432/arenax".to_string());
         let db_max_connections: u32 = env::var("DB_MAX_CONNECTIONS")
-            .unwrap_or_else(|_| "20".to_string()).parse()?;
+            .unwrap_or_else(|_| "20".to_string())
+            .parse()?;
         let db_min_connections: u32 = env::var("DB_MIN_CONNECTIONS")
-            .unwrap_or_else(|_| "5".to_string()).parse()?;
+            .unwrap_or_else(|_| "5".to_string())
+            .parse()?;
         let db_acquire_timeout: u64 = env::var("DB_ACQUIRE_TIMEOUT")
-            .unwrap_or_else(|_| "30".to_string()).parse()?;
+            .unwrap_or_else(|_| "30".to_string())
+            .parse()?;
         let db_idle_timeout: u64 = env::var("DB_IDLE_TIMEOUT")
-            .unwrap_or_else(|_| "600".to_string()).parse()?;
+            .unwrap_or_else(|_| "600".to_string())
+            .parse()?;
         let db_max_lifetime: u64 = env::var("DB_MAX_LIFETIME")
-            .unwrap_or_else(|_| "1800".to_string()).parse()?;
-        let redis_url = env::var("REDIS_URL")
-            .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-        let s3_endpoint = env::var("S3_ENDPOINT")
-            .unwrap_or_else(|_| "http://localhost:9000".to_string());
-        let s3_access_key = env::var("S3_ACCESS_KEY")
-            .unwrap_or_else(|_| "minio".to_string());
-        let s3_secret_key = env::var("S3_SECRET_KEY")
-            .unwrap_or_else(|_| "secret".to_string());
-        let s3_bucket = env::var("S3_BUCKET")
-            .unwrap_or_else(|_| "arenax".to_string());
-        let paystack_secret = env::var("PAYSTACK_SECRET")
-            .unwrap_or_else(|_| "sk_test_xxx".to_string());
-        let flutterwave_secret = env::var("FLUTTERWAVE_SECRET")
-            .unwrap_or_else(|_| "FLWSECK_TEST-xxx".to_string());
-        let jwt_secret = env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "supersecretkey".to_string());
-        let jwt_expires_in = env::var("JWT_EXPIRES_IN")
-            .unwrap_or_else(|_| "7d".to_string());
+            .unwrap_or_else(|_| "1800".to_string())
+            .parse()?;
+        let redis_url =
+            env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+        let s3_endpoint =
+            env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://localhost:9000".to_string());
+        let s3_access_key = env::var("S3_ACCESS_KEY").unwrap_or_else(|_| "minio".to_string());
+        let s3_secret_key = env::var("S3_SECRET_KEY").unwrap_or_else(|_| "secret".to_string());
+        let s3_bucket = env::var("S3_BUCKET").unwrap_or_else(|_| "arenax".to_string());
+        let paystack_secret =
+            env::var("PAYSTACK_SECRET").unwrap_or_else(|_| "sk_test_xxx".to_string());
+        let flutterwave_secret =
+            env::var("FLUTTERWAVE_SECRET").unwrap_or_else(|_| "FLWSECK_TEST-xxx".to_string());
+        let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| "supersecretkey".to_string());
+        let jwt_expires_in = env::var("JWT_EXPIRES_IN").unwrap_or_else(|_| "7d".to_string());
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")
             .unwrap_or_else(|_| "https://horizon-testnet.stellar.org".to_string());
-        let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")
-            .unwrap_or_else(|_| "SBXXX".to_string());
-        let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")
-            .unwrap_or_else(|_| "CAXXX".to_string());
-        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")
-            .unwrap_or_else(|_| "CBXXX".to_string());
-        let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")
-            .unwrap_or_else(|_| "CCXXX".to_string());
-        let ai_model_path = env::var("AI_MODEL_PATH")
-            .unwrap_or_else(|_| "./models/anti_cheat.tflite".to_string());
+        let stellar_admin_secret =
+            env::var("STELLAR_ADMIN_SECRET").unwrap_or_else(|_| "SBXXX".to_string());
+        let soroban_contract_prize =
+            env::var("SOROBAN_CONTRACT_PRIZE").unwrap_or_else(|_| "CAXXX".to_string());
+        let soroban_contract_reputation =
+            env::var("SOROBAN_CONTRACT_REPUTATION").unwrap_or_else(|_| "CBXXX".to_string());
+        let soroban_contract_arenax_token =
+            env::var("SOROBAN_CONTRACT_ARENAX_TOKEN").unwrap_or_else(|_| "CCXXX".to_string());
+        let ai_model_path =
+            env::var("AI_MODEL_PATH").unwrap_or_else(|_| "./models/anti_cheat.tflite".to_string());
         let port: u16 = env::var("PORT")
-            .unwrap_or_else(|_| "8080".to_string()).parse()?;
-        let host = env::var("HOST")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+            .unwrap_or_else(|_| "8080".to_string())
+            .parse()?;
+        let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
         let rate_limit_requests: u32 = env::var("RATE_LIMIT_REQUESTS")
-            .unwrap_or_else(|_| "100".to_string()).parse()?;
+            .unwrap_or_else(|_| "100".to_string())
+            .parse()?;
         let rate_limit_window: u64 = env::var("RATE_LIMIT_WINDOW")
-            .unwrap_or_else(|_| "60".to_string()).parse()?;
+            .unwrap_or_else(|_| "60".to_string())
+            .parse()?;
 
         Ok(Config {
             database: DatabaseConfig {

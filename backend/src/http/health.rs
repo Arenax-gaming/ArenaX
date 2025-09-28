@@ -12,7 +12,7 @@ pub async fn health_check(db_pool: web::Data<DbPool>) -> Result<HttpResponse, Ap
                 "connection": "ok",
                 "pool_info": pool_status
             })
-        },
+        }
         Err(e) => {
             tracing::error!("Database health check failed: {:?}", e);
             serde_json::json!({
@@ -51,6 +51,8 @@ pub async fn health_check(db_pool: web::Data<DbPool>) -> Result<HttpResponse, Ap
 
     let status_code = if is_healthy { 200 } else { 503 };
 
-    Ok(HttpResponse::build(actix_web::http::StatusCode::from_u16(status_code).unwrap())
-        .json(response))
+    Ok(
+        HttpResponse::build(actix_web::http::StatusCode::from_u16(status_code).unwrap())
+            .json(response),
+    )
 }

@@ -7,7 +7,10 @@ pub type DbPool = PgPool;
 
 pub async fn create_pool(config: &Config) -> Result<DbPool, sqlx::Error> {
     // Create database if it doesn't exist
-    if !Postgres::database_exists(&config.database.url).await.unwrap_or(false) {
+    if !Postgres::database_exists(&config.database.url)
+        .await
+        .unwrap_or(false)
+    {
         tracing::info!("Database doesn't exist, creating...");
         Postgres::create_database(&config.database.url).await?;
     }
