@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "example"
+    "example",
+    "reputation"
 ]
 resolver = "2"
 
