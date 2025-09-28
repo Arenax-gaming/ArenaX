@@ -1,8 +1,125 @@
 # 🎮 ArenaX Backend
 
-## Overview
+# 🎮 ArenaX Backend
 
-The ArenaX backend is a high-performance **Rust-based microservices architecture** that powers the competitive gaming tournament platform. It integrates with the **Stellar blockchain** for transparent prize pool management, payouts, and reputation tracking, while providing real-time matchmaking and AI-driven anti-cheat capabilities.
+## Quick Start with Docker Compose
+
+The fastest way to get the ArenaX backend development environment up and running.
+
+### Prerequisites
+
+- Docker and Docker Compose installed
+- Rust 1.70+ (for running the backend locally)
+
+### Starting the Development Environment
+
+1. **Start the database services**:
+   ```bash
+   # From the backend directory
+   docker compose up -d
+   ```
+
+2. **Verify services are running**:
+   ```bash
+   docker compose ps
+   ```
+
+3. **Run the backend application**:
+   ```bash
+   # Make sure you're in the backend directory
+   cargo run
+   ```
+
+The application will:
+- Automatically create the database if it doesn't exist
+- Run all migrations on startup
+- Seed development data
+- Start listening on `http://localhost:8080`
+
+### Services Included
+
+| Service | Port | Purpose | Credentials |
+|---------|------|---------|-------------|
+| PostgreSQL | 5432 | Main database | dev/devpass |
+| Redis | 6379 | Caching | No auth |
+| MinIO | 9000/9001 | Object storage | minio/minio123 |
+| PgAdmin | 5050 | Database admin | admin@arenax.dev/admin |
+| Redis Commander | 8081 | Redis admin | admin/admin |
+
+### Available Endpoints
+
+- **Health Check**: `GET /api/health` - Returns detailed service status
+- **Database Status**: Included in health check response
+
+### Database Access
+
+#### Via PgAdmin (Web Interface)
+1. Go to http://localhost:5050
+2. Login with `admin@arenax.dev` / `admin`
+3. Add server with these details:
+   - Host: `postgres` (or `localhost` if connecting from outside Docker)
+   - Port: `5432`
+   - Database: `arenax_dev`
+   - Username: `dev`
+   - Password: `devpass`
+
+#### Via Command Line
+```bash
+# Connect to PostgreSQL
+docker-compose exec postgres psql -U dev -d arenax_dev
+```
+
+### Development Workflow
+
+1. **Start services**: `docker compose up -d`
+2. **Run backend**: `cargo run`
+3. **Make changes** to code
+4. **Restart backend** (it will automatically apply migrations)
+5. **Test endpoints**: `curl http://localhost:8080/api/health`
+
+### Database Schema
+
+The database schema includes comprehensive tables for:
+- **Users** - User accounts and profiles with Stellar integration
+- **Tournaments** - Gaming tournaments with entry fees and prize pools
+- **Matches** - Individual game matches with scoring and dispute handling
+- **Wallets** - User balances and transaction management
+- **Stellar Integration** - Blockchain accounts and transactions
+- **Leaderboards** - Rankings, reputation, and statistics
+- **Audit Logs** - Security and operations tracking
+
+### Troubleshooting
+
+#### Database Connection Issues
+```bash
+# Check if PostgreSQL is running
+docker compose ps postgres
+
+# Check PostgreSQL logs
+docker compose logs postgres
+
+# Reset database
+docker compose down -v && docker compose up -d
+```
+
+#### Application Issues
+```bash
+# Run with detailed logging
+RUST_LOG=debug cargo run
+
+# Check environment variables
+cat .env
+```
+
+### Stopping Services
+
+```bash
+# Stop all services
+docker compose down
+
+# Stop and remove volumes (resets database)
+docker compose down -v
+```
 
 ## Tech Stack
 
