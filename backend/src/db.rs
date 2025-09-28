@@ -1,6 +1,6 @@
 use crate::api_error::ApiError;
 use crate::config::Config;
-use sqlx::{PgPool, postgres::PgPoolOptions, migrate::MigrateDatabase, Postgres};
+use sqlx::{migrate::MigrateDatabase, postgres::PgPoolOptions, PgPool, Postgres};
 use std::time::Duration;
 
 pub type DbPool = PgPool;
