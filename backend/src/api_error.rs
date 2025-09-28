@@ -3,6 +3,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ApiError {
     #[error("Internal server error: {0}")]
     InternalServerError(String),
@@ -45,16 +46,30 @@ struct ErrorResponse {
 impl ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
         let (status, message) = match self {
-            ApiError::InternalServerError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ApiError::InternalServerError => (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                self.to_string(),
+            ),
             ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
             ApiError::Forbidden(_) => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
             ApiError::NotFound(_) => (actix_web::http::StatusCode::NOT_FOUND, self.to_string()),
             ApiError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, self.to_string()),
-            ApiError::DatabaseError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()),
-            ApiError::RedisError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Cache error".to_string()),
-            ApiError::StellarError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Blockchain error".to_string()),
-            ApiError::ValidationError(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::DatabaseError(_) => (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            ),
+            ApiError::RedisError(_) => (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Cache error".to_string(),
+            ),
+            ApiError::StellarError(_) => (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Blockchain error".to_string(),
+            ),
+            ApiError::ValidationError(_) => {
+                (actix_web::http::StatusCode::BAD_REQUEST, self.to_string())
+            }
         };
 
         let error_response = ErrorResponse {

@@ -1,7 +1,7 @@
-use actix_web::{web, HttpResponse, Result};
-use crate::db::DbPool;
 use crate::api_error::ApiError;
 use crate::realtime::RedisClient;
+use crate::db::DbPool;
+use actix_web::{web, HttpResponse, Result};
 
 pub async fn health_check(
     db_pool: web::Data<DbPool>,
