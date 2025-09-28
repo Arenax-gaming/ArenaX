@@ -76,6 +76,7 @@ pub struct AiConfig {
 pub struct ServerConfig {
     pub port: u16,
     pub host: String,
+    #[allow(dead_code)]
     pub rust_log: String,
 }
 
