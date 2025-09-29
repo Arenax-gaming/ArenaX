@@ -1,7 +1,11 @@
 [workspace]
 members = [
     "example",
+
     "tournament-manager"
+
+    "reputation"
+
 ]
 resolver = "2"
 
