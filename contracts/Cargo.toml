@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "example"
+    "example",
+    "tournament-manager"
 ]
 resolver = "2"
 
