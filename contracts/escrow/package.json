@@ -1,0 +1,16 @@
+{
+  "name": "arenax-escrow-contract",
+  "version": "1.0.0",
+  "description": "ArenaX Escrow Contract Test Runner",
+  "main": "run-tests.js",
+  "scripts": {
+    "test": "node run-tests-simple.js",
+    "test-hook": "node run-tests-simple.js"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2"
+  },
+  "keywords": ["soroban", "stellar", "escrow", "smart-contract", "arenax"],
+  "author": "ArenaX Team",
+  "license": "MIT"
+}
