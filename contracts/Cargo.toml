@@ -2,10 +2,10 @@
 members = [
     "example",
 
-    "tournament-manager"
+    "tournament-manager",
 
-    "reputation"
-
+    "reputation",
+    "prize-distribution"
 ]
 resolver = "2"
 
