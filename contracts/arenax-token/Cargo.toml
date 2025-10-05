@@ -1,0 +1,17 @@
+[package]
+name = "arenax-token"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ArenaX Token Contract - SEP-41 compliant token for the ArenaX platform"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk.workspace = true
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
