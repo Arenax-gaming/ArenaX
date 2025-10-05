@@ -1,4 +1,7 @@
-use crate::{errors::TokenError, storage_types::{DataKey, Metadata}};
+use crate::{
+    errors::TokenError,
+    storage_types::{DataKey, Metadata},
+};
 use soroban_sdk::{Env, String};
 
 pub fn read_metadata(env: &Env) -> Result<Metadata, TokenError> {

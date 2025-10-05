@@ -1,4 +1,6 @@
-use crate::{admin, allowance, balance, errors::TokenError, event, metadata, storage_types::DataKey};
+use crate::{
+    admin, allowance, balance, errors::TokenError, event, metadata, storage_types::DataKey,
+};
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
 #[contract]

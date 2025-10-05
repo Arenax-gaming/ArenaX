@@ -1,7 +1,10 @@
-use crate::{contract::ArenaXToken, contract::ArenaXTokenClient, storage_types::{DECIMAL, NAME, SYMBOL, ZERO_ADDRESS}};
+use crate::{
+    contract::ArenaXToken,
+    contract::ArenaXTokenClient,
+    storage_types::{DECIMAL, NAME, SYMBOL, ZERO_ADDRESS},
+};
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{vec, Address, Env, IntoVal, String, Symbol, TryFromVal, Val};
-
 
 // Test constants
 static INITIAL_SUPPLY: i128 = 0i128; // Start with 0, mint as needed
@@ -27,7 +30,10 @@ fn create_token_contract<'a>(env: &'a Env) -> (Address, ArenaXTokenClient<'a>) {
     (admin, client)
 }
 
-fn create_token_contract_with_decimals<'a>(env: &'a Env, decimals: u32) -> (Address, ArenaXTokenClient<'a>) {
+fn create_token_contract_with_decimals<'a>(
+    env: &'a Env,
+    decimals: u32,
+) -> (Address, ArenaXTokenClient<'a>) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let contract_id = env.register(ArenaXToken, ());
@@ -112,7 +118,10 @@ fn test_approve_and_transfer_from() {
 
     assert_eq!(client.balance(&owner), MINT_AMOUNT - TRANSFER_AMOUNT);
     assert_eq!(client.balance(&recipient), TRANSFER_AMOUNT);
-    assert_eq!(client.allowance(&owner, &spender), ALLOWANCE_AMOUNT - TRANSFER_AMOUNT);
+    assert_eq!(
+        client.allowance(&owner, &spender),
+        ALLOWANCE_AMOUNT - TRANSFER_AMOUNT
+    );
 }
 
 #[test]
@@ -158,7 +167,10 @@ fn test_burn_from() {
     client.burn_from(&spender, &owner, &BURN_AMOUNT);
 
     assert_eq!(client.balance(&owner), MINT_AMOUNT - BURN_AMOUNT);
-    assert_eq!(client.allowance(&owner, &spender), ALLOWANCE_AMOUNT - BURN_AMOUNT);
+    assert_eq!(
+        client.allowance(&owner, &spender),
+        ALLOWANCE_AMOUNT - BURN_AMOUNT
+    );
     assert_eq!(client.total_supply(), MINT_AMOUNT - BURN_AMOUNT);
 }
 
@@ -237,15 +249,14 @@ fn test_mint_event() {
     let mint_data_map: soroban_sdk::Map<Symbol, Val> =
         soroban_sdk::Map::try_from_val(&env, &mint_data).unwrap();
 
-    let expected_mint_data: soroban_sdk::Map<Symbol, Val> =
-        soroban_sdk::Map::from_array(
-            &env,
-            [
-                (Symbol::new(&env, "to"), user.clone().into_val(&env)),
-                (Symbol::new(&env, "from"), zero_address.into_val(&env)),
-                (Symbol::new(&env, "amount"), MINT_AMOUNT.into_val(&env)),
-            ],
-        );
+    let expected_mint_data: soroban_sdk::Map<Symbol, Val> = soroban_sdk::Map::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "to"), user.clone().into_val(&env)),
+            (Symbol::new(&env, "from"), zero_address.into_val(&env)),
+            (Symbol::new(&env, "amount"), MINT_AMOUNT.into_val(&env)),
+        ],
+    );
 
     assert_eq!(mint_data_map, expected_mint_data);
 }
@@ -278,15 +289,14 @@ fn test_transfer_event() {
     let transfer_data_map: soroban_sdk::Map<Symbol, Val> =
         soroban_sdk::Map::try_from_val(&env, &transfer_data).unwrap();
 
-    let expected_transfer_data: soroban_sdk::Map<Symbol, Val> =
-        soroban_sdk::Map::from_array(
-            &env,
-            [
-                (Symbol::new(&env, "from"), user1.clone().into_val(&env)),
-                (Symbol::new(&env, "to"), user2.clone().into_val(&env)),
-                (Symbol::new(&env, "amount"), TRANSFER_AMOUNT.into_val(&env)),
-            ],
-        );
+    let expected_transfer_data: soroban_sdk::Map<Symbol, Val> = soroban_sdk::Map::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "from"), user1.clone().into_val(&env)),
+            (Symbol::new(&env, "to"), user2.clone().into_val(&env)),
+            (Symbol::new(&env, "amount"), TRANSFER_AMOUNT.into_val(&env)),
+        ],
+    );
 
     assert_eq!(transfer_data_map, expected_transfer_data);
 }
@@ -319,15 +329,14 @@ fn test_burn_event() {
     let burn_data_map: soroban_sdk::Map<Symbol, Val> =
         soroban_sdk::Map::try_from_val(&env, &burn_data).unwrap();
 
-    let expected_burn_data: soroban_sdk::Map<Symbol, Val> =
-        soroban_sdk::Map::from_array(
-            &env,
-            [
-                (Symbol::new(&env, "from"), user.clone().into_val(&env)),
-                (Symbol::new(&env, "to"), zero_address.into_val(&env)),
-                (Symbol::new(&env, "amount"), BURN_AMOUNT.into_val(&env)),
-            ],
-        );
+    let expected_burn_data: soroban_sdk::Map<Symbol, Val> = soroban_sdk::Map::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "from"), user.clone().into_val(&env)),
+            (Symbol::new(&env, "to"), zero_address.into_val(&env)),
+            (Symbol::new(&env, "amount"), BURN_AMOUNT.into_val(&env)),
+        ],
+    );
 
     assert_eq!(burn_data_map, expected_burn_data);
 }
@@ -362,16 +371,18 @@ fn test_approve_event() {
     let approve_data_map: soroban_sdk::Map<Symbol, Val> =
         soroban_sdk::Map::try_from_val(&env, &approve_data).unwrap();
 
-    let expected_approve_data: soroban_sdk::Map<Symbol, Val> =
-        soroban_sdk::Map::from_array(
-            &env,
-            [
-                (Symbol::new(&env, "from"), owner.clone().into_val(&env)),
-                (Symbol::new(&env, "spender"), spender.clone().into_val(&env)),
-                (Symbol::new(&env, "amount"), ALLOWANCE_AMOUNT.into_val(&env)),
-                (Symbol::new(&env, "expiration_ledger"), expiration_ledger.into_val(&env)),
-            ],
-        );
+    let expected_approve_data: soroban_sdk::Map<Symbol, Val> = soroban_sdk::Map::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "from"), owner.clone().into_val(&env)),
+            (Symbol::new(&env, "spender"), spender.clone().into_val(&env)),
+            (Symbol::new(&env, "amount"), ALLOWANCE_AMOUNT.into_val(&env)),
+            (
+                Symbol::new(&env, "expiration_ledger"),
+                expiration_ledger.into_val(&env),
+            ),
+        ],
+    );
 
     assert_eq!(approve_data_map, expected_approve_data);
 }

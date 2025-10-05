@@ -21,9 +21,7 @@ pub fn write_balance(env: &Env, addr: &Address, amount: i128) {
 
 pub fn receive_balance(env: &Env, addr: &Address, amount: i128) -> Result<(), TokenError> {
     let balance = read_balance(env, addr);
-    let new_balance = balance
-        .checked_add(amount)
-        .ok_or(TokenError::Overflow)?;
+    let new_balance = balance.checked_add(amount).ok_or(TokenError::Overflow)?;
     write_balance(env, addr, new_balance);
     Ok(())
 }
@@ -33,9 +31,7 @@ pub fn spend_balance(env: &Env, addr: &Address, amount: i128) -> Result<(), Toke
     if balance < amount {
         return Err(TokenError::InsufficientBalance);
     }
-    let new_balance = balance
-        .checked_sub(amount)
-        .ok_or(TokenError::Overflow)?;
+    let new_balance = balance.checked_sub(amount).ok_or(TokenError::Overflow)?;
     write_balance(env, addr, new_balance);
     Ok(())
 }

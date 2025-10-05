@@ -1,4 +1,7 @@
-use crate::{errors::TokenError, storage_types::{AllowanceDataKey, AllowanceValue, DataKey}};
+use crate::{
+    errors::TokenError,
+    storage_types::{AllowanceDataKey, AllowanceValue, DataKey},
+};
 use soroban_sdk::{Address, Env};
 
 pub fn read_allowance(env: &Env, from: &Address, spender: &Address) -> AllowanceValue {
@@ -47,7 +50,12 @@ pub fn write_allowance(
     }
 }
 
-pub fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) -> Result<(), TokenError> {
+pub fn spend_allowance(
+    env: &Env,
+    from: &Address,
+    spender: &Address,
+    amount: i128,
+) -> Result<(), TokenError> {
     let allowance = read_allowance(env, from, spender);
 
     // Check if allowance has expired
@@ -65,13 +73,7 @@ pub fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i12
         .checked_sub(amount)
         .ok_or(TokenError::Overflow)?;
 
-    write_allowance(
-        env,
-        from,
-        spender,
-        new_amount,
-        allowance.expiration_ledger,
-    );
+    write_allowance(env, from, spender, new_amount, allowance.expiration_ledger);
 
     Ok(())
 }
