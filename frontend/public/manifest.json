@@ -1,0 +1,58 @@
+{
+  "name": "ArenaX",
+  "short_name": "ArenaX",
+  "description": "ArenaX Gaming Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#18181b",
+  "theme_color": "#18181b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "label": "ArenaX Home Screen"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "label": "ArenaX Wide Screenshot",
+      "form_factor": "wide"
+    }
+  ],
+  "categories": ["games", "entertainment", "sports"],
+  "shortcuts": [
+    {
+      "name": "Tournaments",
+      "short_name": "Tournaments",
+      "description": "Browse and join tournaments",
+      "url": "/tournaments",
+      "icons": [
+        { "src": "/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "short_name": "Wallet",
+      "description": "View your Stellar wallet",
+      "url": "/wallet",
+      "icons": [
+        { "src": "/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ]
+}

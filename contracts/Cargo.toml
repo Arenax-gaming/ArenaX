@@ -1,11 +1,11 @@
 [workspace]
 members = [
     "example",
-
-    "tournament-manager",
-
     "reputation",
-    "prize-distribution"
+    "prize-distribution",
+    "tournament-manager",
+    "reputation",
+    "staking",
 ]
 resolver = "2"
 

@@ -13,7 +13,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
+  --Color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
@@ -43,80 +43,148 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ------------------------------------------
+   ArenaX tokenized theme (dark-first)
+   ------------------------------------------ */
+
 :root {
+  /* corner radius */
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* ArenaX light fallback (used if .dark not present) */
+  --background: #f7fafc; /* light fallback bg */
+  --foreground: #0b1220; /* light text */
+  --card: #ffffff;
+  --card-foreground: #0b1220;
+  --popover: #ffffff;
+  --popover-foreground: #0b1220;
+
+  /* Primary / accent (light mode variants) */
+  --primary: #00b74a; /* lighter green for light mode */
+  --primary-foreground: #021012; /* very dark text on green */
+  --secondary: #1277ff;
+  --secondary-foreground: #ffffff;
+  --muted: #f1f5f9;
+  --muted-foreground: #53606a;
+  --accent: #1277ff;
+  --accent-foreground: #ffffff;
+  --destructive: #ff5c5c;
+
+  /* borders / inputs / ring */
+  --border: rgba(2, 6, 23, 0.06);
+  --input: rgba(2, 6, 23, 0.06);
+  --ring: rgba(0, 255, 90, 0.12);
+
+  /* charts (light-friendly approximations) */
+  --chart-1: #0dba7a;
+  --chart-2: #1e90ff;
+  --chart-3: #7c5cff;
+  --chart-4: #f6c85f;
+  --chart-5: #ff7a7a;
+
+  /* Sidebar tokens (light) */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0b1220;
+  --sidebar-primary: #00b74a;
+  --sidebar-primary-foreground: #021012;
+  --sidebar-accent: #1277ff;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(2, 6, 23, 0.06);
+  --sidebar-ring: rgba(0, 183, 74, 0.12);
+
+  /* ArenaX special helpers */
+  --ax-neon: rgba(0, 255, 90, 0.18);
+  --ax-green-dark: #05924a; /* accessible darker green for contrast */
 }
 
+/* Dark theme values — primary production style for ArenaX */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* background & surfaces */
+  --background: #05060a; /* dark background */
+  --foreground: #e6eef2; /* primary text on dark */
+  --card: #0e1116; /* card surface */
+  --card-foreground: #e6eef2;
+  --popover: #0e1116;
+  --popover-foreground: #e6eef2;
+
+  /* Primary / accent tuned for dark */
+  --primary: #00ff5a; /* ArenaX neon green */
+  --primary-foreground: #021012; /* dark text when green used as bg */
+  --secondary: #1e90ff; /* trusty blue accent */
+  --secondary-foreground: #021012;
+  --muted: #1b2126;
+  --muted-foreground: #9aa1a6;
+  --accent: #1e90ff;
+  --accent-foreground: #e6eef2;
+  --destructive: #ff6b6b;
+
+  /* borders / inputs / ring (subtle) */
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.04);
+  --ring: rgba(0, 255, 90, 0.14);
+
+  /* charts tuned for dark */
+  --chart-1: #00ff8a;
+  --chart-2: #4fb2ff;
+  --chart-3: #a38cff;
+  --chart-4: #ffd27a;
+  --chart-5: #ff9c9c;
+
+  /* sidebar */
+  --sidebar: #0e1116;
+  --sidebar-foreground: #e6eef2;
+  --sidebar-primary: #00ff5a;
+  --sidebar-primary-foreground: #021012;
+  --sidebar-accent: #1e90ff;
+  --sidebar-accent-foreground: #e6eef2;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: rgba(0, 255, 90, 0.12);
 }
 
+/* ------------------------------------------
+   Optional utility classes that leverage new tokens
+   ------------------------------------------ */
+:root,
+.dark {
+  /* ensure these are always available to Tailwind via CSS vars */
+  --ax-neon: rgba(0, 255, 90, 0.18);
+  --ax-green-dark: #05924a;
+}
+
+/* base layer: preserve your existing layer but apply ArenaX tokens */
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      Roboto, "Helvetica Neue", Arial;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* example tokens for controls so designers & devs can use them easily */
+  .btn-ax {
+    background: linear-gradient(
+      90deg,
+      var(--primary),
+      color-mix(in srgb, var(--primary) 75%, transparent)
+    );
+    color: var(--primary-foreground);
+    padding: 0.6rem 1rem;
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px var(--ax-neon);
+    border: 1px solid rgba(255, 255, 255, 0.02);
+  }
+  .card {
+    background-color: var(--card);
+    color: var(--card-foreground);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    padding: 1rem;
+  }
+  .muted {
+    color: var(--muted-foreground);
   }
 }
