@@ -208,3 +208,194 @@ fn test_negative_amount() {
     let _ = client.mint(&user, &-100);
 }
 
+// ========== EVENT TESTING ==========
+
+#[test]
+fn test_mint_event() {
+    let env = Env::default();
+    let (_admin, client) = create_token_contract(&env);
+    let user = Address::generate(&env);
+    let zero_address = Address::from_str(&env, ZERO_ADDRESS);
+
+    client.mint(&user, &MINT_AMOUNT);
+
+    // Verify mint event
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+
+    let mint_event = events.get(0).unwrap();
+
+    // Check topics
+    let mint_topics = mint_event.1;
+    assert_eq!(
+        mint_topics,
+        vec![&env, Symbol::new(&env, "mint")].into_val(&env)
+    );
+
+    // Check event data
+    let mint_data = mint_event.2;
+    let mint_data_map: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::try_from_val(&env, &mint_data).unwrap();
+
+    let expected_mint_data: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::from_array(
+            &env,
+            [
+                (Symbol::new(&env, "to"), user.clone().into_val(&env)),
+                (Symbol::new(&env, "from"), zero_address.into_val(&env)),
+                (Symbol::new(&env, "amount"), MINT_AMOUNT.into_val(&env)),
+            ],
+        );
+
+    assert_eq!(mint_data_map, expected_mint_data);
+}
+
+#[test]
+fn test_transfer_event() {
+    let env = Env::default();
+    let (_admin, client) = create_token_contract(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    client.mint(&user1, &MINT_AMOUNT);
+    client.transfer(&user1, &user2, &TRANSFER_AMOUNT);
+
+    // Get only the transfer event (skip mint event)
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+
+    let transfer_event = events.get(0).unwrap();
+
+    // Check topics
+    let transfer_topics = transfer_event.1;
+    assert_eq!(
+        transfer_topics,
+        vec![&env, Symbol::new(&env, "transfer")].into_val(&env)
+    );
+
+    // Check event data
+    let transfer_data = transfer_event.2;
+    let transfer_data_map: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::try_from_val(&env, &transfer_data).unwrap();
+
+    let expected_transfer_data: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::from_array(
+            &env,
+            [
+                (Symbol::new(&env, "from"), user1.clone().into_val(&env)),
+                (Symbol::new(&env, "to"), user2.clone().into_val(&env)),
+                (Symbol::new(&env, "amount"), TRANSFER_AMOUNT.into_val(&env)),
+            ],
+        );
+
+    assert_eq!(transfer_data_map, expected_transfer_data);
+}
+
+#[test]
+fn test_burn_event() {
+    let env = Env::default();
+    let (_admin, client) = create_token_contract(&env);
+    let user = Address::generate(&env);
+    let zero_address = Address::from_str(&env, ZERO_ADDRESS);
+
+    client.mint(&user, &MINT_AMOUNT);
+    client.burn(&user, &BURN_AMOUNT);
+
+    // Get only the burn event
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+
+    let burn_event = events.get(0).unwrap();
+
+    // Check topics
+    let burn_topics = burn_event.1;
+    assert_eq!(
+        burn_topics,
+        vec![&env, Symbol::new(&env, "burn")].into_val(&env)
+    );
+
+    // Check event data
+    let burn_data = burn_event.2;
+    let burn_data_map: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::try_from_val(&env, &burn_data).unwrap();
+
+    let expected_burn_data: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::from_array(
+            &env,
+            [
+                (Symbol::new(&env, "from"), user.clone().into_val(&env)),
+                (Symbol::new(&env, "to"), zero_address.into_val(&env)),
+                (Symbol::new(&env, "amount"), BURN_AMOUNT.into_val(&env)),
+            ],
+        );
+
+    assert_eq!(burn_data_map, expected_burn_data);
+}
+
+#[test]
+fn test_approve_event() {
+    let env = Env::default();
+    let (_admin, client) = create_token_contract(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.mint(&owner, &MINT_AMOUNT);
+
+    let expiration_ledger = env.ledger().sequence() + 100;
+    client.approve(&owner, &spender, &ALLOWANCE_AMOUNT, &expiration_ledger);
+
+    // Get only the approve event
+    let events = env.events().all();
+    assert_eq!(events.len(), 1);
+
+    let approve_event = events.get(0).unwrap();
+
+    // Check topics
+    let approve_topics = approve_event.1;
+    assert_eq!(
+        approve_topics,
+        vec![&env, Symbol::new(&env, "approve")].into_val(&env)
+    );
+
+    // Check event data
+    let approve_data = approve_event.2;
+    let approve_data_map: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::try_from_val(&env, &approve_data).unwrap();
+
+    let expected_approve_data: soroban_sdk::Map<Symbol, Val> =
+        soroban_sdk::Map::from_array(
+            &env,
+            [
+                (Symbol::new(&env, "from"), owner.clone().into_val(&env)),
+                (Symbol::new(&env, "spender"), spender.clone().into_val(&env)),
+                (Symbol::new(&env, "amount"), ALLOWANCE_AMOUNT.into_val(&env)),
+                (Symbol::new(&env, "expiration_ledger"), expiration_ledger.into_val(&env)),
+            ],
+        );
+
+    assert_eq!(approve_data_map, expected_approve_data);
+}
+
+#[test]
+fn test_complete_workflow() {
+    let env = Env::default();
+    let (_admin, client) = create_token_contract(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    // Mint tokens to user1
+    client.mint(&user1, &MINT_AMOUNT);
+
+    // Transfer tokens from user1 to user2
+    client.transfer(&user1, &user2, &TRANSFER_AMOUNT);
+
+    // Burn tokens from user2
+    client.burn(&user2, &BURN_AMOUNT);
+
+    // Verify final balances
+    assert_eq!(client.balance(&user1), MINT_AMOUNT - TRANSFER_AMOUNT);
+    assert_eq!(client.balance(&user2), TRANSFER_AMOUNT - BURN_AMOUNT);
+    assert_eq!(client.total_supply(), MINT_AMOUNT - BURN_AMOUNT);
+
+    // Note: Events are cleared after each operation in this test env
+}
