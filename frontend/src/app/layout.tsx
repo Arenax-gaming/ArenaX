@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Toaster } from "sonner";
 
 import RegisterSW from "../components/RegisterSW";
+import Header from "@/components/layout/Header";
+import Footer from "@/components/layout/Footer";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -14,14 +17,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#18181b" />
       </head>
       <body>
+        <Header />
         <RegisterSW />
         {children}
+        <Toaster richColors position="top-center" />
+        <Footer />
       </body>
     </html>
   );

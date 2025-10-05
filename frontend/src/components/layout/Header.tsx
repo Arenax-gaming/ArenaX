@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, Download } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -36,17 +37,19 @@ export default function Header() {
     <header className="w-full border-b border-green-500/30 bg-black">
       <nav className="container mx-auto flex items-center justify-between py-4 px-4">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <Image
-            src="/icon-192x192.png"
-            alt="ArenaX Logo"
-            width={36}
-            height={36}
-          />
-          <span className="text-xl md:text-2xl font-bold text-green-500">
-            ArenaX
-          </span>
-        </div>
+        <Link href="/">
+          <div className="flex items-center gap-2">
+            <Image
+              src="/icon-192x192.png"
+              alt="ArenaX Logo"
+              width={36}
+              height={36}
+            />
+            <span className="text-xl md:text-2xl font-bold text-green-500">
+              ArenaX
+            </span>
+          </div>
+        </Link>
 
         {/* Desktop Nav */}
         <div className="hidden md:flex gap-4">
@@ -68,9 +71,11 @@ export default function Header() {
               Install
             </Button>
           )}
-          <Button className="bg-green-500 hover:bg-green-600 text-black font-semibold">
-            Get Started
-          </Button>
+          <Link href="/signup">
+            <Button className="bg-green-500 hover:bg-green-600 text-black font-semibold">
+              Get Started
+            </Button>
+          </Link>
         </div>
 
         {/* Mobile Menu Toggle */}
@@ -103,9 +108,11 @@ export default function Header() {
               Install
             </Button>
           )}
-          <Button className="bg-green-500 hover:bg-green-600 text-black font-semibold">
-            Get Started
-          </Button>
+          <Link href="/signup">
+            <Button className="bg-green-500 hover:bg-green-600 text-black font-semibold">
+              Get Started
+            </Button>
+          </Link>
         </div>
       )}
     </header>
