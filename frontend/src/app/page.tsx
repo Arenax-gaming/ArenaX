@@ -1,21 +1,12 @@
 "use client";
-
-import Footer from "@/components/layout/Footer";
-import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowRight, Menu } from "lucide-react";
-// import Image from "next/image";
-// import { useState } from "react";
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 export default function Home() {
-  // const [menuOpen, setMenuOpen] = useState(false);
-
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
-      {/* Header */}
-      <Header />
-
       {/* Hero Section */}
       <section className="flex-1 flex items-center justify-center text-center px-6 py-12">
         <div className="max-w-3xl">
@@ -26,12 +17,14 @@ export default function Home() {
             ArenaX is your all-in-one esports platform for tournaments, rewards,
             and community. Compete, climb, and conquer with style.
           </p>
-          <Button
-            size="lg"
-            className="bg-green-500 hover:bg-green-600 text-black font-bold w-full md:w-auto"
-          >
-            Join ArenaX <ArrowRight className="ml-2 h-5 w-5" />
-          </Button>
+          <Link href="/signup">
+            <Button
+              size="lg"
+              className="bg-green-500 hover:bg-green-600 text-black font-bold w-full md:w-auto"
+            >
+              Join ArenaX <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+          </Link>
         </div>
       </section>
 
@@ -75,9 +68,6 @@ export default function Home() {
           </Card>
         </div>
       </section>
-
-      {/* Footer */}
-      <Footer />
     </div>
   );
 }
