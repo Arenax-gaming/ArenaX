@@ -4,8 +4,9 @@ members = [
     "reputation",
     "prize-distribution",
     "tournament-manager",
-    "reputation",
     "staking",
+    "escrow",
+    "arenax-token",
 ]
 resolver = "2"
 
