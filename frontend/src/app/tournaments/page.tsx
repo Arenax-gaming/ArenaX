@@ -15,18 +15,20 @@ import {
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 
 export default function TournamentsPage() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedGame, setSelectedGame] = useState("all");
+  const router = useRouter();
 
   const tournaments = [
     {
       id: 1,
       name: "ArenaX Clash Cup",
       game: "C.O.D Warzone",
-      prize: "$2,000",
+      prizePool: "$2,000",
       fee: "$10",
       startDate: "Oct 15, 2025",
       status: "ongoing",
@@ -37,7 +39,7 @@ export default function TournamentsPage() {
       id: 2,
       name: "Battle Royale Showdown",
       game: "PUBG",
-      prize: "$1,500",
+      prizePool: "$1,500",
       fee: "Free",
       startDate: "Oct 20, 2025",
       status: "upcoming",
@@ -48,7 +50,7 @@ export default function TournamentsPage() {
       id: 3,
       name: "Legends Arena",
       game: "E Football",
-      prize: "$3,000",
+      prizePool: "$3,000",
       fee: "$15",
       startDate: "Sep 25, 2025",
       status: "completed",
@@ -64,6 +66,9 @@ export default function TournamentsPage() {
     return matchFilter && matchSearch && matchGame;
   });
 
+  const handleClick = (id: string) => {
+    router.push(`/tournaments/${id}`);
+  };
   const statusColors = {
     ongoing: "bg-green-500/20 text-green-400 border-green-500/30",
     upcoming: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -139,6 +144,7 @@ export default function TournamentsPage() {
         {filteredTournaments.map((tournament, index) => (
           <motion.div
             key={tournament.id}
+            onClick={() => handleClick(tournament.id.toString())}
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
@@ -173,7 +179,7 @@ export default function TournamentsPage() {
                 <p className="text-sm text-gray-400">{tournament.game}</p>
 
                 <div className="flex justify-between text-sm text-gray-400 mt-2">
-                  <span>Prize: {tournament.prize}</span>
+                  <span>Prize: {tournament.prizePool}</span>
                   <span>Fee: {tournament.fee}</span>
                 </div>
 
@@ -182,6 +188,10 @@ export default function TournamentsPage() {
                 </p>
 
                 <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClick(tournament.id.toString());
+                  }}
                   className={cn(
                     "w-full mt-3 font-semibold",
                     tournament.status === "ongoing"
