@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::reward_settlement::{RewardSettlement, SettlementStatus};
@@ -9,6 +11,7 @@ use std::sync::RwLock;
 /// Integrates with escrow and token contracts.
 #[derive(Clone)]
 pub struct RewardSettlementService {
+    #[allow(dead_code)]
     pool: DbPool,
 }
 

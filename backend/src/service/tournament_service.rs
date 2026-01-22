@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::tournament::{Tournament, CreateTournamentRequest};
@@ -5,6 +7,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct TournamentService {
+    #[allow(dead_code)]
     pool: DbPool,
 }
 

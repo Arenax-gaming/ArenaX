@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use actix_web::{HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
 use std::fmt;

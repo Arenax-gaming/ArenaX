@@ -1,4 +1,6 @@
 // TODO: Implement database connection with sqlx
+#![allow(dead_code)]
+
 #[derive(Clone)]
 pub struct DbPool;
 

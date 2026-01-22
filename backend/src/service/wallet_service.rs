@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::wallet::Wallet;
@@ -5,6 +7,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct WalletService {
+    #[allow(dead_code)]
     pool: DbPool,
 }
 
