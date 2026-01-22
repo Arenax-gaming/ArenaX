@@ -34,12 +34,14 @@ impl UserIdentityContract {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
         admin.require_auth();
 
+        // Validate role u32 can be converted to Role enum (0-3)
         if role > 3 {
             panic!("invalid role");
         }
 
         env.storage().persistent().set(&DataKey::UserRole(user.clone()), &role);
 
+        // Emit event
         env.events().publish(
             (symbol_short!("role_set"), user),
             role,
@@ -50,7 +52,7 @@ impl UserIdentityContract {
         env.storage()
             .persistent()
             .get(&DataKey::UserRole(user))
-            .unwrap_or(0)
+            .unwrap_or(0) // Default to Player (0) if no role assigned
     }
 
     pub fn has_role(env: Env, user: Address, role: u32) -> bool {
