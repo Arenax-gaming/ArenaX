@@ -4,7 +4,7 @@ mod error;
 mod events;
 mod storage;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 pub use error::RegistryError;
 pub use storage::{ContractEntry, DataKey};
@@ -20,7 +20,7 @@ impl ArenaXRegistry {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        let names: Vec<String> = Vec::new(&env);
+        let names: Vec<BytesN<32>> = Vec::new(&env);
         env.storage()
             .instance()
             .set(&DataKey::ContractNames, &names);
