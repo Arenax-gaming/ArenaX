@@ -2,6 +2,7 @@
 members = [
     "example",
     "user_identity_contract",
+    "reputation_aggregation",
 ]
 resolver = "2"
 
