@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "example",
+    "user_identity_contract",
 ]
 resolver = "2"
 
