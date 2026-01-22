@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { Button } from "@/components/ui/Button";
 
 interface AppLayoutProps {
@@ -36,6 +37,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
             <nav className="flex items-center">
               <ThemeToggle />
+              <MobileNav />
             </nav>
           </div>
         </div>
