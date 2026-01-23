@@ -11,7 +11,7 @@ pub struct Tournament {
     pub description: Option<String>,
     pub game_type: String,
     pub tournament_type: String,
-    pub entry_fee: i32, // TODO: Use Decimal when rust_decimal is added
+    pub entry_fee: i32,  // TODO: Use Decimal when rust_decimal is added
     pub prize_pool: i32, // TODO: Use Decimal when rust_decimal is added
     pub max_participants: i32,
     pub current_participants: i32,
