@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+<<<<<<< HEAD
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
@@ -183,3 +184,88 @@ jobs:
       uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: 'trivy-results.sarif'
+=======
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+          contracts/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Cache Node.js dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.npm
+          frontend/node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: Check Rust code
+      run: |
+        cd backend && cargo check
+        cd ../contracts && cargo check
+
+    - name: Run Rust tests
+      run: |
+        cd backend && cargo test
+        cd ../contracts && cargo test
+
+    - name: Install frontend dependencies
+      run: cd frontend && npm ci
+
+    - name: Run frontend tests
+      run: cd frontend && npm test
+
+    - name: Build frontend
+      run: cd frontend && npm run build
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Run Rust lints
+      run: |
+        cd backend && cargo clippy -- -D warnings
+        cd ../contracts && cargo clippy -- -D warnings
+
+    - name: Run frontend lints
+      run: cd frontend && npm run lint
+>>>>>>> upstream/main

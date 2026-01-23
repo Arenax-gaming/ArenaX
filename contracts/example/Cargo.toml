@@ -5,7 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+<<<<<<< HEAD
 description = "ArenaX Example Smart Contract"
+=======
+description = "Example Soroban contract for ArenaX"
+>>>>>>> upstream/main
 
 [lib]
 crate-type = ["cdylib"]
@@ -14,4 +18,8 @@ crate-type = ["cdylib"]
 soroban-sdk.workspace = true
 
 [dev-dependencies]
+<<<<<<< HEAD
 soroban-sdk = { workspace = true, features = ["testutils"] }
+=======
+soroban-sdk = { workspace = true, features = ["testutils"] }
+>>>>>>> upstream/main
