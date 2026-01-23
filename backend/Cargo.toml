@@ -10,10 +10,13 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-sqlx = "0.8.6"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "offline"] }
 validator = "0.20.0"
 rust_decimal = "1.40.0"
 actix-web = "4.12.1"
+anyhow = "1.0"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+tracing = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
