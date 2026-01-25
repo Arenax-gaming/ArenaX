@@ -13,32 +13,25 @@ import {
     CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [error, setError] = useState<string | undefined>("");
-    const [loading, setLoading] = useState(false);
+    const [formError, setFormError] = useState<string | undefined>("");
+    const { login, loading, error } = useAuth();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError("");
-        setLoading(true);
+        setFormError("");
 
         // Basic validation
         if (!email || !password) {
-            setError("Email and password are required.");
-            setLoading(false);
+            setFormError("Email and password are required.");
             return;
         }
 
-        // Simulate API call
-        setTimeout(() => {
-            console.log("Logging in with:", { email, password });
-            // Here you would typically handling the login logic
-            // e.g., using next-auth
-            setLoading(false);
-        }, 1000);
+        await login({ email, password });
     };
 
     return (
@@ -63,7 +56,7 @@ export default function LoginPage() {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 disabled={loading}
-                                error={!!error && !email}
+                                error={!!(formError || error) && !email}
                             />
                         </div>
                         <div className="space-y-2">
@@ -82,10 +75,10 @@ export default function LoginPage() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 disabled={loading}
-                                error={!!error && !password}
+                                error={!!(formError || error) && !password}
                             />
                         </div>
-                        <FormError message={error} />
+                        <FormError message={formError || error || ""} />
                         <Button className="w-full" type="submit" disabled={loading} loading={loading}>
                             Sign in
                         </Button>
