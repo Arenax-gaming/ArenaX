@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use actix_web::{HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
 use std::fmt;
@@ -36,6 +38,10 @@ impl ApiError {
 
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::new("Forbidden", message, "FORBIDDEN")
+    }
+
+    pub fn database_error(err: impl std::fmt::Display) -> Self {
+        Self::internal_error(format!("Database error: {}", err))
     }
 }
 

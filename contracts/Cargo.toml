@@ -1,6 +1,11 @@
 [workspace]
 members = [
-    "example", "protocol-params",
+    "example",
+    "protocol-params",
+    "user_identity_contract",
+    "reputation_aggregation",
+    "match_contract",
+    "registry",
 ]
 resolver = "2"
 
