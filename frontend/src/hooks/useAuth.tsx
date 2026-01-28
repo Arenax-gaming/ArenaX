@@ -13,6 +13,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
 const STORAGE_KEY = "arenax_mock_auth";
 
 const buildMockUser = (overrides: Partial<AuthUser> = {}): AuthUser => ({
