@@ -1,11 +1,8 @@
 [workspace]
 members = [
-<<<<<<< HEAD
-    "example"
-=======
     "example",
     "user_identity_contract",
->>>>>>> upstream/main
+    "reputation_aggregation",
 ]
 resolver = "2"
 
@@ -25,10 +22,7 @@ opt-level = "z"  # Optimize for size
 lto = true       # Link-time optimization
 codegen-units = 1
 panic = "abort"
-<<<<<<< HEAD
-=======
 
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
->>>>>>> upstream/main

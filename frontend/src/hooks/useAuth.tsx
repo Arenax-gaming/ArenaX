@@ -1,5 +1,7 @@
-import { useState, useEffect, createContext, useContext } from 'react';
-import { AuthUser, LoginRequest, RegisterRequest, AuthResponse } from '../types';
+"use client";
+
+import { useState, createContext, useContext } from "react";
+import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -11,64 +13,67 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const STORAGE_KEY = "arenax_mock_auth";
+
+const buildMockUser = (overrides: Partial<AuthUser> = {}): AuthUser => ({
+  id: "mock-user",
+  username: "ArenaPlayer",
+  email: "player@arenax.gg",
+  isVerified: true,
+  createdAt: new Date().toISOString(),
+  token: "mock-token",
+  refreshToken: "mock-refresh",
+  ...overrides,
+});
+
+const readStoredUser = (): AuthUser | null => {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored) as AuthUser;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredUser = (user: AuthUser | null) => {
+  if (typeof window === "undefined") return;
+  if (user) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<AuthUser | null>(() => readStoredUser());
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Check for stored auth token on mount
-    const token = localStorage.getItem('auth_token');
-    const refreshToken = localStorage.getItem('refresh_token');
-
-    if (token && refreshToken) {
-      // TODO: Validate token and fetch user profile
-      // For now, just set loading to false
-      setLoading(false);
-    } else {
-      setLoading(false);
-    }
-  }, []);
 
   const login = async (credentials: LoginRequest) => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(credentials),
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const nextUser = buildMockUser({
+        email: credentials.email,
+        username: credentials.email.split("@")[0] || "ArenaPlayer",
       });
 
-      if (!response.ok) {
-        throw new Error('Login failed');
-      }
-
-      const data: AuthResponse = await response.json();
-
-      // Store tokens
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('refresh_token', data.refreshToken);
-
-      setUser({
-        ...data.user,
-        token: data.token,
-        refreshToken: data.refreshToken,
-      });
+      setUser(nextUser);
+      writeStoredUser(nextUser);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
     }
@@ -79,45 +84,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(userData),
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const nextUser = buildMockUser({
+        email: userData.email,
+        username: userData.username || "ArenaPlayer",
       });
 
-      if (!response.ok) {
-        throw new Error('Registration failed');
-      }
-
-      const data: AuthResponse = await response.json();
-
-      // Store tokens
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('refresh_token', data.refreshToken);
-
-      setUser({
-        ...data.user,
-        token: data.token,
-        refreshToken: data.refreshToken,
-      });
+      setUser(nextUser);
+      writeStoredUser(nextUser);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setLoading(false);
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('refresh_token');
+    writeStoredUser(null);
     setUser(null);
     setError(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, loading, error }}>
+    <AuthContext.Provider
+      value={{ user, login, register, logout, loading, error }}
+    >
       {children}
     </AuthContext.Provider>
   );

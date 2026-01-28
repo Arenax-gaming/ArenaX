@@ -13,6 +13,7 @@ import {
     CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function RegisterPage() {
     const [formData, setFormData] = useState({
@@ -21,8 +22,8 @@ export default function RegisterPage() {
         password: "",
         confirmPassword: "",
     });
-    const [error, setError] = useState<string | undefined>("");
-    const [loading, setLoading] = useState(false);
+    const [formError, setFormError] = useState<string | undefined>("");
+    const { register, loading, error } = useAuth();
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setFormData((prev) => ({
@@ -31,41 +32,31 @@ export default function RegisterPage() {
         }));
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError("");
-        setLoading(true);
+        setFormError("");
 
         const { username, email, password, confirmPassword } = formData;
 
         // Basic validation
         if (!username || !email || !password || !confirmPassword) {
-            setError("All fields are required.");
-            setLoading(false);
+            setFormError("All fields are required.");
             return;
         }
 
         if (password !== confirmPassword) {
-            setError("Passwords do not match.");
-            setLoading(false);
+            setFormError("Passwords do not match.");
             return;
         }
 
         // Basic email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
-            setError("Invalid email address.");
-            setLoading(false);
+            setFormError("Invalid email address.");
             return;
         }
 
-
-        // Simulate API call
-        setTimeout(() => {
-            console.log("Registering with:", formData);
-            // Here you would typically handling the registration logic
-            setLoading(false);
-        }, 1000);
+        await register(formData);
     };
 
     return (
@@ -131,7 +122,7 @@ export default function RegisterPage() {
                                 disabled={loading}
                             />
                         </div>
-                        <FormError message={error} />
+                        <FormError message={formError || error || ""} />
                         <Button className="w-full" type="submit" disabled={loading} loading={loading}>
                             Create account
                         </Button>
