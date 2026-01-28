@@ -1,1 +1,40 @@
+<<<<<<< HEAD
+# Contracts .gitignore
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Stellar
+.stellar/
+*.wasm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Test artifacts
+test-results/
+
+# Build artifacts
+build/
+dist/
+
+# Secrets
+*.pem
+*.key
+secrets/
+=======
 target
+>>>>>>> upstream/main

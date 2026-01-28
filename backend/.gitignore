@@ -1,1 +1,56 @@
+<<<<<<< HEAD
+# Backend .gitignore
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+migrations/*.sql
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Stellar
+.stellar/
+*.wasm
+
+# Docker
+.dockerignore
+
+# Test artifacts
+test-results/
+coverage/
+
+# Secrets
+*.pem
+*.key
+secrets/
+keys/
+
+# Build artifacts
+build/
+dist/
+=======
 target
+>>>>>>> upstream/main

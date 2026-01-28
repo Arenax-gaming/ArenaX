@@ -1,66 +1,68 @@
-#![allow(dead_code)]
+use actix_web::{HttpResponse, ResponseError};
+use serde::Serialize;
+use thiserror::Error;
 
-use actix_web::{HttpResponse, http::StatusCode};
-use serde::{Serialize, Deserialize};
-use std::fmt;
+#[derive(Debug, Error)]
+pub enum ApiError {
+    #[error("Internal server error")]
+    InternalServerError,
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ApiError {
-    pub error: String,
-    pub message: String,
-    pub code: String,
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
+    #[error("Unauthorized")]
+    Unauthorized,
+
+    #[error("Forbidden")]
+    Forbidden,
+
+    #[error("Not found")]
+    NotFound,
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] sqlx::Error),
+
+    #[error("Redis error: {0}")]
+    RedisError(String),
+
+    #[error("Stellar error: {0}")]
+    StellarError(String),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
 }
 
-impl ApiError {
-    pub fn new(error: impl Into<String>, message: impl Into<String>, code: impl Into<String>) -> Self {
-        Self {
-            error: error.into(),
-            message: message.into(),
-            code: code.into(),
-        }
-    }
-
-    pub fn bad_request(message: impl Into<String>) -> Self {
-        Self::new("Bad Request", message, "BAD_REQUEST")
-    }
-
-    pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new("Not Found", message, "NOT_FOUND")
-    }
-
-    pub fn internal_error(message: impl Into<String>) -> Self {
-        Self::new("Internal Server Error", message, "INTERNAL_ERROR")
-    }
-
-    pub fn unauthorized(message: impl Into<String>) -> Self {
-        Self::new("Unauthorized", message, "UNAUTHORIZED")
-    }
-
-    pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::new("Forbidden", message, "FORBIDDEN")
-    }
-
-    pub fn database_error(err: impl std::fmt::Display) -> Self {
-        Self::internal_error(format!("Database error: {}", err))
-    }
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+    code: u16,
+    details: Option<String>,
 }
 
-impl fmt::Display for ApiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.error, self.message)
-    }
-}
-
-impl actix_web::ResponseError for ApiError {
+impl ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
-        let status_code = match self.code.as_str() {
-            "BAD_REQUEST" => StatusCode::BAD_REQUEST,
-            "NOT_FOUND" => StatusCode::NOT_FOUND,
-            "UNAUTHORIZED" => StatusCode::UNAUTHORIZED,
-            "FORBIDDEN" => StatusCode::FORBIDDEN,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        let (status, message) = match self {
+            ApiError::InternalServerError => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
+            ApiError::Forbidden => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
+            ApiError::NotFound => (actix_web::http::StatusCode::NOT_FOUND, self.to_string()),
+            ApiError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, self.to_string()),
+            ApiError::DatabaseError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()),
+            ApiError::RedisError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Cache error".to_string()),
+            ApiError::StellarError(_) => (actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "Blockchain error".to_string()),
+            ApiError::ValidationError(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
         };
 
-        HttpResponse::build(status_code).json(self)
+        let error_response = ErrorResponse {
+            error: message,
+            code: status.as_u16(),
+            details: Some(self.to_string()),
+        };
+
+        HttpResponse::build(status).json(error_response)
     }
 }
