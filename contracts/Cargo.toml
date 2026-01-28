@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "example",
+    "example", "protocol-params",
 ]
 resolver = "2"
 
