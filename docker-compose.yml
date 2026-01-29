@@ -1,6 +1,55 @@
 version: '3.8'
 
 services:
+<<<<<<< HEAD
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: arenax
+      POSTGRES_USER: arenax
+      POSTGRES_PASSWORD: arenax
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arenax"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+=======
   # Database
   postgres:
     image: postgres:15
@@ -18,12 +67,59 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+>>>>>>> upstream/main
 
   # Backend API
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+<<<<<<< HEAD
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://arenax:arenax@postgres:5432/arenax
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: secret
+      JWT_SECRET: dev-secret-key
+      STELLAR_NETWORK_URL: https://horizon-testnet.stellar.org
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - cargo_cache:/usr/local/cargo/registry
+
+  # Frontend (Development)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080
+      NEXT_PUBLIC_STELLAR_NETWORK: testnet
+      NEXT_PUBLIC_STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  cargo_cache:
+=======
     environment:
       - DATABASE_URL=postgres://arenax_user:arenax_password@postgres:5432/arenax
       - REDIS_URL=redis://redis:6379
@@ -48,3 +144,4 @@ services:
 
 volumes:
   postgres_data:
+>>>>>>> upstream/main
