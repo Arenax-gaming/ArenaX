@@ -1,3 +1,29 @@
+<<<<<<< HEAD
+# Frontend .gitignore
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+.nyc_output
+
+# Next.js
+.next/
+out/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+=======
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
@@ -20,10 +46,38 @@
 *.pem
 
 # debug
+>>>>>>> upstream/main
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+<<<<<<< HEAD
+# Local env files
+.env*.local
+.env
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# PWA
+sw.js
+workbox-*.js
+
+# Stellar
+.stellar/
+*.wasm
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+=======
 # local env files
 .env*.local
 
@@ -33,3 +87,4 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+>>>>>>> upstream/main
