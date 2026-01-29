@@ -1,0 +1,5 @@
+# Cargo configuration for ArenaX backend
+
+[env]
+# Tell SQLx to use offline mode (cached query metadata) for compilation
+SQLX_OFFLINE = "true"
