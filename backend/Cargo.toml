@@ -16,6 +16,10 @@ rust_decimal = "1.40.0"
 actix-web = "4.12.1"
 jsonwebtoken = "9.2"
 bcrypt = "0.15"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+validator = { version = "0.20.0", features = ["derive"] }
+rust_decimal = "1.40.0"
+actix-web = "4.12.1"
 actix = "0.13"
 actix-web-actors = "4.3"
 anyhow = "1.0"
