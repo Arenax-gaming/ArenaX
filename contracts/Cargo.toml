@@ -7,6 +7,7 @@ members = [
     "match_contract",
     "registry",
     "slashing_contract",
+    "governance_multisig",
 ]
 resolver = "2"
 
