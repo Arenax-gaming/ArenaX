@@ -10,6 +10,12 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+validator = { version = "0.20.0", features = ["derive"] }
+rust_decimal = "1.40.0"
+actix-web = "4.12.1"
+jsonwebtoken = "9.2"
+bcrypt = "0.15"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
 validator = { version = "0.20.0", features = ["derive"] }
 rust_decimal = "1.40.0"
