@@ -6,6 +6,7 @@ members = [
     "reputation_aggregation",
     "match_contract",
     "registry",
+    "slashing_contract",
 ]
 resolver = "2"
 
