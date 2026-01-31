@@ -8,6 +8,7 @@ members = [
     "registry",
     "slashing_contract",
     "governance_multisig",
+    "tournament_finalizer",
 ]
 resolver = "2"
 
