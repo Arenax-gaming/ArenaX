@@ -1,7 +1,4 @@
-#![no_std]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec};
 
 // Data Structures
 
@@ -39,12 +36,13 @@ pub struct TournamentSnapshot {
     pub finalized_at: u64,
 }
 
-// Interface for Match Lifecycle Contract
 mod match_contract {
     soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/release/match_contract.wasm"
+        file = "../../../target/wasm32-unknown-unknown/release/match_contract.wasm"
     );
 }
+
+use match_contract::MatchData;
 
 #[contract]
 pub struct TournamentFinalizer;
@@ -94,7 +92,8 @@ impl TournamentFinalizer {
         // Validate all matches are completed
         let match_client = match_contract::Client::new(&env, &match_contract_addr);
         for match_id in match_ids.iter() {
-            let match_data = match_client.get_match(&match_id);
+            let match_data: MatchData = match_client.get_match(&match_id);
+            // MatchState is an enum in match_contract, but we can check the u32 value
             // MatchState::Completed is 2
             if match_data.state != 2 {
                 panic!("all matches must be completed");
