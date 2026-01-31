@@ -134,3 +134,5 @@ impl TournamentFinalizer {
             .has(&DataKey::Tournament(tournament_id))
     }
 }
+
+mod test;
