@@ -38,7 +38,7 @@ pub struct TournamentSnapshot {
 
 mod match_contract {
     soroban_sdk::contractimport!(
-        file = "../../../target/wasm32-unknown-unknown/release/match_contract.wasm"
+        file = "../target/wasm32-unknown-unknown/release/match_contract.wasm"
     );
 }
 
