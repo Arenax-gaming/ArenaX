@@ -8,7 +8,8 @@
         "build": "tsc",
         "start": "node dist/app.js",
         "prisma:generate": "prisma generate",
-        "prisma:migrate": "prisma migrate dev"
+        "prisma:migrate": "prisma migrate dev",
+        "lint": "tsc --noEmit"
     },
     "dependencies": {
         "@prisma/client": "^5.10.2",
