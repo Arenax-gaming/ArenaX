@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  walletAddress String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  projects      Project[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  payments    Payment[]
+}
+
+model Payment {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  fromAddress String
+  toAddress   String
+  amount      String
+  asset       String   @default("USDC")
+  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  txHash      String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlockchainEvent {
+  id          String   @id @default(uuid())
+  eventType   String   // e.g., PAY_DONE
+  contractId  String
+  txHash      String
+  ledger      Int
+  data        Json
+  createdAt   DateTime @default(now())
+}
