@@ -2,6 +2,7 @@
 export * from './user';
 export * from './tournament';
 export * from './match';
+export * from './bracket';
 
 // Common API response types
 export interface ApiResponse<T> {

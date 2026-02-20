@@ -6,6 +6,8 @@ export interface NavItem {
 export const mainNav: NavItem[] = [
   { label: "Tournaments", href: "/tournaments" },
   { label: "Leaderboard", href: "/leaderboard" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
 ];
 
 export const authNav = {

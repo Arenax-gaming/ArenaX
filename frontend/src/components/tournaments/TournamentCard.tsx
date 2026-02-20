@@ -7,6 +7,8 @@ import { Users, Trophy, Clock, Zap } from "lucide-react";
 
 interface TournamentCardProps {
   tournament: Tournament;
+  isJoined?: boolean;
+  onQuickJoin?: () => void;
 }
 
 const statusConfig: Record<
@@ -45,13 +47,13 @@ const statusConfig: Record<
   },
 };
 
-export function TournamentCard({ tournament }: TournamentCardProps) {
+export function TournamentCard({ tournament, isJoined = false, onQuickJoin }: TournamentCardProps) {
   const status = statusConfig[tournament.status];
   const participantPercentage = Math.round(
     (tournament.currentParticipants / tournament.maxParticipants) * 100,
   );
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
-  const canJoin = tournament.status === "registration_open" && !isFull;
+  const canJoin = tournament.status === "registration_open" && !isFull && !isJoined;
 
   return (
     <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
@@ -152,20 +154,58 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
 
       {/* Footer with Button */}
       <div className="border-t p-4">
-        <Link href={`/tournaments/${tournament.id}`} className="block">
-          <Button
-            variant={canJoin ? "primary" : "outline"}
-            size="md"
-            className="w-full"
-            disabled={!canJoin}
-          >
-            {isFull
-              ? "Tournament Full"
-              : canJoin
-                ? "Join Tournament"
-                : "View Details"}
-          </Button>
-        </Link>
+        {isJoined ? (
+          // Already joined - show "Joined" button that links to details
+          <Link href={`/tournaments/${tournament.id}`} className="block">
+            <Button
+              variant="secondary"
+              size="md"
+              className="w-full"
+            >
+              View Details
+            </Button>
+          </Link>
+        ) : canJoin && onQuickJoin ? (
+          // Can join and has quick join handler - show Quick Join button
+          <div className="space-y-2">
+            <Button
+              variant="primary"
+              size="md"
+              className="w-full"
+              onClick={(e) => {
+                e.preventDefault();
+                onQuickJoin();
+              }}
+            >
+              Quick Join
+            </Button>
+            <Link href={`/tournaments/${tournament.id}`} className="block">
+              <Button
+                variant="outline"
+                size="md"
+                className="w-full"
+              >
+                View Details
+              </Button>
+            </Link>
+          </div>
+        ) : (
+          // Default state
+          <Link href={`/tournaments/${tournament.id}`} className="block">
+            <Button
+              variant={canJoin ? "primary" : "outline"}
+              size="md"
+              className="w-full"
+              disabled={!canJoin}
+            >
+              {isFull
+                ? "Tournament Full"
+                : canJoin
+                  ? "Join Tournament"
+                  : "View Details"}
+            </Button>
+          </Link>
+        )}
       </div>
     </Card>
   );
