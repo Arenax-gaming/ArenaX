@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "cdc8ae34e71e15addc0bee17d7829c6040003452ba16c8163ecce2b919b1af8a"
+                  "bytes": "8452360eeb895b2dfc02389714e7c0846df09d235f680bd5a5c9c8814a75d6d6"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -86,7 +86,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "cdc8ae34e71e15addc0bee17d7829c6040003452ba16c8163ecce2b919b1af8a"
+                              "bytes": "8452360eeb895b2dfc02389714e7c0846df09d235f680bd5a5c9c8814a75d6d6"
                             }
                           ]
                         }
@@ -98,7 +98,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "cdc8ae34e71e15addc0bee17d7829c6040003452ba16c8163ecce2b919b1af8a"
+                              "bytes": "8452360eeb895b2dfc02389714e7c0846df09d235f680bd5a5c9c8814a75d6d6"
                             }
                           ]
                         },
@@ -117,7 +117,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "cdc8ae34e71e15addc0bee17d7829c6040003452ba16c8163ecce2b919b1af8a"
+                                "bytes": "8452360eeb895b2dfc02389714e7c0846df09d235f680bd5a5c9c8814a75d6d6"
                               }
                             },
                             {
@@ -215,7 +215,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "ArenaX"
+                "symbol": "ArenaXRegistry"
               },
               {
                 "symbol": "REGISTER"
@@ -236,7 +236,7 @@
                     "symbol": "name"
                   },
                   "val": {
-                    "bytes": "cdc8ae34e71e15addc0bee17d7829c6040003452ba16c8163ecce2b919b1af8a"
+                    "bytes": "8452360eeb895b2dfc02389714e7c0846df09d235f680bd5a5c9c8814a75d6d6"
                   }
                 },
                 {

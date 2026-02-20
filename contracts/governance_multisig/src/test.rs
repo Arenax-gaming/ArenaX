@@ -15,11 +15,7 @@ fn create_test_env() -> (Env, Address, Address, Address) {
     (env, signer1, signer2, signer3)
 }
 
-fn initialize_contract(
-    env: &Env,
-    signers: Vec<Address>,
-    threshold: u32,
-) -> Address {
+fn initialize_contract(env: &Env, signers: Vec<Address>, threshold: u32) -> Address {
     let contract_id = env.register(GovernanceMultisig, ());
     let client = GovernanceMultisigClient::new(&env, &contract_id);
 
@@ -155,14 +151,7 @@ fn test_propose_success() {
     let function = Symbol::new(&env, "test_func");
     let args = create_empty_args(&env);
 
-    client.create_proposal(
-        &signer1,
-        &proposal_id,
-        &target,
-        &function,
-        &args,
-        &None,
-    );
+    client.create_proposal(&signer1, &proposal_id, &target, &function, &args, &None);
 
     // Verify proposal was created
     let proposal = client.get_proposal(&proposal_id);
@@ -189,24 +178,11 @@ fn test_propose_duplicate_fails() {
     let function = Symbol::new(&env, "test_func");
     let args = create_empty_args(&env);
 
-    client.create_proposal(
-        &signer1,
-        &proposal_id,
-        &target,
-        &function,
-        &args,
-        &None,
-    );
+    client.create_proposal(&signer1, &proposal_id, &target, &function, &args, &None);
 
     // Second proposal with same ID should fail
-    let result = client.try_create_proposal(
-        &signer1,
-        &proposal_id,
-        &target,
-        &function,
-        &args,
-        &None,
-    );
+    let result =
+        client.try_create_proposal(&signer1, &proposal_id, &target, &function, &args, &None);
     assert_eq!(result, Err(Ok(GovernanceError::ProposalAlreadyExists)));
 }
 
@@ -230,7 +206,7 @@ fn test_propose_self_call_fails() {
     let result = client.try_create_proposal(
         &signer1,
         &proposal_id,
-        &contract_id,  // targeting self
+        &contract_id, // targeting self
         &function,
         &args,
         &None,
@@ -256,14 +232,8 @@ fn test_propose_non_signer_fails() {
     let args = create_empty_args(&env);
     let non_signer = Address::generate(&env);
 
-    let result = client.try_create_proposal(
-        &non_signer,
-        &proposal_id,
-        &target,
-        &function,
-        &args,
-        &None,
-    );
+    let result =
+        client.try_create_proposal(&non_signer, &proposal_id, &target, &function, &args, &None);
     assert_eq!(result, Err(Ok(GovernanceError::NotASigner)));
 }
 
