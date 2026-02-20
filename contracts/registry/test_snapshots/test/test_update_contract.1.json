@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                  "bytes": "f9cf758a042445c6a9f8436268a63fecef0004a42ed8940c167da62bc9903a21"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -40,7 +40,7 @@
               "function_name": "update_contract",
               "args": [
                 {
-                  "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                  "bytes": "f9cf758a042445c6a9f8436268a63fecef0004a42ed8940c167da62bc9903a21"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -111,7 +111,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                              "bytes": "f9cf758a042445c6a9f8436268a63fecef0004a42ed8940c167da62bc9903a21"
                             }
                           ]
                         }
@@ -123,7 +123,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                              "bytes": "f9cf758a042445c6a9f8436268a63fecef0004a42ed8940c167da62bc9903a21"
                             }
                           ]
                         },
@@ -142,7 +142,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                                "bytes": "f9cf758a042445c6a9f8436268a63fecef0004a42ed8940c167da62bc9903a21"
                               }
                             },
                             {

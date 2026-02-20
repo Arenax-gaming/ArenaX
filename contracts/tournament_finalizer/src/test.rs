@@ -9,8 +9,8 @@ pub struct MockMatchContract;
 
 #[contractimpl]
 impl MockMatchContract {
-    pub fn get_match(env: Env, _match_id: BytesN<32>) -> MatchData {
-        MatchData {
+    pub fn get_match(env: Env, _match_id: BytesN<32>) -> ExternalMatchData {
+        ExternalMatchData {
             player_a: Address::generate(&env),
             player_b: Address::generate(&env),
             state: 2, // MatchState::Completed

@@ -1,4 +1,6 @@
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec,
+};
 
 // Data Structures
 
@@ -36,13 +38,21 @@ pub struct TournamentSnapshot {
     pub finalized_at: u64,
 }
 
-mod match_contract {
-    soroban_sdk::contractimport!(
-        file = "../target/wasm32-unknown-unknown/release/match_contract.wasm"
-    );
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalMatchData {
+    pub player_a: Address,
+    pub player_b: Address,
+    pub state: u32,
+    pub winner: Option<Address>,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
 }
 
-use match_contract::MatchData;
+#[contractclient(name = "MatchContractClient")]
+pub trait MatchContract {
+    fn get_match(match_id: BytesN<32>) -> ExternalMatchData;
+}
 
 #[contract]
 pub struct TournamentFinalizer;
@@ -90,9 +100,9 @@ impl TournamentFinalizer {
             .expect("match contract not set");
 
         // Validate all matches are completed
-        let match_client = match_contract::Client::new(&env, &match_contract_addr);
+        let match_client = MatchContractClient::new(&env, &match_contract_addr);
         for match_id in match_ids.iter() {
-            let match_data: MatchData = match_client.get_match(&match_id);
+            let match_data: ExternalMatchData = match_client.get_match(&match_id);
             // MatchState is an enum in match_contract, but we can check the u32 value
             // MatchState::Completed is 2
             if match_data.state != 2 {
