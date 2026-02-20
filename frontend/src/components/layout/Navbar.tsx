@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/common/Logo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { Button } from "@/components/ui/Button";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useAuth } from "@/hooks/useAuth";
 
 const isActiveRoute = (pathname: string, href: string) =>
@@ -48,6 +49,7 @@ export function Navbar() {
         </nav>
       </div>
       <div className="flex items-center gap-2">
+        <NotificationBell />
         {authItems.map((item) => {
           const isActive = isActiveRoute(pathname, item.href);
           const variant = user

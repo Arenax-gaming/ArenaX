@@ -4,6 +4,7 @@ import "../styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthProvider } from "@/hooks/useAuth";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,7 +28,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <AppLayout>{children}</AppLayout>
+            <NotificationProvider>
+              <AppLayout>{children}</AppLayout>
+            </NotificationProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

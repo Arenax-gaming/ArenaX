@@ -5,6 +5,7 @@ import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
 import { LogIn, CheckCircle, AlertCircle, Clock, Users, X } from "lucide-react";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 interface JoinTournamentButtonProps {
   tournament: Tournament;
@@ -14,6 +15,7 @@ export function JoinTournamentButton({
   tournament,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
+  const { notify } = useNotifications();
   const [showModal, setShowModal] = useState(false);
   const [joinStatus, setJoinStatus] = useState<
     "idle" | "confirming" | "success" | "error"
@@ -95,6 +97,17 @@ export function JoinTournamentButton({
 
     setJoinStatus("success");
     setIsJoined(true);
+
+    notify({
+      type: "match",
+      title: "Tournament Joined",
+      message: `You've joined ${tournament.name}. We'll notify you when your match is ready.`,
+      link: `/tournaments/${tournament.id}`,
+      linkLabel: "View Tournament",
+      persistent: true,
+      toast: true,
+      toastDuration: 5000,
+    });
 
     // Auto-close after 2 seconds
     setTimeout(() => {
