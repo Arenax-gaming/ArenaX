@@ -7,6 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Currency {
+  NGN
+  USDC
+  XLM
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  LOCK
+  RELEASE
+  SLASH
+}
+
+enum EscrowStatus {
+  LOCKED
+  RELEASED
+  SLASHED
+}
+
 model User {
   id            String    @id @default(uuid())
   email         String    @unique
@@ -15,6 +41,7 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   projects      Project[]
+  wallet        Wallet?
 }
 
 model Project {
@@ -50,4 +77,48 @@ model BlockchainEvent {
   ledger      Int
   data        Json
   createdAt   DateTime @default(now())
+}
+
+model Wallet {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  balanceNGN   Decimal  @default(0) @db.Decimal(65, 30)
+  balanceUSDC  Decimal  @default(0) @db.Decimal(65, 30)
+  balanceXLM   Decimal  @default(0) @db.Decimal(65, 30)
+  escrowNGN    Decimal  @default(0) @db.Decimal(65, 30)
+  escrowUSDC   Decimal  @default(0) @db.Decimal(65, 30)
+  escrowXLM    Decimal  @default(0) @db.Decimal(65, 30)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  transactions WalletTransaction[]
+  escrows      Escrow[]
+}
+
+model WalletTransaction {
+  id        String            @id @default(uuid())
+  walletId  String
+  wallet    Wallet            @relation(fields: [walletId], references: [id])
+  userId    String
+  currency  Currency
+  type      TransactionType
+  amount    Decimal           @db.Decimal(65, 30)
+  status    TransactionStatus @default(PENDING)
+  reference String?
+  metadata  Json?
+  matchId   String?
+  createdAt DateTime          @default(now())
+}
+
+model Escrow {
+  id         String        @id @default(uuid())
+  matchId    String
+  userId     String
+  walletId   String
+  wallet     Wallet        @relation(fields: [walletId], references: [id])
+  currency   Currency
+  amount     Decimal       @db.Decimal(65, 30)
+  status     EscrowStatus  @default(LOCKED)
+  createdAt  DateTime      @default(now())
+  releasedAt DateTime?
 }
