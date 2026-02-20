@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes';
+import adminRoutes from './admin.routes';
+import governanceRoutes from './governance.routes';
+import profileRoutes from './profile.routes';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
-
-// Placeholder for other routes
-// router.use('/projects', projectRoutes);
-// router.use('/payments', paymentRoutes);
-// router.use('/wallets', walletRoutes);
+router.use('/profiles', profileRoutes);
+router.use('/admin', adminRoutes);
+router.use('/governance', governanceRoutes);
 
 export default router;
