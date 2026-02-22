@@ -5,6 +5,7 @@ members = [
     "user_identity_contract",
     "reputation_aggregation",
     "match_contract",
+    "match_escrow_vault",
     "registry",
     "slashing_contract",
     "governance_multisig",
