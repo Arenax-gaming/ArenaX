@@ -16,9 +16,15 @@ model User {
   bio           String?
   socials       Json?
   walletAddress String?   @unique
+  
+  
+  elo           Int       @default(1200)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
   projects      Project[]
+
   wallet        UserWallet?
   refreshTokens RefreshToken[]
 }
@@ -50,6 +56,11 @@ model RefreshToken {
 
   @@index([userId])
   @@index([familyId])
+
+  matchesAsP1   Match[]   @relation("Player1")
+  matchesAsP2   Match[]   @relation("Player2")
+  eloHistory    EloHistory[]
+
 }
 
 model Project {
@@ -103,4 +114,48 @@ model BlockchainEvent {
   ledger      Int
   data        Json
   createdAt   DateTime @default(now())
+}
+model Match {
+  id          String   @id @default(uuid())
+
+  player1Id   String   
+  player2Id   String
+
+  player1      User @relation("Player1", fields: [player1Id], references: [id])
+  player2      User @relation("Player2", fields: [player2Id], references: [id]) 
+
+  state        MatchState @default(PENDING)
+
+  winnerId     String?
+
+  player1Report  Json?
+  player2Report  Json?
+
+  createdAt   DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  eloHistory  EloHistory[]
+}
+model EloHistory {
+  id          String   @id @default(uuid())
+
+  matchId   String   
+  userId    String
+
+  match     Match @relation(fields: [matchId], references: [id])
+  user      User @relation(fields: [userId], references: [id]) 
+
+  oldRating  Int
+  newRating  Int
+  delta      Int
+
+  createdAt   DateTime @default(now())
+  
+}
+
+enum MatchState {
+  PENDING
+  ACTIVE
+  SETTLED
+  FORFEIT
 }
