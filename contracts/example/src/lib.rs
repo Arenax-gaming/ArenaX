@@ -1,7 +1,6 @@
-<<<<<<< HEAD
 #![no_std]
 
-use soroban_sdk::{Address, Env, Symbol, contract, contractimpl};
+use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
 
 #[contract]
 pub struct ExampleContract;
@@ -13,12 +12,17 @@ impl ExampleContract {
         if env.storage().instance().has(&Symbol::new(&env, "admin")) {
             panic!("Already initialized");
         }
-        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "admin"), &admin);
     }
 
     /// Get the admin address
     pub fn admin(env: Env) -> Address {
-        env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap()
+        env.storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap()
     }
 
     /// Store a greeting message
@@ -29,7 +33,10 @@ impl ExampleContract {
 
     /// Get a greeting message
     pub fn get_greeting(env: Env, user: Address) -> Symbol {
-        env.storage().persistent().get(&user).unwrap_or(Symbol::new(&env, "Hello!"))
+        env.storage()
+            .persistent()
+            .get(&user)
+            .unwrap_or(Symbol::new(&env, "Hello!"))
     }
 
     /// Add a number to the counter
