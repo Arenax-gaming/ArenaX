@@ -5,12 +5,21 @@ import { TournamentCard } from "@/components/tournaments/TournamentCard";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
 import { Tournament, TournamentStatus } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function TournamentsPage() {
   // Search and filter state
   const [searchValue, setSearchValue] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<TournamentStatus | null>(null);
   const [selectedGameType, setSelectedGameType] = useState<string | null>(null);
+
+  // Example: Entry fee & sort filters
+  const [entryFeeFilter, setEntryFeeFilter] = useState<{ type: string }>({ type: "all" });
+  const [sortOption, setSortOption] = useState<{ type: string }>({ type: "newest" });
+
+  // Quick join state
+  const [quickJoinTournament, setQuickJoinTournament] = useState<Tournament | null>(null);
+  const [joinedTournamentIds, setJoinedTournamentIds] = useState<Set<string>>(new Set());
 
   // Get unique game types from tournaments
   const availableGameTypes = useMemo(() => {
@@ -21,18 +30,15 @@ export default function TournamentsPage() {
   // Filter tournaments based on search and filters
   const filteredTournaments = useMemo(() => {
     return mockTournaments.filter((tournament) => {
-      // Search filter - case insensitive search in name and game type
       const searchLower = searchValue.toLowerCase();
       const matchesSearch =
         tournament.name.toLowerCase().includes(searchLower) ||
         tournament.gameType.toLowerCase().includes(searchLower) ||
         (tournament.description?.toLowerCase().includes(searchLower) ?? false);
 
-      // Status filter
       const matchesStatus =
         !selectedStatus || tournament.status === selectedStatus;
 
-      // Game type filter
       const matchesGameType =
         !selectedGameType || tournament.gameType === selectedGameType;
 
@@ -40,6 +46,7 @@ export default function TournamentsPage() {
     });
   }, [searchValue, selectedStatus, selectedGameType]);
 
+  // Reset filters
   const handleReset = () => {
     setSearchValue("");
     setSelectedStatus(null);
@@ -55,32 +62,31 @@ export default function TournamentsPage() {
 
   const handleConfirmJoin = async (): Promise<boolean> => {
     if (!quickJoinTournament) return false;
-    
+
     // Simulate API call
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    // Add to joined tournaments
+
     setJoinedTournamentIds((prev) => {
-      const newSet = new Set<string>();
-      prev.forEach((id) => newSet.add(id));
+      const newSet = new Set(prev);
       newSet.add(quickJoinTournament.id);
       return newSet;
     });
-    
+
     return true;
   };
 
   return (
-    <div className="min-h-screen px-4 py-8 bg-background">
-      {/* Header */}
-      <div className="space-y-2 mb-8 text-center">
-        <h1 className="text-3xl md:text-4xl font-bold text-foreground">
-          Tournaments
-        </h1>
-        <p className="text-lg text-muted-foreground">
-          Browse and join exciting esports competitions
-        </p>
-      </div>
+    <AppLayout>
+      <div className="min-h-screen px-4 py-8 bg-background">
+        {/* Header */}
+        <div className="space-y-2 mb-8 text-center">
+          <h1 className="text-3xl md:text-4xl font-bold text-foreground">
+            Tournaments
+          </h1>
+          <p className="text-lg text-muted-foreground">
+            Browse and join exciting esports competitions
+          </p>
+        </div>
 
         {/* Filters */}
         <TournamentFilter
@@ -95,7 +101,7 @@ export default function TournamentsPage() {
         />
 
         {/* Results Count */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between my-4">
           <p className="text-sm text-muted-foreground">
             {filteredTournaments.length} tournament
             {filteredTournaments.length !== 1 ? "s" : ""} found
@@ -106,7 +112,10 @@ export default function TournamentsPage() {
         {filteredTournaments.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament} />
+              <TournamentCard
+                key={tournament.id}
+                tournament={tournament}
+              />
             ))}
           </div>
         ) : (
@@ -123,7 +132,7 @@ export default function TournamentsPage() {
               {(searchValue || selectedStatus || selectedGameType) && (
                 <button
                   onClick={handleReset}
-                  className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-sm"
+                  className="text-blue-600 hover:text-blue-700 font-medium text-sm"
                 >
                   Reset filters
                 </button>

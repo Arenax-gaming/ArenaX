@@ -11,6 +11,7 @@ import { mockBracketData } from "@/data/mockBrackets";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { BracketTree } from "@/components/brackets/BracketTree";
+import { AppLayout } from "@/components/layout/AppLayout";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -21,17 +22,23 @@ export default function TournamentDetailsPage() {
     return mockTournaments.find((t) => t.id === tournamentId);
   }, [tournamentId]);
 
+  const bracketData = useMemo(() => {
+    return mockBracketData[tournamentId] || null;
+  }, [tournamentId]);
+
+  const showBracket =
+    bracketData &&
+    (tournament?.status === "in_progress" ||
+      tournament?.status === "completed");
+
   if (!tournament) {
     return (
       <AppLayout>
         <div className="min-h-screen flex items-center justify-center">
           <div className="text-center">
-            <h1 className="text-3xl font-bold text-foreground mb-2">
+            <h1 className="text-3xl font-bold mb-2">
               Tournament Not Found
             </h1>
-            <p className="text-muted-foreground mb-6">
-              The tournament you're looking for doesn't exist.
-            </p>
             <Button onClick={() => router.push("/tournaments")}>
               Back to Tournaments
             </Button>
@@ -41,86 +48,39 @@ export default function TournamentDetailsPage() {
     );
   }
 
-  const showBracket = bracketData !== null && (tournament.status === "in_progress" || tournament.status === "completed");
-
   return (
-    <div className="min-h-screen bg-background px-4 py-8">
-      {/* Back Button */}
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="gap-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
-      </div>
+    <AppLayout>
+      <div className="min-h-screen px-4 py-8">
+        <div className="mb-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+            className="gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        </div>
 
-        {/* Main Content */}
-        <div className="container mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column - Main Content */}
-            <div className="lg:col-span-2 space-y-8">
-              {/* Tournament Header */}
-              <TournamentHeader tournament={tournament} />
+        <div className="container mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-8">
+            <TournamentHeader tournament={tournament} />
+            <TournamentRules tournament={tournament} />
+            <TournamentParticipants tournament={tournament} />
 
-              {/* Rules Section */}
-              <TournamentRules tournament={tournament} />
-
-              {/* Participants Section */}
-              <TournamentParticipants tournament={tournament} />
-            </div>
-
-            {/* Right Column - Sidebar */}
-            <div className="space-y-6">
-              {/* Join Button */}
-              <JoinTournamentButton tournament={tournament} />
-
-              {/* Quick Stats Card */}
-              <div className="bg-card border rounded-lg p-6 sticky top-24">
-                <h3 className="font-semibold text-foreground mb-4">
-                  Quick Stats
+            {showBracket && (
+              <div className="bg-card border rounded-lg p-6">
+                <h3 className="font-semibold mb-4">
+                  Tournament Bracket
                 </h3>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center pb-3 border-b">
-                    <span className="text-sm text-muted-foreground">
-                      Entry Fee
-                    </span>
-                    <span className="font-semibold text-foreground">
-                      {tournament.entryFee === 0
-                        ? "Free"
-                        : `$${tournament.entryFee}`}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center pb-3 border-b">
-                    <span className="text-sm text-muted-foreground">
-                      Prize Pool
-                    </span>
-                    <span className="font-semibold text-foreground">
-                      ${tournament.prizePool.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center pb-3 border-b">
-                    <span className="text-sm text-muted-foreground">
-                      Match Format
-                    </span>
-                    <span className="font-semibold text-foreground capitalize">
-                      {tournament.tournamentType.replace(/_/g, " ")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">
-                      Total Slots
-                    </span>
-                    <span className="font-semibold text-foreground">
-                      {tournament.maxParticipants}
-                    </span>
-                  </div>
-                </div>
+                <BracketTree bracketData={bracketData} />
               </div>
-            </div>
+            )}
+          </div>
+
+          <div className="space-y-6">
+            <JoinTournamentButton tournament={tournament} />
           </div>
         </div>
       </div>
