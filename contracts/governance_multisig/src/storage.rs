@@ -40,9 +40,7 @@ pub fn is_initialized(env: &Env) -> bool {
 
 /// Mark the contract as initialized
 pub fn set_initialized(env: &Env) {
-    env.storage()
-        .instance()
-        .set(&DataKey::Initialized, &true);
+    env.storage().instance().set(&DataKey::Initialized, &true);
 }
 
 // ============================================================================
@@ -81,9 +79,7 @@ pub fn get_signer_count(env: &Env) -> u32 {
 
 /// Set the signer count
 pub fn set_signer_count(env: &Env, count: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::SignerCount, &count);
+    env.storage().instance().set(&DataKey::SignerCount, &count);
 }
 
 /// Get the list of all signer addresses

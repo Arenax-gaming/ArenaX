@@ -4,7 +4,7 @@ use soroban_sdk::{contracttype, Bytes, Symbol};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
-    LatestVersion(Symbol), 
+    LatestVersion(Symbol),
     Param(Symbol, u32), // (Key, Version) -> Value
 }
 
