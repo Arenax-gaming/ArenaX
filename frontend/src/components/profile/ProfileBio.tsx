@@ -81,7 +81,7 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
         ) : (
           <>
             <p className="text-sm text-foreground leading-relaxed italic">
-              "{user.bio || "No bio set yet."}"
+              {`"${user.bio || "No bio set yet."}"`}
             </p>
             <div className="flex flex-wrap gap-3">
               {user.socialLinks?.twitter && (

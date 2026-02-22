@@ -173,7 +173,7 @@ export default function PrivacyPage() {
           </section>
 
           <section className="mb-8">
-            <h2 className="font-heading text-2xl font-bold mb-4">10. Children's Privacy</h2>
+            <h2 className="font-heading text-2xl font-bold mb-4">10. Children&apos;s Privacy</h2>
             <p className="text-muted-foreground mb-4">
               ArenaX is not intended for children under 18. We do not knowingly collect 
               personal information from children under 18. If you become aware that a child 
@@ -204,7 +204,7 @@ export default function PrivacyPage() {
             <p className="text-muted-foreground mb-4">
               We may update this Privacy Policy from time to time. We will notify you of 
               any changes by posting the new Privacy Policy on this page and updating the 
-              "Last Updated" date. You are advised to review this Privacy Policy periodically 
+              &quot;Last Updated&quot; date. You are advised to review this Privacy Policy periodically 
               for any changes.
             </p>
           </section>

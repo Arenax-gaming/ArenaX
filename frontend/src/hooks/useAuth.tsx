@@ -22,6 +22,7 @@ const buildMockUser = (overrides: Partial<AuthUser> = {}): AuthUser => ({
   email: "player@arenax.gg",
   isVerified: true,
   createdAt: new Date().toISOString(),
+  elo: 1200,
   token: "mock-token",
   refreshToken: "mock-refresh",
   ...overrides,

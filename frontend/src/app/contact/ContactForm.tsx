@@ -49,7 +49,7 @@ export function ContactForm() {
           Send us a Message
         </CardTitle>
         <CardDescription>
-          Fill out the form below and we'll get back to you within 24 hours.
+          Fill out the form below and we&apos;ll get back to you within 24 hours.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -64,7 +64,7 @@ export function ContactForm() {
             </div>
             <h3 className="text-xl font-bold mb-2">Message Sent!</h3>
             <p className="text-muted-foreground">
-              Thank you for reaching out. We'll respond to your inquiry soon.
+              Thank you for reaching out. We&apos;ll respond to your inquiry soon.
             </p>
           </motion.div>
         ) : (

@@ -7,7 +7,7 @@ import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { mockTournaments } from "@/data/mockTournaments";
-import { mockBracketData, mockPrizeDistributions } from "@/data/mockBrackets";
+import { mockBracketData } from "@/data/mockBrackets";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { BracketTree } from "@/components/brackets/BracketTree";
@@ -21,6 +21,15 @@ export default function TournamentDetailsPage() {
     return mockTournaments.find((t) => t.id === tournamentId);
   }, [tournamentId]);
 
+  // Check if tournament has a bracket
+  const bracketData = useMemo(() => {
+    if (tournament && (tournament.status === "in_progress" || tournament.status === "completed")) {
+      return mockBracketData[tournamentId] || null;
+    }
+    return null;
+  }, [tournament, tournamentId]);
+
+  // If not found, show not found page
   if (!tournament) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -29,7 +38,7 @@ export default function TournamentDetailsPage() {
             Tournament Not Found
           </h1>
           <p className="text-muted-foreground mb-6">
-            The tournament you're looking for doesn't exist.
+            The tournament you&apos;re looking for doesn&apos;t exist.
           </p>
           <Button onClick={() => router.push("/tournaments")}>
             Back to Tournaments
@@ -39,7 +48,7 @@ export default function TournamentDetailsPage() {
     );
   }
 
-  const showBracket = bracketData && (tournament.status === "in_progress" || tournament.status === "completed");
+  const showBracket = bracketData !== null && (tournament.status === "in_progress" || tournament.status === "completed");
 
   return (
     <div className="min-h-screen bg-background px-4 py-8">
@@ -57,22 +66,29 @@ export default function TournamentDetailsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Content */}
-        <div className="container mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column - Main Content */}
-            <div className="lg:col-span-2 space-y-8">
-              {/* Tournament Header */}
-              <TournamentHeader tournament={tournament} />
+        {/* Left Column - Main Content */}
+        <div className="lg:col-span-2 space-y-8">
+          {/* Tournament Header */}
+          <TournamentHeader tournament={tournament} />
 
-              {/* Rules Section */}
-              <TournamentRules tournament={tournament} />
+          {/* Rules Section */}
+          <TournamentRules tournament={tournament} />
 
-              {/* Participants Section */}
-              <TournamentParticipants tournament={tournament} />
+          {/* Participants Section */}
+          <TournamentParticipants tournament={tournament} />
+
+          {/* Bracket Section */}
+          {showBracket && bracketData && (
+            <div className="bg-card border rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-foreground mb-4">
+                Tournament Bracket
+              </h2>
+              <BracketTree bracketData={bracketData} />
             </div>
+          )}
+        </div>
 
-        {/* Sidebar */}
+        {/* Right Column - Sidebar */}
         <div className="space-y-6">
           <JoinTournamentButton tournament={tournament} />
           <div className="bg-card border rounded-lg p-6 sticky top-24">

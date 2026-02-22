@@ -87,18 +87,18 @@ export default function MatchPage() {
       clearTimeout(connectTimeout);
       clearInterval(intervalId);
     };
-  }, [match?.id, match?.status]);
+  }, [match]);
 
   // Get player usernames
   const player1Username = useMemo(() => {
     if (!match) return "Unknown";
     return mockPlayerUsernames[match.player1Id] || `Player ${match.player1Id}`;
-  }, [match?.player1Id]);
+  }, [match]);
 
   const player2Username = useMemo(() => {
     if (!match) return "Unknown";
     return mockPlayerUsernames[match.player2Id] || `Player ${match.player2Id}`;
-  }, [match?.player2Id]);
+  }, [match]);
 
   // Determine if current user is player 1 or player 2
   const isPlayer1 = match?.player1Id === currentUserId;
@@ -218,7 +218,7 @@ export default function MatchPage() {
             {error || "Match Not Found"}
           </h1>
           <p className="text-muted-foreground mb-6">
-            The match you're looking for doesn't exist or has been removed.
+            The match you&apos;re looking for doesn&apos;t exist or has been removed.
           </p>
           <Button onClick={() => router.push("/tournaments")}>
             Back to Tournaments
@@ -403,7 +403,7 @@ export default function MatchPage() {
                       Waiting for Opponent
                     </h3>
                     <p className="text-muted-foreground text-sm">
-                      {isPlayer1 ? player2Username : player1Username} hasn't submitted their score yet.
+                      {isPlayer1 ? player2Username : player1Username} hasn&apos;t submitted their score yet.
                     </p>
                   </div>
                 </Card>
@@ -421,7 +421,7 @@ export default function MatchPage() {
                 Spectator View
               </h3>
               <p className="text-muted-foreground">
-                You're watching this match as a spectator. Both players are currently competing.
+                You&apos;re watching this match as a spectator. Both players are currently competing.
               </p>
             </div>
           </Card>

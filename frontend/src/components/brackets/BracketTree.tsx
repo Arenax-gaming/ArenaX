@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { BracketData, BracketMatch, BracketPlayer } from "@/types/bracket";
 import { Card } from "@/components/ui/Card";
 
@@ -136,9 +137,11 @@ export function BracketTree({
                           >
                             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                               {match.player1?.avatar ? (
-                                <img
+                                <Image
                                   src={match.player1.avatar}
                                   alt={match.player1.username}
+                                  width={24}
+                                  height={24}
                                   className="h-5 w-5 sm:h-6 sm:w-6 rounded-full flex-shrink-0"
                                 />
                               ) : (
@@ -172,9 +175,11 @@ export function BracketTree({
                           >
                             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                               {match.player2?.avatar ? (
-                                <img
+                                <Image
                                   src={match.player2.avatar}
                                   alt={match.player2.username}
+                                  width={24}
+                                  height={24}
                                   className="h-5 w-5 sm:h-6 sm:w-6 rounded-full flex-shrink-0"
                                 />
                               ) : (

@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Shield, Zap, Globe, Users } from "lucide-react";
 
@@ -87,8 +88,8 @@ export default function AboutPage() {
                 are delivered instantly, transparently, and globally.
               </p>
               <p>
-                By leveraging Stellar's lightning-fast blockchain and Soroban's smart contract 
-                capabilities, we've built a tournament platform that eliminates the middlemen 
+                By leveraging Stellar&apos;s lightning-fast blockchain and Soroban&apos;s smart contract 
+                capabilities, we&apos;ve built a tournament platform that eliminates the middlemen 
                 and puts players first.
               </p>
             </div>
@@ -96,7 +97,7 @@ export default function AboutPage() {
           <div className="bg-muted/50 rounded-3xl p-8">
             <h3 className="font-heading text-2xl font-bold mb-4">Our Vision</h3>
             <p className="text-muted-foreground mb-6">
-              To become the world's most trusted competitive gaming platform by making every 
+              To become the world&apos;s most trusted competitive gaming platform by making every 
               match verifiable, every prize instant, and every player empowered.
             </p>
             <div className="grid grid-cols-2 gap-4">
@@ -182,10 +183,11 @@ export default function AboutPage() {
           {team.map((member) => (
             <Card key={member.name} className="border-none bg-muted/50 overflow-hidden">
               <div className="aspect-square relative bg-gradient-to-br from-primary/20 to-primary/5">
-                <img
+                <Image
                   src={member.image}
                   alt={member.name}
-                  className="absolute inset-0 w-full h-full object-cover"
+                  fill
+                  className="object-cover"
                 />
               </div>
               <CardContent className="pt-4">
