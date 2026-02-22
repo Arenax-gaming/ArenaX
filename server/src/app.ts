@@ -10,6 +10,13 @@ import routes from './routes/index';
 import { logger } from './services/logger.service';
 import { initializeTelemetry } from './services/telemetry.service';
 
+import Redis from "ioredis";
+import { MatchMakingWorker } from './workers/matchmaking.worker';
+import {ReaperWorker} from "./workers/reaper.worker";
+
+const redis = new Redis();
+
+
 dotenv.config();
 initializeTelemetry();
 
@@ -101,5 +108,8 @@ if (process.env.NODE_ENV !== 'test') {
         logger.info('Server started', { url: `http://localhost:${port}` });
     });
 }
+
+new MatchMakingWorker(redis).start();
+new ReaperWorker().start();
 
 export default app;
