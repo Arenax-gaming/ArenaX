@@ -13,7 +13,7 @@ interface ScoreReportingFormProps {
   isPlayer1?: boolean;
   onSubmitScore: (score: number) => Promise<boolean>;
   isMatchActive?: boolean;
-  opponentScore?: number;
+  opponentScore?: number | null;
 }
 
 export function ScoreReportingForm({
@@ -97,13 +97,13 @@ export function ScoreReportingForm({
         </div>
 
         {/* Current Score Display */}
-        {opponentScore !== undefined && (
+        {(opponentScore !== undefined && opponentScore !== null) ? (
           <div className="text-center p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
             <p className="text-sm text-blue-600 dark:text-blue-400">
               Opponent reported score: <span className="font-bold">{opponentScore}</span>
             </p>
           </div>
-        )}
+        ) : null}
 
         {/* Submission Status */}
         {hasSubmitted ? (

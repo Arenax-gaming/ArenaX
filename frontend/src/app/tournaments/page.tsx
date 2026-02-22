@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { TournamentCard } from "@/components/tournaments/TournamentCard";
-import { TournamentFilter, EntryFeeFilter } from "@/components/tournaments/TournamentFilter";
+import { TournamentFilter, EntryFeeFilter, SortOption } from "@/components/tournaments/TournamentFilter";
 import { TournamentStatus } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { Button } from "@/components/ui/Button";
@@ -17,6 +17,7 @@ export default function TournamentsPage() {
   const [selectedStatus, setSelectedStatus] = useState<TournamentStatus | null>(null);
   const [selectedGameType, setSelectedGameType] = useState<string | null>(null);
   const [entryFeeFilter, setEntryFeeFilter] = useState<EntryFeeFilter>({ type: "all" });
+  const [sortOption, setSortOption] = useState<SortOption>({ type: "newest" });
   
   // Tab state
   const [activeTab, setActiveTab] = useState<"available" | "joined">("available");
@@ -34,10 +35,11 @@ export default function TournamentsPage() {
     return Array.from(types).sort();
   }, []);
 
-  // Filter logic for tournaments - Extended with entry fee filter
-  const filterTournaments = useMemo(() => {
+  // Filter and sort logic for tournaments - Extended with entry fee filter
+  const filterAndSortTournaments = useMemo(() => {
     return (tournaments: Tournament[]): Tournament[] => {
-      return tournaments.filter((tournament) => {
+      // First filter
+      let filtered = tournaments.filter((tournament) => {
         const searchLower = searchValue.toLowerCase();
         const matchesSearch =
           tournament.name.toLowerCase().includes(searchLower) ||
@@ -61,24 +63,44 @@ export default function TournamentsPage() {
 
         return matchesSearch && matchesStatus && matchesGameType && matchesEntryFee;
       });
+
+      // Then sort
+      filtered = [...filtered].sort((a, b) => {
+        switch (sortOption.type) {
+          case "newest":
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          case "oldest":
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          case "highest_prize":
+            return b.prizePool - a.prizePool;
+          case "lowest_fee":
+            return a.entryFee - b.entryFee;
+          case "soonest":
+            return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+          default:
+            return 0;
+        }
+      });
+
+      return filtered;
     };
-  }, [searchValue, selectedStatus, selectedGameType, entryFeeFilter]);
+  }, [searchValue, selectedStatus, selectedGameType, entryFeeFilter, sortOption]);
 
   // Get available tournaments (not joined)
   const availableTournaments = useMemo(() => {
     const notJoined = mockTournaments.filter(
       (t) => !joinedTournamentIds.has(t.id)
     );
-    return filterTournaments(notJoined);
-  }, [filterTournaments, joinedTournamentIds]);
+    return filterAndSortTournaments(notJoined);
+  }, [filterAndSortTournaments, joinedTournamentIds]);
 
   // Get joined tournaments
   const joinedTournaments = useMemo(() => {
     const joined = mockTournaments.filter(
       (t) => joinedTournamentIds.has(t.id)
     );
-    return filterTournaments(joined);
-  }, [filterTournaments, joinedTournamentIds]);
+    return filterAndSortTournaments(joined);
+  }, [filterAndSortTournaments, joinedTournamentIds]);
 
   // Current tournaments based on tab
   const currentTournaments = activeTab === "available" 
@@ -90,6 +112,7 @@ export default function TournamentsPage() {
     setSelectedStatus(null);
     setSelectedGameType(null);
     setEntryFeeFilter({ type: "all" });
+    setSortOption({ type: "newest" });
   };
 
   // Quick join handlers
@@ -138,6 +161,8 @@ export default function TournamentsPage() {
         onReset={handleReset}
         entryFeeFilter={entryFeeFilter}
         onEntryFeeChange={setEntryFeeFilter}
+        sortOption={sortOption}
+        onSortChange={setSortOption}
       />
 
       {/* Tabs */}

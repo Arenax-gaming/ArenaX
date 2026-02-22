@@ -2,7 +2,7 @@ import React from "react";
 import { TournamentStatus } from "@/types/tournament";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { X, Zap } from "lucide-react";
+import { X, Zap, ArrowUpDown, Clock, Trophy, DollarSign } from "lucide-react";
 
 // Entry fee filter types
 export type EntryFeeFilter = 
@@ -10,6 +10,14 @@ export type EntryFeeFilter =
   | { type: "free" }
   | { type: "paid" }
   | { type: "custom"; min: number; max: number };
+
+// Sorting types
+export type SortOption = 
+  | { type: "newest" }
+  | { type: "oldest" }
+  | { type: "highest_prize" }
+  | { type: "lowest_fee" }
+  | { type: "soonest" };
 
 interface TournamentFilterProps {
   onSearchChange: (search: string) => void;
@@ -23,12 +31,28 @@ interface TournamentFilterProps {
   // New Entry Fee filter props
   entryFeeFilter?: EntryFeeFilter;
   onEntryFeeChange?: (filter: EntryFeeFilter) => void;
+  // Sorting props
+  sortOption?: SortOption;
+  onSortChange?: (sort: SortOption) => void;
 }
 
 const statuses: Array<{ value: TournamentStatus; label: string }> = [
   { value: "registration_open", label: "Registration Open" },
   { value: "in_progress", label: "Ongoing" },
   { value: "completed", label: "Completed" },
+];
+
+// Sort options with labels and icons
+const sortOptions: Array<{ 
+  value: SortOption; 
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { value: { type: "newest" }, label: "Newest First", icon: <Clock className="h-3 w-3" /> },
+  { value: { type: "oldest" }, label: "Oldest First", icon: <Clock className="h-3 w-3 rotate-180" /> },
+  { value: { type: "highest_prize" }, label: "Highest Prize", icon: <Trophy className="h-3 w-3" /> },
+  { value: { type: "lowest_fee" }, label: "Lowest Fee", icon: <DollarSign className="h-3 w-3" /> },
+  { value: { type: "soonest" }, label: "Starting Soon", icon: <Clock className="h-3 w-3" /> },
 ];
 
 // Entry fee options
@@ -53,6 +77,8 @@ export function TournamentFilter({
   onReset,
   entryFeeFilter = { type: "all" },
   onEntryFeeChange,
+  sortOption = { type: "newest" },
+  onSortChange,
 }: TournamentFilterProps) {
   // Check if entry fee filter is active
   const isEntryFeeFilterActive = entryFeeFilter.type !== "all";
@@ -96,7 +122,7 @@ export function TournamentFilter({
       </div>
 
       {/* Filters Container */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Status Filter */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Status</label>
@@ -238,8 +264,32 @@ export function TournamentFilter({
           </div>
         </div>
 
+        {/* Sort Options - NEW */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground flex items-center gap-2">
+            <ArrowUpDown className="h-4 w-4" />
+            Sort By
+          </label>
+          <div className="space-y-2">
+            {sortOptions.map((option) => (
+              <button
+                key={option.value.type}
+                onClick={() => onSortChange?.(option.value)}
+                className={`w-full px-3 py-2 rounded-md text-sm font-medium text-left transition-colors flex items-center gap-2 ${
+                  sortOption?.type === option.value.type
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-100"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {option.icon}
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Results Count and Reset */}
-        <div className="flex flex-col justify-end">
+        <div className="flex flex-col justify-end md:col-span-1">
           {hasActiveFilters && (
             <Button
               variant="outline"

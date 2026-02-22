@@ -20,3 +20,8 @@ export const authNav = {
     { label: "Register", href: "/register" },
   ],
 };
+
+// Match routes for quick access
+export const matchRoutes = {
+  match: (id: string) => `/match/${id}`,
+};

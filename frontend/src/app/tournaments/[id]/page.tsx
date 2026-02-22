@@ -7,8 +7,10 @@ import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { mockTournaments } from "@/data/mockTournaments";
+import { mockBracketData, mockPrizeDistributions } from "@/data/mockBrackets";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { BracketTree } from "@/components/brackets/BracketTree";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -18,6 +20,23 @@ export default function TournamentDetailsPage() {
   const tournament = useMemo(() => {
     return mockTournaments.find((t) => t.id === tournamentId);
   }, [tournamentId]);
+
+  // Check if tournament has a bracket
+  const bracketData = useMemo(() => {
+    if (tournament && (tournament.status === "in_progress" || tournament.status === "completed")) {
+      return mockBracketData[tournament.id] || null;
+    }
+    return null;
+  }, [tournament]);
+
+  // Get prize distribution
+  const prizeDistribution = useMemo(() => {
+    if (bracketData) {
+      const distributions = mockPrizeDistributions as Record<string, { position: number; positionName: string; prizeAmount: number; prizePercentage: number }[]>;
+      return distributions[bracketData.tournamentId] || [];
+    }
+    return [];
+  }, [bracketData]);
 
   // If not found, show minimal page
   if (!tournament) {
@@ -38,6 +57,8 @@ export default function TournamentDetailsPage() {
     );
   }
 
+  const showBracket = bracketData && (tournament.status === "in_progress" || tournament.status === "completed");
+
   return (
     <div className="min-h-screen bg-background px-4 py-8">
       {/* Back Button */}
@@ -57,8 +78,28 @@ export default function TournamentDetailsPage() {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
           <TournamentHeader tournament={tournament} />
-          <TournamentRules tournament={tournament} />
-          <TournamentParticipants tournament={tournament} />
+          
+          {/* Bracket Section - Show for in_progress and completed tournaments */}
+          {showBracket && (
+            <div>
+              <h2 className="text-xl font-bold text-foreground mb-4">Tournament Bracket</h2>
+              <BracketTree 
+                bracketData={bracketData} 
+                currentUserId="mock-user"
+              />
+            </div>
+          )}
+          
+          {!showBracket && (
+            <>
+              <TournamentRules tournament={tournament} />
+              <TournamentParticipants tournament={tournament} />
+            </>
+          )}
+          
+          {showBracket && (
+            <TournamentRules tournament={tournament} />
+          )}
         </div>
 
         {/* Sidebar */}
