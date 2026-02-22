@@ -4,7 +4,21 @@ export interface User {
   username: string;
   email: string;
   isVerified: boolean;
+  avatar?: string;
+  bio?: string;
+  socialLinks?: {
+    twitter?: string;
+    discord?: string;
+    twitch?: string;
+    github?: string;
+  };
+  elo: number;
   createdAt: string;
+}
+
+export interface EloPoint {
+  date: string;
+  elo: number;
 }
 
 export interface AuthUser extends User {

@@ -1,8 +1,11 @@
-import { AuthenticatedUser } from './auth.types';
+import { Logger } from 'winston';
 
 declare global {
     namespace Express {
-        interface User extends AuthenticatedUser {}
+        interface Request {
+            requestId: string;
+            log: Logger;
+        }
     }
 }
 
