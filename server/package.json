@@ -12,6 +12,7 @@
         "lint": "tsc --noEmit"
     },
     "dependencies": {
+        "@sentry/node": "^9.18.0",
         "@prisma/client": "^5.10.2",
         "@stellar/stellar-sdk": "^11.3.0",
         "bcrypt": "^5.1.1",
