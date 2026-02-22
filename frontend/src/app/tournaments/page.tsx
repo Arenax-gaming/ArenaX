@@ -3,12 +3,11 @@
 import { useState, useMemo } from "react";
 import { TournamentCard } from "@/components/tournaments/TournamentCard";
 import { TournamentFilter, EntryFeeFilter, SortOption } from "@/components/tournaments/TournamentFilter";
-import { TournamentStatus } from "@/types/tournament";
+import { TournamentStatus, Tournament } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { Button } from "@/components/ui/Button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { QuickJoinModal } from "@/components/game/QuickJoinModal";
-import { Tournament } from "@/types/tournament";
 import { Users } from "lucide-react";
 
 export default function TournamentsPage() {

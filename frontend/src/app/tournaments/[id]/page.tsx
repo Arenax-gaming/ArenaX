@@ -21,24 +21,6 @@ export default function TournamentDetailsPage() {
     return mockTournaments.find((t) => t.id === tournamentId);
   }, [tournamentId]);
 
-  // Check if tournament has a bracket
-  const bracketData = useMemo(() => {
-    if (tournament && (tournament.status === "in_progress" || tournament.status === "completed")) {
-      return mockBracketData[tournament.id] || null;
-    }
-    return null;
-  }, [tournament]);
-
-  // Get prize distribution
-  const prizeDistribution = useMemo(() => {
-    if (bracketData) {
-      const distributions = mockPrizeDistributions as Record<string, { position: number; positionName: string; prizeAmount: number; prizePercentage: number }[]>;
-      return distributions[bracketData.tournamentId] || [];
-    }
-    return [];
-  }, [bracketData]);
-
-  // If not found, show minimal page
   if (!tournament) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -76,31 +58,19 @@ export default function TournamentDetailsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content */}
-        <div className="lg:col-span-2 space-y-8">
-          <TournamentHeader tournament={tournament} />
-          
-          {/* Bracket Section - Show for in_progress and completed tournaments */}
-          {showBracket && (
-            <div>
-              <h2 className="text-xl font-bold text-foreground mb-4">Tournament Bracket</h2>
-              <BracketTree 
-                bracketData={bracketData} 
-                currentUserId="mock-user"
-              />
-            </div>
-          )}
-          
-          {!showBracket && (
-            <>
+        <div className="container mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Left Column - Main Content */}
+            <div className="lg:col-span-2 space-y-8">
+              {/* Tournament Header */}
+              <TournamentHeader tournament={tournament} />
+
+              {/* Rules Section */}
               <TournamentRules tournament={tournament} />
+
+              {/* Participants Section */}
               <TournamentParticipants tournament={tournament} />
-            </>
-          )}
-          
-          {showBracket && (
-            <TournamentRules tournament={tournament} />
-          )}
-        </div>
+            </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
