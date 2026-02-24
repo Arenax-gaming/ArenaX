@@ -10,12 +10,17 @@ datasource db {
 model User {
   id            String    @id @default(uuid())
   email         String    @unique
+  username      String    @unique
   passwordHash  String
+  role          String    @default("USER")
+  bio           String?
+  socials       Json?
   walletAddress String?   @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   projects      Project[]
   wallet        UserWallet?
+  refreshTokens RefreshToken[]
 }
 
 model UserWallet {
@@ -28,6 +33,23 @@ model UserWallet {
   updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id])
+}
+
+model RefreshToken {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String
+  tokenHash         String   @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  parentTokenId     String?
+  replacedByTokenId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([familyId])
 }
 
 model Project {
