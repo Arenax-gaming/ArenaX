@@ -46,8 +46,9 @@ async function verifyWalletGeneration() {
     const testEmail = `test-${Date.now()}@example.com`;
     const user = await prisma.user.create({
         data: {
-            email: testEmail,
-            passwordHash: 'dummy',
+            email: 'test@example.com',
+            username: 'testuser',
+            passwordHash: 'hashed_placeholder'
         }
     });
     console.log('Test User Created:', user.id);
