@@ -4,10 +4,10 @@ export interface NavItem {
 }
 
 export const mainNav: NavItem[] = [
+  { label: "Home", href: "/" },
   { label: "Tournaments", href: "/tournaments" },
+  { label: "Wallet", href: "/wallet" },
   { label: "Leaderboard", href: "/leaderboard" },
-  { label: "About", href: "/about" },
-  { label: "Contact", href: "/contact" },
 ];
 
 export const authNav = {

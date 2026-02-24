@@ -13,8 +13,9 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
 
-    // Add authorization header if token exists
-    const token = localStorage.getItem("auth_token");
+    // Add authorization header if token exists (localStorage or sessionStorage)
+    const token =
+      localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token");
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
@@ -42,12 +43,30 @@ class ApiClient {
     return data.data;
   }
 
-  // Auth endpoints
+  // Auth endpoints — backend returns { user, tokens } directly (no .data wrapper)
+  private async authRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseURL}${endpoint}`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string>),
+    };
+    const response = await fetch(url, { ...options, headers });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message =
+        (json as { error?: { message?: string } })?.error?.message ??
+        (json as { message?: string })?.message ??
+        `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+    return json as T;
+  }
+
   async login(credentials: { email: string; password: string }) {
-    return this.request("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(credentials),
-    });
+    return this.authRequest<{ user: unknown; tokens: { accessToken: string; refreshToken: string } }>(
+      "/auth/login",
+      { method: "POST", body: JSON.stringify(credentials) }
+    );
   }
 
   async register(userData: {
@@ -55,10 +74,10 @@ class ApiClient {
     email: string;
     password: string;
   }) {
-    return this.request("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(userData),
-    });
+    return this.authRequest<{ user: unknown; tokens: { accessToken: string; refreshToken: string } }>(
+      "/auth/register",
+      { method: "POST", body: JSON.stringify(userData) }
+    );
   }
 
   // Tournament endpoints
