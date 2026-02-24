@@ -309,8 +309,8 @@ impl GovernanceMultisig {
         }
 
         // Get proposal
-        let mut proposal = storage::get_proposal(&env, &proposal_id)
-            .ok_or(GovernanceError::ProposalNotFound)?;
+        let mut proposal =
+            storage::get_proposal(&env, &proposal_id).ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check proposal status
         if proposal.status == ProposalStatus::Executed as u32 {
@@ -397,8 +397,8 @@ impl GovernanceMultisig {
         }
 
         // Get proposal
-        let mut proposal = storage::get_proposal(&env, &proposal_id)
-            .ok_or(GovernanceError::ProposalNotFound)?;
+        let mut proposal =
+            storage::get_proposal(&env, &proposal_id).ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check proposal not already executed
         if proposal.status == ProposalStatus::Executed as u32 {
@@ -482,8 +482,8 @@ impl GovernanceMultisig {
         }
 
         // Get proposal
-        let mut proposal = storage::get_proposal(&env, &proposal_id)
-            .ok_or(GovernanceError::ProposalNotFound)?;
+        let mut proposal =
+            storage::get_proposal(&env, &proposal_id).ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check proposal status
         if proposal.status == ProposalStatus::Executed as u32 {
@@ -529,11 +529,8 @@ impl GovernanceMultisig {
         // For this implementation, we pass an empty args vec since the specific
         // args encoding depends on the target function signature
         let empty_args: Vec<soroban_sdk::Val> = Vec::new(&env);
-        let _result: soroban_sdk::Val = env.invoke_contract(
-            &proposal.target_contract,
-            &proposal.function,
-            empty_args,
-        );
+        let _result: soroban_sdk::Val =
+            env.invoke_contract(&proposal.target_contract, &proposal.function, empty_args);
 
         // Emit event
         ProposalExecuted {
@@ -577,8 +574,8 @@ impl GovernanceMultisig {
         }
 
         // Get proposal
-        let mut proposal = storage::get_proposal(&env, &proposal_id)
-            .ok_or(GovernanceError::ProposalNotFound)?;
+        let mut proposal =
+            storage::get_proposal(&env, &proposal_id).ok_or(GovernanceError::ProposalNotFound)?;
 
         // Check proposal not already executed
         if proposal.status == ProposalStatus::Executed as u32 {

@@ -30,7 +30,9 @@ impl ArenaXReputationAggregation {
             base_score: 1000, // Starting score
             decay_factor: 0,  // No decay for now
         };
-        env.storage().instance().set(&DataKey::Config, &default_config);
+        env.storage()
+            .instance()
+            .set(&DataKey::Config, &default_config);
 
         let timestamp = env.ledger().timestamp();
         events::emit_initialized(&env, &admin, timestamp);
@@ -47,7 +49,9 @@ impl ArenaXReputationAggregation {
 
         admin.require_auth();
 
-        env.storage().instance().set(&DataKey::AuthorizedResolver(resolver.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorizedResolver(resolver.clone()), &true);
 
         let timestamp = env.ledger().timestamp();
         events::emit_authorizer_added(&env, &resolver, timestamp);
@@ -64,7 +68,9 @@ impl ArenaXReputationAggregation {
 
         admin.require_auth();
 
-        env.storage().instance().remove(&DataKey::AuthorizedResolver(resolver.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::AuthorizedResolver(resolver.clone()));
 
         let timestamp = env.ledger().timestamp();
         events::emit_authorizer_removed(&env, &resolver, timestamp);
@@ -129,20 +135,41 @@ impl ArenaXReputationAggregation {
         // Update statistics based on outcome
         match outcome_enum {
             MatchOutcome::Win => {
-                reputation.wins = reputation.wins.checked_add(1).ok_or(ReputationError::ArithmeticOverflow)?;
-                reputation.score = reputation.score.checked_add(config.win_weight).ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.wins = reputation
+                    .wins
+                    .checked_add(1)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.score = reputation
+                    .score
+                    .checked_add(config.win_weight)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
             }
             MatchOutcome::Loss => {
-                reputation.losses = reputation.losses.checked_add(1).ok_or(ReputationError::ArithmeticOverflow)?;
-                reputation.score = reputation.score.checked_add(config.loss_weight).ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.losses = reputation
+                    .losses
+                    .checked_add(1)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.score = reputation
+                    .score
+                    .checked_add(config.loss_weight)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
             }
             MatchOutcome::Draw => {
-                reputation.draws = reputation.draws.checked_add(1).ok_or(ReputationError::ArithmeticOverflow)?;
-                reputation.score = reputation.score.checked_add(config.draw_weight).ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.draws = reputation
+                    .draws
+                    .checked_add(1)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
+                reputation.score = reputation
+                    .score
+                    .checked_add(config.draw_weight)
+                    .ok_or(ReputationError::ArithmeticOverflow)?;
             }
         }
 
-        reputation.matches_played = reputation.matches_played.checked_add(1).ok_or(ReputationError::ArithmeticOverflow)?;
+        reputation.matches_played = reputation
+            .matches_played
+            .checked_add(1)
+            .ok_or(ReputationError::ArithmeticOverflow)?;
         reputation.last_updated = timestamp;
 
         // Ensure score doesn't go below 0
@@ -151,10 +178,19 @@ impl ArenaXReputationAggregation {
         }
 
         // Save updated reputation
-        env.storage().instance().set(&DataKey::PlayerReputation(player.clone()), &reputation);
+        env.storage()
+            .instance()
+            .set(&DataKey::PlayerReputation(player.clone()), &reputation);
 
         // Emit events
-        events::emit_reputation_updated(&env, &player, previous_score, reputation.score, match_id, timestamp);
+        events::emit_reputation_updated(
+            &env,
+            &player,
+            previous_score,
+            reputation.score,
+            match_id,
+            timestamp,
+        );
         events::emit_match_recorded(&env, &player, outcome, match_id, timestamp);
 
         Ok(())
