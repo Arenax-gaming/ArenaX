@@ -1,5 +1,5 @@
 use soroban_sdk::{contractevent, Address};
-
+// events
 #[contractevent]
 pub struct ReputationChanged {
     pub player: Address,
