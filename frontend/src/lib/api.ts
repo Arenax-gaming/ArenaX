@@ -105,6 +105,57 @@ class ApiClient {
   async healthCheck() {
     return this.request("/health");
   }
+
+  // Notification endpoints (persistent, stored in DB)
+  async getNotifications(): Promise<
+    Array<{
+      id: string;
+      type: string;
+      title: string;
+      message: string;
+      link?: string;
+      linkLabel?: string;
+      read: boolean;
+      createdAt: string;
+    }>
+  > {
+    try {
+      return await this.request("/notifications");
+    } catch {
+      return [];
+    }
+  }
+
+  async createNotification(data: {
+    type: string;
+    title: string;
+    message: string;
+    link?: string;
+    linkLabel?: string;
+  }) {
+    return this.request("/notifications", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request(`/notifications/${id}/read`, {
+      method: "PATCH",
+    });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request("/notifications/read-all", {
+      method: "PATCH",
+    });
+  }
+
+  async deleteNotification(id: string) {
+    return this.request(`/notifications/${id}`, {
+      method: "DELETE",
+    });
+  }
 }
 
 export const api = new ApiClient();

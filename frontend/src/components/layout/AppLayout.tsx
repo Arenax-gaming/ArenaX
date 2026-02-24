@@ -1,7 +1,7 @@
-import { MobileNav } from "@/components/layout/MobileNav";
 import { Navbar } from "@/components/layout/Navbar";
-import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { MobileHeaderActions } from "@/components/layout/MobileHeaderActions";
 import { Logo } from "@/components/common/Logo";
+import { ToastContainer } from "@/components/notifications/Toast";
 import Link from "next/link";
 
 interface AppLayoutProps {
@@ -15,13 +15,11 @@ export function AppLayout({ children }: AppLayoutProps) {
         <div className="container flex h-14 items-center justify-between">
           <Logo className="md:hidden" />
           <Navbar />
-          <div className="flex items-center gap-2 md:hidden">
-            <ThemeToggle />
-            <MobileNav />
-          </div>
+          <MobileHeaderActions />
         </div>
       </header>
       <main className="container py-6 md:py-10 flex-1">{children}</main>
+      <ToastContainer />
       <footer className="border-t py-6 md:py-8">
         <div className="container flex flex-col items-center justify-between gap-4 md:flex-row">
           <p className="text-sm text-muted-foreground">

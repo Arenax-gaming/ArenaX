@@ -2,7 +2,9 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import passport from 'passport';
 import routes from './routes/index';
+import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { logger } from './services/logger.service';
@@ -75,8 +77,12 @@ app.use(cors({
 app.use(express.json());
 app.use(requestIdMiddleware);
 
-// Routes
-app.use('/api', routes);
+    // Middleware
+    app.use(helmet());
+    app.use(cors());
+    app.use(morgan('dev'));
+    app.use(express.json());
+    app.use(passport.initialize());
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
@@ -84,8 +90,10 @@ app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Error handling
-app.use(errorHandler);
+    // Health check
+    app.get('/health', (_req: Request, res: Response) => {
+        res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    });
 
 app.listen(port, () => {
     logger.info('Server started', { url: `http://localhost:${port}` });
