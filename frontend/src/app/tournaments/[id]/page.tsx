@@ -6,18 +6,31 @@ import { TournamentHeader } from "@/components/tournaments/TournamentHeader";
 import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
+import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
 import { mockTournaments } from "@/data/mockTournaments";
+import { generateMockBracket } from "@/data/mockBracket";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const tournamentId = params.id as string;
 
   const tournament = useMemo(() => {
     return mockTournaments.find((t) => t.id === tournamentId);
   }, [tournamentId]);
+
+  // Generate bracket data for tournaments that are in progress or completed
+  const bracketData = useMemo(() => {
+    if (!tournament) return null;
+    if (tournament.status === "in_progress" || tournament.status === "completed") {
+      return generateMockBracket(tournamentId);
+    }
+    return null;
+  }, [tournament, tournamentId]);
 
   // If not found, show minimal page
   if (!tournament) {
@@ -38,6 +51,8 @@ export default function TournamentDetailsPage() {
     );
   }
 
+  const showBracket = tournament.status === "in_progress" || tournament.status === "completed";
+
   return (
     <div className="min-h-screen bg-background px-4 py-8">
       {/* Back Button */}
@@ -57,6 +72,22 @@ export default function TournamentDetailsPage() {
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
           <TournamentHeader tournament={tournament} />
+          
+          {/* Bracket Section - Show for in_progress and completed tournaments */}
+          {showBracket && bracketData && (
+            <div className="bg-card border rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-foreground mb-4">
+                Tournament Bracket
+              </h2>
+              <div className="overflow-x-auto">
+                <SingleEliminationBracket
+                  bracketData={bracketData}
+                  currentUserId={user?.id}
+                />
+              </div>
+            </div>
+          )}
+
           <TournamentRules tournament={tournament} />
           <TournamentParticipants tournament={tournament} />
         </div>
