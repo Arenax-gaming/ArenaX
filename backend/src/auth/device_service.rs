@@ -289,10 +289,22 @@ impl DeviceService {
             device_info.user_agent,
             device_info.platform,
             device_info.os,
-            device_info.browser.as_ref().unwrap_or(&"unknown".to_string()),
-            device_info.screen_resolution.as_ref().unwrap_or(&"unknown".to_string()),
-            device_info.timezone.as_ref().unwrap_or(&"unknown".to_string()),
-            device_info.language.as_ref().unwrap_or(&"unknown".to_string()),
+            device_info
+                .browser
+                .as_ref()
+                .unwrap_or(&"unknown".to_string()),
+            device_info
+                .screen_resolution
+                .as_ref()
+                .unwrap_or(&"unknown".to_string()),
+            device_info
+                .timezone
+                .as_ref()
+                .unwrap_or(&"unknown".to_string()),
+            device_info
+                .language
+                .as_ref()
+                .unwrap_or(&"unknown".to_string()),
             device_info.ip_address,
         );
 
@@ -411,12 +423,10 @@ impl DeviceService {
             .await?;
 
         // Get the created device
-        let device = sqlx::query_as::<_, Device>(
-            "SELECT * FROM devices WHERE id = $1",
-        )
-        .bind(device_id)
-        .fetch_one(&self.db_pool)
-        .await?;
+        let device = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = $1")
+            .bind(device_id)
+            .fetch_one(&self.db_pool)
+            .await?;
 
         info!(
             device_id = %device_id,
@@ -441,35 +451,27 @@ impl DeviceService {
 
     /// Get a specific device by ID
     pub async fn get_device(&self, device_id: Uuid) -> Result<Device, DeviceError> {
-        let device = sqlx::query_as::<_, Device>(
-            "SELECT * FROM devices WHERE id = $1",
-        )
-        .bind(device_id)
-        .fetch_optional(&self.db_pool)
-        .await?
-        .ok_or(DeviceError::DeviceNotFound)?;
+        let device = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = $1")
+            .bind(device_id)
+            .fetch_optional(&self.db_pool)
+            .await?
+            .ok_or(DeviceError::DeviceNotFound)?;
 
         Ok(device)
     }
 
     /// Get device count for a user
     async fn get_user_device_count(&self, user_id: Uuid) -> Result<i64, DeviceError> {
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM devices WHERE user_id = $1",
-        )
-        .bind(user_id)
-        .fetch_one(&self.db_pool)
-        .await?;
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM devices WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db_pool)
+            .await?;
 
         Ok(count.0)
     }
 
     /// Revoke/remove a device
-    pub async fn revoke_device(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-    ) -> Result<(), DeviceError> {
+    pub async fn revoke_device(&self, user_id: Uuid, device_id: Uuid) -> Result<(), DeviceError> {
         // Verify device belongs to user
         let device = self.get_device(device_id).await?;
         if device.user_id != user_id {
@@ -630,11 +632,7 @@ impl DeviceService {
     }
 
     /// Block a device
-    pub async fn block_device(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-    ) -> Result<(), DeviceError> {
+    pub async fn block_device(&self, user_id: Uuid, device_id: Uuid) -> Result<(), DeviceError> {
         let device = self.get_device(device_id).await?;
         if device.user_id != user_id {
             return Err(DeviceError::DeviceNotFound);
@@ -656,11 +654,7 @@ impl DeviceService {
     }
 
     /// Unblock a device
-    pub async fn unblock_device(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-    ) -> Result<(), DeviceError> {
+    pub async fn unblock_device(&self, user_id: Uuid, device_id: Uuid) -> Result<(), DeviceError> {
         let device = self.get_device(device_id).await?;
         if device.user_id != user_id {
             return Err(DeviceError::DeviceNotFound);
@@ -682,11 +676,7 @@ impl DeviceService {
     }
 
     /// Trust a device
-    pub async fn trust_device(
-        &self,
-        user_id: Uuid,
-        device_id: Uuid,
-    ) -> Result<(), DeviceError> {
+    pub async fn trust_device(&self, user_id: Uuid, device_id: Uuid) -> Result<(), DeviceError> {
         let device = self.get_device(device_id).await?;
         if device.user_id != user_id {
             return Err(DeviceError::DeviceNotFound);
@@ -724,7 +714,10 @@ impl DeviceService {
         };
 
         let devices: Vec<Device> = if let Some(uid) = user_id {
-            sqlx::query_as(query).bind(uid).fetch_all(&self.db_pool).await?
+            sqlx::query_as(query)
+                .bind(uid)
+                .fetch_all(&self.db_pool)
+                .await?
         } else {
             sqlx::query_as(query).fetch_all(&self.db_pool).await?
         };
@@ -732,10 +725,7 @@ impl DeviceService {
         let total_devices = devices.len() as i64;
         let active_devices = devices.iter().filter(|d| d.is_active).count() as i64;
         let blocked_devices = devices.iter().filter(|d| d.is_blocked).count() as i64;
-        let suspicious_devices = devices
-            .iter()
-            .filter(|d| d.failed_login_count > 5)
-            .count() as i64;
+        let suspicious_devices = devices.iter().filter(|d| d.failed_login_count > 5).count() as i64;
 
         let mut devices_by_type = HashMap::new();
         let mut devices_by_platform = HashMap::new();
@@ -745,7 +735,9 @@ impl DeviceService {
         for device in &devices {
             let device_type_str = format!("{:?}", device.device_type);
             *devices_by_type.entry(device_type_str).or_insert(0) += 1;
-            *devices_by_platform.entry(device.platform.clone()).or_insert(0) += 1;
+            *devices_by_platform
+                .entry(device.platform.clone())
+                .or_insert(0) += 1;
 
             if device.last_login.is_some() {
                 recent_logins += 1;
@@ -767,22 +759,17 @@ impl DeviceService {
 
     /// Clean up inactive devices
     pub async fn cleanup_inactive_devices(&self) -> Result<u64, DeviceError> {
-        let cutoff_date = Utc::now()
-            - chrono::Duration::days(self.config.device_inactivity_days as i64);
+        let cutoff_date =
+            Utc::now() - chrono::Duration::days(self.config.device_inactivity_days as i64);
 
-        let result = sqlx::query(
-            "DELETE FROM devices WHERE last_seen < $1 AND is_active = false",
-        )
-        .bind(cutoff_date)
-        .execute(&self.db_pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM devices WHERE last_seen < $1 AND is_active = false")
+            .bind(cutoff_date)
+            .execute(&self.db_pool)
+            .await?;
 
         let deleted_count = result.rows_affected();
 
-        info!(
-            deleted_count = deleted_count,
-            "Cleaned up inactive devices"
-        );
+        info!(deleted_count = deleted_count, "Cleaned up inactive devices");
 
         Ok(deleted_count)
     }
@@ -797,37 +784,54 @@ impl DeviceService {
 
         // Note: This assumes a device_security_alerts table exists
         // For now, we'll return alerts from memory or create a simplified version
-        let alerts: Vec<(Uuid, Uuid, String, String, String, Option<serde_json::Value>, DateTime<Utc>)> =
-            sqlx::query_as(
-                "SELECT device_id, user_id, alert_type, severity, message, details, created_at
+        let alerts: Vec<(
+            Uuid,
+            Uuid,
+            String,
+            String,
+            String,
+            Option<serde_json::Value>,
+            DateTime<Utc>,
+        )> = sqlx::query_as(
+            "SELECT device_id, user_id, alert_type, severity, message, details, created_at
                  FROM device_security_alerts
                  WHERE device_id = $1
                  ORDER BY created_at DESC
                  LIMIT $2",
-            )
-            .bind(device_id)
-            .bind(limit)
-            .fetch_all(&self.db_pool)
-            .await?;
+        )
+        .bind(device_id)
+        .bind(limit)
+        .fetch_all(&self.db_pool)
+        .await?;
 
         let security_alerts = alerts
             .into_iter()
-            .map(|(device_id, user_id, alert_type_str, severity_str, message, details, created_at)| {
-                let alert_type: AlertType = serde_json::from_str(&alert_type_str)
-                    .unwrap_or(AlertType::UnusualActivity);
-                let severity: AlertSeverity = serde_json::from_str(&severity_str)
-                    .unwrap_or(AlertSeverity::Medium);
-
-                SecurityAlert {
+            .map(
+                |(
                     device_id,
                     user_id,
-                    alert_type,
-                    severity,
+                    alert_type_str,
+                    severity_str,
                     message,
                     details,
                     created_at,
-                }
-            })
+                )| {
+                    let alert_type: AlertType =
+                        serde_json::from_str(&alert_type_str).unwrap_or(AlertType::UnusualActivity);
+                    let severity: AlertSeverity =
+                        serde_json::from_str(&severity_str).unwrap_or(AlertSeverity::Medium);
+
+                    SecurityAlert {
+                        device_id,
+                        user_id,
+                        alert_type,
+                        severity,
+                        message,
+                        details,
+                        created_at,
+                    }
+                },
+            )
             .collect();
 
         Ok(security_alerts)

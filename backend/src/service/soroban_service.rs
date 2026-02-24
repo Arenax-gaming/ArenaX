@@ -150,12 +150,8 @@ struct RpcResponse {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum RpcResult {
-    Success {
-        result: serde_json::Value,
-    },
-    Error {
-        error: RpcError,
-    },
+    Success { result: serde_json::Value },
+    Error { error: RpcError },
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,9 +326,7 @@ impl SorobanService {
             "transaction": tx_envelope
         });
 
-        let response: SimulateResponse = self
-            .rpc_call("simulateTransaction", params)
-            .await?;
+        let response: SimulateResponse = self.rpc_call("simulateTransaction", params).await?;
 
         Ok(response)
     }
@@ -378,8 +372,7 @@ impl SorobanService {
 
         // Encode to base64 XDR (simplified)
         use base64::{engine::general_purpose, Engine as _};
-        let xdr = general_purpose::STANDARD
-            .encode(serde_json::to_string(&signed_tx)?);
+        let xdr = general_purpose::STANDARD.encode(serde_json::to_string(&signed_tx)?);
 
         Ok(xdr)
     }
@@ -390,9 +383,7 @@ impl SorobanService {
             "transaction": signed_tx
         });
 
-        let response: SendTransactionResponse = self
-            .rpc_call("sendTransaction", params)
-            .await?;
+        let response: SendTransactionResponse = self.rpc_call("sendTransaction", params).await?;
 
         info!(tx_hash = response.hash, "Transaction submitted");
 
@@ -400,10 +391,7 @@ impl SorobanService {
     }
 
     /// Monitor a transaction until it completes or fails
-    async fn monitor_transaction(
-        &self,
-        tx_hash: &str,
-    ) -> Result<SorobanTxResult, SorobanError> {
+    async fn monitor_transaction(&self, tx_hash: &str) -> Result<SorobanTxResult, SorobanError> {
         let mut attempt = 0;
         let mut delay = self.retry_config.initial_delay_ms;
 
@@ -484,25 +472,18 @@ impl SorobanService {
             "hash": tx_hash
         });
 
-        let response: GetTransactionResponse = self
-            .rpc_call("getTransaction", params)
-            .await?;
+        let response: GetTransactionResponse = self.rpc_call("getTransaction", params).await?;
 
         Ok(response.status)
     }
 
     /// Decode events from a transaction
-    pub async fn decode_events(
-        &self,
-        tx_hash: &str,
-    ) -> Result<Vec<DecodedEvent>, SorobanError> {
+    pub async fn decode_events(&self, tx_hash: &str) -> Result<Vec<DecodedEvent>, SorobanError> {
         let params = serde_json::json!({
             "hash": tx_hash
         });
 
-        let response: GetTransactionResponse = self
-            .rpc_call("getTransaction", params)
-            .await?;
+        let response: GetTransactionResponse = self.rpc_call("getTransaction", params).await?;
 
         // Decode events from resultMetaXdr
         // In production, properly decode XDR to extract events
@@ -530,11 +511,7 @@ impl SorobanService {
     }
 
     /// Make an RPC call to the Soroban RPC endpoint
-    async fn rpc_call<T>(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<T, SorobanError>
+    async fn rpc_call<T>(&self, method: &str, params: serde_json::Value) -> Result<T, SorobanError>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -556,10 +533,7 @@ impl SorobanService {
         let text = response.text().await?;
 
         if !status.is_success() {
-            return Err(SorobanError::RpcError(format!(
-                "HTTP {}: {}",
-                status, text
-            )));
+            return Err(SorobanError::RpcError(format!("HTTP {}: {}", status, text)));
         }
 
         let rpc_response: RpcResponse = serde_json::from_str(&text)?;
@@ -590,8 +564,7 @@ impl SorobanService {
         });
 
         use base64::{engine::general_purpose, Engine as _};
-        Ok(general_purpose::STANDARD
-            .encode(serde_json::to_string(&envelope)?))
+        Ok(general_purpose::STANDARD.encode(serde_json::to_string(&envelope)?))
     }
 
     /// Extract public key from secret key
@@ -687,7 +660,8 @@ mod tests {
         let service = SorobanService::new(network);
 
         // Valid secret key format
-        let result = service.secret_to_public_key("SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        let result =
+            service.secret_to_public_key("SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
         assert!(result.is_ok());
 
         // Invalid secret key format
@@ -839,7 +813,10 @@ mod tests {
             "operation": "invoke"
         });
 
-        let result = service.sign_transaction(&tx_data, "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        let result = service.sign_transaction(
+            &tx_data,
+            "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
         assert!(result.is_ok());
         let signature = result.unwrap();
         assert!(signature.starts_with("sig_"));

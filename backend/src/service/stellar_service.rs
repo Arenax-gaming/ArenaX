@@ -141,7 +141,11 @@ impl StellarService {
     }
 
     /// Fund a Stellar account (for testnet only)
-    pub async fn fund_account(&self, public_key: &str, amount: i64) -> Result<String, StellarError> {
+    pub async fn fund_account(
+        &self,
+        public_key: &str,
+        amount: i64,
+    ) -> Result<String, StellarError> {
         // TODO: Implement actual Stellar funding
         // For testnet, you can use the friendbot
         // For mainnet, this would require transferring XLM from the admin account
@@ -473,8 +477,14 @@ impl StellarService {
         // Ok((keypair.public_key(), keypair.secret_key()))
 
         // Placeholder implementation
-        let public_key = format!("G{}", Uuid::new_v4().to_string().replace("-", "").to_uppercase());
-        let secret_key = format!("S{}", Uuid::new_v4().to_string().replace("-", "").to_uppercase());
+        let public_key = format!(
+            "G{}",
+            Uuid::new_v4().to_string().replace("-", "").to_uppercase()
+        );
+        let secret_key = format!(
+            "S{}",
+            Uuid::new_v4().to_string().replace("-", "").to_uppercase()
+        );
 
         Ok((public_key, secret_key))
     }
