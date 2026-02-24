@@ -105,10 +105,10 @@ impl TournamentService {
         game_filter: Option<String>,
     ) -> Result<TournamentListResponse, ApiError> {
         let offset = (page - 1) * per_page;
-        
+
         let mut query = String::from(
-            "SELECT t.*, COUNT(tp.id) as current_participants FROM tournaments t 
-             LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id 
+            "SELECT t.*, COUNT(tp.id) as current_participants FROM tournaments t
+             LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
              WHERE 1=1"
         );
         let mut params: Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>> = Vec::new();
@@ -127,11 +127,11 @@ impl TournamentService {
         }
 
         query.push_str(" GROUP BY t.id ORDER BY t.created_at DESC");
-        
+
         param_count += 1;
         query.push_str(&format!(" LIMIT ${}", param_count));
         params.push(Box::new(per_page));
-        
+
         param_count += 1;
         query.push_str(&format!(" OFFSET ${}", param_count));
         params.push(Box::new(offset));
@@ -139,13 +139,13 @@ impl TournamentService {
         // For now, we'll use a simpler approach with sqlx::query
         let tournaments = sqlx::query!(
             r#"
-            SELECT t.*, COUNT(tp.id) as current_participants 
-            FROM tournaments t 
-            LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id 
+            SELECT t.*, COUNT(tp.id) as current_participants
+            FROM tournaments t
+            LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
             WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
             AND ($2::text IS NULL OR t.game = $2)
-            GROUP BY t.id 
-            ORDER BY t.created_at DESC 
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
             LIMIT $3 OFFSET $4
             "#,
             status_filter.map(|s| s as i32),
@@ -160,8 +160,8 @@ impl TournamentService {
         // Get total count
         let total = sqlx::query!(
             r#"
-            SELECT COUNT(*) as count 
-            FROM tournaments t 
+            SELECT COUNT(*) as count
+            FROM tournaments t
             WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
             AND ($2::text IS NULL OR t.game = $2)
             "#,
@@ -225,9 +225,9 @@ impl TournamentService {
     pub async fn get_tournament(&self, tournament_id: Uuid, user_id: Option<Uuid>) -> Result<TournamentResponse, ApiError> {
         let tournament = sqlx::query!(
             r#"
-            SELECT t.*, COUNT(tp.id) as current_participants 
-            FROM tournaments t 
-            LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id 
+            SELECT t.*, COUNT(tp.id) as current_participants
+            FROM tournaments t
+            LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
             WHERE t.id = $1
             GROUP BY t.id
             "#,
@@ -344,7 +344,7 @@ impl TournamentService {
         let tournament = sqlx::query_as!(
             Tournament,
             r#"
-            UPDATE tournaments 
+            UPDATE tournaments
             SET status = $1, updated_at = $2
             WHERE id = $3
             RETURNING *
@@ -469,7 +469,7 @@ impl TournamentService {
 
         // Verify payment with payment provider
         let payment_verified = self.verify_payment_with_provider(reference, tournament.entry_fee).await?;
-        
+
         if !payment_verified {
             return Err(ApiError::bad_request("Payment verification failed"));
         }
@@ -494,11 +494,11 @@ impl TournamentService {
         // 1. Make API call to Paystack/Flutterwave
         // 2. Verify the payment reference and amount
         // 3. Check payment status
-        
+
         // For now, simulate payment verification
         // In production, you would use the actual payment provider APIs
         tracing::info!("Verifying payment: reference={}, amount={}", reference, amount);
-        
+
         // Simulate successful verification
         Ok(true)
     }
@@ -523,7 +523,7 @@ impl TournamentService {
     ) -> Result<(), ApiError> {
         // Check user's ArenaX token balance
         let wallet = self.get_user_wallet(user_id).await?;
-        
+
         if wallet.balance_arenax_tokens < tournament.entry_fee {
             return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
         }
@@ -550,7 +550,7 @@ impl TournamentService {
         sqlx::query!(
             r#"
             INSERT INTO prize_pools (
-                id, tournament_id, total_amount, currency, stellar_account, 
+                id, tournament_id, total_amount, currency, stellar_account,
                 distribution_percentages, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8
@@ -575,7 +575,7 @@ impl TournamentService {
     async fn update_prize_pool(&self, tournament_id: Uuid, entry_fee: i64) -> Result<(), ApiError> {
         sqlx::query!(
             r#"
-            UPDATE prize_pools 
+            UPDATE prize_pools
             SET total_amount = total_amount + $1, updated_at = $2
             WHERE tournament_id = $3
             "#,
@@ -593,11 +593,11 @@ impl TournamentService {
     async fn start_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Generate tournament bracket
         self.generate_tournament_bracket(tournament_id).await?;
-        
+
         // Update all participants to active status
         sqlx::query!(
             r#"
-            UPDATE tournament_participants 
+            UPDATE tournament_participants
             SET status = $1
             WHERE tournament_id = $2 AND status = $3
             "#,
@@ -615,7 +615,7 @@ impl TournamentService {
     async fn complete_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Calculate final rankings
         self.calculate_final_rankings(tournament_id).await?;
-        
+
         // Distribute prizes
         self.distribute_prizes(tournament_id).await?;
 
@@ -627,7 +627,7 @@ impl TournamentService {
         let participants = sqlx::query_as!(
             TournamentParticipant,
             r#"
-            SELECT * FROM tournament_participants 
+            SELECT * FROM tournament_participants
             WHERE tournament_id = $1 AND status = $2
             ORDER BY registered_at
             "#,
@@ -672,7 +672,7 @@ impl TournamentService {
 
         // Calculate number of rounds needed
         let rounds = (participant_count as f64).log2().ceil() as i32;
-        
+
         // Create rounds
         for round_num in 1..=rounds {
             let round = sqlx::query_as!(
@@ -903,7 +903,7 @@ impl TournamentService {
         // 2. Create the account on Stellar network
         // 3. Fund it with XLM
         // 4. Return the public key
-        
+
         // For now, generate a realistic-looking Stellar public key
         let account_id = format!("G{}", uuid::Uuid::new_v4().to_string().replace('-', "").to_uppercase());
         Ok(account_id)
@@ -935,7 +935,7 @@ impl TournamentService {
 
         // Calculate rankings based on tournament type
         let tournament = self.get_tournament_by_id(tournament_id).await?;
-        
+
         match tournament.bracket_type {
             BracketType::SingleElimination | BracketType::DoubleElimination => {
                 // For elimination tournaments, rank by elimination order
@@ -984,7 +984,7 @@ impl TournamentService {
             if index < percentages.len() && participant.final_rank.unwrap_or(0) <= 3 {
                 let percentage = percentages[index];
                 let prize_amount = (prize_pool.total_amount as f64 * percentage / 100.0) as i64;
-                
+
                 // Update participant with prize amount
                 sqlx::query!(
                     "UPDATE tournament_participants SET prize_amount = $1, prize_currency = $2 WHERE id = $3",
@@ -1014,7 +1014,7 @@ impl TournamentService {
 
         // Calculate number of rounds needed
         let rounds = (participant_count as f64).log2().ceil() as i32;
-        
+
         // Winners bracket
         for round_num in 1..=rounds {
             let round = sqlx::query_as!(
@@ -1263,7 +1263,7 @@ impl TournamentService {
         for participant in &participants {
             let wins = sqlx::query!(
                 r#"
-                SELECT COUNT(*) as count FROM tournament_matches 
+                SELECT COUNT(*) as count FROM tournament_matches
                 WHERE tournament_id = $1 AND winner_id = $2 AND status = $3
                 "#,
                 tournament_id,
@@ -1278,8 +1278,8 @@ impl TournamentService {
 
             let losses = sqlx::query!(
                 r#"
-                SELECT COUNT(*) as count FROM tournament_matches 
-                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2) 
+                SELECT COUNT(*) as count FROM tournament_matches
+                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2)
                 AND winner_id != $2 AND status = $3
                 "#,
                 tournament_id,
@@ -1327,7 +1327,7 @@ impl TournamentService {
         for participant in &participants {
             let wins = sqlx::query!(
                 r#"
-                SELECT COUNT(*) as count FROM tournament_matches 
+                SELECT COUNT(*) as count FROM tournament_matches
                 WHERE tournament_id = $1 AND winner_id = $2 AND status = $3
                 "#,
                 tournament_id,
@@ -1342,8 +1342,8 @@ impl TournamentService {
 
             let draws = sqlx::query!(
                 r#"
-                SELECT COUNT(*) as count FROM tournament_matches 
-                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2) 
+                SELECT COUNT(*) as count FROM tournament_matches
+                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2)
                 AND winner_id IS NULL AND status = $3
                 "#,
                 tournament_id,

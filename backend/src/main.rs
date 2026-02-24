@@ -2,19 +2,19 @@ use actix_web::{web, App, HttpServer};
 use std::io;
 use tokio::signal;
 
+mod api_error;
+mod auth;
 mod config;
 mod db;
-mod api_error;
-mod telemetry;
-mod middleware;
-mod auth;
 mod http;
+mod middleware;
 mod service;
+mod telemetry;
 
 use crate::config::Config;
 use crate::db::create_pool;
-use crate::telemetry::init_telemetry;
 use crate::middleware::cors_middleware;
+use crate::telemetry::init_telemetry;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {

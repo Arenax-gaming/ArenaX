@@ -153,7 +153,7 @@ impl SecurityMonitor {
 
         let key = format!("device:login:{}", device_id);
         let value = if success { "1" } else { "0" };
-        
+
         redis::cmd("LPUSH")
             .arg(&key)
             .arg(value)
@@ -281,7 +281,7 @@ impl DeviceService {
     /// Generate a device fingerprint from device information
     pub fn generate_fingerprint(&self, device_info: &DeviceInfo) -> String {
         let mut hasher = Sha256::new();
-        
+
         // Combine device characteristics
         let fingerprint_data = format!(
             "{}{}{}{}{}{}{}{}{}",
@@ -338,7 +338,7 @@ impl DeviceService {
             device.updated_at = Utc::now();
 
             sqlx::query(
-                "UPDATE devices SET last_seen = $1, is_active = $2, login_count = $3, 
+                "UPDATE devices SET last_seen = $1, is_active = $2, login_count = $3,
                  last_login = $4, ip_address = $5, updated_at = $6 WHERE id = $7",
             )
             .bind(device.last_seen)
@@ -797,12 +797,12 @@ impl DeviceService {
 
         // Note: This assumes a device_security_alerts table exists
         // For now, we'll return alerts from memory or create a simplified version
-        let alerts: Vec<(Uuid, Uuid, String, String, String, Option<serde_json::Value>, DateTime<Utc>)> = 
+        let alerts: Vec<(Uuid, Uuid, String, String, String, Option<serde_json::Value>, DateTime<Utc>)> =
             sqlx::query_as(
-                "SELECT device_id, user_id, alert_type, severity, message, details, created_at 
-                 FROM device_security_alerts 
-                 WHERE device_id = $1 
-                 ORDER BY created_at DESC 
+                "SELECT device_id, user_id, alert_type, severity, message, details, created_at
+                 FROM device_security_alerts
+                 WHERE device_id = $1
+                 ORDER BY created_at DESC
                  LIMIT $2",
             )
             .bind(device_id)

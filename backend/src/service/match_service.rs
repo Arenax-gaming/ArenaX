@@ -16,7 +16,7 @@ pub struct MatchService {
 
 impl MatchService {
     pub fn new(db_pool: DbPool) -> Self {
-        Self { 
+        Self {
             db_pool,
             redis_client: None,
         }
@@ -38,7 +38,7 @@ impl MatchService {
         round_id: Option<Uuid>,
     ) -> Result<Match, ApiError> {
         let match_id = Uuid::new_v4();
-        
+
         // Get player Elo ratings
         let player1_elo = self.get_user_elo(player1_id, &game_mode).await?;
         let player2_elo = if let Some(p2_id) = player2_id {
@@ -140,7 +140,7 @@ impl MatchService {
             MatchScore,
             r#"
             INSERT INTO match_scores (
-                id, match_id, player_id, score, proof_url, telemetry_data, 
+                id, match_id, player_id, score, proof_url, telemetry_data,
                 submitted_at, verified
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8
@@ -196,7 +196,7 @@ impl MatchService {
             MatchDispute,
             r#"
             INSERT INTO match_disputes (
-                id, match_id, disputing_player_id, reason, evidence_urls, 
+                id, match_id, disputing_player_id, reason, evidence_urls,
                 status, created_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7
@@ -242,7 +242,7 @@ impl MatchService {
 
         // Get user's current Elo rating
         let current_elo = self.get_user_elo(user_id, &request.game).await?;
-        
+
         // Calculate Elo range for matchmaking
         let (min_elo, max_elo) = self.calculate_elo_range(current_elo);
 
@@ -296,7 +296,7 @@ impl MatchService {
         if let Some(entry) = queue_entry {
             // Calculate queue position
             let position = self.get_queue_position(user_id, &entry.game).await?;
-            
+
             // Estimate wait time
             let estimated_wait = self.estimate_wait_time(&entry.game, &entry.game_mode).await?;
 
@@ -309,7 +309,7 @@ impl MatchService {
         } else {
             // Check if user has an active match
             let active_match = self.get_user_active_match(user_id).await?;
-            
+
             Ok(MatchmakingStatusResponse {
                 in_queue: false,
                 queue_position: None,
@@ -539,7 +539,7 @@ impl MatchService {
 
     async fn both_players_reported_scores(&self, match_id: Uuid) -> Result<bool, ApiError> {
         let match_record = self.get_match_by_id(match_id).await?;
-        
+
         let player1_score = sqlx::query!(
             "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
             match_id,
@@ -567,14 +567,14 @@ impl MatchService {
 
     async fn process_match_completion(&self, match_id: Uuid) -> Result<(), ApiError> {
         let match_record = self.get_match_by_id(match_id).await?;
-        
+
         // Determine winner
         let winner_id = self.determine_winner(&match_record).await?;
-        
+
         // Update match with winner and completion time
         sqlx::query!(
             r#"
-            UPDATE matches 
+            UPDATE matches
             SET winner_id = $1, status = $2, completed_at = $3, updated_at = $4
             WHERE id = $5
             "#,
@@ -968,7 +968,7 @@ impl MatchService {
         let candidates = sqlx::query_as!(
             MatchmakingQueue,
             r#"
-            SELECT * FROM matchmaking_queue 
+            SELECT * FROM matchmaking_queue
             WHERE game = $1 AND game_mode = $2 AND status = $3
             ORDER BY joined_at ASC
             LIMIT 10
@@ -1046,7 +1046,7 @@ impl MatchService {
     async fn get_queue_position(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
         let position = sqlx::query!(
             r#"
-            SELECT COUNT(*) as position FROM matchmaking_queue 
+            SELECT COUNT(*) as position FROM matchmaking_queue
             WHERE game = $1 AND status = $2 AND joined_at < (
                 SELECT joined_at FROM matchmaking_queue WHERE user_id = $3 AND game = $1 AND status = $2
             )
@@ -1086,10 +1086,10 @@ impl MatchService {
         let match_record = sqlx::query_as!(
             Match,
             r#"
-            SELECT m.* FROM matches m 
-            WHERE (m.player1_id = $1 OR m.player2_id = $1) 
+            SELECT m.* FROM matches m
+            WHERE (m.player1_id = $1 OR m.player2_id = $1)
             AND m.status IN ($2, $3)
-            ORDER BY m.created_at DESC 
+            ORDER BY m.created_at DESC
             LIMIT 1
             "#,
             user_id,
@@ -1168,15 +1168,15 @@ impl MatchService {
         game: Option<String>,
     ) -> Result<MatchHistoryResponse, ApiError> {
         let offset = (page - 1) * per_page;
-        
+
         let matches = sqlx::query_as!(
             Match,
             r#"
-            SELECT * FROM matches 
-            WHERE (player1_id = $1 OR player2_id = $1) 
+            SELECT * FROM matches
+            WHERE (player1_id = $1 OR player2_id = $1)
             AND ($2::text IS NULL OR game_mode = $2)
             AND status = $3
-            ORDER BY completed_at DESC 
+            ORDER BY completed_at DESC
             LIMIT $4 OFFSET $5
             "#,
             user_id,
@@ -1192,8 +1192,8 @@ impl MatchService {
         // Get total count
         let total = sqlx::query!(
             r#"
-            SELECT COUNT(*) as count FROM matches 
-            WHERE (player1_id = $1 OR player2_id = $1) 
+            SELECT COUNT(*) as count FROM matches
+            WHERE (player1_id = $1 OR player2_id = $1)
             AND ($2::text IS NULL OR game_mode = $2)
             AND status = $3
             "#,
@@ -1255,10 +1255,10 @@ impl MatchService {
         per_page: i32,
     ) -> Result<LeaderboardResponse, ApiError> {
         let offset = (page - 1) * per_page;
-        
+
         let rankings = sqlx::query!(
             r#"
-            SELECT ue.*, u.username, u.avatar_url 
+            SELECT ue.*, u.username, u.avatar_url
             FROM user_elo ue
             JOIN users u ON ue.user_id = u.id
             WHERE ue.game = $1
@@ -1432,7 +1432,7 @@ impl MatchService {
         let dispute = sqlx::query_as!(
             MatchDispute,
             r#"
-            UPDATE match_disputes 
+            UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, resolution = $3, resolved_at = $4
             WHERE id = $5
             RETURNING *
@@ -1478,7 +1478,7 @@ impl MatchService {
         let dispute = sqlx::query_as!(
             MatchDispute,
             r#"
-            UPDATE match_disputes 
+            UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, admin_notes = $3, resolved_at = $4
             WHERE id = $5
             RETURNING *
@@ -1508,7 +1508,7 @@ impl MatchService {
         let updated_match = sqlx::query_as!(
             Match,
             r#"
-            UPDATE matches 
+            UPDATE matches
             SET status = $1, started_at = $2, updated_at = $3
             WHERE id = $4
             RETURNING *
@@ -1551,7 +1551,7 @@ impl MatchService {
         let updated_match = sqlx::query_as!(
             Match,
             r#"
-            UPDATE matches 
+            UPDATE matches
             SET status = $1, scheduled_time = $2, updated_at = $3
             WHERE id = $4
             RETURNING *
@@ -1591,7 +1591,7 @@ impl MatchService {
         let updated_match = sqlx::query_as!(
             Match,
             r#"
-            UPDATE matches 
+            UPDATE matches
             SET status = $1, updated_at = $2
             WHERE id = $3
             RETURNING *
@@ -1612,7 +1612,7 @@ impl MatchService {
     pub async fn cleanup_expired_queue_entries(&self) -> Result<i64, ApiError> {
         let result = sqlx::query!(
             r#"
-            UPDATE matchmaking_queue 
+            UPDATE matchmaking_queue
             SET status = $1
             WHERE status = $2 AND expires_at < $3
             "#,
@@ -1668,7 +1668,7 @@ impl MatchService {
         let disputes = sqlx::query_as!(
             MatchDispute,
             r#"
-            SELECT * FROM match_disputes 
+            SELECT * FROM match_disputes
             WHERE status = $1
             ORDER BY created_at ASC
             LIMIT $2 OFFSET $3
