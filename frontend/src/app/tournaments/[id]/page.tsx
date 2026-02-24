@@ -41,7 +41,7 @@ export default function TournamentDetailsPage() {
             Tournament Not Found
           </h1>
           <p className="text-muted-foreground mb-6">
-            The tournament you're looking for doesn't exist.
+            The tournament you&apos;re looking for doesn&apos;t exist.
           </p>
           <Button onClick={() => router.push("/tournaments")}>
             Back to Tournaments
