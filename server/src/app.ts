@@ -76,24 +76,15 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(requestIdMiddleware);
+app.use(passport.initialize());
 
-    // Middleware
-    app.use(helmet());
-    app.use(cors());
-    app.use(morgan('dev'));
-    app.use(express.json());
-    app.use(passport.initialize());
+// Routes
+app.use('/api', routes);
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
-    req.log.info('Health check invoked');
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
-
-    // Health check
-    app.get('/health', (_req: Request, res: Response) => {
-        res.json({ status: 'ok', timestamp: new Date().toISOString() });
-    });
 
 app.listen(port, () => {
     logger.info('Server started', { url: `http://localhost:${port}` });

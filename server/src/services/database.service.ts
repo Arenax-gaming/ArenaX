@@ -2,13 +2,14 @@ import { PrismaClient } from '@prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
-    'user' | 'refreshToken'
+    'user' | 'refreshToken' | 'userWallet' | 'blockchainTransaction'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
     $transaction<T>(
         fn: (tx: DatabaseTransactionClient) => Promise<T>
     ): Promise<T>;
+    $disconnect(): Promise<void>;
 }
 
 const prisma = new PrismaClient() as unknown as DatabaseClient;

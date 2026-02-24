@@ -19,7 +19,20 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   projects      Project[]
+  wallet        UserWallet?
   refreshTokens RefreshToken[]
+}
+
+model UserWallet {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  publicKey          String   @unique
+  encryptedSecretKey String
+  encryptionVersion  Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
 }
 
 model RefreshToken {
@@ -62,6 +75,24 @@ model Payment {
   txHash      String?  @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+enum TxStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model BlockchainTransaction {
+  id        String   @id @default(uuid())
+  userId    String?
+  txHash    String   @unique
+  type      String   // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
+  status    TxStatus @default(PENDING)
+  payload   Json?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model BlockchainEvent {
