@@ -43,6 +43,11 @@ async fn main() -> io::Result<()> {
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    .route("/notifications", web::get().to(crate::http::notification_handler::get_notifications))
+                    .route("/notifications", web::post().to(crate::http::notification_handler::create_notification))
+                    .route("/notifications/read-all", web::patch().to(crate::http::notification_handler::mark_all_read))
+                    .route("/notifications/{id}/read", web::patch().to(crate::http::notification_handler::mark_notification_read))
+                    .route("/notifications/{id}", web::delete().to(crate::http::notification_handler::delete_notification))
             )
     })
     .bind((config.server.host.clone(), config.server.port))?

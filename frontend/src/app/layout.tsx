@@ -6,6 +6,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -35,6 +36,11 @@ export default function RootLayout({
               </WalletProvider>
             </AuthProvider>
           </QueryProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <AppLayout>{children}</AppLayout>
+            </NotificationProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
