@@ -35,6 +35,37 @@ pub enum ApiError {
     ValidationError(String),
 }
 
+// Helper methods for convenience
+impl ApiError {
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        ApiError::BadRequest(message.into())
+    }
+
+    pub fn internal_error(message: impl Into<String>) -> Self {
+        ApiError::InternalServerError
+    }
+
+    pub fn database_error(e: impl Into<sqlx::Error>) -> Self {
+        ApiError::DatabaseError(e.into())
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        ApiError::NotFound
+    }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        ApiError::Unauthorized
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        ApiError::Forbidden
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        ApiError::Conflict(message.into())
+    }
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
