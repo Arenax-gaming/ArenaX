@@ -180,10 +180,9 @@ impl GovernanceService {
             .map_err(|e| GovernanceServiceError::SorobanError(e.to_string()))?;
 
         // Store in database
-        let execute_after_dt = dto.execute_after.map(|ts| {
-            chrono::DateTime::from_timestamp(ts, 0)
-                .unwrap_or_else(chrono::Utc::now)
-        });
+        let execute_after_dt = dto
+            .execute_after
+            .map(|ts| chrono::DateTime::from_timestamp(ts, 0).unwrap_or_else(chrono::Utc::now));
 
         sqlx::query(
             r#"
@@ -255,7 +254,12 @@ impl GovernanceService {
         // Submit to chain
         let tx_result = self
             .soroban
-            .invoke(&self.governance_contract_id, "approve", &args, signer_secret)
+            .invoke(
+                &self.governance_contract_id,
+                "approve",
+                &args,
+                signer_secret,
+            )
             .await
             .map_err(|e| GovernanceServiceError::SorobanError(e.to_string()))?;
 
@@ -329,7 +333,12 @@ impl GovernanceService {
         // Submit to chain
         let tx_result = self
             .soroban
-            .invoke(&self.governance_contract_id, "execute", &args, executor_secret)
+            .invoke(
+                &self.governance_contract_id,
+                "execute",
+                &args,
+                executor_secret,
+            )
             .await
             .map_err(|e| GovernanceServiceError::SorobanError(e.to_string()))?;
 

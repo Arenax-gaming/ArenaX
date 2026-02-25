@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { LogOut, User, Wallet } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -44,10 +45,12 @@ export function UserMenu() {
         aria-label="User menu"
       >
         {user.avatar ? (
-          <img
+          <Image
             src={user.avatar}
             alt=""
-            className="h-full w-full rounded-full object-cover"
+            fill
+            className="rounded-full object-cover"
+            unoptimized
           />
         ) : (
           <span>{initial}</span>

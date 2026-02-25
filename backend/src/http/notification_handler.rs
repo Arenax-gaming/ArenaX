@@ -86,11 +86,7 @@ pub async fn create_notification(
 ) -> Result<HttpResponse, ApiError> {
     let user_id = req.user_id().ok_or(ApiError::Unauthorized)?;
 
-    let typ = body
-        .typ
-        .as_deref()
-        .unwrap_or("info")
-        .to_string();
+    let typ = body.typ.as_deref().unwrap_or("info").to_string();
     let message = body.message.as_deref().unwrap_or("").to_string();
 
     let row = sqlx::query_as::<_, NotificationRow>(
