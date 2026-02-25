@@ -11,6 +11,7 @@ members = [
     "governance_multisig",
     "tournament_finalizer",
     "reputation-index",
+    "anti-cheat-oracle",
 ]
 resolver = "2"
 

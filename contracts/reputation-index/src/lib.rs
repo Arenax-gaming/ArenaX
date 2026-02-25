@@ -16,6 +16,7 @@ pub enum DataKey {
     Reputation(Address),
     Admin,
     AuthorizedMatchContract,
+    AuthorizedAntiCheatOracle,
     DecayRate, // points per day (as i128)
 }
 
@@ -141,6 +142,67 @@ impl ReputationIndex {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::DecayRate, &new_rate);
+    }
+
+    /// Set the authorized anti-cheat oracle contract (admin only). That contract may call
+    /// apply_anticheat_penalty to apply bounded fair_play penalties.
+    pub fn set_authorized_anticheat_oracle(env: Env, admin: Address, oracle: Address) {
+        let saved_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != saved_admin {
+            panic!("not admin");
+        }
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorizedAntiCheatOracle, &oracle);
+    }
+
+    /// Apply a bounded anti-cheat penalty to a player's fair_play score.
+    /// Callable only by the authorized anti-cheat oracle contract. Penalty is capped and
+    /// fair_play cannot underflow (floor at 0).
+    pub fn apply_anticheat_penalty(
+        env: Env,
+        oracle: Address,
+        player: Address,
+        match_id: u64,
+        penalty: i128,
+    ) {
+        oracle.require_auth();
+        let authorized: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuthorizedAntiCheatOracle)
+            .expect("anticheat oracle not set");
+        if oracle != authorized {
+            panic!("not authorized anticheat oracle");
+        }
+        // Cap penalty at a maximum (e.g. 100 per call) to keep penalties bounded
+        const MAX_PENALTY_PER_FLAG: i128 = 100;
+        let capped = if penalty > MAX_PENALTY_PER_FLAG {
+            MAX_PENALTY_PER_FLAG
+        } else if penalty < 0 {
+            0
+        } else {
+            penalty
+        };
+        if capped == 0 {
+            return;
+        }
+        let now = env.ledger().timestamp();
+        let mut rep = Self::get_reputation(env.clone(), player.clone());
+        rep = Self::internal_apply_decay(&env, rep, now);
+        rep.fair_play = rep.fair_play.saturating_sub(capped).max(0);
+        rep.last_update_ts = now;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Reputation(player.clone()), &rep);
+        events::ReputationChanged {
+            player,
+            skill_delta: 0,
+            fair_play_delta: -(capped as i128),
+            match_id,
+        }
+        .publish(&env);
     }
 }
 
