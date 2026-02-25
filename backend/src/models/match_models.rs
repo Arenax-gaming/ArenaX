@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -35,7 +35,7 @@ pub struct MatchScore {
     pub match_id: Uuid,
     pub player_id: Uuid,
     pub score: i32,
-    pub proof_url: Option<String>, // URL to screenshot/video proof
+    pub proof_url: Option<String>,      // URL to screenshot/video proof
     pub telemetry_data: Option<String>, // JSON string of game telemetry
     pub submitted_at: DateTime<Utc>,
     pub verified: bool,
@@ -225,7 +225,7 @@ pub struct EloResponse {
     pub win_rate: f64,
     pub win_streak: i32,
     pub loss_streak: i32,
-    pub rank: Option<i32>, // Global rank
+    pub rank: Option<i32>,       // Global rank
     pub percentile: Option<f64>, // Top X% of players
 }
 

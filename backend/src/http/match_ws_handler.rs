@@ -11,9 +11,13 @@ use uuid::Uuid;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsMessage {
     /// Subscribe to match updates
-    Subscribe { match_id: Uuid },
+    Subscribe {
+        match_id: Uuid,
+    },
     /// Unsubscribe from match updates
-    Unsubscribe { match_id: Uuid },
+    Unsubscribe {
+        match_id: Uuid,
+    },
     /// Match state changed
     MatchStateChanged {
         match_id: Uuid,
@@ -51,7 +55,9 @@ pub enum WsMessage {
         finalized_at: String,
     },
     /// Error message
-    Error { message: String },
+    Error {
+        message: String,
+    },
     /// Ping/Pong for keepalive
     Ping,
     Pong,
@@ -152,7 +158,12 @@ impl MatchWebSocket {
     }
 
     /// Broadcast message to this session if subscribed to match
-    pub fn broadcast_if_subscribed(&self, match_id: Uuid, message: &WsMessage, ctx: &mut <Self as Actor>::Context) {
+    pub fn broadcast_if_subscribed(
+        &self,
+        match_id: Uuid,
+        message: &WsMessage,
+        ctx: &mut <Self as Actor>::Context,
+    ) {
         if self.subscriptions.contains(&match_id) {
             debug!(
                 session_id = %self.id,

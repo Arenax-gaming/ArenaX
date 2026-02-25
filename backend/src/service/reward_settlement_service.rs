@@ -117,7 +117,10 @@ impl RewardSettlementService {
     }
 
     /// Get existing settlement by match ID.
-    pub async fn get_settlement(&self, match_id: &str) -> Result<Option<RewardSettlement>, ApiError> {
+    pub async fn get_settlement(
+        &self,
+        match_id: &str,
+    ) -> Result<Option<RewardSettlement>, ApiError> {
         let settlements = SETTLEMENTS
             .read()
             .map_err(|_| ApiError::internal_error("Failed to read settlements"))?;
@@ -170,8 +173,11 @@ mod tests {
     #[tokio::test]
     async fn test_idempotent_settlement() {
         let service = create_test_service();
-        let match_id = format!("test_match_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
-        
+        let match_id = format!(
+            "test_match_{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
+
         // First settlement
         let result1 = service
             .settle_match_reward(
@@ -201,8 +207,11 @@ mod tests {
     #[tokio::test]
     async fn test_settlement_persisted() {
         let service = create_test_service();
-        let match_id = format!("persist_test_{}", Utc::now().timestamp_nanos_opt().unwrap_or(0));
-        
+        let match_id = format!(
+            "persist_test_{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
+
         service
             .settle_match_reward(
                 match_id.clone(),

@@ -1,6 +1,5 @@
 use crate::models::{
-    Wallet, Transaction, TransactionType, TransactionStatus,
-    WalletResponse, TransactionResponse,
+    Transaction, TransactionResponse, TransactionStatus, TransactionType, Wallet, WalletResponse,
 };
 use anyhow::Result;
 use chrono::Utc;
@@ -272,11 +271,7 @@ impl WalletService {
     }
 
     /// Release escrow back to balance
-    pub async fn release_from_escrow(
-        &self,
-        user_id: Uuid,
-        amount: i64,
-    ) -> Result<(), WalletError> {
+    pub async fn release_from_escrow(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
                 "Amount must be positive".to_string(),
@@ -512,8 +507,11 @@ impl WalletService {
                     let verified = self.verify_paystack_payment(ref_id, amount).await?;
                     if verified {
                         self.add_fiat_balance(user_id, amount).await?;
-                        self.update_transaction_status(transaction.id, TransactionStatus::Completed)
-                            .await?;
+                        self.update_transaction_status(
+                            transaction.id,
+                            TransactionStatus::Completed,
+                        )
+                        .await?;
                         transaction.status = TransactionStatus::Completed;
                     } else {
                         self.update_transaction_status(transaction.id, TransactionStatus::Failed)
@@ -527,8 +525,11 @@ impl WalletService {
                     let verified = self.verify_flutterwave_payment(ref_id, amount).await?;
                     if verified {
                         self.add_fiat_balance(user_id, amount).await?;
-                        self.update_transaction_status(transaction.id, TransactionStatus::Completed)
-                            .await?;
+                        self.update_transaction_status(
+                            transaction.id,
+                            TransactionStatus::Completed,
+                        )
+                        .await?;
                         transaction.status = TransactionStatus::Completed;
                     } else {
                         self.update_transaction_status(transaction.id, TransactionStatus::Failed)

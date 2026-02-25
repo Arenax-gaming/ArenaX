@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
@@ -22,7 +23,7 @@ export default function ProfilePage() {
         <div className="relative group">
           <div className="h-32 w-32 rounded-full border-4 border-primary/10 overflow-hidden bg-muted flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300">
             {user.avatar ? (
-              <img src={user.avatar} alt={user.username} className="h-full w-full object-cover" />
+              <Image src={user.avatar} alt={user.username} fill className="object-cover" unoptimized />
             ) : (
               <span className="text-4xl font-bold text-muted-foreground">
                 {user.username.charAt(0)}

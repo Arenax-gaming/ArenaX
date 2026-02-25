@@ -223,7 +223,7 @@ pub struct PrizePool {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JoinTournamentRequest {
-    pub payment_method: String, // "fiat" or "arenax_token"
+    pub payment_method: String,            // "fiat" or "arenax_token"
     pub payment_reference: Option<String>, // For fiat payments
 }
 

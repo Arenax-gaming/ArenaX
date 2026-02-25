@@ -22,7 +22,7 @@ export default function TermsPage() {
           <section className="mb-8">
             <h2 className="font-heading text-2xl font-bold mb-4">1. Acceptance of Terms</h2>
             <p className="text-muted-foreground mb-4">
-              By accessing and using ArenaX ("the Platform"), you accept and agree to be bound 
+              By accessing and using ArenaX (&quot;the Platform&quot;), you accept and agree to be bound 
               by the terms and provision of this agreement. Additionally, when using ArenaX services, 
               you shall be subject to any posted guidelines or rules applicable to such services.
             </p>
@@ -148,7 +148,7 @@ export default function TermsPage() {
             <p className="text-muted-foreground mb-4">
               ArenaX reserves the right to modify these terms at any time. We will provide 
               notice of material changes by posting the updated terms on the Platform and 
-              updating the "Last Updated" date. Your continued use of the Platform after 
+              updating the &quot;Last Updated&quot; date. Your continued use of the Platform after 
               such modifications constitutes your acceptance of the new terms.
             </p>
           </section>

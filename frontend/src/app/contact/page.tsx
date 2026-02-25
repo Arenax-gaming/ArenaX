@@ -19,7 +19,7 @@ export default function ContactPage() {
           Contact <span className="text-primary">&</span> Support
         </h1>
         <p className="text-xl text-muted-foreground max-w-[42rem] mx-auto">
-          Have questions? We're here to help. Reach out to our team or check our FAQs.
+          Have questions? We&apos;re here to help. Reach out to our team or check our FAQs.
         </p>
       </section>
 

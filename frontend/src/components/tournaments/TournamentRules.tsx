@@ -135,7 +135,7 @@ export function TournamentRules({ tournament }: TournamentRulesProps) {
                 of conduct
               </li>
               <li>
-                • In case of disputes, tournament organizers' decisions are
+                • In case of disputes, tournament organizers&apos; decisions are
                 final
               </li>
             </ul>

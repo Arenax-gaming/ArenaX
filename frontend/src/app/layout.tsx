@@ -31,16 +31,13 @@ export default function RootLayout({
             <AuthProvider>
               <WalletProvider>
                 <TxStatusProvider>
-                  <AppLayout>{children}</AppLayout>
+                  <NotificationProvider>
+                    <AppLayout>{children}</AppLayout>
+                  </NotificationProvider>
                 </TxStatusProvider>
               </WalletProvider>
             </AuthProvider>
           </QueryProvider>
-          <AuthProvider>
-            <NotificationProvider>
-              <AppLayout>{children}</AppLayout>
-            </NotificationProvider>
-          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
