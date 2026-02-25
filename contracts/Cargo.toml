@@ -6,6 +6,7 @@ members = [
     "reputation_aggregation",
     "match_contract",
     "match_escrow_vault",
+    "match-lifecycle",
     "registry",
     "slashing_contract",
     "governance_multisig",
