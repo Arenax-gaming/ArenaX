@@ -10,6 +10,7 @@ members = [
     "slashing_contract",
     "governance_multisig",
     "tournament_finalizer",
+    "reputation-index",
 ]
 resolver = "2"
 
