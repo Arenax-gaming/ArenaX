@@ -33,6 +33,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arenax-anti-cheat-oracle"
+version = "0.0.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "arenax-registry"
 version = "0.0.0"
 dependencies = [
@@ -176,6 +183,13 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "ax-token"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 
 [[package]]
 name = "base16ct"
@@ -865,6 +879,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "match-lifecycle"
 version = "0.1.0"
 dependencies = [
@@ -872,6 +887,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> 99cfb318a51dd06fdbbff4fd1fd598156b02db34
 name = "match_escrow_vault"
 version = "0.1.0"
 dependencies = [
