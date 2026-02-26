@@ -1,0 +1,17 @@
+[package]
+name = "dispute-resolution"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dispute Resolution Module: handles dispute open/close, evidence references, adjudication and timeouts"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk.workspace = true
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
