@@ -872,6 +872,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "match-lifecycle"
 version = "0.1.0"
 dependencies = [
@@ -879,6 +880,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> 99cfb318a51dd06fdbbff4fd1fd598156b02db34
 name = "match_escrow_vault"
 version = "0.1.0"
 dependencies = [
