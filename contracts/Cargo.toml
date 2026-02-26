@@ -16,6 +16,7 @@ members = [
     "auth-gateway",
     "ax-token",
     "anti-cheat-oracle",
+    "staking-manager",
 ]
 resolver = "2"
 
