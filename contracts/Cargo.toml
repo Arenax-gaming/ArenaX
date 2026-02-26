@@ -12,6 +12,7 @@ members = [
     "governance_multisig",
     "tournament_finalizer",
     "reputation-index",
+    "auth-gateway",
 ]
 resolver = "2"
 
