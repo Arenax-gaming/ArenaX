@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "example",
+    "dispute-resolution",
     "protocol-params",
     "user_identity_contract",
     "reputation_aggregation",
@@ -12,6 +13,7 @@ members = [
     "governance_multisig",
     "tournament_finalizer",
     "reputation-index",
+    "auth-gateway",
     "ax-token",
     "anti-cheat-oracle",
 ]
