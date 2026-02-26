@@ -13,6 +13,7 @@ members = [
     "governance_multisig",
     "tournament_finalizer",
     "reputation-index",
+    "auth-gateway",
     "ax-token",
     "anti-cheat-oracle",
 ]
