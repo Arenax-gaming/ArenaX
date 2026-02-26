@@ -33,6 +33,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arenax-anti-cheat-oracle"
+version = "0.0.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "arenax-registry"
 version = "0.0.0"
 dependencies = [

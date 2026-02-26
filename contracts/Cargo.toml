@@ -13,6 +13,7 @@ members = [
     "tournament_finalizer",
     "reputation-index",
     "ax-token",
+    "anti-cheat-oracle",
 ]
 resolver = "2"
 
