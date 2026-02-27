@@ -8,18 +8,27 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  username      String    @unique
+  id            String  @id @default(uuid())
+  email         String  @unique
+  username      String  @unique
   passwordHash  String
-  role          String    @default("USER")
+  role          String  @default("USER")
   bio           String?
   socials       Json?
-  walletAddress String?   @unique
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  projects      Project[]
-  wallet        UserWallet?
+  walletAddress String? @unique
+
+  elo Int @default(1200)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+
+  wallet      UserWallet?
+  matchesAsP1 Match[]      @relation("Player1")
+  matchesAsP2 Match[]      @relation("Player2")
+  eloHistory  EloHistory[]
+
   refreshTokens RefreshToken[]
 }
 
@@ -36,30 +45,30 @@ model UserWallet {
 }
 
 model RefreshToken {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   familyId          String
-  tokenHash         String   @unique
+  tokenHash         String    @unique
   expiresAt         DateTime
   revokedAt         DateTime?
   parentTokenId     String?
   replacedByTokenId String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([userId])
   @@index([familyId])
 }
 
 model Project {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
   description String?
   ownerId     String
-  owner       User     @relation(fields: [ownerId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  owner       User      @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   payments    Payment[]
 }
 
@@ -87,7 +96,7 @@ model BlockchainTransaction {
   id        String   @id @default(uuid())
   userId    String?
   txHash    String   @unique
-  type      String   // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
+  type      String // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
   status    TxStatus @default(PENDING)
   payload   Json?
   error     String?
@@ -96,11 +105,56 @@ model BlockchainTransaction {
 }
 
 model BlockchainEvent {
-  id          String   @id @default(uuid())
-  eventType   String   // e.g., PAY_DONE
-  contractId  String
-  txHash      String
-  ledger      Int
-  data        Json
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  eventType  String // e.g., PAY_DONE
+  contractId String
+  txHash     String
+  ledger     Int
+  data       Json
+  createdAt  DateTime @default(now())
+}
+
+model Match {
+  id String @id @default(uuid())
+
+  player1Id String
+  player2Id String
+
+  player1 User @relation("Player1", fields: [player1Id], references: [id])
+  player2 User @relation("Player2", fields: [player2Id], references: [id])
+
+  state MatchState @default(PENDING)
+
+  winnerId String?
+
+  player1Report Json?
+  player2Report Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  eloHistory EloHistory[]
+}
+
+model EloHistory {
+  id String @id @default(uuid())
+
+  matchId String
+  userId  String
+
+  match Match @relation(fields: [matchId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  oldRating Int
+  newRating Int
+  delta     Int
+
+  createdAt DateTime @default(now())
+}
+
+enum MatchState {
+  PENDING
+  ACTIVE
+  SETTLED
+  FORFEIT
 }

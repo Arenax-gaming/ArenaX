@@ -10,6 +10,13 @@ import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { logger } from './services/logger.service';
 import { initializeTelemetry } from './services/telemetry.service';
 
+import Redis from "ioredis";
+import { MatchMakingWorker } from './workers/matchmaking.worker';
+import {ReaperWorker} from "./workers/reaper.worker";
+
+const redis = new Redis();
+
+
 dotenv.config();
 initializeTelemetry();
 
@@ -89,5 +96,8 @@ app.get('/health', (req: Request, res: Response) => {
 app.listen(port, () => {
     logger.info('Server started', { url: `http://localhost:${port}` });
 });
+
+new MatchMakingWorker(redis).start();
+new ReaperWorker().start();
 
 export default app;
