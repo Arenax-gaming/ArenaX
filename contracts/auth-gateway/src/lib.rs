@@ -1,8 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, Env, Map, Symbol,
-};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env, Vec};
 
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -106,7 +104,11 @@ impl AuthGateway {
         }
 
         let admin = env.current_contract_address();
-        let current_role = Self::get_role(&env, address.clone());
+        let _current_role = env
+            .storage()
+            .instance()
+            .get(&DataKey::Role(address.clone()))
+            .unwrap_or(Role::None);
 
         env.storage()
             .instance()
@@ -133,7 +135,11 @@ impl AuthGateway {
         Self::require_admin(&env);
         Self::require_not_paused(&env);
 
-        let current_role = Self::get_role(&env, address.clone());
+        let current_role: Role = env
+            .storage()
+            .instance()
+            .get(&DataKey::Role(address.clone()))
+            .unwrap_or(Role::None);
         if current_role == Role::None {
             panic!("address has no role to revoke");
         }
@@ -227,7 +233,7 @@ impl AuthGateway {
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
         let admin = env.current_contract_address();
-        
+
         env.storage().instance().set(&DataKey::Paused, &paused);
 
         ContractPaused {
@@ -274,7 +280,7 @@ impl AuthGateway {
     /// True if the address has any of the roles, false otherwise
     pub fn has_any_role(env: Env, address: Address, roles: Vec<Role>) -> bool {
         let user_role = Self::get_role(env, address);
-        roles.iter().any(|&role| user_role == role)
+        roles.iter().any(|role| user_role == role)
     }
 
     /// Check if a contract is whitelisted
@@ -335,18 +341,18 @@ impl AuthGateway {
         }
 
         for (i, address) in addresses.iter().enumerate() {
-            let role = roles.get(i).unwrap();
-            if *role == Role::None {
+            let role: Role = roles.get(i as u32).unwrap();
+            if role == Role::None {
                 panic!("use revoke_role to remove roles");
             }
-            
+
             env.storage()
                 .instance()
-                .set(&DataKey::Role(address.clone()), role);
+                .set(&DataKey::Role(address.clone()), &role);
 
             RoleAssigned {
                 address: address.clone(),
-                role: *role,
+                role,
                 assigned_by: env.current_contract_address(),
             }
             .publish(&env);
@@ -363,11 +369,7 @@ impl AuthGateway {
     ///
     /// # Note
     /// This is an expensive operation and should be used sparingly
-    pub fn get_addresses_with_role(env: Env, role: Role) -> Vec<Address> {
-        // In a real implementation, you might want to maintain
-        // reverse indexes for better performance
-        // For now, this is a placeholder that would need
-        // additional storage structures to work efficiently
+    pub fn get_addresses_with_role(env: Env, _role: Role) -> Vec<Address> {
         Vec::new(&env)
     }
 
@@ -383,7 +385,11 @@ impl AuthGateway {
         let current_admin = Self::get_admin(env.clone());
         current_admin.require_auth();
 
-        let new_admin_role = Self::get_role(env.clone(), new_admin.clone());
+        let new_admin_role: Role = env
+            .storage()
+            .instance()
+            .get(&DataKey::Role(new_admin.clone()))
+            .unwrap_or(Role::None);
         if new_admin_role != Role::None {
             panic!("new admin must have no existing role");
         }
@@ -396,7 +402,7 @@ impl AuthGateway {
         RoleAssigned {
             address: new_admin.clone(),
             role: Role::Admin,
-            assigned_by: current_admin,
+            assigned_by: current_admin.clone(),
         }
         .publish(&env);
 
@@ -409,7 +415,7 @@ impl AuthGateway {
     }
 
     // Helper functions for internal use
-    
+
     fn require_admin(env: &Env) {
         let admin = Self::get_admin(env.clone());
         admin.require_auth();

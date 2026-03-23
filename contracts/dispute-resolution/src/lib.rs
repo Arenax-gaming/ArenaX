@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String, Symbol,
+    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String,
+    Symbol,
 };
 
 #[contractevent(topics = ["ArenaXDispute", "OPENED"])]

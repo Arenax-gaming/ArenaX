@@ -17,7 +17,7 @@ fn create_test_env() -> (Env, Address, Address, Address) {
 
 fn initialize_contract(env: &Env, admin: &Address) -> Address {
     let contract_id = env.register(SlashingContract, ());
-    let client = SlashingContractClient::new(&env, &contract_id);
+    let client = SlashingContractClient::new(env, &contract_id);
 
     env.mock_all_auths();
     client.initialize(admin);
@@ -28,13 +28,13 @@ fn initialize_contract(env: &Env, admin: &Address) -> Address {
 fn generate_case_id(env: &Env, seed: u32) -> BytesN<32> {
     let mut bytes = [0u8; 32];
     bytes[0..4].copy_from_slice(&seed.to_be_bytes());
-    BytesN::from_array(&env, &bytes)
+    BytesN::from_array(env, &bytes)
 }
 
 fn generate_evidence_hash(env: &Env, seed: u32) -> BytesN<32> {
     let mut bytes = [0u8; 32];
     bytes[28..32].copy_from_slice(&seed.to_be_bytes());
-    BytesN::from_array(&env, &bytes)
+    BytesN::from_array(env, &bytes)
 }
 
 // ============================================================================

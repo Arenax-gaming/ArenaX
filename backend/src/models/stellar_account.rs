@@ -68,7 +68,7 @@ impl From<StellarAccount> for StellarAccountResponse {
     fn from(account: StellarAccount) -> Self {
         Self {
             id: account.id,
-            user_id: account.user_id,
+            user_id: account.user_id.unwrap_or_default(),
             public_key: account.public_key,
             account_type: account.account_type,
             is_active: account.is_active,

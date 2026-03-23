@@ -386,7 +386,7 @@ impl SlashingContract {
 
         let _penalty = Penalty {
             penalty_type,
-            amount: amount.clone(),
+            amount,
             asset: asset.clone(),
             duration,
         };
@@ -568,7 +568,7 @@ impl SlashingContract {
             // Check if caller has Admin (2) or System (3) role
             let role: u32 = env.invoke_contract(
                 &identity_contract,
-                &Symbol::new(&env, "get_role"),
+                &Symbol::new(env, "get_role"),
                 (caller.clone(),).into_val(env),
             );
 
@@ -618,7 +618,7 @@ impl SlashingContract {
         // slash_stake(subject: Address, amount: i128, asset: Address)
         let _result: () = env.invoke_contract(
             &escrow_contract,
-            &Symbol::new(&env, "slash_stake"),
+            &Symbol::new(env, "slash_stake"),
             (subject.clone(), amount, asset.clone()).into_val(env),
         );
 
@@ -655,7 +655,7 @@ impl SlashingContract {
         // confiscate_reward(subject: Address, amount: i128, asset: Address)
         let _result: () = env.invoke_contract(
             &escrow_contract,
-            &Symbol::new(&env, "confiscate_reward"),
+            &Symbol::new(env, "confiscate_reward"),
             (subject.clone(), amount, asset.clone()).into_val(env),
         );
 

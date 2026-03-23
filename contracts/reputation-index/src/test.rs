@@ -11,7 +11,7 @@ fn test_reputation_index() {
     let admin = Address::generate(&env);
     let match_contract = Address::generate(&env);
     let player1 = Address::generate(&env);
-    
+
     let contract_id = env.register(ReputationIndex, ());
     let client = ReputationIndexClient::new(&env, &contract_id);
 

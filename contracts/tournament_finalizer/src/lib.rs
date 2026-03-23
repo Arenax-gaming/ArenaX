@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec,
+};
 
 // Data Structures
 
@@ -38,12 +40,25 @@ pub struct TournamentSnapshot {
 }
 
 mod match_contract {
-    soroban_sdk::contractimport!(
-        file = "../target/wasm32-unknown-unknown/release/match_contract.wasm"
-    );
+    use soroban_sdk::{contracttype, Address};
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct MatchData {
+        pub player_a: Address,
+        pub player_b: Address,
+        pub state: u32,
+        pub winner: Option<Address>,
+        pub started_at: u64,
+        pub ended_at: Option<u64>,
+    }
 }
 
-use match_contract::MatchData;
+#[contractevent]
+pub struct TournamentFinalized {
+    pub tournament_id: BytesN<32>,
+    pub finalized_at: u64,
+}
 
 #[contract]
 pub struct TournamentFinalizer;
@@ -90,11 +105,13 @@ impl TournamentFinalizer {
             .get(&DataKey::MatchContract)
             .expect("match contract not set");
 
-        // Validate all matches are completed
-        let match_client = match_contract::Client::new(&env, &match_contract_addr);
+        // Validate all matches are completed via cross-contract call
         for match_id in match_ids.iter() {
-            let match_data: MatchData = match_client.get_match(&match_id);
-            // MatchState is an enum in match_contract, but we can check the u32 value
+            let match_data: match_contract::MatchData = env.invoke_contract(
+                &match_contract_addr,
+                &soroban_sdk::Symbol::new(&env, "get_match"),
+                (match_id.clone(),).into_val(&env),
+            );
             // MatchState::Completed is 2
             if match_data.state != 2 {
                 panic!("all matches must be completed");
@@ -113,11 +130,11 @@ impl TournamentFinalizer {
             .persistent()
             .set(&DataKey::Tournament(tournament_id.clone()), &snapshot);
 
-        // Emit finalization event
-        env.events().publish(
-            (symbol_short!("finalized"), tournament_id),
-            env.ledger().timestamp(),
-        );
+        TournamentFinalized {
+            tournament_id,
+            finalized_at: snapshot.finalized_at,
+        }
+        .publish(&env);
     }
 
     /// Retrieve a tournament snapshot

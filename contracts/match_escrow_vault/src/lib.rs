@@ -203,9 +203,7 @@ impl MatchEscrowVault {
     pub fn set_treasury(env: Env, treasury: Address) {
         Self::require_admin(&env);
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Treasury, &treasury);
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
 
         TreasurySet { treasury }.publish(&env);
     }
@@ -314,15 +312,6 @@ impl MatchEscrowVault {
             panic!("player not in match");
         }
 
-        if is_player_a && escrow.player_a_deposited {
-            Self::release_reentrancy_guard(&env, &match_id);
-            panic!("player A already deposited");
-        }
-        if is_player_b && escrow.player_b_deposited {
-            Self::release_reentrancy_guard(&env, &match_id);
-            panic!("player B already deposited");
-        }
-
         let valid_states = [
             EscrowState::AwaitingDeposits as u32,
             EscrowState::PlayerADeposited as u32,
@@ -331,6 +320,15 @@ impl MatchEscrowVault {
         if !valid_states.contains(&escrow.state) {
             Self::release_reentrancy_guard(&env, &match_id);
             panic!("invalid escrow state for deposit");
+        }
+
+        if is_player_a && escrow.player_a_deposited {
+            Self::release_reentrancy_guard(&env, &match_id);
+            panic!("player A already deposited");
+        }
+        if is_player_b && escrow.player_b_deposited {
+            Self::release_reentrancy_guard(&env, &match_id);
+            panic!("player B already deposited");
         }
 
         let contract_address = env.current_contract_address();
@@ -732,9 +730,7 @@ impl MatchEscrowVault {
 
     /// Check if escrow exists for a match
     pub fn escrow_exists(env: Env, match_id: BytesN<32>) -> bool {
-        env.storage()
-            .persistent()
-            .has(&DataKey::Escrow(match_id))
+        env.storage().persistent().has(&DataKey::Escrow(match_id))
     }
 
     /// Get escrow state for a match

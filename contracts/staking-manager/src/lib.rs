@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, token, Address, BytesN, Env, Map, Symbol,
+    contract, contractevent, contractimpl, contracttype, token, Address, BytesN, Env,
 };
 
 #[contracttype]
@@ -236,9 +236,10 @@ impl StakingManager {
             completed_at: None,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentInfo(tournament_id.clone()), &tournament_info);
+        env.storage().persistent().set(
+            &DataKey::TournamentInfo(tournament_id.clone()),
+            &tournament_info,
+        );
 
         TournamentCreated {
             tournament_id,
@@ -267,19 +268,21 @@ impl StakingManager {
             .get(&DataKey::TournamentInfo(tournament_id.clone()))
             .expect("tournament not found");
 
-        let old_state = tournament_info.state;
+        let _old_state = tournament_info.state;
         tournament_info.state = state;
 
-        if state == TournamentState::Completed as u32 || state == TournamentState::Cancelled as u32 {
+        if state == TournamentState::Completed as u32 || state == TournamentState::Cancelled as u32
+        {
             tournament_info.completed_at = Some(env.ledger().timestamp());
-            
+
             // Unlock all stakes for this tournament
             Self::unlock_tournament_stakes(&env, &tournament_id);
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentInfo(tournament_id.clone()), &tournament_info);
+        env.storage().persistent().set(
+            &DataKey::TournamentInfo(tournament_id.clone()),
+            &tournament_info,
+        );
 
         TournamentUpdated {
             tournament_id,
@@ -328,7 +331,7 @@ impl StakingManager {
         }
 
         // Transfer AX tokens to contract
-        let ax_token = Self::get_ax_token(&env);
+        let ax_token = Self::get_ax_token(env.clone());
         let contract_address = env.current_contract_address();
         let token_client = token::Client::new(&env, &ax_token);
         token_client.transfer(&user, &contract_address, &amount);
@@ -343,17 +346,16 @@ impl StakingManager {
             can_withdraw: false,
         };
 
-        env.storage()
-            .persistent()
-            .set(&stake_key, &stake_info);
+        env.storage().persistent().set(&stake_key, &stake_info);
 
         // Update tournament info
         let mut updated_tournament_info = tournament_info;
         updated_tournament_info.total_staked += amount;
         updated_tournament_info.participant_count += 1;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentInfo(tournament_id.clone()), &updated_tournament_info);
+        env.storage().persistent().set(
+            &DataKey::TournamentInfo(tournament_id.clone()),
+            &updated_tournament_info,
+        );
 
         // Update user stake info
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
@@ -381,7 +383,7 @@ impl StakingManager {
         user.require_auth();
 
         let stake_key = DataKey::Stake(tournament_id.clone(), user.clone());
-        let mut stake_info: StakeInfo = env
+        let stake_info: StakeInfo = env
             .storage()
             .persistent()
             .get(&stake_key)
@@ -392,7 +394,7 @@ impl StakingManager {
         }
 
         // Transfer tokens back to user
-        let ax_token = Self::get_ax_token(&env);
+        let ax_token = Self::get_ax_token(env.clone());
         let contract_address = env.current_contract_address();
         let token_client = token::Client::new(&env, &ax_token);
         token_client.transfer(&contract_address, &user, &stake_info.amount);
@@ -424,7 +426,13 @@ impl StakingManager {
     /// * If caller is not authorized (dispute contract or admin)
     /// * If user has no stake for this tournament
     /// * If amount exceeds staked amount
-    pub fn slash(env: Env, user: Address, tournament_id: BytesN<32>, amount: i128, slashed_by: Address) {
+    pub fn slash(
+        env: Env,
+        user: Address,
+        tournament_id: BytesN<32>,
+        amount: i128,
+        slashed_by: Address,
+    ) {
         Self::require_not_paused(&env);
         Self::require_dispute_contract_or_admin(&env, &slashed_by);
 
@@ -443,15 +451,17 @@ impl StakingManager {
             panic!("slash amount exceeds staked amount");
         }
 
-        // Transfer slashed amount to treasury (or burn)
-        let ax_token = Self::get_ax_token(&env);
+        // Transfer slashed amount to admin (treasury)
+        let ax_token = Self::get_ax_token(env.clone());
         let contract_address = env.current_contract_address();
         let token_client = token::Client::new(&env, &ax_token);
-        
-        // For now, we'll burn the slashed tokens by sending to a dead address
-        // In production, this might go to a treasury address
-        let dead_address = Address::from_contract_id(&BytesN::from_array(&env, &[0u8; 32]));
-        token_client.transfer(&contract_address, &dead_address, &amount);
+
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        token_client.transfer(&contract_address, &treasury, &amount);
 
         // Update stake info
         stake_info.amount -= amount;
@@ -459,9 +469,7 @@ impl StakingManager {
             // Remove stake record if fully slashed
             env.storage().persistent().remove(&stake_key);
         } else {
-            env.storage()
-                .persistent()
-                .set(&stake_key, &stake_info);
+            env.storage().persistent().set(&stake_key, &stake_info);
         }
 
         // Update tournament info
@@ -474,9 +482,10 @@ impl StakingManager {
         if stake_info.amount == 0 {
             tournament_info.participant_count -= 1;
         }
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentInfo(tournament_id.clone()), &tournament_info);
+        env.storage().persistent().set(
+            &DataKey::TournamentInfo(tournament_id.clone()),
+            &tournament_info,
+        );
 
         // Update user stake info
         Self::update_user_stake_info(&env, &user, 0, amount, 0, 0);
@@ -529,7 +538,7 @@ impl StakingManager {
     pub fn get_user_stake_info(env: Env, user: Address) -> UserStakeInfo {
         env.storage()
             .instance()
-            .get(&DataKey::UserStakeInfo(user))
+            .get(&DataKey::UserStakeInfo(user.clone()))
             .unwrap_or(UserStakeInfo {
                 user,
                 total_staked: 0,
@@ -585,7 +594,7 @@ impl StakingManager {
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
         let admin = env.current_contract_address();
-        
+
         env.storage().instance().set(&DataKey::Paused, &paused);
 
         ContractPaused {
@@ -636,10 +645,8 @@ impl StakingManager {
 
     // Helper functions for internal use
 
-    fn unlock_tournament_stakes(env: &Env, tournament_id: &BytesN<32>) {
-        // This would need to iterate through all stakes for the tournament
-        // For now, this is a placeholder - in a real implementation,
-        // you'd need a way to efficiently find all stakes for a tournament
+    fn unlock_tournament_stakes(_env: &Env, _tournament_id: &BytesN<32>) {
+        // Placeholder - in a real implementation you'd iterate all stakes
     }
 
     fn update_user_stake_info(
@@ -687,23 +694,12 @@ impl StakingManager {
 
     fn require_admin_or_tournament_contract(env: &Env) {
         let admin = Self::get_admin(env.clone());
-        
-        if let Some(tournament_contract) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::TournamentContract)
-        {
-            // Check if caller is admin or tournament contract
-            // This is simplified - in practice, you'd check the actual caller
-            admin.require_auth();
-        } else {
-            admin.require_auth();
-        }
+        admin.require_auth();
     }
 
     fn require_dispute_contract_or_admin(env: &Env, caller: &Address) {
         let admin = Self::get_admin(env.clone());
-        
+
         if caller == &admin {
             return;
         }

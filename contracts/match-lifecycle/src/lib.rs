@@ -162,9 +162,7 @@ impl MatchLifecycleContract {
             .expect("match not found");
 
         let state = match_data.state;
-        if state != MatchState::Created as u32
-            && state != MatchState::InProgress as u32
-        {
+        if state != MatchState::Created as u32 && state != MatchState::InProgress as u32 {
             panic!("invalid state for result submission");
         }
 

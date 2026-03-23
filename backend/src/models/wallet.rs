@@ -56,16 +56,16 @@ pub struct PaymentMethod {
 }
 
 // Enums
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum TransactionType {
-    Deposit = 0,
-    Withdrawal = 1,
-    Payment = 2,
-    Refund = 3,
-    Prize = 4,
-    EntryFee = 5,
-    Fee = 6,
+    Deposit,
+    Withdrawal,
+    Payment,
+    Refund,
+    Prize,
+    EntryFee,
+    Fee,
 }
 
 impl std::fmt::Display for TransactionType {
@@ -82,15 +82,15 @@ impl std::fmt::Display for TransactionType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum TransactionStatus {
-    Pending = 0,
-    Processing = 1,
-    Completed = 2,
-    Failed = 3,
-    Cancelled = 4,
-    Refunded = 5,
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    Cancelled,
+    Refunded,
 }
 
 impl std::fmt::Display for TransactionStatus {

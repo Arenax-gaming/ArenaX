@@ -1,3 +1,4 @@
+#![allow(clippy::duplicated_attributes)]
 #![cfg(test)]
 
 use super::*;

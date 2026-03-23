@@ -73,7 +73,9 @@ impl AntiCheatOracle {
             .get(&DataKey::Admin)
             .ok_or(AntiCheatError::NotInitialized)?;
         admin.require_auth();
-        env.storage().instance().set(&DataKey::ReputationContract, &reputation);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReputationContract, &reputation);
         Ok(())
     }
 
@@ -110,9 +112,10 @@ impl AntiCheatOracle {
             timestamp,
             oracle: oracle.clone(),
         };
-        env.storage()
-            .instance()
-            .set(&DataKey::Confirmation(player.clone(), match_id), &confirmation);
+        env.storage().instance().set(
+            &DataKey::Confirmation(player.clone(), match_id),
+            &confirmation,
+        );
 
         if let Some(reputation_addr) = env
             .storage()
@@ -151,13 +154,7 @@ impl AntiCheatOracle {
         }
 
         events::emit_anticheat_flag(
-            &env,
-            &player,
-            match_id,
-            severity,
-            penalty,
-            &oracle,
-            timestamp,
+            &env, &player, match_id, severity, penalty, &oracle, timestamp,
         );
         Ok(())
     }

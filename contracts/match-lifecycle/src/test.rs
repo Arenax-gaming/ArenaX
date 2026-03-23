@@ -3,7 +3,14 @@ use super::*;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{BytesN, Env, Vec};
 
-fn setup(env: &Env) -> (MatchLifecycleContractClient<'_>, Address, Vec<Address>, BytesN<32>) {
+fn setup(
+    env: &Env,
+) -> (
+    MatchLifecycleContractClient<'_>,
+    Address,
+    Vec<Address>,
+    BytesN<32>,
+) {
     env.mock_all_auths();
     env.ledger().set_timestamp(12345);
 

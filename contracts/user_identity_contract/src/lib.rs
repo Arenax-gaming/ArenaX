@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,6 +16,12 @@ pub enum Role {
     Referee = 1,
     Admin = 2,
     System = 3,
+}
+
+#[contractevent]
+pub struct RoleSet {
+    pub user: Address,
+    pub role: u32,
 }
 
 #[contract]
@@ -47,9 +53,7 @@ impl UserIdentityContract {
             .persistent()
             .set(&DataKey::UserRole(user.clone()), &role);
 
-        // Emit event
-        env.events()
-            .publish((symbol_short!("role_set"), user), role);
+        RoleSet { user, role }.publish(&env);
     }
 
     pub fn get_role(env: Env, user: Address) -> u32 {

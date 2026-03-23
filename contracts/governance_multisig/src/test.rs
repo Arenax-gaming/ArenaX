@@ -17,7 +17,7 @@ fn create_test_env() -> (Env, Address, Address, Address) {
 
 fn initialize_contract(env: &Env, signers: Vec<Address>, threshold: u32) -> Address {
     let contract_id = env.register(GovernanceMultisig, ());
-    let client = GovernanceMultisigClient::new(&env, &contract_id);
+    let client = GovernanceMultisigClient::new(env, &contract_id);
 
     env.mock_all_auths();
     client.initialize(&signers, &threshold);
@@ -28,7 +28,7 @@ fn initialize_contract(env: &Env, signers: Vec<Address>, threshold: u32) -> Addr
 fn generate_proposal_id(env: &Env, seed: u32) -> BytesN<32> {
     let mut bytes = [0u8; 32];
     bytes[0..4].copy_from_slice(&seed.to_be_bytes());
-    BytesN::from_array(&env, &bytes)
+    BytesN::from_array(env, &bytes)
 }
 
 fn create_empty_args(env: &Env) -> Bytes {

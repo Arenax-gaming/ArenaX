@@ -206,7 +206,7 @@ impl ArenaXReputationAggregation {
                     .storage()
                     .instance()
                     .get(&DataKey::Config)
-                    .unwrap_or_else(|| ReputationConfig {
+                    .unwrap_or(ReputationConfig {
                         win_weight: 25,
                         loss_weight: -10,
                         draw_weight: 5,

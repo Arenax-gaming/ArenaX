@@ -1,5 +1,6 @@
 #![cfg(test)]
 use super::*;
+use crate::match_contract::MatchData;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, BytesN, Env, Vec};
 

@@ -1,7 +1,5 @@
 #![no_std]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,8 +31,12 @@ impl ReputationIndex {
             panic!("already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::AuthorizedMatchContract, &match_contract);
-        env.storage().instance().set(&DataKey::DecayRate, &decay_rate);
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorizedMatchContract, &match_contract);
+        env.storage()
+            .instance()
+            .set(&DataKey::DecayRate, &decay_rate);
     }
 
     /// Update reputation after a match outcome is finalized.
@@ -45,7 +47,7 @@ impl ReputationIndex {
             .instance()
             .get(&DataKey::AuthorizedMatchContract)
             .expect("match contract not set");
-        
+
         match_contract.require_auth();
 
         if players.len() != outcome.len() {
@@ -57,19 +59,21 @@ impl ReputationIndex {
         for i in 0..players.len() {
             let player = players.get(i).unwrap();
             let skill_delta = outcome.get(i).unwrap();
-            
+
             let mut rep = Self::get_reputation(env.clone(), player.clone());
-            
+
             // Apply decay before updating
             rep = Self::internal_apply_decay(&env, rep, now);
 
             let fair_play_delta = 1i128; // Completion bonus
-            
+
             rep.skill = rep.skill.saturating_add(skill_delta).max(0);
             rep.fair_play = rep.fair_play.saturating_add(fair_play_delta).max(0);
             rep.last_update_ts = now;
 
-            env.storage().persistent().set(&DataKey::Reputation(player.clone()), &rep);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Reputation(player.clone()), &rep);
 
             // Emit reputation_changed event
             events::ReputationChanged {
@@ -87,9 +91,11 @@ impl ReputationIndex {
         let mut rep = Self::get_reputation(env.clone(), addr.clone());
         let old_skill = rep.skill;
         let old_fair_play = rep.fair_play;
-        
+
         rep = Self::internal_apply_decay(&env, rep, now_ts);
-        env.storage().persistent().set(&DataKey::Reputation(addr.clone()), &rep);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Reputation(addr.clone()), &rep);
 
         // Emit decay event
         events::ReputationDecayed {
@@ -118,20 +124,24 @@ impl ReputationIndex {
             return rep;
         }
 
-        let decay_rate: i128 = env.storage().instance().get(&DataKey::DecayRate).unwrap_or(0);
+        let decay_rate: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DecayRate)
+            .unwrap_or(0);
         if decay_rate == 0 {
             return rep;
         }
 
         // decay_rate is points per day (86400 seconds)
         let decay_amount = (elapsed as i128 * decay_rate) / 86400;
-        
+
         if decay_amount > 0 {
             rep.skill = rep.skill.saturating_sub(decay_amount).max(0);
             rep.fair_play = rep.fair_play.saturating_sub(decay_amount).max(0);
             rep.last_update_ts = now;
         }
-        
+
         rep
     }
 
@@ -178,13 +188,7 @@ impl ReputationIndex {
         }
         // Cap penalty at a maximum (e.g. 100 per call) to keep penalties bounded
         const MAX_PENALTY_PER_FLAG: i128 = 100;
-        let capped = if penalty > MAX_PENALTY_PER_FLAG {
-            MAX_PENALTY_PER_FLAG
-        } else if penalty < 0 {
-            0
-        } else {
-            penalty
-        };
+        let capped = penalty.clamp(0, MAX_PENALTY_PER_FLAG);
         if capped == 0 {
             return;
         }
@@ -199,7 +203,7 @@ impl ReputationIndex {
         events::ReputationChanged {
             player,
             skill_delta: 0,
-            fair_play_delta: -(capped as i128),
+            fair_play_delta: -capped,
             match_id,
         }
         .publish(&env);

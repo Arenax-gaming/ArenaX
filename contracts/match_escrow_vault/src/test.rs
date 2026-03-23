@@ -31,7 +31,7 @@ fn create_token(env: &Env, admin: &Address) -> Address {
     token_address.address()
 }
 
-fn mint_tokens(env: &Env, token: &Address, admin: &Address, to: &Address, amount: i128) {
+fn mint_tokens(env: &Env, token: &Address, _admin: &Address, to: &Address, amount: i128) {
     let stellar_client = StellarAssetClient::new(env, token);
     stellar_client.mint(to, &amount);
 }
@@ -58,8 +58,8 @@ fn setup_escrow_with_deposits(
     env.mock_all_auths();
 
     client.set_treasury(treasury);
-    mint_tokens(env, &token, admin, player_a, amount * 2);
-    mint_tokens(env, &token, admin, player_b, amount * 2);
+    mint_tokens(env, &token, admin, player_a, amount);
+    mint_tokens(env, &token, admin, player_b, amount);
     client.create_escrow(&match_id, player_a, player_b, &amount, &token);
     client.deposit(&match_id, player_a);
     client.deposit(&match_id, player_b);
@@ -409,8 +409,15 @@ fn test_lock_funds_success() {
 
     env.ledger().set_timestamp(12345);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
 
@@ -444,8 +451,15 @@ fn test_lock_funds_when_paused_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.set_paused(&true);
     client.lock_funds(&match_id); // Should panic
@@ -459,8 +473,15 @@ fn test_release_to_winner_player_a_wins() {
 
     env.ledger().set_timestamp(12345);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
 
@@ -482,8 +503,15 @@ fn test_release_to_winner_player_b_wins() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.release_to_winner(&match_id, &player_b);
@@ -502,8 +530,15 @@ fn test_release_to_winner_not_locked_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.release_to_winner(&match_id, &player_a);
 }
@@ -515,8 +550,15 @@ fn test_release_to_winner_invalid_winner_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
 
@@ -531,8 +573,15 @@ fn test_release_to_winner_when_paused_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.set_paused(&true);
@@ -545,8 +594,15 @@ fn test_refund_fully_funded() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.refund(&match_id);
 
@@ -591,8 +647,15 @@ fn test_refund_locked_escrow() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.refund(&match_id);
@@ -612,8 +675,15 @@ fn test_refund_already_released_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.release_to_winner(&match_id, &player_a);
@@ -627,8 +697,15 @@ fn test_refund_already_refunded_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.refund(&match_id);
     client.refund(&match_id); // Should panic
@@ -640,8 +717,15 @@ fn test_mark_disputed() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.mark_disputed(&match_id);
@@ -657,8 +741,15 @@ fn test_mark_disputed_not_locked_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.mark_disputed(&match_id);
 }
@@ -669,8 +760,15 @@ fn test_resolve_dispute_success() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.mark_disputed(&match_id);
@@ -691,8 +789,15 @@ fn test_resolve_dispute_not_disputed_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.resolve_dispute(&match_id, &player_a, &admin);
@@ -705,8 +810,15 @@ fn test_resolve_dispute_invalid_winner_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, _) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.mark_disputed(&match_id);
@@ -721,8 +833,15 @@ fn test_slash_stake_success() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (_, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (_, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.slash_stake(&player_a, &500, &token);
 
@@ -738,8 +857,15 @@ fn test_slash_stake_zero_amount_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (_, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (_, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.slash_stake(&player_a, &0, &token); // Should panic
 }
@@ -751,8 +877,15 @@ fn test_slash_stake_insufficient_balance_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (_, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (_, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.slash_stake(&player_a, &5000, &token);
 }
@@ -763,8 +896,15 @@ fn test_emergency_withdraw_success() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     let emergency_recipient = Address::generate(&env);
     client.emergency_withdraw(&match_id, &emergency_recipient);
@@ -837,21 +977,36 @@ fn test_full_lifecycle_happy_path() {
     mint_tokens(&env, &token, &admin, &player_b, amount);
 
     client.create_escrow(&match_id, &player_a, &player_b, &amount, &token);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::AwaitingDeposits as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::AwaitingDeposits as u32
+    );
 
     client.deposit(&match_id, &player_a);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::PlayerADeposited as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::PlayerADeposited as u32
+    );
 
     client.deposit(&match_id, &player_b);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::FullyFunded as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::FullyFunded as u32
+    );
 
     env.ledger().set_timestamp(2000);
     client.lock_funds(&match_id);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::Locked as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::Locked as u32
+    );
 
     env.ledger().set_timestamp(3000);
     client.release_to_winner(&match_id, &player_a);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::Released as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::Released as u32
+    );
 
     let escrow = client.get_escrow(&match_id);
     assert_eq!(escrow.locked_at, Some(2000));
@@ -868,15 +1023,28 @@ fn test_full_lifecycle_with_dispute() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
     client.mark_disputed(&match_id);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::Disputed as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::Disputed as u32
+    );
 
     client.resolve_dispute(&match_id, &player_b, &admin);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::Released as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::Released as u32
+    );
 
     let token_client = SdkTokenClient::new(&env, &token);
     assert_eq!(token_client.balance(&player_b), 2000);
@@ -888,11 +1056,21 @@ fn test_full_lifecycle_with_cancellation() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, token) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.refund(&match_id);
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::Refunded as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::Refunded as u32
+    );
 
     let token_client = SdkTokenClient::new(&env, &token);
     assert_eq!(token_client.balance(&player_a), 1000);
@@ -927,7 +1105,10 @@ fn test_multiple_escrows_independent() {
     client.lock_funds(&match_id_1);
     client.release_to_winner(&match_id_1, &player_a);
 
-    assert_eq!(client.get_escrow_state(&match_id_2), EscrowState::FullyFunded as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id_2),
+        EscrowState::FullyFunded as u32
+    );
 
     client.refund(&match_id_2);
 
@@ -969,11 +1150,20 @@ fn test_deposit_after_lock_fails() {
     let contract_id = initialize_contract(&env, &admin);
     let client = MatchEscrowVaultClient::new(&env, &contract_id);
 
-    let (match_id, _) =
-        setup_escrow_with_deposits(&env, &contract_id, &admin, &player_a, &player_b, &treasury, 1000);
+    let (match_id, token) = setup_escrow_with_deposits(
+        &env,
+        &contract_id,
+        &admin,
+        &player_a,
+        &player_b,
+        &treasury,
+        1000,
+    );
 
     client.lock_funds(&match_id);
 
+    // Mint more tokens so the transfer wouldn't fail, but state check should fail first
+    mint_tokens(&env, &token, &admin, &player_a, 1000);
     client.deposit(&match_id, &player_a);
 }
 
@@ -994,7 +1184,10 @@ fn test_view_functions() {
     client.create_escrow(&match_id, &player_a, &player_b, &1000, &token);
     assert!(client.escrow_exists(&match_id));
     assert!(!client.escrow_exists(&nonexistent_match));
-    assert_eq!(client.get_escrow_state(&match_id), EscrowState::AwaitingDeposits as u32);
+    assert_eq!(
+        client.get_escrow_state(&match_id),
+        EscrowState::AwaitingDeposits as u32
+    );
     assert_eq!(client.get_admin(), admin);
     assert!(!client.is_paused());
 }

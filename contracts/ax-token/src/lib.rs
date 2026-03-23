@@ -1,14 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{
-    contracttype, 
-    contractimpl, 
-    contractevent,
-    Address, 
-    Env, 
-    Map,
-    Vec
-};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env};
 
 #[derive(Clone)]
 #[contracttype]
@@ -37,6 +29,7 @@ pub struct TransferEvent {
     pub amount: i128,
 }
 
+#[contract]
 pub struct AxToken;
 
 #[contractimpl]
@@ -45,37 +38,36 @@ impl AxToken {
         if Self::has_admin(env) {
             panic!("already initialized");
         }
-        
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
     }
 
     pub fn mint(env: &Env, to: Address, amount: i128) {
         Self::require_admin(env);
-        
+
         if amount <= 0 {
             panic!("amount must be positive");
         }
 
         let current_balance = Self::balance(env, to.clone());
         let new_balance = current_balance + amount;
-        env.storage().instance().set(&DataKey::Balance(to.clone()), &new_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &new_balance);
 
         let current_supply = Self::total_supply(env);
         let new_supply = current_supply + amount;
-        env.storage().instance().set(&DataKey::TotalSupply, &new_supply);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_supply);
 
-        env.events().publish(
-            MintEvent {
-                to,
-                amount,
-            }
-        );
+        MintEvent { to, amount }.publish(env);
     }
 
     pub fn burn(env: &Env, from: Address, amount: i128) {
         Self::require_admin(env);
-        
+
         if amount <= 0 {
             panic!("amount must be positive");
         }
@@ -86,23 +78,22 @@ impl AxToken {
         }
 
         let new_balance = current_balance - amount;
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &new_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &new_balance);
 
         let current_supply = Self::total_supply(env);
         let new_supply = current_supply - amount;
-        env.storage().instance().set(&DataKey::TotalSupply, &new_supply);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_supply);
 
-        env.events().publish(
-            BurnEvent {
-                from,
-                amount,
-            }
-        );
+        BurnEvent { from, amount }.publish(env);
     }
 
     pub fn transfer(env: &Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
-        
+
         if amount <= 0 {
             panic!("amount must be positive");
         }
@@ -117,19 +108,17 @@ impl AxToken {
         }
 
         let new_from_balance = from_balance - amount;
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &new_from_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &new_from_balance);
 
         let to_balance = Self::balance(env, to.clone());
         let new_to_balance = to_balance + amount;
-        env.storage().instance().set(&DataKey::Balance(to.clone()), &new_to_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &new_to_balance);
 
-        env.events().publish(
-            TransferEvent {
-                from,
-                to,
-                amount,
-            }
-        );
+        TransferEvent { from, to, amount }.publish(env);
     }
 
     pub fn balance(env: &Env, addr: Address) -> i128 {
@@ -147,10 +136,7 @@ impl AxToken {
     }
 
     pub fn get_admin(env: &Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .unwrap()
+        env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
     pub fn set_admin(env: &Env, new_admin: Address) {
