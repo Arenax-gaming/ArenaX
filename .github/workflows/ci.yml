@@ -117,8 +117,12 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
+          ~/.cargo/bin/sqlx
           backend/target
         key: ${{ runner.os }}-cargo-backend-${{ hashFiles('backend/Cargo.lock') }}
+    
+    - name: Install sqlx-cli
+      run: cargo install sqlx-cli --no-default-features --features postgres --locked
     
     - name: Check formatting
       run: cargo fmt --all -- --check
