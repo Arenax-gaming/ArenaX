@@ -1368,17 +1368,16 @@ impl TournamentService {
 
         // Process matches to determine rankings
         for tournament_match in matches {
-            if let Some(loser_id) = tournament_match.player1_id {
-                if tournament_match.winner_id != Some(loser_id) {
-                    rankings.push((loser_id, current_rank));
-                    current_rank += 1;
-                }
-            }
-            if let Some(loser_id) = tournament_match.player2_id {
-                if tournament_match.winner_id != Some(loser_id) {
-                    rankings.push((loser_id, current_rank));
-                    current_rank += 1;
-                }
+            let loser_id = if tournament_match.winner_id != Some(tournament_match.player1_id) {
+                Some(tournament_match.player1_id)
+            } else {
+                tournament_match
+                    .player2_id
+                    .filter(|&p2| tournament_match.winner_id != Some(p2))
+            };
+            if let Some(lid) = loser_id {
+                rankings.push((lid, current_rank));
+                current_rank += 1;
             }
         }
 
@@ -1595,8 +1594,8 @@ impl TournamentService {
             bracket_rounds.push(BracketRound {
                 round_id: round.id,
                 round_number: round.round_number,
-                round_type: round.round_type.into(),
-                status: round.status.into(),
+                round_type: round.round_type.parse().unwrap_or(RoundType::Elimination),
+                status: round.status.parse().unwrap_or(RoundStatus::Pending),
                 matches: matches
                     .into_iter()
                     .map(|m| BracketMatch {
@@ -1607,7 +1606,7 @@ impl TournamentService {
                         winner_id: m.winner_id,
                         player1_score: m.player1_score,
                         player2_score: m.player2_score,
-                        status: m.status.into(),
+                        status: m.status.parse().unwrap_or(MatchStatus::Pending),
                     })
                     .collect(),
             });
@@ -1655,46 +1654,4 @@ pub struct BracketMatch {
     pub player1_score: Option<i32>,
     pub player2_score: Option<i32>,
     pub status: MatchStatus,
-}
-
-// Helper trait implementations for enum conversions
-impl From<i32> for TournamentStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => TournamentStatus::Draft,
-            1 => TournamentStatus::Upcoming,
-            2 => TournamentStatus::RegistrationOpen,
-            3 => TournamentStatus::RegistrationClosed,
-            4 => TournamentStatus::InProgress,
-            5 => TournamentStatus::Completed,
-            6 => TournamentStatus::Cancelled,
-            _ => TournamentStatus::Draft,
-        }
-    }
-}
-
-impl From<i32> for ParticipantStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => ParticipantStatus::Registered,
-            1 => ParticipantStatus::Paid,
-            2 => ParticipantStatus::Active,
-            3 => ParticipantStatus::Eliminated,
-            4 => ParticipantStatus::Disqualified,
-            5 => ParticipantStatus::Withdrawn,
-            _ => ParticipantStatus::Registered,
-        }
-    }
-}
-
-impl From<i32> for BracketType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => BracketType::SingleElimination,
-            1 => BracketType::DoubleElimination,
-            2 => BracketType::RoundRobin,
-            3 => BracketType::Swiss,
-            _ => BracketType::SingleElimination,
-        }
-    }
 }

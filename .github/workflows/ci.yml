@@ -141,62 +141,62 @@ jobs:
         JWT_SECRET: test-secret-key
 
   # Contracts CI (Rust)
-#  contracts:
-#    name: Contracts
-#    runs-on: ubuntu-latest
-#    defaults:
-#      run:
-#        working-directory: ./contracts
-#    
-#    steps:
-#    - name: Checkout code
-#      uses: actions/checkout@v4
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./contracts
     
-#    - name: Install Rust
-#      uses: dtolnay/rust-toolchain@stable
-#      with:
-#        components: rustfmt, clippy
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     
-#    - name: Install wasm target
-#      run: rustup target add wasm32-unknown-unknown
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
     
-#    - name: Cache cargo
-#      uses: actions/cache@v3
-#      with:
-#        path: |
-#          ~/.cargo/registry
-#          ~/.cargo/git
-#          contracts/target
-#        key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock') }}
+    - name: Install wasm target
+      run: rustup target add wasm32-unknown-unknown
     
-#    - name: Check formatting
-#      run: cargo fmt --all -- --check
+    - name: Cache cargo
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          contracts/target
+        key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock') }}
     
-#    - name: Run clippy
-#      run: cargo clippy --all-targets --all-features -- -D warnings
+    - name: Check formatting
+      run: cargo fmt --all -- --check
     
-#    - name: Build contracts
-#      run: cargo build --target wasm32-unknown-unknown --release
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
     
-#    - name: Run tests
-#      run: cargo test
+    - name: Build contracts
+      run: cargo build --target wasm32-unknown-unknown --release
+    
+    - name: Run tests
+      run: cargo test
 
   # Security scan
-#  security:
-#    name: Security Scan
-#    runs-on: ubuntu-latest
-#    needs: [frontend, server, contracts]
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [frontend, server, contracts]
     
-#    steps:
-#    - name: Checkout code
-#      uses: actions/checkout@v4
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
     
-#    - name: Run Trivy vulnerability scanner
-#      uses: aquasecurity/trivy-action@master
-#      with:
-#        scan-type: 'fs'
-#        scan-ref: '.'
-#        format: 'table'
-#        exit-code: '1'
-#        ignore-unfixed: true
-#        severity: 'CRITICAL,HIGH'
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+        severity: 'CRITICAL,HIGH'

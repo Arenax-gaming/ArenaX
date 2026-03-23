@@ -3,6 +3,7 @@ use crate::db::DbPool;
 use crate::models::*;
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -593,16 +594,17 @@ impl MatchService {
     async fn both_players_reported_scores(&self, match_id: Uuid) -> Result<bool, ApiError> {
         let match_record = self.get_match_by_id(match_id).await?;
 
-        let player1_score = sqlx::query!(
+        let player1_reported = sqlx::query!(
             "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
             match_id,
             match_record.player1_id
         )
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(|e| ApiError::database_error(e))?
+        .is_some();
 
-        let player2_score = if let Some(p2_id) = match_record.player2_id {
+        let player2_reported = if let Some(p2_id) = match_record.player2_id {
             sqlx::query!(
                 "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
                 match_id,
@@ -611,11 +613,12 @@ impl MatchService {
             .fetch_optional(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?
+            .is_some()
         } else {
-            Some(sqlx::Row::new()) // Bye match, consider as reported
+            true // Bye match - no player2 needed
         };
 
-        Ok(player1_score.is_some() && player2_score.is_some())
+        Ok(player1_reported && player2_reported)
     }
 
     async fn process_match_completion(&self, match_id: Uuid) -> Result<(), ApiError> {
@@ -1467,58 +1470,6 @@ pub struct LeaderboardEntry {
     pub draws: i32,
     pub win_rate: f64,
     pub win_streak: i32,
-}
-
-// Helper trait implementations for enum conversions
-impl From<i32> for MatchType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => MatchType::Tournament,
-            1 => MatchType::Casual,
-            2 => MatchType::Ranked,
-            3 => MatchType::Practice,
-            _ => MatchType::Casual,
-        }
-    }
-}
-
-impl From<i32> for MatchStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => MatchStatus::Pending,
-            1 => MatchStatus::Scheduled,
-            2 => MatchStatus::InProgress,
-            3 => MatchStatus::Completed,
-            4 => MatchStatus::Disputed,
-            5 => MatchStatus::Cancelled,
-            6 => MatchStatus::Abandoned,
-            _ => MatchStatus::Pending,
-        }
-    }
-}
-
-impl From<i32> for DisputeStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => DisputeStatus::Pending,
-            1 => DisputeStatus::UnderReview,
-            2 => DisputeStatus::Resolved,
-            3 => DisputeStatus::Rejected,
-            _ => DisputeStatus::Pending,
-        }
-    }
-}
-
-impl From<i32> for QueueStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => QueueStatus::Waiting,
-            1 => QueueStatus::Matched,
-            2 => QueueStatus::Expired,
-            3 => QueueStatus::Cancelled,
-            _ => QueueStatus::Waiting,
-        }
-    }
 }
 
 impl MatchService {

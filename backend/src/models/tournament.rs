@@ -361,26 +361,44 @@ pub struct TournamentMatch {
 
 // ===== Type Conversions =====
 
-impl From<i32> for RoundType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => RoundType::Qualification,
-            1 => RoundType::Elimination,
-            2 => RoundType::Semifinal,
-            3 => RoundType::Final,
-            _ => RoundType::Elimination,
+impl std::str::FromStr for RoundType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "qualification" => Ok(RoundType::Qualification),
+            "elimination" => Ok(RoundType::Elimination),
+            "semifinal" => Ok(RoundType::Semifinal),
+            "final" => Ok(RoundType::Final),
+            _ => Ok(RoundType::Elimination),
         }
     }
 }
 
-impl From<i32> for RoundStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => RoundStatus::Pending,
-            1 => RoundStatus::InProgress,
-            2 => RoundStatus::Completed,
-            3 => RoundStatus::Cancelled,
-            _ => RoundStatus::Pending,
+impl std::str::FromStr for RoundStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(RoundStatus::Pending),
+            "in_progress" => Ok(RoundStatus::InProgress),
+            "completed" => Ok(RoundStatus::Completed),
+            "cancelled" => Ok(RoundStatus::Cancelled),
+            _ => Ok(RoundStatus::Pending),
+        }
+    }
+}
+
+impl std::str::FromStr for MatchStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(MatchStatus::Pending),
+            "scheduled" => Ok(MatchStatus::Scheduled),
+            "in_progress" => Ok(MatchStatus::InProgress),
+            "completed" => Ok(MatchStatus::Completed),
+            "disputed" => Ok(MatchStatus::Disputed),
+            "cancelled" => Ok(MatchStatus::Cancelled),
+            "abandoned" => Ok(MatchStatus::Abandoned),
+            _ => Ok(MatchStatus::Pending),
         }
     }
 }

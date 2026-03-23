@@ -13,8 +13,8 @@ pub use match_authority::*;
 pub use match_models::{
     CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory, EloResponse,
     JoinMatchmakingRequest, Match, MatchDispute, MatchResponse, MatchResult, MatchScore,
-    MatchStatus, MatchType, MatchmakingQueue, MatchmakingStatusResponse, PlayerInfo,
-    QueueStatus, ReportScoreRequest, UserElo,
+    MatchStatus, MatchType, MatchmakingQueue, MatchmakingStatusResponse, PlayerInfo, QueueStatus,
+    ReportScoreRequest, UserElo,
 };
 pub use reward_settlement::*;
 pub use stellar_account::{

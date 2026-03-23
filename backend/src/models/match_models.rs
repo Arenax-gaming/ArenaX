@@ -245,3 +245,19 @@ pub struct DisputeListResponse {
     pub page: i32,
     pub per_page: i32,
 }
+
+impl std::str::FromStr for MatchStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(MatchStatus::Pending),
+            "scheduled" => Ok(MatchStatus::Scheduled),
+            "in_progress" => Ok(MatchStatus::InProgress),
+            "completed" => Ok(MatchStatus::Completed),
+            "disputed" => Ok(MatchStatus::Disputed),
+            "cancelled" => Ok(MatchStatus::Cancelled),
+            "abandoned" => Ok(MatchStatus::Abandoned),
+            _ => Ok(MatchStatus::Pending),
+        }
+    }
+}
