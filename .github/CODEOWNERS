@@ -1,0 +1,20 @@
+# Global fallback
+* @anonfedora
+
+# Smart contracts — require contract team review
+/contracts/ @anonfedora
+
+# DB migrations — require backend lead review
+/backend/migrations/ @anonfedora
+
+# CI/CD and workflow changes
+/.github/ @anonfedora
+
+# Frontend
+/frontend/ @anonfedora
+
+# TypeScript server
+/server/ @anonfedora
+
+# Rust backend
+/backend/src/ @anonfedora
