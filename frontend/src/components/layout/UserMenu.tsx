@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { LogOut, User, Wallet } from "lucide-react";
+import { Bell, LogOut, User, Wallet } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +86,18 @@ export function UserMenu() {
           >
             <Wallet className="h-4 w-4" />
             Wallet
+          </Link>
+          <Link
+            href="/notifications/settings"
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60 transition-colors",
+              isActiveRoute(pathname, "/notifications") && "bg-muted/60"
+            )}
+            role="menuitem"
+            onClick={() => setOpen(false)}
+          >
+            <Bell className="h-4 w-4" />
+            Notifications
           </Link>
           <button
             type="button"
