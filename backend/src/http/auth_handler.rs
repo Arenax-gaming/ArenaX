@@ -50,7 +50,7 @@ pub async fn register(
 ) -> Result<impl Responder, ApiError> {
     info!(
         username = %request.username,
-        email = %request.email,
+        email = request.email.as_deref().unwrap_or("none"),
         "Registration request received"
     );
 

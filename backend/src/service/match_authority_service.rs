@@ -587,7 +587,7 @@ impl MatchAuthorityService {
     // =============================================================================
 
     /// Validate state transition according to FSM rules
-    fn validate_transition(
+    pub(crate) fn validate_transition(
         &self,
         from: &MatchAuthorityState,
         to: &MatchAuthorityState,

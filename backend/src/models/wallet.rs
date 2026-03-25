@@ -211,7 +211,6 @@ pub struct TransactionResponse {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct DepositRequest {
-    #[validate(range(min = 1))]
     pub amount: Decimal,
     #[validate(length(min = 3, max = 10))]
     pub currency: String, // "NGN", "XLM", "ARENAX_TOKEN"
@@ -220,7 +219,6 @@ pub struct DepositRequest {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct WithdrawalRequest {
-    #[validate(range(min = 1))]
     pub amount: Decimal,
     #[validate(length(min = 3, max = 10))]
     pub currency: String,
