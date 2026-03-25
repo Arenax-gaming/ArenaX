@@ -1,5 +1,6 @@
 use actix_web::{web, App, HttpServer};
 use std::io;
+use std::sync::Arc;
 use tokio::signal;
 
 mod api_error;
@@ -8,12 +9,14 @@ mod config;
 mod db;
 mod http;
 mod middleware;
+mod models;
 mod service;
 mod telemetry;
 
 use crate::config::Config;
 use crate::db::create_pool;
 use crate::middleware::cors_middleware;
+use crate::service::ReaperService;
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -28,6 +31,10 @@ async fn main() -> io::Result<()> {
     let db_pool = create_pool(&config)
         .await
         .expect("Failed to create database pool");
+
+    // Spawn the Reaper — forfeits players who miss the reporting deadline
+    let reaper = Arc::new(ReaperService::new(db_pool.clone()));
+    reaper.run();
 
     // Create Redis client (placeholder)
     // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
