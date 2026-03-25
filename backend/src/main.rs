@@ -66,6 +66,27 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/notifications/{id}",
                         web::delete().to(crate::http::notification_handler::delete_notification),
+                    )
+                    // Reputation endpoints
+                    .route(
+                        "/reputation/player/{user_id}",
+                        web::get().to(crate::http::reputation_handler::get_player_reputation),
+                    )
+                    .route(
+                        "/reputation/history/{user_id}",
+                        web::get().to(crate::http::reputation_handler::get_reputation_history),
+                    )
+                    .route(
+                        "/reputation/bad-actors",
+                        web::get().to(crate::http::reputation_handler::get_bad_actors),
+                    )
+                    .route(
+                        "/reputation/bad-actors/{user_id}/remove",
+                        web::post().to(crate::http::reputation_handler::remove_bad_actor_flag),
+                    )
+                    .route(
+                        "/reputation/stats",
+                        web::get().to(crate::http::reputation_handler::get_reputation_stats),
                     ),
             )
     })
