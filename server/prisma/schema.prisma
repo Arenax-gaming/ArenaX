@@ -21,6 +21,11 @@ model User {
   projects      Project[]
   wallet        UserWallet?
   refreshTokens RefreshToken[]
+  proposals     Proposal[] @relation("UserProposals")
+  votes         Vote[]     @relation("UserVotes")
+  reportedDisputes Dispute[] @relation("ReportedDisputes")
+  resolvedDisputes Dispute[] @relation("ResolvedDisputes")
+  auditLogs     AuditLog[]
 }
 
 model UserWallet {
@@ -103,4 +108,105 @@ model BlockchainEvent {
   ledger      Int
   data        Json
   createdAt   DateTime @default(now())
+}
+
+enum ProposalStatus {
+  DRAFT
+  VOTING
+  APPROVED
+  EXECUTED
+  CANCELLED
+  FAILED
+}
+
+model Proposal {
+  id             String         @id @default(uuid())
+  onChainId      String?        @unique // Map to hex-encoded 32 bytes on-chain
+  targetContract String
+  functionName   String
+  args           Json           @default("{}")
+  description    String?
+  status         ProposalStatus @default(DRAFT)
+  proposerId     String
+  proposer       User           @relation("UserProposals", fields: [proposerId], references: [id])
+  executeAfter   DateTime?
+  executedAt     DateTime?
+  lastChainTx    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  votes          Vote[]
+
+  @@index([status])
+  @@index([proposerId])
+}
+
+model Vote {
+  id         String   @id @default(uuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  voterId    String
+  voter      User     @relation("UserVotes", fields: [voterId], references: [id])
+  signature  String?  // If multisig requires signatures
+  chainTx    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([proposalId, voterId])
+}
+
+enum MatchStatus {
+  CREATED
+  STARTED
+  COMPLETED
+  DISPUTED
+  FINALIZED
+}
+
+model Match {
+  id             String      @id @default(uuid())
+  onChainId      String      @unique
+  playerAId      String
+  playerBId      String
+  winnerId       String?
+  status         MatchStatus @default(CREATED)
+  metadata       Json        @default("{}")
+  lastChainTx    String?
+  createdAt      DateTime    @default(now())
+  startedAt      DateTime?
+  endedAt        DateTime?
+  updatedAt      DateTime    @updatedAt
+  disputes       Dispute[]
+
+  @@index([status])
+}
+
+model Dispute {
+  id           String   @id @default(uuid())
+  matchId      String
+  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  reporterId   String
+  reporter     User     @relation("ReportedDisputes", fields: [reporterId], references: [id])
+  reason       String
+  evidenceUrls String[] // Array of S3/MinIO links
+  status       String   @default("OPEN") // OPEN, RESOLVED, DISMISSED
+  resolution   String?
+  resolvedById String?
+  resolvedBy   User?    @relation("ResolvedDisputes", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  admin      User     @relation(fields: [adminId], references: [id])
+  action     String   // e.g., "MATCH_OVERRIDE", "PROPOSAL_EXECUTE", "MANUAL_PAYOUT"
+  targetType String   // e.g., "MATCH", "PROPOSAL", "USER"
+  targetId   String
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
 }
