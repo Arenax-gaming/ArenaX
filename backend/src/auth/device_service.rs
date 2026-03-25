@@ -157,7 +157,7 @@ impl SecurityMonitor {
         redis::cmd("LPUSH")
             .arg(&key)
             .arg(value)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -166,7 +166,7 @@ impl SecurityMonitor {
             .arg(&key)
             .arg(0)
             .arg(99)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -174,7 +174,7 @@ impl SecurityMonitor {
         redis::cmd("EXPIRE")
             .arg(&key)
             .arg(2592000)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -494,7 +494,7 @@ impl DeviceService {
         let key = format!("device:login:{}", device_id);
         redis::cmd("DEL")
             .arg(&key)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 

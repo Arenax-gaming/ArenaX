@@ -504,7 +504,7 @@ impl TournamentService {
     ) -> Result<(), ApiError> {
         let wallet = self.get_user_wallet(user_id).await?;
 
-        if wallet.balance_arenax_tokens < tournament.entry_fee {
+        if wallet.balance_arenax_tokens.unwrap_or(0) < tournament.entry_fee {
             return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
         }
 
@@ -678,7 +678,7 @@ impl TournamentService {
             let matches_in_round = if round_num == 1 {
                 participant_count / 2
             } else {
-                (participant_count / (2_i32.pow(round_num as u32))) as usize
+                participant_count / (2_usize.pow(round_num as u32))
             };
 
             for match_num in 1..=matches_in_round {
