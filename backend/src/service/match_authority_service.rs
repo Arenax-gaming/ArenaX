@@ -74,8 +74,7 @@ impl MatchAuthorityService {
 
         // Step 2: Create match entity in database
         let match_id = Uuid::new_v4();
-        let match_entity = sqlx::query_as!(
-            MatchAuthorityEntity,
+        let match_entity = sqlx::query_as::<_, MatchAuthorityEntity>(
             r#"
             INSERT INTO match_authority (
                 id, on_chain_match_id, player_a, player_b, state,
@@ -85,18 +84,17 @@ impl MatchAuthorityService {
             )
             RETURNING
                 id, on_chain_match_id, player_a, player_b, winner,
-                state as "state: MatchAuthorityState",
-                created_at, started_at, ended_at, last_chain_tx,
+                state, created_at, started_at, ended_at, last_chain_tx,
                 idempotency_key, metadata
             "#,
-            match_id,
-            chain_result.hash,
-            dto.player_a,
-            dto.player_b,
-            chain_result.hash.clone(),
-            dto.idempotency_key,
-            serde_json::json!({})
         )
+        .bind(match_id)
+        .bind(&chain_result.hash)
+        .bind(&dto.player_a)
+        .bind(&dto.player_b)
+        .bind(&chain_result.hash)
+        .bind(&dto.idempotency_key)
+        .bind(serde_json::json!({}))
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -163,7 +161,7 @@ impl MatchAuthorityService {
             })?;
 
         // Step 2: Update match state
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE match_authority
             SET state = 'STARTED'::match_authority_state,
@@ -171,9 +169,9 @@ impl MatchAuthorityService {
                 started_at = NOW()
             WHERE id = $2
             "#,
-            chain_result.hash,
-            match_id
         )
+        .bind(&chain_result.hash)
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -242,7 +240,7 @@ impl MatchAuthorityService {
             })?;
 
         // Step 2: Update match state
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE match_authority
             SET state = 'COMPLETED'::match_authority_state,
@@ -251,10 +249,10 @@ impl MatchAuthorityService {
                 ended_at = NOW()
             WHERE id = $3
             "#,
-            dto.winner,
-            chain_result.hash,
-            match_id
         )
+        .bind(&dto.winner)
+        .bind(&chain_result.hash)
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -324,16 +322,16 @@ impl MatchAuthorityService {
             })?;
 
         // Step 2: Update match state
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE match_authority
             SET state = 'DISPUTED'::match_authority_state,
                 last_chain_tx = $1
             WHERE id = $2
             "#,
-            chain_result.hash,
-            match_id
         )
+        .bind(&chain_result.hash)
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -397,16 +395,16 @@ impl MatchAuthorityService {
             })?;
 
         // Step 2: Update match state
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE match_authority
             SET state = 'FINALIZED'::match_authority_state,
                 last_chain_tx = $1
             WHERE id = $2
             "#,
-            chain_result.hash,
-            match_id
         )
+        .bind(&chain_result.hash)
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -448,19 +446,17 @@ impl MatchAuthorityService {
 
     /// Get match entity (internal)
     async fn get_match_entity(&self, match_id: Uuid) -> Result<MatchAuthorityEntity, ApiError> {
-        sqlx::query_as!(
-            MatchAuthorityEntity,
+        sqlx::query_as::<_, MatchAuthorityEntity>(
             r#"
             SELECT
                 id, on_chain_match_id, player_a, player_b, winner,
-                state as "state: MatchAuthorityState",
-                created_at, started_at, ended_at, last_chain_tx,
+                state, created_at, started_at, ended_at, last_chain_tx,
                 idempotency_key, metadata
             FROM match_authority
             WHERE id = $1
             "#,
-            match_id
         )
+        .bind(match_id)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
@@ -487,20 +483,18 @@ impl MatchAuthorityService {
         &self,
         match_id: Uuid,
     ) -> Result<Vec<MatchTransition>, ApiError> {
-        sqlx::query_as!(
-            MatchTransition,
+        sqlx::query_as::<_, MatchTransition>(
             r#"
             SELECT
                 id, match_id,
-                from_state as "from_state: MatchAuthorityState",
-                to_state as "to_state: MatchAuthorityState",
+                from_state, to_state,
                 actor, timestamp, chain_tx, metadata, error
             FROM match_transitions
             WHERE match_id = $1
             ORDER BY timestamp ASC
             "#,
-            match_id
         )
+        .bind(match_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))
@@ -511,19 +505,17 @@ impl MatchAuthorityService {
         &self,
         key: &str,
     ) -> Result<Option<MatchAuthorityEntity>, ApiError> {
-        sqlx::query_as!(
-            MatchAuthorityEntity,
+        sqlx::query_as::<_, MatchAuthorityEntity>(
             r#"
             SELECT
                 id, on_chain_match_id, player_a, player_b, winner,
-                state as "state: MatchAuthorityState",
-                created_at, started_at, ended_at, last_chain_tx,
+                state, created_at, started_at, ended_at, last_chain_tx,
                 idempotency_key, metadata
             FROM match_authority
             WHERE idempotency_key = $1
             "#,
-            key
         )
+        .bind(key)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))
@@ -557,7 +549,7 @@ impl MatchAuthorityService {
         let is_divergent = on_chain_state != off_chain_state_str;
 
         // Log reconciliation
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO match_reconciliation_log (
                 id, match_id, off_chain_state, on_chain_state, is_divergent, metadata
@@ -565,13 +557,13 @@ impl MatchAuthorityService {
                 $1, $2, $3, $4, $5, $6
             )
             "#,
-            Uuid::new_v4(),
-            match_id,
-            match_entity.state as MatchAuthorityState,
-            on_chain_state,
-            is_divergent,
-            serde_json::json!({ "checked_at": Utc::now() })
         )
+        .bind(Uuid::new_v4())
+        .bind(match_id)
+        .bind(&match_entity.state as &MatchAuthorityState)
+        .bind(&on_chain_state)
+        .bind(is_divergent)
+        .bind(serde_json::json!({ "checked_at": Utc::now() }))
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -619,7 +611,7 @@ impl MatchAuthorityService {
         chain_tx: Option<&str>,
         metadata: Option<serde_json::Value>,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO match_transitions (
                 id, match_id, from_state, to_state, actor, chain_tx, metadata
@@ -627,14 +619,14 @@ impl MatchAuthorityService {
                 $1, $2, $3, $4, $5, $6, $7
             )
             "#,
-            Uuid::new_v4(),
-            match_id,
-            from as MatchAuthorityState,
-            to as MatchAuthorityState,
-            actor,
-            chain_tx,
-            metadata.unwrap_or_else(|| serde_json::json!({}))
         )
+        .bind(Uuid::new_v4())
+        .bind(match_id)
+        .bind(&from as &MatchAuthorityState)
+        .bind(&to as &MatchAuthorityState)
+        .bind(actor)
+        .bind(chain_tx)
+        .bind(metadata.unwrap_or_else(|| serde_json::json!({})))
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -651,7 +643,7 @@ impl MatchAuthorityService {
         status: &str,
         error: Option<&str>,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO match_chain_sync (
                 id, match_id, operation_type, tx_hash, tx_status, error_message, metadata
@@ -659,14 +651,14 @@ impl MatchAuthorityService {
                 $1, $2, $3, $4, $5, $6, $7
             )
             "#,
-            Uuid::new_v4(),
-            match_id,
-            operation_type,
-            tx_hash,
-            status,
-            error,
-            serde_json::json!({})
         )
+        .bind(Uuid::new_v4())
+        .bind(match_id)
+        .bind(operation_type)
+        .bind(tx_hash)
+        .bind(status)
+        .bind(error)
+        .bind(serde_json::json!({}))
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -811,8 +803,12 @@ mod tests {
 
     #[test]
     fn test_validate_transition() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/test")
+            .expect("failed to create lazy pool");
         let service = MatchAuthorityService {
-            db_pool: DbPool::default(),
+            db_pool: pool,
             soroban_service: Arc::new(SorobanService::new(
                 crate::service::soroban_service::NetworkConfig::testnet(),
             )),

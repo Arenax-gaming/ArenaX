@@ -106,7 +106,8 @@ impl std::fmt::Display for TransactionStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum PaymentProvider {
     Paystack,
     Flutterwave,

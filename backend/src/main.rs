@@ -8,6 +8,7 @@ mod config;
 mod db;
 mod http;
 mod middleware;
+mod models;
 mod service;
 mod telemetry;
 
