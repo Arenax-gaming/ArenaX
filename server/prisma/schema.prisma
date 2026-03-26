@@ -21,6 +21,8 @@ model User {
   projects      Project[]
   wallet        UserWallet?
   refreshTokens RefreshToken[]
+  walletKeyAccessAudits WalletKeyAccessAudit[] @relation("WalletKeyAccessActor")
+  walletRecoveryChallenges WalletRecoveryChallenge[]
 }
 
 model UserWallet {
@@ -29,10 +31,14 @@ model UserWallet {
   publicKey          String   @unique
   encryptedSecretKey String
   encryptionVersion  Int      @default(1)
+  encryptedSecretKeyVersion Int @default(1)
+  lastRotatedAt      DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id])
+  keyAccessAudits WalletKeyAccessAudit[]
+  recoveryChallenges WalletRecoveryChallenge[]
 }
 
 model RefreshToken {
@@ -103,4 +109,66 @@ model BlockchainEvent {
   ledger      Int
   data        Json
   createdAt   DateTime @default(now())
+}
+
+enum WalletKeyAccessAction {
+  SIGN
+  EXPORT
+  RECOVERY_CHALLENGE_CREATED
+  RECOVERY_CHALLENGE_COMPLETED
+  ROTATION
+}
+
+enum WalletRecoveryChallengeStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+model WalletKeyAccessAudit {
+  id               String                @id @default(uuid())
+  walletId         String
+  actorUserId      String?
+  action           WalletKeyAccessAction
+  success          Boolean               @default(true)
+  requestId        String?
+  ipAddress        String?
+  userAgent        String?
+  reason           String?
+  keyVersion       Int?
+  metadata         Json?
+  previousHash     String?
+  entryHash        String                @unique
+  createdAt        DateTime              @default(now())
+
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  actor  User?      @relation("WalletKeyAccessActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model WalletRecoveryChallenge {
+  id               String                        @id @default(uuid())
+  userId           String
+  walletId         String
+  codeHash         String
+  expiresAt        DateTime
+  completedAt      DateTime?
+  status           WalletRecoveryChallengeStatus @default(PENDING)
+  attempts         Int                           @default(0)
+  maxAttempts      Int                           @default(5)
+  requestId        String?
+  requestedFromIp  String?
+  requestedUserAgent String?
+  lastAttemptAt    DateTime?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, expiresAt])
+  @@index([walletId, status])
 }
