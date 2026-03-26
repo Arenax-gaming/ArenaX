@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::soroban_service::{SorobanService, SorobanTxResult, TxStatus};
@@ -604,7 +604,7 @@ impl GovernanceService {
 
     /// Get current signers from the contract
     pub async fn get_signers(&self) -> Result<Vec<String>, GovernanceServiceError> {
-        let args = serde_json::json!({});
+        let _args = serde_json::json!({});
 
         // Note: This is a read-only call, we don't need to submit a transaction
         // In production, this would use a read-only RPC method

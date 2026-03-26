@@ -26,6 +26,7 @@ pub enum StellarError {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct StellarService {
     db_pool: DbPool,
     redis_client: Option<Arc<RedisClient>>,
@@ -370,6 +371,7 @@ impl StellarService {
     // ========================================================================
 
     /// Record a Stellar transaction in the database
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_transaction(
         &self,
         tx_hash: &str,
@@ -412,7 +414,7 @@ impl StellarService {
     }
 
     /// Verify a Stellar transaction on the network
-    pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, StellarError> {
+    pub async fn verify_transaction(&self, _tx_hash: &str) -> Result<bool, StellarError> {
         // TODO: Implement actual verification by querying Horizon
         // let client = reqwest::Client::new();
         // let response = client
@@ -491,6 +493,7 @@ impl StellarService {
     }
 
     /// Decrypt a secret key from storage
+    #[allow(dead_code)]
     fn decrypt_secret_key(&self, encrypted: &str) -> Result<String, StellarError> {
         // TODO: Implement actual decryption
         // For now, just base64 decode (NOT SECURE - implement proper decryption)

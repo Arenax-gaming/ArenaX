@@ -24,10 +24,7 @@ mod tests {
 
         // Valid transitions
         assert!(service
-            .validate_transition(
-                &MatchAuthorityState::Created,
-                &MatchAuthorityState::Started
-            )
+            .validate_transition(&MatchAuthorityState::Created, &MatchAuthorityState::Started)
             .is_ok());
 
         assert!(service
@@ -197,7 +194,7 @@ mod tests {
         let match_id = Uuid::new_v4();
         let now = chrono::Utc::now();
 
-        let transitions = vec![
+        let transitions = [
             MatchTransition {
                 id: Uuid::new_v4(),
                 match_id,
