@@ -30,9 +30,9 @@ impl SeedingEngine {
         .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
 
         let status: String = row.try_get("status").map_err(ApiError::database_error)?;
-        if status != "registration_closed" {
+        if status != "registration_closed" && status != "in_progress" {
             return Err(ApiError::bad_request(
-                "Tournament must be in RegistrationClosed status to seed",
+                "Tournament must be in RegistrationClosed or InProgress status to seed",
             ));
         }
 

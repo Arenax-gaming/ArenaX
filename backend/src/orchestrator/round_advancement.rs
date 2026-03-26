@@ -127,8 +127,12 @@ impl RoundAdvancementWorker {
                     if let Some(p1) = player1_id {
                         advancing_players.push(p1);
                     }
+                } else {
+                    // Both players present but match cancelled — propagate player1 as bye to preserve bracket structure.
+                    if let Some(p1) = player1_id {
+                        advancing_players.push(p1);
+                    }
                 }
-                // If both players were present but match was cancelled, no one advances.
             }
         }
 
@@ -146,6 +150,17 @@ impl RoundAdvancementWorker {
             .execute(&self.db_pool)
             .await
             .map_err(ApiError::database_error)?;
+
+            // Trigger payout finalization
+            let payout = crate::orchestrator::PayoutSettler::new(self.db_pool.clone());
+            if let Err(e) = payout.finalize_tournament(tournament_id).await {
+                tracing::error!(
+                    "Payout finalization failed for tournament {}: {}",
+                    tournament_id,
+                    e
+                );
+                // Polling worker will retry
+            }
 
             return Ok(());
         }

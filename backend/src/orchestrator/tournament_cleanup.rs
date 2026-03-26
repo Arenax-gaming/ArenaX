@@ -60,6 +60,31 @@ impl TournamentCleanup {
         .await
         .map_err(ApiError::database_error)?;
 
+        // Step 1b: Verify payouts have been issued; if not, re-trigger PayoutSettler.
+        let payout_row = sqlx::query(
+            r#"
+            SELECT COUNT(*) AS cnt
+            FROM transactions
+            WHERE description LIKE $1
+              AND transaction_type = 'Prize'
+            "#,
+        )
+        .bind(format!("%tournament:{}%", tournament_id))
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let payout_count: i64 = payout_row
+            .try_get("cnt")
+            .map_err(ApiError::database_error)?;
+
+        if payout_count == 0 {
+            let payout = crate::orchestrator::PayoutSettler::new(self.db_pool.clone());
+            if let Err(e) = payout.finalize_tournament(tournament_id).await {
+                tracing::error!("Payout re-trigger failed for tournament {}: {}", tournament_id, e);
+            }
+        }
+
         // Step 2: Mark all participants with final_rank > 1 as Eliminated (if not already).
         sqlx::query(
             r#"
