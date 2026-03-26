@@ -4,11 +4,9 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::match_models::*;
 use crate::models::user::User;
-use chrono::{Duration, Utc};
-use redis::Client as RedisClient;
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -43,19 +41,19 @@ pub struct LeaderboardEntry {
 
 pub struct MatchService {
     db_pool: DbPool,
-    redis_client: Option<Arc<RedisClient>>,
+    event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl MatchService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
             db_pool,
-            redis_client: None,
+            event_bus: None,
         }
     }
 
-    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
-        self.redis_client = Some(redis_client);
+    pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
+        self.event_bus = Some(event_bus);
         self
     }
 
@@ -948,6 +946,16 @@ impl MatchService {
     // HELPERS
     // ========================================================================
 
+    /// Get raw Match entity by ID (for internal use)
+    async fn get_match_raw(&self, match_id: Uuid) -> Result<Match, ApiError> {
+        sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))
+    }
+
     /// Convert a Match entity to a MatchResponse
     async fn match_to_response(&self, m: Match) -> Result<MatchResponse, ApiError> {
         let player1 = self.get_player_info(m.player1_id).await?;
@@ -1016,5 +1024,290 @@ impl MatchService {
             elo_rating,
             avatar_url: user.avatar_url,
         })
+    }
+
+    // ========================================================================
+    // REALTIME EVENT PUBLISHING
+    // ========================================================================
+
+    async fn publish_match_event(&self, event_data: serde_json::Value) -> Result<(), ApiError> {
+        if let Some(ref event_bus) = self.event_bus {
+            if let (Some(match_id_str), Some(event_type)) = (
+                event_data.get("match_id").and_then(|v| v.as_str()),
+                event_data.get("event").and_then(|v| v.as_str()),
+            ) {
+                let match_id = Uuid::parse_str(match_id_str).unwrap_or_default();
+                let timestamp = chrono::Utc::now().to_rfc3339();
+
+                let event = crate::realtime::events::RealtimeEvent::MatchStatusChange {
+                    match_id,
+                    from_status: event_data
+                        .get("from_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    to_status: event_type.to_string(),
+                    timestamp,
+                };
+
+                event_bus.publish_to_match(match_id, &event).await;
+
+                // Also publish to participant user channels
+                for key in ["player1_id", "player2_id", "user_id"] {
+                    if let Some(uid_str) = event_data.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(uid) = Uuid::parse_str(uid_str) {
+                            event_bus.publish_to_user(uid, &event).await;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn publish_global_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
+        // Global events (e.g., tournament announcements) to be implemented
+        // when a global subscription mechanism is added.
+        Ok(())
+    }
+
+    // ========================================================================
+    // DISPUTE MANAGEMENT (ADMIN)
+    // ========================================================================
+
+    /// Resolve a match dispute (admin function)
+    pub async fn resolve_dispute(
+        &self,
+        dispute_id: Uuid,
+        admin_id: Uuid,
+        resolution: String,
+        winner_id: Option<Uuid>,
+    ) -> Result<MatchDispute, ApiError> {
+        let dispute = sqlx::query_as::<_, MatchDispute>(
+            r#"
+            UPDATE match_disputes
+            SET status = $1, admin_reviewer_id = $2, resolution = $3, resolved_at = $4
+            WHERE id = $5
+            RETURNING *
+            "#,
+        )
+        .bind(DisputeStatus::Resolved)
+        .bind(admin_id)
+        .bind(&resolution)
+        .bind(Utc::now())
+        .bind(dispute_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if let Some(new_winner) = winner_id {
+            sqlx::query("UPDATE matches SET winner_id = $1, updated_at = $2 WHERE id = $3")
+                .bind(new_winner)
+                .bind(Utc::now())
+                .bind(dispute.match_id)
+                .execute(&self.db_pool)
+                .await
+                .map_err(ApiError::database_error)?;
+
+            let match_record = self.get_match_raw(dispute.match_id).await?;
+            if let Some(game) = match_record.game_mode.split('_').next() {
+                self.update_elo_ratings(
+                    match_record.player1_id,
+                    match_record.player2_id,
+                    Some(new_winner),
+                    game,
+                    dispute.match_id,
+                )
+                .await?;
+            }
+        }
+
+        tracing::info!("Dispute {} resolved by admin {}", dispute_id, admin_id);
+        Ok(dispute)
+    }
+
+    /// Reject a match dispute
+    pub async fn reject_dispute(
+        &self,
+        dispute_id: Uuid,
+        admin_id: Uuid,
+        reason: String,
+    ) -> Result<MatchDispute, ApiError> {
+        let dispute = sqlx::query_as::<_, MatchDispute>(
+            r#"
+            UPDATE match_disputes
+            SET status = $1, admin_reviewer_id = $2, admin_notes = $3, resolved_at = $4
+            WHERE id = $5
+            RETURNING *
+            "#,
+        )
+        .bind(DisputeStatus::Rejected)
+        .bind(admin_id)
+        .bind(&reason)
+        .bind(Utc::now())
+        .bind(dispute_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        tracing::info!("Dispute {} rejected by admin {}", dispute_id, admin_id);
+        Ok(dispute)
+    }
+
+    // ========================================================================
+    // MATCH LIFECYCLE
+    // ========================================================================
+
+    /// Start a match (transition from scheduled to in_progress)
+    pub async fn start_match_lifecycle(&self, match_id: Uuid) -> Result<Match, ApiError> {
+        let match_record = self.get_match_raw(match_id).await?;
+
+        if match_record.status != MatchStatus::Scheduled {
+            return Err(ApiError::bad_request(
+                "Match cannot be started from current status".to_string(),
+            ));
+        }
+
+        let now = Utc::now();
+        let updated_match = sqlx::query_as::<_, Match>(
+            r#"
+            UPDATE matches
+            SET status = $1, started_at = $2, updated_at = $3
+            WHERE id = $4
+            RETURNING *
+            "#,
+        )
+        .bind(MatchStatus::InProgress)
+        .bind(now)
+        .bind(now)
+        .bind(match_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "started",
+            "match_id": match_id.to_string(),
+            "tournament_id": match_record.tournament_id
+        }))
+        .await?;
+
+        Ok(updated_match)
+    }
+
+    /// Schedule a match
+    pub async fn schedule_match(
+        &self,
+        match_id: Uuid,
+        scheduled_time: DateTime<Utc>,
+    ) -> Result<Match, ApiError> {
+        let match_record = self.get_match_raw(match_id).await?;
+
+        if match_record.status != MatchStatus::Pending {
+            return Err(ApiError::bad_request(
+                "Match cannot be scheduled from current status".to_string(),
+            ));
+        }
+
+        if scheduled_time <= Utc::now() {
+            return Err(ApiError::bad_request(
+                "Scheduled time must be in the future".to_string(),
+            ));
+        }
+
+        let updated_match = sqlx::query_as::<_, Match>(
+            r#"
+            UPDATE matches
+            SET status = $1, scheduled_time = $2, updated_at = $3
+            WHERE id = $4
+            RETURNING *
+            "#,
+        )
+        .bind(MatchStatus::Scheduled)
+        .bind(scheduled_time)
+        .bind(Utc::now())
+        .bind(match_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "scheduled",
+            "match_id": match_id.to_string(),
+            "tournament_id": match_record.tournament_id,
+            "scheduled_time": scheduled_time
+        }))
+        .await?;
+
+        Ok(updated_match)
+    }
+
+    /// Cancel a match
+    pub async fn cancel_match(
+        &self,
+        match_id: Uuid,
+        reason: Option<String>,
+    ) -> Result<Match, ApiError> {
+        let match_record = self.get_match_raw(match_id).await?;
+
+        if match_record.status == MatchStatus::Completed
+            || match_record.status == MatchStatus::Cancelled
+        {
+            return Err(ApiError::bad_request(
+                "Cannot cancel a completed or already cancelled match".to_string(),
+            ));
+        }
+
+        let updated_match = sqlx::query_as::<_, Match>(
+            r#"
+            UPDATE matches
+            SET status = $1, updated_at = $2
+            WHERE id = $3
+            RETURNING *
+            "#,
+        )
+        .bind(MatchStatus::Cancelled)
+        .bind(Utc::now())
+        .bind(match_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        tracing::info!("Match {} cancelled. Reason: {:?}", match_id, reason);
+        Ok(updated_match)
+    }
+
+    /// Clean up expired matchmaking queue entries
+    pub async fn cleanup_expired_queue_entries(&self) -> Result<i64, ApiError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE matchmaking_queue
+            SET status = $1
+            WHERE status = $2 AND expires_at < $3
+            "#,
+        )
+        .bind(QueueStatus::Expired)
+        .bind(QueueStatus::Waiting)
+        .bind(Utc::now())
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let rows_affected = result.rows_affected();
+        if rows_affected > 0 {
+            tracing::info!("Cleaned up {} expired queue entries", rows_affected);
+        }
+
+        Ok(rows_affected as i64)
+    }
+
+    /// Get dispute details
+    pub async fn get_dispute(&self, dispute_id: Uuid) -> Result<MatchDispute, ApiError> {
+        sqlx::query_as::<_, MatchDispute>("SELECT * FROM match_disputes WHERE id = $1")
+            .bind(dispute_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Dispute not found"))
     }
 }
