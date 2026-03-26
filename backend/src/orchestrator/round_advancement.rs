@@ -195,40 +195,24 @@ impl RoundAdvancementWorker {
             .try_get("id")
             .map_err(ApiError::database_error)?;
 
-        // Step 8: Pair advancing players: idx 0 vs 1, idx 2 vs 3, etc.
+        // Step 8: Pair advancing players. If there is an odd number, the first player
+        // (lowest match_number from the previous round, i.e. highest seed) gets a bye.
+        // Pairing then proceeds from index 1 onwards: idx 1 vs 2, idx 3 vs 4, etc.
         let now = Utc::now();
         let num_players = advancing_players.len();
-        let num_pairs = num_players / 2;
+        let has_bye = num_players % 2 != 0;
 
-        for match_idx in 0..num_pairs {
-            let player1 = advancing_players[match_idx * 2];
-            let player2 = advancing_players[match_idx * 2 + 1];
-            let match_number = (match_idx + 1) as i32;
+        // The bye player is always advancing_players[0] when the count is odd.
+        // Paired players start at index 1 (odd count) or 0 (even count).
+        let pair_start = if has_bye { 1 } else { 0 };
+        let num_pairs = (num_players - pair_start) / 2;
 
-            sqlx::query(
-                r#"
-                INSERT INTO tournament_matches (
-                    id, tournament_id, round_id, match_number,
-                    player1_id, player2_id, winner_id, status, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, NULL, 'pending', $7, $7)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(tournament_id)
-            .bind(new_round_id)
-            .bind(match_number)
-            .bind(player1)
-            .bind(player2)
-            .bind(now)
-            .execute(&self.db_pool)
-            .await
-            .map_err(ApiError::database_error)?;
-        }
+        // Insert the bye match first (match_number = 1) so that it always lands at the top
+        // of the bracket, keeping the highest seed's position consistent.
+        let mut next_match_number: i32 = 1;
 
-        // Step 9: Handle odd number of advancing players — last one gets a bye (auto-completed match).
-        if num_players % 2 != 0 {
-            let bye_player = advancing_players[num_players - 1];
-            let bye_match_number = (num_pairs + 1) as i32;
+        if has_bye {
+            let bye_player = advancing_players[0];
 
             sqlx::query(
                 r#"
@@ -241,12 +225,40 @@ impl RoundAdvancementWorker {
             .bind(Uuid::new_v4())
             .bind(tournament_id)
             .bind(new_round_id)
-            .bind(bye_match_number)
+            .bind(next_match_number)
             .bind(bye_player)
             .bind(now)
             .execute(&self.db_pool)
             .await
             .map_err(ApiError::database_error)?;
+
+            next_match_number += 1;
+        }
+
+        for match_idx in 0..num_pairs {
+            let player1 = advancing_players[pair_start + match_idx * 2];
+            let player2 = advancing_players[pair_start + match_idx * 2 + 1];
+
+            sqlx::query(
+                r#"
+                INSERT INTO tournament_matches (
+                    id, tournament_id, round_id, match_number,
+                    player1_id, player2_id, winner_id, status, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, NULL, 'pending', $7, $7)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tournament_id)
+            .bind(new_round_id)
+            .bind(next_match_number)
+            .bind(player1)
+            .bind(player2)
+            .bind(now)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+
+            next_match_number += 1;
         }
 
         Ok(())
@@ -278,6 +290,9 @@ impl RoundAdvancementWorker {
                   SELECT 1 FROM tournament_rounds tr2
                   WHERE tr2.tournament_id = tr.tournament_id
                     AND tr2.round_number > tr.round_number
+              )
+              AND EXISTS (
+                  SELECT 1 FROM tournament_matches tm2 WHERE tm2.round_id = tr.id
               )
             "#,
         )

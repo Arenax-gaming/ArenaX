@@ -16,7 +16,7 @@ impl PayoutSettler {
 
     /// Called when a tournament completes. Computes rankings and distributes prizes idempotently.
     pub async fn finalize_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
-        // Step 1: Verify tournament status is "Completed" (case-insensitive).
+        // Step 1: Verify tournament status is "completed" (case-insensitive).
         let tournament_row = sqlx::query(
             "SELECT status FROM tournaments WHERE id = $1",
         )
@@ -32,11 +32,20 @@ impl PayoutSettler {
 
         if status.to_lowercase() != "completed" {
             return Err(ApiError::bad_request(
-                "Tournament must be in Completed status to finalize payouts",
+                "Tournament must be in completed status to finalize payouts",
             ));
         }
 
-        // Step 2: Idempotency check — skip if Prize transactions already exist for this tournament.
+        // Step 2: Begin transaction and lock the tournament row to prevent concurrent payout races.
+        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
+
+        sqlx::query("SELECT id FROM tournaments WHERE id = $1 FOR UPDATE")
+            .bind(tournament_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::database_error)?;
+
+        // Step 3: Idempotency check inside the transaction — skip if Prize transactions already exist.
         let existing_row = sqlx::query(
             r#"
             SELECT COUNT(*) as cnt
@@ -46,7 +55,7 @@ impl PayoutSettler {
             "#,
         )
         .bind(format!("%tournament:{}%", tournament_id))
-        .fetch_one(&self.db_pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(ApiError::database_error)?;
 
@@ -59,18 +68,19 @@ impl PayoutSettler {
                 tournament_id = %tournament_id,
                 "Payouts already exist for tournament — skipping"
             );
+            tx.rollback().await.map_err(ApiError::database_error)?;
             return Ok(());
         }
 
-        // Step 3: Compute rankings for all participants.
+        // Step 4: Compute rankings for all participants (idempotent, uses pool directly — OK outside tx).
         self.compute_rankings(tournament_id).await?;
 
-        // Step 4: Get prize pool.
+        // Step 5: Get prize pool.
         let prize_pool_row = sqlx::query(
             "SELECT total_amount, currency, distribution_percentages FROM prize_pools WHERE tournament_id = $1",
         )
         .bind(tournament_id)
-        .fetch_optional(&self.db_pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::not_found("Prize pool not found for tournament"))?;
@@ -85,7 +95,7 @@ impl PayoutSettler {
             .try_get("distribution_percentages")
             .map_err(ApiError::database_error)?;
 
-        // Step 5: Parse distribution_percentages from JSON string (e.g., "[50, 30, 20]").
+        // Step 6: Parse distribution_percentages from JSON string (e.g., "[50, 30, 20]").
         let percentages: Vec<f64> = serde_json::from_str(&distribution_percentages_str)
             .map_err(|e| ApiError::bad_request(format!("Invalid distribution_percentages JSON: {}", e)))?;
 
@@ -93,7 +103,7 @@ impl PayoutSettler {
             return Err(ApiError::bad_request("distribution_percentages must not be empty"));
         }
 
-        // Step 6: Get ranked participants ordered by final_rank ASC.
+        // Step 7: Get ranked participants ordered by final_rank ASC.
         let participant_rows = sqlx::query(
             r#"
             SELECT user_id, final_rank
@@ -104,12 +114,9 @@ impl PayoutSettler {
             "#,
         )
         .bind(tournament_id)
-        .fetch_all(&self.db_pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(ApiError::database_error)?;
-
-        // Step 7: Execute payouts in a single DB transaction.
-        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
 
         let now = Utc::now();
         let num_recipients = percentages.len().min(participant_rows.len());
@@ -120,7 +127,10 @@ impl PayoutSettler {
             let rank: i32 = row.try_get("final_rank").map_err(ApiError::database_error)?;
             let percentage = percentages[i];
 
-            let prize_amount = (total_amount as f64 * percentage / 100.0) as i64;
+            let total_dec = rust_decimal::Decimal::from(total_amount);
+            let pct_dec = rust_decimal::Decimal::try_from(percentage).unwrap_or_default();
+            let prize_dec = total_dec * pct_dec / rust_decimal::Decimal::from(100);
+            let prize_amount = prize_dec.to_string().parse::<i64>().unwrap_or(0);
             let reference = format!("prize-{}-{}", tournament_id, user_id);
             let description = format!(
                 "Tournament prize payout tournament:{} rank:{}",
@@ -310,11 +320,11 @@ impl PayoutSettler {
             }
         }
 
-        // Step 3: Mark all participants with final_rank > 1 as 'Eliminated'.
+        // Step 3: Mark all participants with final_rank > 1 as 'eliminated'.
         sqlx::query(
             r#"
             UPDATE tournament_participants
-            SET status = 'Eliminated'
+            SET status = 'eliminated'
             WHERE tournament_id = $1
               AND final_rank > 1
             "#,

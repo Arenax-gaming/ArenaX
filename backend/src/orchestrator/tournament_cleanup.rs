@@ -38,10 +38,25 @@ impl TournamentCleanup {
 
     /// Cleans up a completed tournament:
     /// 1. Force-cancels stuck matches that have exceeded the timeout.
-    /// 2. Marks all non-winner participants as Eliminated.
+    /// 2. Marks all non-winner participants as eliminated.
     /// 3. Releases escrow balances back to participants.
     /// 4. Stamps `cleaned_up_at` on the tournament row.
     pub async fn cleanup_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        // Early exit if already cleaned up (idempotency guard).
+        let already_cleaned: bool = sqlx::query(
+            "SELECT cleaned_up_at IS NOT NULL as cleaned FROM tournaments WHERE id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))
+        .and_then(|row| row.try_get::<bool, _>("cleaned").map_err(|e| ApiError::database_error(e)))
+        .unwrap_or(false);
+
+        if already_cleaned {
+            return Ok(());
+        }
+
         // Step 1: Force-cancel stuck matches (pending or in_progress) older than the timeout.
         let cutoff = Utc::now() - chrono::Duration::hours(self.config.stuck_match_timeout_hours);
 
@@ -85,14 +100,14 @@ impl TournamentCleanup {
             }
         }
 
-        // Step 2: Mark all participants with final_rank > 1 as Eliminated (if not already).
+        // Step 2: Mark all participants with final_rank > 1 as eliminated (if not already).
         sqlx::query(
             r#"
             UPDATE tournament_participants
-            SET status = 'Eliminated', eliminated_at = NOW()
+            SET status = 'eliminated', eliminated_at = NOW()
             WHERE tournament_id = $1
               AND final_rank > 1
-              AND status != 'Eliminated'
+              AND status != 'eliminated'
             "#,
         )
         .bind(tournament_id)
