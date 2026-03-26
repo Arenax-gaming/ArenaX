@@ -6,15 +6,16 @@ mod config;
 mod db;
 mod api_error;
 mod telemetry;
-mod middleware;
-mod auth;
-mod http;
-mod service;
+// mod middleware; // temporarily disabled: see lib.rs for details
+// mod auth;
+// mod http;
+// mod service;
+mod realtime;
 
 use crate::config::Config;
 use crate::db::create_pool;
 use crate::telemetry::init_telemetry;
-use crate::middleware::cors_middleware;
+// use crate::middleware::cors_middleware;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -38,12 +39,12 @@ async fn main() -> io::Result<()> {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
             // .app_data(web::Data::new(redis_client.clone()))
-            .wrap(cors_middleware())
+            // .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
-            .service(
-                web::scope("/api")
-                    .route("/health", web::get().to(crate::http::health::health_check))
-            )
+            // .service(
+            //     web::scope("/api")
+            //         .route("/health", web::get().to(crate::http::health::health_check))
+            // )
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();
