@@ -9,6 +9,7 @@ mod db;
 mod http;
 mod middleware;
 mod service;
+mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
