@@ -21,3 +21,4 @@ pub use soroban_service::{
 pub use stellar_service::StellarService;
 pub use tournament_service::TournamentService;
 pub use wallet_service::WalletService;
+pub use crate::realtime::event_bus::EventBus;
