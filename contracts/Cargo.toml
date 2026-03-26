@@ -1,16 +1,28 @@
 [workspace]
 members = [
     "example",
+    "dispute-resolution",
     "protocol-params",
     "user_identity_contract",
     "reputation_aggregation",
     "match_contract",
+    "match_escrow_vault",
+    "match-lifecycle",
     "registry",
+    "slashing_contract",
+    "governance_multisig",
+    "tournament_finalizer",
+    "reputation-index",
+    "contract-registry",
+    "auth-gateway",
+    "ax-token",
+    "anti-cheat-oracle",
+    "staking-manager",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-soroban-sdk = "23.0.2"
+soroban-sdk = "23.5.2"
 
 [workspace.package]
 version = "0.1.0"

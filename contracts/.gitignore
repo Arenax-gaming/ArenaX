@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Contracts .gitignore
 
 # Rust
@@ -26,6 +25,7 @@ Thumbs.db
 
 # Test artifacts
 test-results/
+**/test_snapshots/
 
 # Build artifacts
 build/
@@ -35,6 +35,3 @@ dist/
 *.pem
 *.key
 secrets/
-=======
-target
->>>>>>> upstream/main

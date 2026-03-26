@@ -1,11 +1,11 @@
 #![cfg(test)]
 
+use crate::storage::ReputationConfig;
 use crate::{ArenaXReputationAggregation, ArenaXReputationAggregationClient, ReputationError};
 use soroban_sdk::{
     testutils::{Address as _, Events},
     Address, Env, Vec,
 };
-use crate::storage::ReputationConfig;
 
 #[test]
 fn test_initialize() {
@@ -219,7 +219,7 @@ fn test_score_floor() {
         win_weight: 25,
         loss_weight: -100, // High penalty
         draw_weight: 5,
-        base_score: 50,   // Low starting score
+        base_score: 50, // Low starting score
         decay_factor: 0,
     };
     client.update_config(&harsh_config);
@@ -284,7 +284,7 @@ fn test_batch_reputations() {
 
     assert_eq!(reputations.len(), 2);
     assert_eq!(reputations.get(0).unwrap().score, 1025); // Win
-    assert_eq!(reputations.get(1).unwrap().score, 990);  // Loss
+    assert_eq!(reputations.get(1).unwrap().score, 990); // Loss
 }
 
 #[test]

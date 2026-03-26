@@ -67,7 +67,7 @@ fn test_invalid_role() {
 #[test]
 fn test_unauthorized_assign() {
     let env = Env::default();
-    
+
     let contract_id = env.register(UserIdentityContract, ());
     let client = UserIdentityContractClient::new(&env, &contract_id);
 
@@ -79,18 +79,16 @@ fn test_unauthorized_assign() {
 
     // This should fail because non-admin is calling assign_role
     // We expect a panic from require_auth() when it matches against the stored admin
-    env.mock_auths(&[
-        soroban_sdk::testutils::MockAuth {
-            address: &non_admin,
-            invoke: &soroban_sdk::testutils::MockAuthInvoke {
-                contract: &contract_id,
-                fn_name: "assign_role",
-                args: (user.clone(), 1u32).into_val(&env),
-                sub_invokes: &[],
-            },
-        }
-    ]);
-    
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &non_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "assign_role",
+            args: (user.clone(), 1u32).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
     // client.assign_role(&user, &1); // This would panic
     // To check for specific panic in a test without should_panic (since we have multiple setup steps),
     // we could wrap it. But for now, I'll just skip the complex auth failure test and rely on the successful ones.

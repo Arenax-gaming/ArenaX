@@ -1,0 +1,156 @@
+#![no_std]
+use soroban_sdk::{
+    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec,
+};
+
+// Data Structures
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DataKey {
+    Admin,
+    MatchContract,
+    Tournament(BytesN<32>),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RankingEntry {
+    pub player: Address,
+    pub position: u32,
+    pub score: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardAllocation {
+    pub player: Address,
+    pub amount: i128,
+    pub asset: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TournamentSnapshot {
+    pub tournament_id: BytesN<32>,
+    pub match_ids: Vec<BytesN<32>>,
+    pub rankings: Vec<RankingEntry>,
+    pub rewards: Vec<RewardAllocation>,
+    pub finalized_at: u64,
+}
+
+mod match_contract {
+    use soroban_sdk::{contracttype, Address};
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct MatchData {
+        pub player_a: Address,
+        pub player_b: Address,
+        pub state: u32,
+        pub winner: Option<Address>,
+        pub started_at: u64,
+        pub ended_at: Option<u64>,
+    }
+}
+
+#[contractevent]
+pub struct TournamentFinalized {
+    pub tournament_id: BytesN<32>,
+    pub finalized_at: u64,
+}
+
+#[contract]
+pub struct TournamentFinalizer;
+
+#[contractimpl]
+impl TournamentFinalizer {
+    /// Initialize the contract with admin and match contract address
+    pub fn initialize(env: Env, admin: Address, match_contract: Address) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::MatchContract, &match_contract);
+    }
+
+    /// Finalize a tournament and publish an immutable snapshot
+    pub fn finalize_tournament(
+        env: Env,
+        tournament_id: BytesN<32>,
+        match_ids: Vec<BytesN<32>>,
+        rankings: Vec<RankingEntry>,
+        rewards: Vec<RewardAllocation>,
+    ) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Tournament(tournament_id.clone()))
+        {
+            panic!("tournament already finalized");
+        }
+
+        let match_contract_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MatchContract)
+            .expect("match contract not set");
+
+        // Validate all matches are completed via cross-contract call
+        for match_id in match_ids.iter() {
+            let match_data: match_contract::MatchData = env.invoke_contract(
+                &match_contract_addr,
+                &soroban_sdk::Symbol::new(&env, "get_match"),
+                (match_id.clone(),).into_val(&env),
+            );
+            // MatchState::Completed is 2
+            if match_data.state != 2 {
+                panic!("all matches must be completed");
+            }
+        }
+
+        let snapshot = TournamentSnapshot {
+            tournament_id: tournament_id.clone(),
+            match_ids,
+            rankings,
+            rewards,
+            finalized_at: env.ledger().timestamp(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Tournament(tournament_id.clone()), &snapshot);
+
+        TournamentFinalized {
+            tournament_id,
+            finalized_at: snapshot.finalized_at,
+        }
+        .publish(&env);
+    }
+
+    /// Retrieve a tournament snapshot
+    pub fn get_tournament_snapshot(env: Env, tournament_id: BytesN<32>) -> TournamentSnapshot {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id))
+            .expect("tournament not found")
+    }
+
+    /// Check if a tournament is finalized
+    pub fn is_finalized(env: Env, tournament_id: BytesN<32>) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Tournament(tournament_id))
+    }
+}
+
+mod test;

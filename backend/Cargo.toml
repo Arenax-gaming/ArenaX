@@ -10,14 +10,14 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal"] }
 validator = { version = "0.20.0", features = ["derive"] }
-rust_decimal = "1.40.0"
+rust_decimal = { version = "1.40.0", features = ["db-postgres"] }
 actix-web = "4.12.1"
-actix = "0.13"
-actix-web-actors = "4.3"
 jsonwebtoken = "9.2"
 bcrypt = "0.15"
+actix = "0.13"
+actix-web-actors = "4.3"
 anyhow = "1.0"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tracing = "0.1"
@@ -25,11 +25,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "std"] }
 sha2 = "0.10"
 dotenvy = "0.15"
 actix-cors = "0.6"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 base64 = "0.22"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
+futures = "0.3"
 futures-util = "0.3"
+hex = "0.4"
+
+# Security: pin patched versions of transitive deps
+quinn-proto = "0.11.14"
 
 [dev-dependencies]
 tokio-test = "0.4"

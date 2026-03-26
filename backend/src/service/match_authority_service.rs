@@ -442,18 +442,12 @@ impl MatchAuthorityService {
     // =============================================================================
 
     /// Get match by ID
-    pub async fn get_match(
-        &self,
-        match_id: Uuid,
-    ) -> Result<MatchAuthorityResponse, ApiError> {
+    pub async fn get_match(&self, match_id: Uuid) -> Result<MatchAuthorityResponse, ApiError> {
         self.get_match_with_transitions(match_id).await
     }
 
     /// Get match entity (internal)
-    async fn get_match_entity(
-        &self,
-        match_id: Uuid,
-    ) -> Result<MatchAuthorityEntity, ApiError> {
+    async fn get_match_entity(&self, match_id: Uuid) -> Result<MatchAuthorityEntity, ApiError> {
         sqlx::query_as!(
             MatchAuthorityEntity,
             r#"
@@ -541,10 +535,7 @@ impl MatchAuthorityService {
 
     /// Reconcile match state with blockchain
     /// Checks if on-chain and off-chain states match
-    pub async fn reconcile_match(
-        &self,
-        match_id: Uuid,
-    ) -> Result<bool, ApiError> {
+    pub async fn reconcile_match(&self, match_id: Uuid) -> Result<bool, ApiError> {
         let match_entity = self.get_match_entity(match_id).await?;
 
         info!(
@@ -798,10 +789,7 @@ impl MatchAuthorityService {
     }
 
     /// Get match state from blockchain
-    async fn get_match_state_from_chain(
-        &self,
-        on_chain_match_id: &str,
-    ) -> Result<String, String> {
+    async fn get_match_state_from_chain(&self, on_chain_match_id: &str) -> Result<String, String> {
         // In a real implementation, this would:
         // 1. Query the contract state
         // 2. Decode the response
@@ -833,10 +821,7 @@ mod tests {
 
         // Valid transition
         assert!(service
-            .validate_transition(
-                &MatchAuthorityState::Created,
-                &MatchAuthorityState::Started
-            )
+            .validate_transition(&MatchAuthorityState::Created, &MatchAuthorityState::Started)
             .is_ok());
 
         // Invalid transition

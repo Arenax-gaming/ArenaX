@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/common/Logo";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { Button } from "@/components/ui/Button";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { UserMenu } from "@/components/layout/UserMenu";
+import { ProtectedLink } from "@/components/navigation/ProtectedLink";
 import { useAuth } from "@/hooks/useAuth";
 
 const isActiveRoute = (pathname: string, href: string) =>
@@ -19,7 +22,7 @@ export function Navbar() {
   const authItems = loading
     ? []
     : user
-      ? authNav.authenticated
+      ? [] // Authenticated: show UserMenu instead of auth links
       : authNav.unauthenticated;
 
   return (
@@ -29,34 +32,51 @@ export function Navbar() {
         <nav className="flex items-center gap-6 text-sm font-medium">
           {mainNav.map((item) => {
             const isActive = isActiveRoute(pathname, item.href);
+            const linkClass = cn(
+              "transition-colors",
+              isActive
+                ? "text-foreground"
+                : "text-foreground/60 hover:text-foreground/80"
+            );
+            const content = item.label;
+
+            if (item.href === "/wallet") {
+              return (
+                <ProtectedLink
+                  key={item.href}
+                  href={item.href}
+                  className={linkClass}
+                  fallback={
+                    <Link href={`/login?redirect=${encodeURIComponent(pathname || "/")}`} className={linkClass}>
+                      {content}
+                    </Link>
+                  }
+                >
+                  {content}
+                </ProtectedLink>
+              );
+            }
+
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={cn(
-                  "transition-colors",
-                  isActive
-                    ? "text-foreground"
-                    : "text-foreground/60 hover:text-foreground/80",
-                )}
+                className={linkClass}
                 aria-current={isActive ? "page" : undefined}
               >
-                {item.label}
+                {content}
               </Link>
             );
           })}
         </nav>
       </div>
       <div className="flex items-center gap-2">
+        <NotificationBell />
+        {user && <UserMenu />}
         {authItems.map((item) => {
           const isActive = isActiveRoute(pathname, item.href);
-          const variant = user
-            ? item.label === "Wallet"
-              ? "outline"
-              : "ghost"
-            : item.label === "Register"
-              ? "primary"
-              : "ghost";
+          const variant =
+            item.label === "Register" ? "primary" : "ghost";
 
           return (
             <Link

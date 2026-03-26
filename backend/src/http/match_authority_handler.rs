@@ -183,10 +183,7 @@ pub async fn get_match(
 
     info!(match_id = %match_id, "Received get match request");
 
-    let result = state
-        .match_authority_service
-        .get_match(match_id)
-        .await?;
+    let result = state.match_authority_service.get_match(match_id).await?;
 
     Ok(HttpResponse::Ok().json(result))
 }

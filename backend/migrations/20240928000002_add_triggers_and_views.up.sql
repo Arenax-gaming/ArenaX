@@ -85,7 +85,7 @@ SELECT
     u.display_name,
     tp.status AS participation_status,
     COUNT(DISTINCT CASE WHEN tm.winner_id = u.id THEN tm.id END) AS wins,
-    COUNT(DISTINCT CASE WHEN (tm.player1_id = u.id OR tm.player2_id = u.id) AND tm.status = 3 THEN tm.id END) AS matches_played,
+    COUNT(DISTINCT CASE WHEN (tm.player1_id = u.id OR tm.player2_id = u.id) AND tm.status = 'completed' THEN tm.id END) AS matches_played,
     COALESCE(SUM(CASE WHEN tm.winner_id = u.id THEN 1 ELSE 0 END), 0) AS total_score,
     ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY
         COUNT(DISTINCT CASE WHEN tm.winner_id = u.id THEN tm.id END) DESC,

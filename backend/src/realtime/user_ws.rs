@@ -1,4 +1,4 @@
-use crate::realtime::events::{ClientMessage, DeliverEvent, RealtimeEvent, WsEnvelope};
+use crate::realtime::events::{ClientMessage, DeliverEvent, WsEnvelope};
 use crate::realtime::session_registry::SessionRegistry;
 use actix::{Actor, ActorContext, AsyncContext, Handler, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};

@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -20,6 +20,7 @@ pub struct Match {
     pub player1_elo_after: Option<i32>,
     pub player2_elo_after: Option<i32>,
     pub scheduled_time: Option<DateTime<Utc>>,
+    pub scheduled_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -27,6 +28,8 @@ pub struct Match {
     pub game_mode: String,
     pub map: Option<String>,
     pub match_duration: Option<i32>, // in seconds
+    pub round_number: Option<i32>,
+    pub match_number: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -35,7 +38,7 @@ pub struct MatchScore {
     pub match_id: Uuid,
     pub player_id: Uuid,
     pub score: i32,
-    pub proof_url: Option<String>, // URL to screenshot/video proof
+    pub proof_url: Option<String>,      // URL to screenshot/video proof
     pub telemetry_data: Option<String>, // JSON string of game telemetry
     pub submitted_at: DateTime<Utc>,
     pub verified: bool,
@@ -55,7 +58,9 @@ pub struct MatchDispute {
     pub admin_reviewer_id: Option<Uuid>,
     pub admin_notes: Option<String>,
     pub resolution: Option<String>,
+    pub resolved_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub resolved_at: Option<DateTime<Utc>>,
 }
 
@@ -89,6 +94,8 @@ pub struct UserElo {
     pub win_streak: i32,
     pub loss_streak: i32,
     pub last_updated: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -107,51 +114,51 @@ pub struct EloHistory {
 }
 
 // Enums
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum MatchType {
-    Tournament = 0,
-    Casual = 1,
-    Ranked = 2,
-    Practice = 3,
+    Tournament,
+    Casual,
+    Ranked,
+    Practice,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum MatchStatus {
-    Pending = 0,
-    Scheduled = 1,
-    InProgress = 2,
-    Completed = 3,
-    Disputed = 4,
-    Cancelled = 5,
-    Abandoned = 6,
+    Pending,
+    Scheduled,
+    InProgress,
+    Completed,
+    Disputed,
+    Cancelled,
+    Abandoned,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum DisputeStatus {
-    Pending = 0,
-    UnderReview = 1,
-    Resolved = 2,
-    Rejected = 3,
+    Pending,
+    UnderReview,
+    Resolved,
+    Rejected,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum QueueStatus {
-    Waiting = 0,
-    Matched = 1,
-    Expired = 2,
-    Cancelled = 3,
+    Waiting,
+    Matched,
+    Expired,
+    Cancelled,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum MatchResult {
-    Win = 0,
-    Loss = 1,
-    Draw = 2,
+    Win,
+    Loss,
+    Draw,
 }
 
 // DTOs for API requests/responses
@@ -225,7 +232,7 @@ pub struct EloResponse {
     pub win_rate: f64,
     pub win_streak: i32,
     pub loss_streak: i32,
-    pub rank: Option<i32>, // Global rank
+    pub rank: Option<i32>,       // Global rank
     pub percentile: Option<f64>, // Top X% of players
 }
 
@@ -237,4 +244,20 @@ pub struct DisputeListResponse {
     pub total: i64,
     pub page: i32,
     pub per_page: i32,
+}
+
+impl std::str::FromStr for MatchStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(MatchStatus::Pending),
+            "scheduled" => Ok(MatchStatus::Scheduled),
+            "in_progress" => Ok(MatchStatus::InProgress),
+            "completed" => Ok(MatchStatus::Completed),
+            "disputed" => Ok(MatchStatus::Disputed),
+            "cancelled" => Ok(MatchStatus::Cancelled),
+            "abandoned" => Ok(MatchStatus::Abandoned),
+            _ => Ok(MatchStatus::Pending),
+        }
+    }
 }

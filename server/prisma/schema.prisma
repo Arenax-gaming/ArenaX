@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String
+  role          String    @default("USER")
+  bio           String?
+  socials       Json?
+  walletAddress String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  projects      Project[]
+  wallet        UserWallet?
+  refreshTokens RefreshToken[]
+}
+
+model UserWallet {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  publicKey          String   @unique
+  encryptedSecretKey String
+  encryptionVersion  Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model RefreshToken {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String
+  tokenHash         String   @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  parentTokenId     String?
+  replacedByTokenId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  payments    Payment[]
+}
+
+model Payment {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  fromAddress String
+  toAddress   String
+  amount      String
+  asset       String   @default("USDC")
+  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  txHash      String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum TxStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model BlockchainTransaction {
+  id        String   @id @default(uuid())
+  userId    String?
+  txHash    String   @unique
+  type      String   // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
+  status    TxStatus @default(PENDING)
+  payload   Json?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BlockchainEvent {
+  id          String   @id @default(uuid())
+  eventType   String   // e.g., PAY_DONE
+  contractId  String
+  txHash      String
+  ledger      Int
+  data        Json
+  createdAt   DateTime @default(now())
+}

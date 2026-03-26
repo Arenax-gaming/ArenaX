@@ -53,10 +53,10 @@ impl From<jsonwebtoken::errors::Error> for JwtError {
 /// JWT Claims structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,        // Subject (user ID)
-    pub exp: i64,           // Expiration time
-    pub iat: i64,           // Issued at
-    pub jti: String,        // JWT ID (unique token identifier)
+    pub sub: String, // Subject (user ID)
+    pub exp: i64,    // Expiration time
+    pub iat: i64,    // Issued at
+    pub jti: String, // JWT ID (unique token identifier)
     pub token_type: TokenType,
     pub device_id: Option<String>,
     pub session_id: String,
@@ -248,8 +248,12 @@ impl JwtService {
         roles: Vec<String>,
         device_id: Option<String>,
     ) -> Result<TokenPair, JwtError> {
-        let access_token = self.generate_access_token(user_id, roles.clone(), device_id.clone()).await?;
-        let refresh_token = self.generate_refresh_token(user_id, roles, device_id).await?;
+        let access_token = self
+            .generate_access_token(user_id, roles.clone(), device_id.clone())
+            .await?;
+        let refresh_token = self
+            .generate_refresh_token(user_id, roles, device_id)
+            .await?;
 
         Ok(TokenPair {
             access_token,
@@ -323,8 +327,8 @@ impl JwtService {
             return Err(JwtError::InvalidToken);
         }
 
-        let user_id = Uuid::parse_str(&claims.sub)
-            .map_err(|e| JwtError::TokenValidation(e.to_string()))?;
+        let user_id =
+            Uuid::parse_str(&claims.sub).map_err(|e| JwtError::TokenValidation(e.to_string()))?;
 
         // Generate new token pair
         let token_pair = self
@@ -354,7 +358,8 @@ impl JwtService {
         let blacklist_key = format!("blacklist:{}", claims.jti);
 
         let mut conn = self.redis.clone();
-        conn.set_ex(&blacklist_key, reason, exp_duration as u64).await?;
+        conn.set_ex(&blacklist_key, reason, exp_duration as u64)
+            .await?;
 
         // Increment analytics
         self.increment_analytics("blacklisted").await?;
@@ -412,8 +417,11 @@ impl JwtService {
         // Add to user's active sessions
         let user_sessions_key = format!("user_sessions:{}", user_id);
         conn.sadd(&user_sessions_key, session_id).await?;
-        conn.expire(&user_sessions_key, self.config.refresh_token_expiry.num_seconds() as i64)
-            .await?;
+        conn.expire(
+            &user_sessions_key,
+            self.config.refresh_token_expiry.num_seconds() as i64,
+        )
+        .await?;
 
         Ok(())
     }
@@ -435,13 +443,13 @@ impl JwtService {
         let session_json: Option<String> = conn.get(&session_key).await?;
 
         if let Some(json) = session_json {
-            let mut session: SessionData = serde_json::from_str(&json)
-                .map_err(|e| JwtError::RedisError(e.to_string()))?;
+            let mut session: SessionData =
+                serde_json::from_str(&json).map_err(|e| JwtError::RedisError(e.to_string()))?;
 
             session.last_activity = Utc::now().timestamp();
 
-            let updated_json = serde_json::to_string(&session)
-                .map_err(|e| JwtError::RedisError(e.to_string()))?;
+            let updated_json =
+                serde_json::to_string(&session).map_err(|e| JwtError::RedisError(e.to_string()))?;
 
             conn.set_ex(
                 &session_key,

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "../styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthProvider } from "@/hooks/useAuth";
-
-const inter = Inter({ subsets: ["latin"] });
+import { TxStatusProvider } from "@/hooks/useTxStatus";
+import { WalletProvider } from "@/hooks/useWallet";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -19,16 +20,24 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            <AppLayout>{children}</AppLayout>
-          </AuthProvider>
+          <QueryProvider>
+            <AuthProvider>
+              <WalletProvider>
+                <TxStatusProvider>
+                  <NotificationProvider>
+                    <AppLayout>{children}</AppLayout>
+                  </NotificationProvider>
+                </TxStatusProvider>
+              </WalletProvider>
+            </AuthProvider>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

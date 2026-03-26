@@ -1,12 +1,15 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use validator::Validate;
 
 /// Match Authority State - represents the finite state machine states
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "match_authority_state", rename_all = "SCREAMING_SNAKE_CASE")]
+#[sqlx(
+    type_name = "match_authority_state",
+    rename_all = "SCREAMING_SNAKE_CASE"
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MatchAuthorityState {
     Created,
@@ -242,7 +245,10 @@ mod tests {
     #[test]
     fn test_valid_next_states() {
         let created = MatchAuthorityState::Created;
-        assert_eq!(created.valid_next_states(), vec![MatchAuthorityState::Started]);
+        assert_eq!(
+            created.valid_next_states(),
+            vec![MatchAuthorityState::Started]
+        );
 
         let completed = MatchAuthorityState::Completed;
         let next_states = completed.valid_next_states();

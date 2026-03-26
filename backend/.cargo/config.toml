@@ -2,4 +2,6 @@
 
 [env]
 # Tell SQLx to use offline mode (cached query metadata) for compilation
-SQLX_OFFLINE = "true"
+# NOTE: Commented out because it requires .sqlx cache to be pre-generated
+# To enable offline mode, run: cargo sqlx prepare
+# SQLX_OFFLINE = "true"

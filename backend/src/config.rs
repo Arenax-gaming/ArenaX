@@ -121,8 +121,14 @@ impl Config {
                 soroban_contract_reputation,
                 soroban_contract_arenax_token,
             },
-            ai: AiConfig { model_path: ai_model_path },
-            server: ServerConfig { port, host, rust_log },
+            ai: AiConfig {
+                model_path: ai_model_path,
+            },
+            server: ServerConfig {
+                port,
+                host,
+                rust_log,
+            },
             rate_limit: RateLimitConfig {
                 requests: rate_limit_requests,
                 window: rate_limit_window,

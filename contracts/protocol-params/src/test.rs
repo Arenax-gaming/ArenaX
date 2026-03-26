@@ -1,3 +1,4 @@
+#![allow(clippy::duplicated_attributes)]
 #![cfg(test)]
 #![allow(deprecated)]
 
@@ -31,7 +32,7 @@ fn test_set_and_get_param() {
 
     let retrieved = client.get_param(&key, &None);
     assert_eq!(retrieved, Some(value));
-    
+
     let version = client.get_latest_version(&key);
     assert_eq!(version, 1);
 }

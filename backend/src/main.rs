@@ -3,22 +3,24 @@ use std::io;
 use std::sync::Arc;
 use tokio::signal;
 
+mod api_error;
+mod auth;
 mod config;
 mod db;
-mod api_error;
-mod telemetry;
-// mod middleware; // temporarily disabled: pre-existing compilation issues
-// mod auth;
-// mod http;
-// mod service;
+mod http;
+mod middleware;
+mod models;
 mod realtime;
+mod service;
+mod telemetry;
 
 use crate::config::Config;
 use crate::db::create_pool;
-use crate::telemetry::init_telemetry;
+use crate::middleware::cors_middleware;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
+use crate::telemetry::init_telemetry;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -53,7 +55,11 @@ async fn main() -> io::Result<()> {
     );
     let _broadcaster_handles = broadcaster.start();
 
-    tracing::info!("Starting ArenaX backend server on {}:{}", config.server.host, config.server.port);
+    tracing::info!(
+        "Starting ArenaX backend server on {}:{}",
+        config.server.host,
+        config.server.port
+    );
 
     let server = HttpServer::new(move || {
         App::new()
@@ -61,7 +67,32 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
+            .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
+            .service(
+                web::scope("/api")
+                    .route("/health", web::get().to(crate::http::health::health_check))
+                    .route(
+                        "/notifications",
+                        web::get().to(crate::http::notification_handler::get_notifications),
+                    )
+                    .route(
+                        "/notifications",
+                        web::post().to(crate::http::notification_handler::create_notification),
+                    )
+                    .route(
+                        "/notifications/read-all",
+                        web::patch().to(crate::http::notification_handler::mark_all_read),
+                    )
+                    .route(
+                        "/notifications/{id}/read",
+                        web::patch().to(crate::http::notification_handler::mark_notification_read),
+                    )
+                    .route(
+                        "/notifications/{id}",
+                        web::delete().to(crate::http::notification_handler::delete_notification),
+                    ),
+            )
             .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?
@@ -70,7 +101,9 @@ async fn main() -> io::Result<()> {
     // Graceful shutdown
     let server_handle = server.handle();
     tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+        signal::ctrl_c()
+            .await
+            .expect("Failed to listen for shutdown signal");
         tracing::info!("Shutdown signal received, stopping server...");
         server_handle.stop(true).await;
     });

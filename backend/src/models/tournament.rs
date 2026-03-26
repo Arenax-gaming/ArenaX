@@ -50,16 +50,16 @@ impl std::fmt::Display for TournamentType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum TournamentStatus {
-    Draft = 0,
-    Upcoming = 1,
-    RegistrationOpen = 2,
-    RegistrationClosed = 3,
-    InProgress = 4,
-    Completed = 5,
-    Cancelled = 6,
+    Draft,
+    Upcoming,
+    RegistrationOpen,
+    RegistrationClosed,
+    InProgress,
+    Completed,
+    Cancelled,
 }
 
 impl std::fmt::Display for TournamentStatus {
@@ -168,17 +168,20 @@ pub struct TournamentParticipant {
     pub final_rank: Option<i32>,
     pub prize_amount: Option<i64>,
     pub prize_currency: Option<String>,
+    pub entry_fee_currency: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum ParticipantStatus {
-    Registered = 0,
-    Paid = 1,
-    Active = 2,
-    Eliminated = 3,
-    Disqualified = 4,
-    Withdrawn = 5,
+    Registered,
+    Paid,
+    Active,
+    Eliminated,
+    Disqualified,
+    Withdrawn,
 }
 
 impl std::fmt::Display for ParticipantStatus {
@@ -223,7 +226,7 @@ pub struct PrizePool {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JoinTournamentRequest {
-    pub payment_method: String, // "fiat" or "arenax_token"
+    pub payment_method: String,            // "fiat" or "arenax_token"
     pub payment_reference: Option<String>, // For fiat payments
 }
 
@@ -258,7 +261,7 @@ impl std::fmt::Display for BracketType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "round_type", rename_all = "lowercase")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum RoundType {
     Qualification,
     Elimination,
@@ -278,7 +281,7 @@ impl std::fmt::Display for RoundType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "round_status", rename_all = "lowercase")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum RoundStatus {
     Pending,
     InProgress,
@@ -298,7 +301,7 @@ impl std::fmt::Display for RoundStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "match_status", rename_all = "lowercase")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum MatchStatus {
     Pending,
     Scheduled,
@@ -358,53 +361,44 @@ pub struct TournamentMatch {
 
 // ===== Type Conversions =====
 
-impl From<i32> for BracketType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => BracketType::SingleElimination,
-            1 => BracketType::DoubleElimination,
-            2 => BracketType::RoundRobin,
-            3 => BracketType::Swiss,
-            _ => BracketType::SingleElimination,
+impl std::str::FromStr for RoundType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "qualification" => Ok(RoundType::Qualification),
+            "elimination" => Ok(RoundType::Elimination),
+            "semifinal" => Ok(RoundType::Semifinal),
+            "final" => Ok(RoundType::Final),
+            _ => Ok(RoundType::Elimination),
         }
     }
 }
 
-impl From<i32> for RoundType {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => RoundType::Qualification,
-            1 => RoundType::Elimination,
-            2 => RoundType::Semifinal,
-            3 => RoundType::Final,
-            _ => RoundType::Elimination,
+impl std::str::FromStr for RoundStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(RoundStatus::Pending),
+            "in_progress" => Ok(RoundStatus::InProgress),
+            "completed" => Ok(RoundStatus::Completed),
+            "cancelled" => Ok(RoundStatus::Cancelled),
+            _ => Ok(RoundStatus::Pending),
         }
     }
 }
 
-impl From<i32> for RoundStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => RoundStatus::Pending,
-            1 => RoundStatus::InProgress,
-            2 => RoundStatus::Completed,
-            3 => RoundStatus::Cancelled,
-            _ => RoundStatus::Pending,
-        }
-    }
-}
-
-impl From<i32> for MatchStatus {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => MatchStatus::Pending,
-            1 => MatchStatus::Scheduled,
-            2 => MatchStatus::InProgress,
-            3 => MatchStatus::Completed,
-            4 => MatchStatus::Disputed,
-            5 => MatchStatus::Cancelled,
-            6 => MatchStatus::Abandoned,
-            _ => MatchStatus::Pending,
+impl std::str::FromStr for MatchStatus {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(MatchStatus::Pending),
+            "scheduled" => Ok(MatchStatus::Scheduled),
+            "in_progress" => Ok(MatchStatus::InProgress),
+            "completed" => Ok(MatchStatus::Completed),
+            "disputed" => Ok(MatchStatus::Disputed),
+            "cancelled" => Ok(MatchStatus::Cancelled),
+            "abandoned" => Ok(MatchStatus::Abandoned),
+            _ => Ok(MatchStatus::Pending),
         }
     }
 }

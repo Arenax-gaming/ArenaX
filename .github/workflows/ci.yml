@@ -2,15 +2,14 @@ name: CI
 
 on:
   push:
-<<<<<<< HEAD
-    branches: [ main, develop ]
+    branches: [ main, dev, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, dev, develop ]
 
 jobs:
   # Frontend CI
   frontend:
-    name: Frontend Tests
+    name: Frontend
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,101 +23,55 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'yarn'
-        cache-dependency-path: frontend/yarn.lock
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
     
     - name: Install dependencies
-      run: yarn install --frozen-lockfile
+      run: npm ci
     
     - name: Lint code
-      run: yarn lint
-    
-    - name: Type check
-      run: yarn type-check
-    
-    - name: Run tests
-      run: yarn test:coverage
+      run: npm run lint
     
     - name: Build
-      run: yarn build
+      run: npm run build
+    
+    - name: Run tests
+      run: npm test
 
-  # Backend CI
-  backend:
-    name: Backend Tests
+  # Server (TypeScript) CI
+  server:
+    name: Server
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./backend
-    
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: arenax_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      
-      redis:
-        image: redis:6
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
+        working-directory: ./server
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
       with:
-        toolchain: stable
-        components: rustfmt, clippy
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: server/package-lock.json
     
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    - name: Install dependencies
+      run: npm ci
     
-    - name: Cache cargo index
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    - name: Generate Prisma Client
+      run: npm run prisma:generate
     
-    - name: Cache cargo build
-      uses: actions/cache@v3
-      with:
-        path: target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    - name: Type check (Lint)
+      run: npm run lint
     
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-    
-    - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
-    
-    - name: Run tests
-      run: cargo test
-      env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/arenax_test
-        REDIS_URL: redis://localhost:6379
-        JWT_SECRET: test-secret-key
-        STELLAR_NETWORK_URL: https://horizon-testnet.stellar.org
+    - name: Build
+      run: npm run build
 
-  # Contracts CI
+  # Contracts CI (Rust)
   contracts:
-    name: Contracts Tests
+    name: Contracts
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -129,26 +82,21 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
         components: rustfmt, clippy
-        target: wasm32-unknown-unknown
     
     - name: Install wasm target
       run: rustup target add wasm32-unknown-unknown
     
-    - name: Cache cargo registry
+    - name: Cache cargo
       uses: actions/cache@v3
       with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: Cache cargo build
-      uses: actions/cache@v3
-      with:
-        path: target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          contracts/target
+        key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock') }}
     
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -163,109 +111,3 @@ jobs:
       run: cargo test
 
   # Security scan
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: [frontend, backend, contracts]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-    
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: 'trivy-results.sarif'
-=======
-    branches: [ main, dev ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-
-    - name: Cache Rust dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          backend/target
-          contracts/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    - name: Cache Node.js dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.npm
-          frontend/node_modules
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
-
-    - name: Check Rust code
-      run: |
-        cd backend && cargo check
-        cd ../contracts && cargo check
-
-    - name: Run Rust tests
-      run: |
-        cd backend && cargo test
-        cd ../contracts && cargo test
-
-    - name: Install frontend dependencies
-      run: cd frontend && npm ci
-
-    - name: Run frontend tests
-      run: cd frontend && npm test
-
-    - name: Build frontend
-      run: cd frontend && npm run build
-
-  lint:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-
-    - name: Run Rust lints
-      run: |
-        cd backend && cargo clippy -- -D warnings
-        cd ../contracts && cargo clippy -- -D warnings
-
-    - name: Run frontend lints
-      run: cd frontend && npm run lint
->>>>>>> upstream/main
