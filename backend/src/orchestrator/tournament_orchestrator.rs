@@ -2,6 +2,7 @@ use crate::db::DbPool;
 use crate::orchestrator::{
     PayoutSettler, RoundAdvancementWorker, SeedingEngine, TournamentCleanup,
 };
+use sqlx::Row;
 use std::time::Duration;
 use tokio::time;
 
@@ -26,12 +27,26 @@ impl TournamentOrchestrator {
         tokio::spawn(async move {
             let advancement = RoundAdvancementWorker::new(db_pool.clone());
             let payout = PayoutSettler::new(db_pool.clone());
-            let cleanup = TournamentCleanup::new(db_pool);
+            let cleanup = TournamentCleanup::new(db_pool.clone());
 
             let mut interval = time::interval(Duration::from_secs(interval_secs));
 
             loop {
                 interval.tick().await;
+
+                // Try to acquire advisory lock — skip this tick if another instance holds it
+                let lock_acquired: bool = sqlx::query("SELECT pg_try_advisory_lock(hashtext('tournament_orchestrator_poll')) as locked")
+                    .fetch_one(&db_pool)
+                    .await
+                    .map(|row: sqlx::postgres::PgRow| {
+                        row.get::<bool, _>("locked")
+                    })
+                    .unwrap_or(false);
+
+                if !lock_acquired {
+                    tracing::debug!("Another instance holds the polling lock, skipping tick");
+                    continue;
+                }
 
                 tracing::debug!("Tournament polling worker running...");
 
@@ -46,6 +61,10 @@ impl TournamentOrchestrator {
                 if let Err(e) = cleanup.poll_for_cleanup().await {
                     tracing::error!("Polling: cleanup error: {}", e);
                 }
+
+                let _ = sqlx::query("SELECT pg_advisory_unlock(hashtext('tournament_orchestrator_poll'))")
+                    .execute(&db_pool)
+                    .await;
             }
         })
     }

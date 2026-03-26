@@ -36,6 +36,14 @@ impl SeedingEngine {
             ));
         }
 
+        // Only single elimination is supported
+        let bracket_type: String = row.try_get("bracket_type").map_err(ApiError::database_error)?;
+        if bracket_type.to_lowercase() != "singleelimination" && bracket_type.to_lowercase() != "single_elimination" {
+            return Err(ApiError::bad_request(
+                "Only SingleElimination bracket type is currently supported for automated seeding",
+            ));
+        }
+
         let game: String = row.try_get("game").map_err(ApiError::database_error)?;
 
         // Fetch active participants with their Elo ratings

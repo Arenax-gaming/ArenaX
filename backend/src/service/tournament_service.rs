@@ -664,10 +664,7 @@ impl TournamentService {
     async fn complete_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         let payout = crate::orchestrator::PayoutSettler::new(self.db_pool.clone());
         payout.finalize_tournament(tournament_id).await?;
-
-        let cleanup = crate::orchestrator::TournamentCleanup::new(self.db_pool.clone());
-        cleanup.cleanup_tournament(tournament_id).await?;
-
+        // Cleanup handled by background polling worker
         Ok(())
     }
 
