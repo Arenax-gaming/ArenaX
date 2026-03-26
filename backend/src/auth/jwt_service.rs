@@ -4,7 +4,7 @@ use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// JWT-related errors
@@ -417,10 +417,11 @@ impl JwtService {
 
         // Add to user's active sessions
         let user_sessions_key = format!("user_sessions:{}", user_id);
-        conn.sadd::<_, _, ()>(&user_sessions_key, session_id).await?;
+        conn.sadd::<_, _, ()>(&user_sessions_key, session_id)
+            .await?;
         conn.expire::<_, ()>(
             &user_sessions_key,
-            self.config.refresh_token_expiry.num_seconds() as i64,
+            self.config.refresh_token_expiry.num_seconds(),
         )
         .await?;
 
@@ -590,6 +591,7 @@ impl JwtService {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn create_test_config() -> JwtConfig {
         JwtConfig {
             secret_key: "test_secret_key_for_testing".to_string(),

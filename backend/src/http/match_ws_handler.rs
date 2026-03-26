@@ -73,6 +73,12 @@ pub struct MatchWebSocket {
     subscriptions: Vec<Uuid>,
 }
 
+impl Default for MatchWebSocket {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MatchWebSocket {
     pub fn new() -> Self {
         Self {
@@ -98,7 +104,7 @@ impl MatchWebSocket {
     }
 
     /// Handle subscription request
-    fn handle_subscribe(&mut self, match_id: Uuid, ctx: &mut <Self as Actor>::Context) {
+    fn handle_subscribe(&mut self, match_id: Uuid, _ctx: &mut <Self as Actor>::Context) {
         if !self.subscriptions.contains(&match_id) {
             self.subscriptions.push(match_id);
             info!(

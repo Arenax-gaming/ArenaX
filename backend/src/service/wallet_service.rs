@@ -1,7 +1,5 @@
 use crate::db::DbPool;
-use crate::models::{
-    Transaction, TransactionResponse, TransactionStatus, TransactionType, Wallet, WalletResponse,
-};
+use crate::models::{Transaction, TransactionStatus, TransactionType, Wallet};
 use anyhow::Result;
 use chrono::Utc;
 // EventBus is used via crate::realtime::event_bus::EventBus
@@ -426,8 +424,8 @@ impl WalletService {
     /// Verify payment with Paystack
     pub async fn verify_paystack_payment(
         &self,
-        reference: &str,
-        expected_amount: i64,
+        _reference: &str,
+        _expected_amount: i64,
     ) -> Result<bool, WalletError> {
         // TODO: Implement actual Paystack API call
         // For now, this is a placeholder
@@ -459,8 +457,8 @@ impl WalletService {
     /// Verify payment with Flutterwave
     pub async fn verify_flutterwave_payment(
         &self,
-        transaction_id: &str,
-        expected_amount: i64,
+        _transaction_id: &str,
+        _expected_amount: i64,
     ) -> Result<bool, WalletError> {
         // TODO: Implement actual Flutterwave API call
         tracing::warn!("Flutterwave verification not implemented, returning true for testing");
@@ -483,7 +481,7 @@ impl WalletService {
                 TransactionType::EntryFee,
                 amount,
                 currency.to_string(),
-                format!("Tournament entry fee payment"),
+                "Tournament entry fee payment".to_string(),
                 reference.clone(),
             )
             .await?;

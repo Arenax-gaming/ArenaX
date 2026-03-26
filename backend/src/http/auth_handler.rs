@@ -1,12 +1,10 @@
 use crate::api_error::ApiError;
-use crate::auth::jwt_service::{TokenAnalytics, TokenPair};
 use crate::auth::middleware::ClaimsExt;
-use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest};
+use crate::models::user::{CreateUserRequest, LoginRequest};
 use crate::service::auth_service::AuthService;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use uuid::Uuid;
 
 /// Refresh token request
 #[derive(Debug, Deserialize)]
@@ -174,10 +172,10 @@ pub async fn revoke_all_sessions(
 /// GET /api/auth/sessions
 /// Get all active sessions for current user (requires authentication)
 pub async fn get_sessions(
-    auth_service: web::Data<AuthService>,
+    _auth_service: web::Data<AuthService>,
     req: HttpRequest,
 ) -> Result<impl Responder, ApiError> {
-    let user_id = req
+    let _user_id = req
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
@@ -192,7 +190,7 @@ pub async fn get_sessions(
 /// GET /api/auth/analytics
 /// Get token analytics (admin only)
 pub async fn get_analytics(
-    auth_service: web::Data<AuthService>,
+    _auth_service: web::Data<AuthService>,
     req: HttpRequest,
 ) -> Result<impl Responder, ApiError> {
     // Check if user is admin

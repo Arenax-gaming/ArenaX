@@ -3,11 +3,9 @@ use crate::db::DbPool;
 use crate::models::match_authority::*;
 use crate::service::soroban_service::{SorobanService, SorobanTxResult};
 use chrono::Utc;
-use sqlx::Row;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use validator::Validate;
 
 /// Match Authority Service - FSM enforcer and blockchain coordinator
 pub struct MatchAuthorityService {
@@ -74,7 +72,7 @@ impl MatchAuthorityService {
 
         // Step 2: Create match entity in database
         let match_id = Uuid::new_v4();
-        let match_entity = sqlx::query_as::<_, MatchAuthorityEntity>(
+        let _match_entity = sqlx::query_as::<_, MatchAuthorityEntity>(
             r#"
             INSERT INTO match_authority (
                 id, on_chain_match_id, player_a, player_b, state,
@@ -97,7 +95,7 @@ impl MatchAuthorityService {
         .bind(serde_json::json!({}))
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Step 3: Record blockchain sync
         self.record_chain_sync(
@@ -174,7 +172,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Step 3: Record blockchain sync
         self.record_chain_sync(match_id, "start_match", &chain_result.hash, "pending", None)
@@ -255,7 +253,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Step 3: Record blockchain sync
         self.record_chain_sync(
@@ -334,7 +332,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Step 3: Record blockchain sync
         self.record_chain_sync(
@@ -407,7 +405,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Step 3: Record blockchain sync
         self.record_chain_sync(
@@ -459,7 +457,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?
+        .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::not_found("Match not found"))
     }
 
@@ -497,7 +495,7 @@ impl MatchAuthorityService {
         .bind(match_id)
         .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))
+        .map_err(ApiError::database_error)
     }
 
     /// Get match by idempotency key
@@ -518,7 +516,7 @@ impl MatchAuthorityService {
         .bind(key)
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))
+        .map_err(ApiError::database_error)
     }
 
     // =============================================================================
@@ -566,7 +564,7 @@ impl MatchAuthorityService {
         .bind(serde_json::json!({ "checked_at": Utc::now() }))
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         if is_divergent {
             warn!(
@@ -629,7 +627,7 @@ impl MatchAuthorityService {
         .bind(metadata.unwrap_or_else(|| serde_json::json!({})))
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         Ok(())
     }
@@ -661,7 +659,7 @@ impl MatchAuthorityService {
         .bind(serde_json::json!({}))
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         Ok(())
     }

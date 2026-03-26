@@ -34,14 +34,12 @@ impl AuthService {
         }
 
         // Check if user already exists
-        let existing = sqlx::query(
-            "SELECT id FROM users WHERE email = $1 OR username = $2",
-        )
-        .bind(&request.email)
-        .bind(&request.username)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+        let existing = sqlx::query("SELECT id FROM users WHERE email = $1 OR username = $2")
+            .bind(&request.email)
+            .bind(&request.username)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(ApiError::database_error)?;
 
         if existing.is_some() {
             return Err(ApiError::bad_request(
@@ -76,7 +74,7 @@ impl AuthService {
         .bind(now)
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Generate JWT tokens
         let roles = vec!["user".to_string()];
@@ -105,25 +103,26 @@ impl AuthService {
 
     /// Login user and return JWT tokens
     pub async fn login(&self, request: LoginRequest) -> Result<AuthResponse, ApiError> {
-        let user = sqlx::query_as::<_, User>(
-            "SELECT * FROM users WHERE email = $1",
-        )
-        .bind(&request.email)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+            .bind(&request.email)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
 
         if !user.is_active {
             return Err(ApiError::forbidden("Account is deactivated"));
         }
 
         // Verify password
-        let pw_hash = user.password_hash.as_deref()
+        let pw_hash = user
+            .password_hash
+            .as_deref()
             .ok_or_else(|| ApiError::internal_error("User has no password set"))?;
 
-        let valid = verify(&request.password, pw_hash)
-            .map_err(|e| ApiError::internal_error(format!("Password verification failed: {}", e)))?;
+        let valid = verify(&request.password, pw_hash).map_err(|e| {
+            ApiError::internal_error(format!("Password verification failed: {}", e))
+        })?;
 
         if !valid {
             return Err(ApiError::unauthorized("Invalid email or password"));
@@ -135,7 +134,7 @@ impl AuthService {
             .bind(user.id)
             .execute(&self.pool)
             .await
-            .map_err(|e| ApiError::database_error(e))?;
+            .map_err(ApiError::database_error)?;
 
         // Generate JWT tokens
         let roles = vec![user.role.clone()];
@@ -209,14 +208,12 @@ impl AuthService {
 
     /// Get user by ID
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        sqlx::query_as::<_, User>(
-            "SELECT * FROM users WHERE id = $1",
-        )
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or_else(|| ApiError::not_found("User not found"))
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("User not found"))
     }
 
     /// Change user password
@@ -234,11 +231,14 @@ impl AuthService {
 
         let user = self.get_user(user_id).await?;
 
-        let pw_hash = user.password_hash.as_deref()
+        let pw_hash = user
+            .password_hash
+            .as_deref()
             .ok_or_else(|| ApiError::internal_error("User has no password set"))?;
 
-        let valid = verify(old_password, pw_hash)
-            .map_err(|e| ApiError::internal_error(format!("Password verification failed: {}", e)))?;
+        let valid = verify(old_password, pw_hash).map_err(|e| {
+            ApiError::internal_error(format!("Password verification failed: {}", e))
+        })?;
 
         if !valid {
             return Err(ApiError::unauthorized("Current password is incorrect"));
@@ -253,7 +253,7 @@ impl AuthService {
             .bind(user_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| ApiError::database_error(e))?;
+            .map_err(ApiError::database_error)?;
 
         // Revoke all existing sessions for security
         self.revoke_all_sessions(user_id).await?;
