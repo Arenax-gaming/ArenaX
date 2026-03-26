@@ -21,6 +21,8 @@ model User {
   projects      Project[]
   wallet        UserWallet?
   refreshTokens RefreshToken[]
+  ledger        Ledger?
+  walletTransactions WalletTransaction[]
 }
 
 model UserWallet {
@@ -81,6 +83,59 @@ enum TxStatus {
   PENDING
   SUCCESS
   FAILED
+}
+
+enum Currency {
+  XLM
+  USDC
+  AX
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  ESCROW_LOCK
+  ESCROW_RELEASE
+  ESCROW_SLASH
+  PLATFORM_FEE
+  PRIZE_POOL_FUND
+}
+
+// High-precision financial ledger per user per currency
+model Ledger {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  xlmBalance    Decimal  @default(0) @db.Decimal(20, 7)
+  xlmEscrowed   Decimal  @default(0) @db.Decimal(20, 7)
+  usdcBalance   Decimal  @default(0) @db.Decimal(20, 7)
+  usdcEscrowed  Decimal  @default(0) @db.Decimal(20, 7)
+  axBalance     Decimal  @default(0) @db.Decimal(20, 7)
+  axEscrowed    Decimal  @default(0) @db.Decimal(20, 7)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Immutable transaction history with idempotency key
+model WalletTransaction {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  idempotencyKey String          @unique
+  type           TransactionType
+  currency       Currency
+  amount         Decimal         @db.Decimal(20, 7)
+  balanceBefore  Decimal         @db.Decimal(20, 7)
+  balanceAfter   Decimal         @db.Decimal(20, 7)
+  escrowBefore   Decimal         @db.Decimal(20, 7)
+  escrowAfter    Decimal         @db.Decimal(20, 7)
+  matchId        String?
+  note           String?
+  createdAt      DateTime        @default(now())
+
+  @@index([userId])
+  @@index([idempotencyKey])
+  @@index([matchId])
 }
 
 model BlockchainTransaction {
