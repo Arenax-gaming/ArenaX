@@ -1,16 +1,11 @@
-<<<<<<< HEAD
-# Backend .gitignore
-
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
-migrations/*.sql
 
 # Logs
 *.log
@@ -51,6 +46,3 @@ keys/
 # Build artifacts
 build/
 dist/
-=======
-target
->>>>>>> upstream/main
