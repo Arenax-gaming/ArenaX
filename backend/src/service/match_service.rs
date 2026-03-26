@@ -2,29 +2,27 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::*;
 use chrono::{DateTime, Utc};
-use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct MatchService {
     db_pool: DbPool,
-    redis_client: Option<Arc<RedisClient>>,
+    event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl MatchService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
             db_pool,
-            redis_client: None,
+            event_bus: None,
         }
     }
 
-    pub fn with_redis(mut self, redis_client: RedisClient) -> Self {
-        self.redis_client = Some(redis_client);
+    pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
+        self.event_bus = Some(event_bus);
         self
     }
 
@@ -1488,17 +1486,44 @@ pub struct LeaderboardEntry {
 }
 
 impl MatchService {
-    // Real-time event publishing methods
-    // TODO: Implement proper realtime module with event types
-    async fn publish_match_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time match event publishing
-        // Will be implemented when realtime module is added
+    async fn publish_match_event(&self, event_data: serde_json::Value) -> Result<(), ApiError> {
+        if let Some(ref event_bus) = self.event_bus {
+            if let (Some(match_id_str), Some(event_type)) = (
+                event_data.get("match_id").and_then(|v| v.as_str()),
+                event_data.get("event").and_then(|v| v.as_str()),
+            ) {
+                let match_id = Uuid::parse_str(match_id_str).unwrap_or_default();
+                let timestamp = chrono::Utc::now().to_rfc3339();
+
+                let event = crate::realtime::events::RealtimeEvent::MatchStatusChange {
+                    match_id,
+                    from_status: event_data
+                        .get("from_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    to_status: event_type.to_string(),
+                    timestamp,
+                };
+
+                event_bus.publish_to_match(match_id, &event).await;
+
+                // Also publish to participant user channels
+                for key in ["player1_id", "player2_id", "user_id"] {
+                    if let Some(uid_str) = event_data.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(uid) = Uuid::parse_str(uid_str) {
+                            event_bus.publish_to_user(uid, &event).await;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
     async fn publish_global_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time global event publishing
-        // Will be implemented when realtime module is added
+        // Global events (e.g., tournament announcements) to be implemented
+        // when a global subscription mechanism is added.
         Ok(())
     }
 
