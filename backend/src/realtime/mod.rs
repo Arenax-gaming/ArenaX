@@ -1,6 +1,6 @@
 pub mod events;
 pub mod event_bus;
-// pub mod ws_broadcaster;
+pub mod ws_broadcaster;
 pub mod user_ws;
 pub mod session_registry;
 

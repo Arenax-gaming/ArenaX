@@ -339,6 +339,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "ed25519-dalek",
+ "futures-util",
  "jsonwebtoken",
  "rand 0.8.5",
  "redis",
