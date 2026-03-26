@@ -13,3 +13,4 @@ pub use match_authority_service::MatchAuthorityService;
 pub use wallet_service::WalletService;
 pub use stellar_service::StellarService;
 pub use soroban_service::{SorobanService, SorobanTxResult, NetworkConfig, TxStatus, DecodedEvent, RetryConfig, SorobanError};
+pub use crate::realtime::event_bus::EventBus;
