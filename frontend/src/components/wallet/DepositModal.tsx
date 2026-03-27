@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { QRCode } from "@/components/wallet/QRCode";
 import { WalletAssetCode } from "@/lib/wallet/types";
 
 interface DepositModalProps {
@@ -115,8 +116,11 @@ export function DepositModal({
             />
           </div>
 
-          <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+          <div className="space-y-3 rounded-md border bg-muted/40 p-3 text-sm">
             <p className="font-medium">Deposit Address</p>
+            <div className="flex justify-center py-2">
+              <QRCode value={walletAddress} size={160} />
+            </div>
             <p className="break-all font-mono text-xs">{walletAddress}</p>
             <p className="text-xs text-muted-foreground">
               Memo is optional for self-custody wallets unless required by the sender.

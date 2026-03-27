@@ -1,5 +1,6 @@
 use actix_web::{web, App, HttpServer};
 use std::io;
+use std::sync::Arc;
 use tokio::signal;
 
 mod api_error;
@@ -8,12 +9,17 @@ mod config;
 mod db;
 mod http;
 mod middleware;
+mod models;
+mod realtime;
 mod service;
 mod telemetry;
 
 use crate::config::Config;
 use crate::db::create_pool;
 use crate::middleware::cors_middleware;
+use crate::realtime::event_bus::EventBus;
+use crate::realtime::session_registry::SessionRegistry;
+use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -29,8 +35,25 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create database pool");
 
-    // Create Redis client (placeholder)
-    // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
+    // Create Redis connection manager
+    let redis_client = redis::Client::open(config.redis.url.clone())
+        .expect("Failed to create Redis client");
+    let redis_conn = redis::aio::ConnectionManager::new(redis_client)
+        .await
+        .expect("Failed to create Redis connection manager");
+
+    // Initialize real-time infrastructure
+    let event_bus = EventBus::new(redis_conn.clone());
+    let session_registry = Arc::new(SessionRegistry::new());
+    let address_book = Arc::new(WsAddressBook::new());
+
+    // Start Redis Pub/Sub subscriber (broadcasts to local WebSocket actors)
+    let broadcaster = WsBroadcaster::new(
+        config.redis.url.clone(),
+        session_registry.clone(),
+        address_book.clone(),
+    );
+    let _broadcaster_handles = broadcaster.start();
 
     tracing::info!(
         "Starting ArenaX backend server on {}:{}",
@@ -41,7 +64,9 @@ async fn main() -> io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
-            // .app_data(web::Data::new(redis_client.clone()))
+            .app_data(web::Data::new(event_bus.clone()))
+            .app_data(web::Data::new(session_registry.clone()))
+            .app_data(web::Data::new(address_book.clone()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
@@ -89,6 +114,7 @@ async fn main() -> io::Result<()> {
                         web::get().to(crate::http::reputation_handler::get_reputation_stats),
                     ),
             )
+            .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();

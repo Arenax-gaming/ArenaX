@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Trash2, Loader2, RefreshCw } from "lucide-react";
+import { Bell, CheckCheck, Trash2, Loader2, RefreshCw, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { Button } from "@/components/ui/Button";
@@ -200,6 +200,20 @@ export function NotificationBell({ className, onClose }: NotificationBellProps) 
                 ))}
               </ul>
             )}
+          </div>
+
+          <div className="border-t p-2">
+            <Link
+              href="/notifications/settings"
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              onClick={() => {
+                setIsOpen(false);
+                onClose?.();
+              }}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Notification settings
+            </Link>
           </div>
         </div>
       )}
