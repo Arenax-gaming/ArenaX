@@ -16,7 +16,7 @@ export default function DisputeDashboard() {
   const fetchDisputes = async () => {
     try {
       const data = await api.getDisputes();
-      setDisputes(data);
+      setDisputes(data as any[]);
     } catch (error) {
       console.error("Failed to fetch disputes:", error);
     } finally {
@@ -89,6 +89,7 @@ export default function DisputeDashboard() {
                       <div className="grid grid-cols-3 gap-2">
                         {dispute.evidenceUrls.map((url: string, index: number) => (
                           <div key={index} className="aspect-square bg-gray-200 rounded-md overflow-hidden border">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={url} alt={`Evidence ${index + 1}`} className="w-full h-full object-cover" />
                           </div>
                         ))}
