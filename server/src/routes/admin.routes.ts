@@ -21,6 +21,7 @@ router.get('/status', getAdminStatus);
 router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
 router.get('/audit-logs', listAuditLogs);
+router.post('/payments/:id/replay', replayPayment);
 
 // Refund Management
 router.get('/refunds', listRefundRequests);
