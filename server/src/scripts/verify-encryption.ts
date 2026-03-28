@@ -12,11 +12,16 @@ function verifyEncryption() {
     const encrypted = encryptionService.encrypt(secret);
     console.log('Encrypted Value Generated:', !!encrypted);
 
-    const [iv, tag, cipher] = encrypted.split(':');
-    if (!iv || !tag || !cipher) {
-        throw new Error('Encryption format invalid: ' + encrypted);
+    const parsed = JSON.parse(encrypted);
+    if (
+        parsed.format !== 'arenax-wallet-v1' ||
+        !parsed.iv ||
+        !parsed.authTag ||
+        !parsed.ciphertext
+    ) {
+        throw new Error('Encryption format invalid');
     }
-    console.log('Format Check (iv:tag:cipher): PASS');
+    console.log('Format Check (versioned JSON payload): PASS');
 
     const decrypted = encryptionService.decrypt(encrypted);
     if (decrypted === secret) {
@@ -27,11 +32,11 @@ function verifyEncryption() {
 
     // Verify tampering detection
     try {
-        const [iv, tag, cipher] = encrypted.split(':');
-        // Tamper with ciphertext bytes
-        const cipherBuf = Buffer.from(cipher, 'base64');
+        const tamperedPayload = JSON.parse(encrypted);
+        const cipherBuf = Buffer.from(tamperedPayload.ciphertext, 'base64');
         cipherBuf[0] = cipherBuf[0] ^ 0xFF; // Flip all bits in first byte
-        const tampered = `${iv}:${tag}:${cipherBuf.toString('base64')}`;
+        tamperedPayload.ciphertext = cipherBuf.toString('base64');
+        const tampered = JSON.stringify(tamperedPayload);
         encryptionService.decrypt(tampered);
         throw new Error('Tampering detection failed! (Ciphertext modification)');
     } catch (e: any) {
@@ -40,11 +45,11 @@ function verifyEncryption() {
     }
 
     try {
-        const [iv, tag, cipher] = encrypted.split(':');
-        // Tamper with auth tag bytes
-        const tagBuf = Buffer.from(tag, 'base64');
+        const tamperedPayload = JSON.parse(encrypted);
+        const tagBuf = Buffer.from(tamperedPayload.authTag, 'base64');
         tagBuf[0] = tagBuf[0] ^ 0xFF; // Flip all bits in first byte
-        const tampered = `${iv}:${tagBuf.toString('base64')}:${cipher}`;
+        tamperedPayload.authTag = tagBuf.toString('base64');
+        const tampered = JSON.stringify(tamperedPayload);
         encryptionService.decrypt(tampered);
         throw new Error('Tampering detection failed! (Tag modification)');
     } catch (e: any) {

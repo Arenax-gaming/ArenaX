@@ -6,7 +6,7 @@ const router = Router();
 
 const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: process.env.NODE_ENV === 'test' ? 1000 : 10,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -19,5 +19,7 @@ const authRateLimiter = rateLimit({
 
 router.post('/register', authRateLimiter, authController.register);
 router.post('/login', authRateLimiter, authController.login);
+router.post('/refresh', authRateLimiter, authController.refresh);
+router.post('/logout', authRateLimiter, authController.logout);
 
 export default router;
