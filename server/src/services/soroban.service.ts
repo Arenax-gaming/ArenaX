@@ -109,7 +109,7 @@ export class SorobanService {
         try {
             const sendResult = await this.rpc.sendTransaction(finalTx);
             if (sendResult.status === 'ERROR') {
-                const errXdr = sendResult.errorResultXdr ?? 'unknown';
+                const errXdr = sendResult.errorResult ?? 'unknown';
                 await this._updateTx(txHash, TxStatus.FAILED, errXdr);
                 throw new Error(`Soroban submission error: ${errXdr}`);
             }
