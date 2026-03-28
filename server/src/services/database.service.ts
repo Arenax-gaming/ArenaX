@@ -2,7 +2,15 @@ import { PrismaClient } from '@prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
-    'user' | 'refreshToken' | 'userWallet' | 'blockchainTransaction'
+    | 'user'
+    | 'refreshToken'
+    | 'userWallet'
+    | 'blockchainTransaction'
+    | 'proposal'
+    | 'vote'
+    | 'match'
+    | 'dispute'
+    | 'auditLog'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

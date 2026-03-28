@@ -143,3 +143,6 @@ dist/
 test-results/
 playwright-report/
 test-results.xml
+
+# Design docs (local only)
+docs/superpowers/
