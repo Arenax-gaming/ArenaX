@@ -213,7 +213,7 @@ export class WalletService {
         toUserId: string;
         currency: Currency;
         amount: Decimal;
-        type: $Enums.TransactionType.PLATFORM_FEE | $Enums.TransactionType.PRIZE_POOL_FUND;
+        type: $Enums.TransactionType;
         idempotencyKey: string;
         note?: string;
     }) {
@@ -303,7 +303,7 @@ export class WalletService {
         currency: Currency,
         amount: Decimal,
         idempotencyKey: string,
-        type: $Enums.TransactionType.CREDIT | $Enums.TransactionType.DEBIT,
+        type: $Enums.TransactionType,
         note?: string,
     ) {
         return this.db.$transaction(async (tx) => {
