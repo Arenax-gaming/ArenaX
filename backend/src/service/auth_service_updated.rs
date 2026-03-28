@@ -97,6 +97,9 @@ impl AuthService {
                 email: user.email,
                 is_verified: user.is_verified,
                 created_at: user.created_at,
+                skill_score: None,
+                fair_play_score: None,
+                is_bad_actor: None,
             },
         })
     }
@@ -106,7 +109,7 @@ impl AuthService {
         // Find user by email
         let user = sqlx::query_as!(
             User,
-            "SELECT id, username, email, password_hash, is_active, is_verified, created_at, updated_at FROM users WHERE email = $1",
+            "SELECT id, username, email, password_hash, is_active, is_verified, created_at, updated_at, last_login_at, display_name, avatar_url, country_code, role, bio, phone_number, is_banned, device_fingerprint, stellar_account_id, stellar_public_key, total_earnings, banned_until, profile_image_url, reputation_score, skill_score, fair_play_score, is_bad_actor FROM users WHERE email = $1",
             request.email
         )
         .fetch_optional(&self.pool)
@@ -156,6 +159,9 @@ impl AuthService {
                 email: user.email,
                 is_verified: user.is_verified,
                 created_at: user.created_at,
+                skill_score: None,
+                fair_play_score: None,
+                is_bad_actor: None,
             },
         })
     }

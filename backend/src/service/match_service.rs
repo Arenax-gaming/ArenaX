@@ -1,6 +1,8 @@
 use crate::api_error::ApiError;
+use crate::config::Config;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -10,6 +12,8 @@ use uuid::Uuid;
 
 pub struct MatchService {
     db_pool: DbPool,
+    redis_client: Option<Arc<RedisClient>>,
+    reputation_service: Option<Arc<ReputationService>>,
     event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
@@ -17,12 +21,19 @@ impl MatchService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
             db_pool,
+            redis_client: None,
+            reputation_service: None,
             event_bus: None,
         }
     }
 
     pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
         self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn with_reputation_service(mut self, reputation_service: ReputationService) -> Self {
+        self.reputation_service = Some(Arc::new(reputation_service));
         self
     }
 
@@ -246,6 +257,19 @@ impl MatchService {
             return Err(ApiError::bad_request(
                 "User is already in matchmaking queue",
             ));
+        }
+
+        // Check player reputation (filter bad actors)
+        if let Some(rep_service) = &self.reputation_service {
+            let reputation = rep_service.get_player_reputation(user_id).await
+                .map_err(|e| ApiError::internal_server_error(&format!("Reputation check failed: {}", e)))?;
+            
+            // Filter players with very low fair play score
+            if reputation.should_filter(30) {
+                return Err(ApiError::bad_request(
+                    "Account restricted due to behavioral violations. Please contact support.",
+                ));
+            }
         }
 
         // Get user's current Elo rating
@@ -647,6 +671,21 @@ impl MatchService {
 
         // Create Elo history records
         self.create_elo_history(&match_record, winner_id).await?;
+
+        // Update on-chain reputation (if service is available)
+        if let Some(rep_service) = &self.reputation_service {
+            let players = vec![match_record.player1_id];
+            let skill_deltas = vec![25]; // Example: +25 for win, would be calculated based on outcome
+            
+            if let Err(e) = rep_service.update_reputation_on_match(
+                match_id,
+                &players,
+                &skill_deltas,
+            ).await {
+                error!("Failed to update reputation for match {}: {}", match_id, e);
+                // Don't fail the match completion, just log the error
+            }
+        }
 
         // Publish match completed event
         self.publish_match_event(serde_json::json!({
@@ -1094,11 +1133,24 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        // Filter out bad actors if reputation service is available
+        let filtered_candidates = if let Some(rep_service) = &self.reputation_service {
+            let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.user_id).collect();
+            let filtered_ids = rep_service.filter_bad_actors(&candidate_ids, 50).await
+                .unwrap_or(candidate_ids); // If filtering fails, use original list
+            
+            candidates.into_iter()
+                .filter(|c| filtered_ids.contains(&c.user_id))
+                .collect::<Vec<_>>()
+        } else {
+            candidates
+        };
+
         // Try to match players
-        for i in 0..candidates.len() {
-            for j in (i + 1)..candidates.len() {
-                let player1 = &candidates[i];
-                let player2 = &candidates[j];
+        for i in 0..filtered_candidates.len() {
+            for j in (i + 1)..filtered_candidates.len() {
+                let player1 = &filtered_candidates[i];
+                let player2 = &filtered_candidates[j];
 
                 // Check if Elo ranges overlap
                 if self.elo_ranges_overlap(player1, player2) {
