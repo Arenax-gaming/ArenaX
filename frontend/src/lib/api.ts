@@ -177,12 +177,16 @@ class ApiClient {
   }
 
   // Governance endpoints
-  async getProposals() {
-    return this.request("/governance");
+  async getProposals(): Promise<any[]> {
+    try {
+      return await this.request<any[]>("/governance");
+    } catch {
+      return [];
+    }
   }
 
-  async getProposal(id: string) {
-    return this.request(`/governance/${id}`);
+  async getProposal(id: string): Promise<any> {
+    return this.request<any>(`/governance/${id}`);
   }
 
   async createProposal(data: any) {
