@@ -1,10 +1,8 @@
 target
->>>>>>> upstream/main
 # Backend .gitignore
 
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 
 # Database
@@ -51,6 +49,3 @@ keys/
 # Build artifacts
 build/
 dist/
-=======
-target
->>>>>>> upstream/main

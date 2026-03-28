@@ -711,6 +711,21 @@ impl MatchService {
             }
         }
 
+        // If this was a tournament match, trigger round advancement
+        if let Some(tournament_id) = match_record.tournament_id {
+            if let Some(round_id) = match_record.round_id {
+                let advancement = crate::orchestrator::RoundAdvancementWorker::new(self.db_pool.clone());
+                if let Err(e) = advancement.on_match_completed(tournament_id, round_id).await {
+                    tracing::error!(
+                        "Round advancement failed for tournament {} round {}: {}",
+                        tournament_id,
+                        round_id,
+                        e
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 

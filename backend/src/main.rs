@@ -12,6 +12,7 @@ mod middleware;
 mod models;
 mod realtime;
 mod service;
+mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
@@ -34,6 +35,13 @@ async fn main() -> io::Result<()> {
     let db_pool = create_pool(&config)
         .await
         .expect("Failed to create database pool");
+
+    // Spawn tournament orchestrator polling worker
+    let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
+        db_pool.clone(),
+        60,
+    );
+    tracing::info!("Tournament orchestrator polling worker started");
 
     // Create Redis connection manager
     let redis_client = redis::Client::open(config.redis.url.clone())
