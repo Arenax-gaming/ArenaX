@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '.prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
@@ -11,6 +11,9 @@ export type DatabaseTransactionClient = Pick<
     | 'match'
     | 'dispute'
     | 'auditLog'
+    | 'refundRequest'
+    | 'project'
+    | 'payment'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
