@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { MatchService } from '../services/match.service';
 import { AuditService } from '../services/audit.service';
+import paymentMonitorWorker from '../services/payment-monitor.worker';
+import prisma from '../services/database.service';
 
 const matchService = new MatchService();
 
@@ -32,6 +34,44 @@ export const listAuditLogs = async (req: Request, res: Response): Promise<void> 
     try {
         const logs = await AuditService.listLogs(req.query as any);
         res.status(200).json(logs);
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+};
+
+export const replayPayment = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const payment = await prisma.payment.findUnique({ where: { id } });
+
+        if (!payment) {
+            res.status(404).json({ error: 'Payment not found' });
+            return;
+        }
+
+        // Reset retry metadata and set to PENDING
+        await prisma.payment.update({
+            where: { id },
+            data: {
+                status: 'PENDING',
+                retryCount: 0,
+                nextRetryAt: null,
+                lastError: null,
+                updatedAt: new Date()
+            }
+        });
+
+        // Log the action
+        await AuditService.logAction({
+            adminId: req.user!.id,
+            action: 'REPLAY_PAYMENT',
+            targetType: 'PAYMENT',
+            targetId: id,
+            details: { previousStatus: payment.status },
+            ipAddress: req.ip
+        });
+
+        res.status(200).json({ message: 'Payment replay triggered successfully.' });
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
     }
