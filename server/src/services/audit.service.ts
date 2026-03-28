@@ -11,6 +11,10 @@ export class AuditService {
         targetId: string;
         details?: any;
         ipAddress?: string;
+        userAgent?: string;
+        requestId?: string;
+        snapshotBefore?: any;
+        snapshotAfter?: any;
     }) {
         const prisma = getDatabaseClient();
         return await prisma.auditLog.create({
@@ -21,6 +25,10 @@ export class AuditService {
                 targetId: data.targetId,
                 details: data.details || {},
                 ipAddress: data.ipAddress,
+                userAgent: data.userAgent,
+                requestId: data.requestId,
+                snapshotBefore: data.snapshotBefore || {},
+                snapshotAfter: data.snapshotAfter || {},
             },
         });
     }
