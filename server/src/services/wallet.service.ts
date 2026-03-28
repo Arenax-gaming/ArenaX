@@ -1,5 +1,6 @@
 import { Decimal } from '@prisma/client/runtime/library';
-import { Currency, TransactionType } from '@prisma/client';
+import { $Enums, Currency } from '@prisma/client';
+const TransactionType = $Enums.TransactionType;
 import { getDatabaseClient } from './database.service';
 import { HttpError } from '../utils/http-error';
 
@@ -212,7 +213,7 @@ export class WalletService {
         toUserId: string;
         currency: Currency;
         amount: Decimal;
-        type: TransactionType.PLATFORM_FEE | TransactionType.PRIZE_POOL_FUND;
+        type: $Enums.TransactionType.PLATFORM_FEE | $Enums.TransactionType.PRIZE_POOL_FUND;
         idempotencyKey: string;
         note?: string;
     }) {
@@ -302,7 +303,7 @@ export class WalletService {
         currency: Currency,
         amount: Decimal,
         idempotencyKey: string,
-        type: TransactionType.CREDIT | TransactionType.DEBIT,
+        type: $Enums.TransactionType.CREDIT | $Enums.TransactionType.DEBIT,
         note?: string,
     ) {
         return this.db.$transaction(async (tx) => {

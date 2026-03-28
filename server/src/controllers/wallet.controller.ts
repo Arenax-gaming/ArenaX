@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { Decimal } from '@prisma/client/runtime/library';
-import { Currency, TransactionType } from '@prisma/client';
+import { $Enums, Currency } from '@prisma/client';
+const TransactionType = $Enums.TransactionType;
 import { walletService } from '../services/wallet.service';
 import { HttpError } from '../utils/http-error';
 
