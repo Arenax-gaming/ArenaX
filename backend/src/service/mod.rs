@@ -2,6 +2,7 @@
 pub mod governance_service;
 pub mod match_authority_service;
 pub mod match_service;
+pub mod reaper_service;
 pub mod reputation_service;
 pub mod reward_settlement_service;
 pub mod soroban_service;
@@ -15,6 +16,7 @@ pub use governance_service::{
 };
 pub use match_authority_service::MatchAuthorityService;
 pub use match_service::MatchService;
+pub use reaper_service::ReaperService;
 pub use reputation_service::{PlayerReputation, ReputationService, ReputationTier};
 pub use soroban_service::{
     DecodedEvent, NetworkConfig, RetryConfig, SorobanError, SorobanService, SorobanTxResult,

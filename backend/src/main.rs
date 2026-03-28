@@ -18,6 +18,7 @@ mod telemetry;
 use crate::config::Config;
 use crate::db::create_pool;
 use crate::middleware::cors_middleware;
+use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
@@ -36,6 +37,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create database pool");
 
+    // Spawn the Reaper — forfeits players who miss the reporting deadline
+    let reaper = Arc::new(ReaperService::new(db_pool.clone()));
+    reaper.run();
+
+    // Create Redis client (placeholder)
+    // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
     // Spawn tournament orchestrator polling worker
     let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
         db_pool.clone(),

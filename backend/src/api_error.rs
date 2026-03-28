@@ -33,6 +33,9 @@ pub enum ApiError {
 
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Too many requests: {0}")]
+    TooManyRequests(String),
 }
 
 // Helper methods for convenience
@@ -100,6 +103,10 @@ impl ResponseError for ApiError {
             ApiError::ValidationError(_) => {
                 (actix_web::http::StatusCode::BAD_REQUEST, self.to_string())
             }
+            ApiError::TooManyRequests(_) => (
+                actix_web::http::StatusCode::TOO_MANY_REQUESTS,
+                self.to_string(),
+            ),
         };
 
         let error_response = ErrorResponse {
