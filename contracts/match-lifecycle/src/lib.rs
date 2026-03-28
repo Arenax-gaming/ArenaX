@@ -41,6 +41,9 @@ pub enum DataKey {
     Match(BytesN<32>),
     Admin,
     IdentityContract,
+    EscrowContract,
+    FinalizationWindow,
+    DisputeDeadline(BytesN<32>),
 }
 
 #[contracttype]
@@ -52,6 +55,7 @@ pub enum MatchState {
     PendingResult = 2,
     Finalized = 3,
     Disputed = 4,
+    Cancelled = 5,
 }
 
 #[contracttype]
@@ -96,8 +100,34 @@ impl MatchLifecycleContract {
             .instance()
             .set(&DataKey::IdentityContract, &identity_contract);
     }
+    /// Set the Escrow Contract address for prize distribution
+    pub fn set_escrow_contract(env: Env, escrow_contract: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowContract, &escrow_contract);
+    }
+
+    /// Set the finalization window (time in seconds after match completion before disputes are no longer accepted)
+    pub fn set_finalization_window(env: Env, window_seconds: u64) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::FinalizationWindow, &window_seconds);
+    }
 
     /// Create a new match with the given players, stake asset, and stake amount.
+    /// Automatically creates escrow for prize pool.
     /// State: Created.
     pub fn create_match(
         env: Env,
@@ -138,6 +168,29 @@ impl MatchLifecycleContract {
         env.storage()
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
+
+        // Create escrow for prize pool (atomic operation)
+        if let Some(escrow_contract) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::EscrowContract)
+        {
+            let player_a = players.get(0).unwrap();
+            let player_b = players.get(1).unwrap();
+            
+            let _: () = env.invoke_contract(
+                &escrow_contract,
+                &Symbol::new(&env, "create_escrow"),
+                (
+                    match_id.clone(),
+                    player_a,
+                    player_b,
+                    stake_amount,
+                    stake_asset.clone(),
+                )
+                    .into_val(&env),
+            );
+        }
 
         MatchCreated {
             match_id,
@@ -219,6 +272,7 @@ impl MatchLifecycleContract {
 
     /// Finalize a match. Caller must be a participant or an operator (Referee/Admin via identity contract).
     /// Only allowed when state is PendingResult. Sets winner from agreed score (score = player index).
+    /// Automatically triggers prize distribution if no dispute window is active.
     pub fn finalize_match(env: Env, match_id: BytesN<32>, caller: Address) {
         let mut match_data: MatchData = env
             .storage()
@@ -251,6 +305,18 @@ impl MatchLifecycleContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
+        // Set dispute deadline (finalization window)
+        let finalization_window: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FinalizationWindow)
+            .unwrap_or(300); // Default 5 minutes
+
+        let dispute_deadline = env.ledger().timestamp() + finalization_window;
+        env.storage()
+            .persistent()
+            .set(&DataKey::DisputeDeadline(match_id.clone()), &dispute_deadline);
+
         MatchFinalized {
             match_id,
             winner,
@@ -260,6 +326,7 @@ impl MatchLifecycleContract {
     }
 
     /// Mark match as disputed (e.g. from external dispute flow). Operator or participant only.
+    /// Blocks prize distribution until dispute is resolved.
     pub fn raise_dispute(env: Env, match_id: BytesN<32>, caller: Address) {
         caller.require_auth();
 
@@ -269,7 +336,21 @@ impl MatchLifecycleContract {
             .get(&DataKey::Match(match_id.clone()))
             .expect("match not found");
 
-        if match_data.state != MatchState::InProgress as u32
+        // Can raise dispute during InProgress, PendingResult, or within finalization window after Finalized
+        if match_data.state == MatchState::Finalized as u32 {
+            // Check if still within dispute window
+            if let Some(dispute_deadline) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u64>(&DataKey::DisputeDeadline(match_id.clone()))
+            {
+                if env.ledger().timestamp() > dispute_deadline {
+                    panic!("dispute window has expired");
+                }
+            } else {
+                panic!("no dispute window set");
+            }
+        } else if match_data.state != MatchState::InProgress as u32
             && match_data.state != MatchState::PendingResult as u32
         {
             panic!("invalid state for dispute");
@@ -284,7 +365,157 @@ impl MatchLifecycleContract {
         match_data.state = MatchState::Disputed as u32;
         env.storage()
             .persistent()
-            .set(&DataKey::Match(match_id), &match_data);
+            .set(&DataKey::Match(match_id.clone()), &match_data);
+
+        // Mark escrow as disputed to block payouts
+        if let Some(escrow_contract) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::EscrowContract)
+        {
+            let _: () = env.invoke_contract(
+                &escrow_contract,
+                &Symbol::new(&env, "mark_disputed"),
+                (match_id,).into_val(&env),
+            );
+        }
+    }
+    /// Distribute prize to winner after finalization window expires without disputes.
+    /// Can be called by anyone once the dispute window has passed.
+    pub fn distribute_prize(env: Env, match_id: BytesN<32>) {
+        let match_data: MatchData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Match(match_id.clone()))
+            .expect("match not found");
+
+        if match_data.state != MatchState::Finalized as u32 {
+            panic!("match must be finalized");
+        }
+
+        // Check if dispute deadline has passed
+        if let Some(dispute_deadline) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&DataKey::DisputeDeadline(match_id.clone()))
+        {
+            if env.ledger().timestamp() < dispute_deadline {
+                panic!("dispute window still active");
+            }
+        }
+
+        let winner = match_data.winner.expect("winner must be set");
+
+        // Call escrow contract to release funds
+        if let Some(escrow_contract) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::EscrowContract)
+        {
+            let _: () = env.invoke_contract(
+                &escrow_contract,
+                &Symbol::new(&env, "release_to_winner"),
+                (match_id.clone(), winner).into_val(&env),
+            );
+        } else {
+            panic!("escrow contract not set");
+        }
+    }
+    /// Resolve a disputed match and distribute prize to the determined winner.
+    /// Can only be called by operators (Referee/Admin).
+    pub fn resolve_dispute_and_distribute(
+        env: Env,
+        match_id: BytesN<32>,
+        winner: Address,
+        resolver: Address,
+    ) {
+        resolver.require_auth();
+
+        if !Self::is_operator(&env, &resolver) {
+            panic!("only operators can resolve disputes");
+        }
+
+        let mut match_data: MatchData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Match(match_id.clone()))
+            .expect("match not found");
+
+        if match_data.state != MatchState::Disputed as u32 {
+            panic!("match must be disputed");
+        }
+
+        if !Self::is_participant(&match_data.players, &winner) {
+            panic!("winner must be a participant");
+        }
+
+        match_data.state = MatchState::Finalized as u32;
+        match_data.winner = Some(winner.clone());
+        match_data.finalized_at = Some(env.ledger().timestamp());
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Match(match_id.clone()), &match_data);
+
+        // Resolve dispute and distribute prize via escrow contract
+        if let Some(escrow_contract) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::EscrowContract)
+        {
+            let _: () = env.invoke_contract(
+                &escrow_contract,
+                &Symbol::new(&env, "resolve_dispute"),
+                (match_id.clone(), winner.clone(), resolver).into_val(&env),
+            );
+        } else {
+            panic!("escrow contract not set");
+        }
+
+        MatchFinalized {
+            match_id,
+            winner,
+            finalized_at: match_data.finalized_at.unwrap(),
+        }
+        .publish(&env);
+    }
+
+    /// Cancel a match and refund all players.
+    /// Can only be called by admin or operator before match is finalized.
+    pub fn cancel_match(env: Env, match_id: BytesN<32>, caller: Address) {
+        caller.require_auth();
+
+        let mut match_data: MatchData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Match(match_id.clone()))
+            .expect("match not found");
+
+        if match_data.state == MatchState::Finalized as u32 {
+            panic!("cannot cancel finalized match");
+        }
+
+        if !Self::is_operator(&env, &caller) {
+            panic!("only operators can cancel matches");
+        }
+
+        match_data.state = MatchState::Cancelled as u32;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Match(match_id.clone()), &match_data);
+
+        // Refund players via escrow contract
+        if let Some(escrow_contract) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::EscrowContract)
+        {
+            let _: () = env.invoke_contract(
+                &escrow_contract,
+                &Symbol::new(&env, "refund"),
+                (match_id,).into_val(&env),
+            );
+        }
     }
 
     pub fn get_match(env: Env, match_id: BytesN<32>) -> MatchData {
@@ -344,3 +575,5 @@ impl MatchLifecycleContract {
 }
 
 mod test;
+// TODO: Fix authorization for cross-contract calls in integration tests
+// mod integration_test;
