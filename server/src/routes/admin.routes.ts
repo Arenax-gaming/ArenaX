@@ -3,7 +3,8 @@ import {
     getAdminStatus, 
     listDisputes, 
     resolveDispute, 
-    listAuditLogs 
+    listAuditLogs,
+    replayPayment
 } from '../controllers/admin.controller';
 import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
 
@@ -15,5 +16,6 @@ router.get('/status', getAdminStatus);
 router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
 router.get('/audit-logs', listAuditLogs);
+router.post('/payments/:id/replay', replayPayment);
 
 export default router;

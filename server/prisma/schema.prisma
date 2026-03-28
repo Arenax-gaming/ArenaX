@@ -76,8 +76,11 @@ model Payment {
   toAddress   String
   amount      String
   asset       String   @default("USDC")
-  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED, DEAD_LETTER
   txHash      String?  @unique
+  retryCount  Int      @default(0)
+  nextRetryAt DateTime?
+  lastError   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
