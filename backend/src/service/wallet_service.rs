@@ -3,7 +3,7 @@ use crate::models::{
 };
 use anyhow::Result;
 use chrono::Utc;
-use redis::Client as RedisClient;
+// EventBus is used via crate::realtime::event_bus::EventBus
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -33,14 +33,14 @@ pub type DbPool = Arc<PgPool>;
 #[derive(Clone)]
 pub struct WalletService {
     db_pool: DbPool,
-    redis_client: Option<Arc<RedisClient>>,
+    event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl WalletService {
-    pub fn new(db_pool: DbPool, redis_client: Option<Arc<RedisClient>>) -> Self {
+    pub fn new(db_pool: DbPool, event_bus: Option<crate::realtime::event_bus::EventBus>) -> Self {
         Self {
             db_pool,
-            redis_client,
+            event_bus,
         }
     }
 
@@ -561,23 +561,24 @@ impl WalletService {
     // ========================================================================
 
     async fn publish_balance_update(&self, user_id: Uuid) {
-        if let Some(redis_client) = &self.redis_client {
-            match redis_client.get_connection() {
-                Ok(mut conn) => {
-                    use redis::Commands;
-                    let channel = format!("wallet:{}:balance", user_id);
-                    let message = serde_json::json!({
-                        "user_id": user_id,
-                        "event": "balance_updated",
-                        "timestamp": Utc::now().to_rfc3339()
-                    });
-
-                    if let Err(e) = conn.publish::<_, _, ()>(channel, message.to_string()) {
-                        tracing::error!("Failed to publish balance update: {}", e);
-                    }
+        if let Some(ref event_bus) = self.event_bus {
+            match self.get_wallet(user_id).await {
+                Ok(wallet) => {
+                    let event = crate::realtime::events::RealtimeEvent::BalanceUpdate {
+                        user_id,
+                        balance_ngn: wallet.balance_ngn.unwrap_or(0),
+                        balance_arenax_tokens: wallet.balance_arenax_tokens.unwrap_or(0),
+                        balance_xlm: wallet.balance_xlm.unwrap_or(0),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+                    event_bus.publish_to_user(user_id, &event).await;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to get Redis connection: {}", e);
+                    tracing::error!(
+                        user_id = %user_id,
+                        error = %e,
+                        "Failed to fetch wallet for balance update event"
+                    );
                 }
             }
         }
