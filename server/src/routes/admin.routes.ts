@@ -6,10 +6,11 @@ import {
     listAuditLogs 
 } from '../controllers/admin.controller';
 import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
+import { adminRateLimiter } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 
-router.use(authenticateJWT, restrictTo('ADMIN'));
+router.use(adminRateLimiter, authenticateJWT, restrictTo('ADMIN'));
 
 router.get('/status', getAdminStatus);
 router.get('/disputes', listDisputes);
