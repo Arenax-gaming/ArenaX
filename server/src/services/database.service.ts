@@ -11,6 +11,7 @@ export type DatabaseTransactionClient = Pick<
     | 'match'
     | 'dispute'
     | 'auditLog'
+    | 'refundRequest'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
