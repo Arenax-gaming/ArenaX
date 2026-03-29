@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                  "bytes": "edfd068c764f573941aeb71001bfa1daa3f4fe6986b0539e621bf4f708b98068"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -40,7 +40,7 @@
               "function_name": "update_contract",
               "args": [
                 {
-                  "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                  "bytes": "edfd068c764f573941aeb71001bfa1daa3f4fe6986b0539e621bf4f708b98068"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -110,7 +110,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                              "bytes": "edfd068c764f573941aeb71001bfa1daa3f4fe6986b0539e621bf4f708b98068"
                             }
                           ]
                         }
@@ -122,7 +122,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                              "bytes": "edfd068c764f573941aeb71001bfa1daa3f4fe6986b0539e621bf4f708b98068"
                             }
                           ]
                         },
@@ -141,7 +141,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                                "bytes": "edfd068c764f573941aeb71001bfa1daa3f4fe6986b0539e621bf4f708b98068"
                               }
                             },
                             {

@@ -175,6 +175,62 @@ class ApiClient {
       method: "DELETE",
     });
   }
+
+  // Governance endpoints
+  async getProposals(): Promise<any[]> {
+    try {
+      return await this.request<any[]>("/governance");
+    } catch {
+      return [];
+    }
+  }
+
+  async getProposal(id: string): Promise<any> {
+    return this.request<any>(`/governance/${id}`);
+  }
+
+  async createProposal(data: any) {
+    return this.request("/governance", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async startVoting(id: string) {
+    return this.request(`/governance/${id}/start-voting`, {
+      method: "POST",
+    });
+  }
+
+  async voteOnProposal(id: string, signature?: string) {
+    return this.request(`/governance/${id}/vote`, {
+      method: "POST",
+      body: JSON.stringify({ signature }),
+    });
+  }
+
+  async executeProposal(id: string) {
+    return this.request(`/governance/${id}/execute`, {
+      method: "POST",
+    });
+  }
+
+  // Admin/Dispute endpoints
+  async getDisputes() {
+    return this.request("/admin/disputes");
+  }
+
+  async resolveDispute(id: string, data: { status: string; resolution?: string; winnerOverrideId?: string }) {
+    return this.request(`/admin/disputes/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAuditLogs(params?: Record<string, any>) {
+    const queryString = params ? "?" + new URLSearchParams(params) : "";
+    return this.request(`/admin/audit-logs${queryString}`);
+  }
 }
 
 export const api = new ApiClient();

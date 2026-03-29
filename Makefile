@@ -1,7 +1,6 @@
 # ArenaX Development Makefile
 
-<<<<<<< HEAD
-.PHONY: help install build test clean lint format check-all
+.PHONY: help install build test clean lint format check-all docker-build docker-up docker-down
 
 # Default target
 help:
@@ -34,6 +33,11 @@ help:
 	@echo "  lint             Lint all code"
 	@echo "  format           Format all code"
 	@echo "  check-all        Run all checks (lint, format, test)"
+	@echo ""
+	@echo "Docker:"
+	@echo "  docker-build     Build Docker images"
+	@echo "  docker-up        Start services with Docker Compose"
+	@echo "  docker-down      Stop Docker services"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  clean            Clean all build artifacts"
@@ -119,6 +123,19 @@ format:
 check-all: lint format test
 	@echo "All checks completed!"
 
+# Docker
+docker-build:
+	@echo "Building Docker images..."
+	@docker-compose build
+
+docker-up:
+	@echo "Starting services with Docker Compose..."
+	@docker-compose up -d
+
+docker-down:
+	@echo "Stopping Docker services..."
+	@docker-compose down
+
 # Utilities
 clean:
 	@echo "Cleaning build artifacts..."
@@ -133,67 +150,3 @@ setup: install
 	@if [ -f "backend/env.example" ] && [ ! -f "backend/.env" ]; then cp backend/env.example backend/.env; fi
 	@if [ -f "contracts/env.example" ] && [ ! -f "contracts/.env" ]; then cp contracts/env.example contracts/.env; fi
 	@echo "Setup complete! Edit the .env files with your configuration."
-=======
-.PHONY: help setup dev build test clean docker-build docker-up docker-down
-
-# Default target
-help:
-	@echo "Available commands:"
-	@echo "  setup       - Initial project setup"
-	@echo "  dev         - Start development environment"
-	@echo "  build       - Build all services"
-	@echo "  test        - Run all tests"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  docker-build - Build Docker images"
-	@echo "  docker-up    - Start services with Docker Compose"
-	@echo "  docker-down  - Stop Docker services"
-
-setup:
-	@echo "Setting up development environment..."
-	# Backend setup
-	@cd backend && cargo check
-	# Frontend setup
-	@cd frontend && npm install
-	# Contracts setup
-	@cd contracts && cargo check
-
-dev:
-	@echo "Starting development environment..."
-	# Start services in development mode
-
-build:
-	@echo "Building all services..."
-	# Backend build
-	@cd backend && cargo build --release
-	# Frontend build
-	@cd frontend && npm run build
-	# Contracts build
-	@cd contracts && cargo build --release
-
-test:
-	@echo "Running tests..."
-	# Backend tests
-	@cd backend && cargo test
-	# Frontend tests
-	@cd frontend && npm test
-	# Contract tests
-	@cd contracts && cargo test
-
-clean:
-	@echo "Cleaning build artifacts..."
-	@cd backend && cargo clean
-	@cd contracts && cargo clean
-	@cd frontend && rm -rf .next
-
-docker-build:
-	@echo "Building Docker images..."
-	@docker-compose build
-
-docker-up:
-	@echo "Starting services with Docker Compose..."
-	@docker-compose up -d
-
-docker-down:
-	@echo "Stopping Docker services..."
-	@docker-compose down
->>>>>>> upstream/main

@@ -1,283 +1,836 @@
-import { BracketData, BracketMatch, BracketRound, BracketPlayer, calculatePrizeDistribution } from "@/types/bracket";
+import {
+  BracketData,
+  BracketFormat,
+  BracketMatch,
+  BracketPlayer,
+  BracketRound,
+  BracketSection,
+  calculatePrizeDistribution,
+} from "@/types/bracket";
+import { Tournament } from "@/types/tournament";
 
-// Mock players for bracket
-const mockPlayers: BracketPlayer[] = [
-  { id: "user-1", username: "ProGamer99", elo: 1850 },
-  { id: "user-2", username: "ShadowNinja", elo: 1720 },
-  { id: "user-3", username: "EliteSniper", elo: 1680 },
-  { id: "user-4", username: "DragonSlayer", elo: 1650 },
-  { id: "user-5", username: "NightWalker", elo: 1590 },
-  { id: "user-6", username: "SpeedRunner", elo: 1540 },
-  { id: "user-7", username: "CyberPunk", elo: 1510 },
-  { id: "user-8", username: "IronWolf", elo: 1480 },
+const players: BracketPlayer[] = [
+  {
+    id: "user-123",
+    username: "ProGamer99",
+    elo: 1850,
+    seed: 1,
+    region: "NA",
+    record: "14-2",
+    stats: [
+      { label: "K/D", value: "1.24" },
+      { label: "Win Rate", value: "81%" },
+      { label: "Clutches", value: "17" },
+    ],
+  },
+  {
+    id: "user-456",
+    username: "ShadowNinja",
+    elo: 1808,
+    seed: 2,
+    region: "EU",
+    record: "13-3",
+    stats: [
+      { label: "K/D", value: "1.19" },
+      { label: "Entry", value: "59%" },
+      { label: "Streak", value: "W4" },
+    ],
+  },
+  {
+    id: "user-789",
+    username: "EliteSniper",
+    elo: 1765,
+    seed: 3,
+    region: "BR",
+    record: "12-4",
+    stats: [
+      { label: "ACS", value: "248" },
+      { label: "Headshots", value: "31%" },
+      { label: "MVPs", value: "6" },
+    ],
+  },
+  {
+    id: "user-101",
+    username: "DragonSlayer",
+    elo: 1732,
+    seed: 4,
+    region: "SEA",
+    record: "11-5",
+    stats: [
+      { label: "KAST", value: "73%" },
+      { label: "Plants", value: "22" },
+      { label: "Streak", value: "W2" },
+    ],
+  },
+  {
+    id: "user-202",
+    username: "NightWalker",
+    elo: 1680,
+    seed: 5,
+    region: "NA",
+    record: "10-6",
+    stats: [
+      { label: "K/D", value: "1.07" },
+      { label: "Assists", value: "44" },
+      { label: "Win Rate", value: "64%" },
+    ],
+  },
+  {
+    id: "user-303",
+    username: "SpeedRunner",
+    elo: 1654,
+    seed: 6,
+    region: "EU",
+    record: "9-7",
+    stats: [
+      { label: "Openings", value: "26" },
+      { label: "Clutches", value: "9" },
+      { label: "K/D", value: "1.01" },
+    ],
+  },
+  {
+    id: "user-404",
+    username: "CyberPunk",
+    elo: 1626,
+    seed: 7,
+    region: "MENA",
+    record: "8-8",
+    stats: [
+      { label: "Damage", value: "149" },
+      { label: "Objective", value: "78%" },
+      { label: "Streak", value: "L1" },
+    ],
+  },
+  {
+    id: "user-505",
+    username: "IronWolf",
+    elo: 1598,
+    seed: 8,
+    region: "APAC",
+    record: "8-8",
+    stats: [
+      { label: "K/D", value: "0.98" },
+      { label: "Trade %", value: "72%" },
+      { label: "MVPs", value: "4" },
+    ],
+  },
+  {
+    id: "user-606",
+    username: "NovaQueen",
+    elo: 1564,
+    seed: 9,
+    region: "EU",
+    record: "7-9",
+    stats: [
+      { label: "Rating", value: "1.06" },
+      { label: "First Blood", value: "48%" },
+      { label: "Win Rate", value: "58%" },
+    ],
+  },
+  {
+    id: "user-707",
+    username: "BlitzForge",
+    elo: 1536,
+    seed: 10,
+    region: "NA",
+    record: "7-9",
+    stats: [
+      { label: "KAST", value: "70%" },
+      { label: "Support", value: "61%" },
+      { label: "Streak", value: "W1" },
+    ],
+  },
+  {
+    id: "user-808",
+    username: "HexaStorm",
+    elo: 1510,
+    seed: 11,
+    region: "LATAM",
+    record: "6-10",
+    stats: [
+      { label: "K/D", value: "0.95" },
+      { label: "Openings", value: "18" },
+      { label: "MVPs", value: "2" },
+    ],
+  },
+  {
+    id: "user-909",
+    username: "VantaPulse",
+    elo: 1490,
+    seed: 12,
+    region: "SEA",
+    record: "6-10",
+    stats: [
+      { label: "Damage", value: "141" },
+      { label: "Plants", value: "14" },
+      { label: "Win Rate", value: "51%" },
+    ],
+  },
 ];
 
-// Prize pool for the tournament
-const prizePool = 50000;
-const prizeDistribution = calculatePrizeDistribution(prizePool);
+const byes: BracketPlayer[] = Array.from({ length: 4 }, (_, index) => ({
+  id: `bye-${index + 1}`,
+  username: "BYE",
+  elo: 0,
+  seed: 99,
+  stats: [{ label: "Auto-advance", value: "Enabled" }],
+}));
 
-// Generate mock matches for a single elimination bracket
-export function generateMockBracket(tournamentId: string): BracketData {
-  const rounds: BracketRound[] = [];
-  const totalRounds = 3; // 8 players = 3 rounds (Quarterfinals, Semifinals, Finals)
+const findPlayer = (id: string) => players.find((player) => player.id === id) ?? null;
 
-  // Round 1: Quarterfinals (4 matches)
-  const round1Matches: BracketMatch[] = [
+const createMatch = (match: BracketMatch): BracketMatch => match;
+
+function buildSingleEliminationRounds(): BracketRound[] {
+  return [
     {
-      id: `${tournamentId}-match-1`,
-      round: 1,
-      matchNumber: 1,
-      player1: mockPlayers[0],
-      player2: mockPlayers[7],
-      status: "completed",
-      winnerId: mockPlayers[0].id,
-      scorePlayer1: 2,
-      scorePlayer2: 0,
-      nextMatchId: `${tournamentId}-match-5`,
+      roundNumber: 1,
+      roundName: "Round of 16",
+      shortLabel: "R16",
+      matches: [
+        createMatch({
+          id: "1-match-1",
+          round: 1,
+          matchNumber: 1,
+          label: "Featured Opener",
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-123"),
+          player2: byes[0],
+          winnerId: "user-123",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-9",
+          previousMatchIds: [],
+          scheduledTime: "2026-03-25T18:00:00Z",
+          streamTitle: "ArenaX Main Broadcast",
+          venue: "Stage Alpha",
+          notes: "Top seed received a bye due to 12-player field.",
+          isBye: true,
+        }),
+        createMatch({
+          id: "1-match-2",
+          round: 1,
+          matchNumber: 2,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-909"),
+          player2: findPlayer("user-404"),
+          winnerId: "user-404",
+          status: "completed",
+          scorePlayer1: 1,
+          scorePlayer2: 2,
+          nextMatchId: "1-match-9",
+          scheduledTime: "2026-03-25T18:15:00Z",
+          venue: "Stage Beta",
+        }),
+        createMatch({
+          id: "1-match-3",
+          round: 1,
+          matchNumber: 3,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-456"),
+          player2: byes[1],
+          winnerId: "user-456",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-10",
+          scheduledTime: "2026-03-25T18:30:00Z",
+          venue: "Stage Gamma",
+          notes: "Second seed auto-advanced through bye.",
+          isBye: true,
+        }),
+        createMatch({
+          id: "1-match-4",
+          round: 1,
+          matchNumber: 4,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-808"),
+          player2: findPlayer("user-707"),
+          winnerId: "user-707",
+          status: "completed",
+          scorePlayer1: 0,
+          scorePlayer2: 2,
+          nextMatchId: "1-match-10",
+          scheduledTime: "2026-03-25T18:40:00Z",
+          venue: "Stage Delta",
+        }),
+        createMatch({
+          id: "1-match-5",
+          round: 1,
+          matchNumber: 5,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-789"),
+          player2: byes[2],
+          winnerId: "user-789",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-11",
+          scheduledTime: "2026-03-25T19:00:00Z",
+          venue: "Stage Alpha",
+          isBye: true,
+        }),
+        createMatch({
+          id: "1-match-6",
+          round: 1,
+          matchNumber: 6,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-606"),
+          player2: findPlayer("user-303"),
+          winnerId: "user-606",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "1-match-11",
+          scheduledTime: "2026-03-25T19:20:00Z",
+          venue: "Stage Beta",
+        }),
+        createMatch({
+          id: "1-match-7",
+          round: 1,
+          matchNumber: 7,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-101"),
+          player2: byes[3],
+          winnerId: "user-101",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-12",
+          scheduledTime: "2026-03-25T19:35:00Z",
+          venue: "Stage Gamma",
+          isBye: true,
+        }),
+        createMatch({
+          id: "1-match-8",
+          round: 1,
+          matchNumber: 8,
+          roundLabel: "Upper Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-202"),
+          player2: findPlayer("user-505"),
+          winnerId: "user-202",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "1-match-12",
+          scheduledTime: "2026-03-25T19:50:00Z",
+          venue: "Stage Delta",
+        }),
+      ],
     },
     {
-      id: `${tournamentId}-match-2`,
-      round: 1,
-      matchNumber: 2,
-      player1: mockPlayers[1],
-      player2: mockPlayers[6],
-      status: "completed",
-      winnerId: mockPlayers[1].id,
-      scorePlayer1: 2,
-      scorePlayer2: 1,
-      nextMatchId: `${tournamentId}-match-5`,
+      roundNumber: 2,
+      roundName: "Quarterfinals",
+      shortLabel: "QF",
+      matches: [
+        createMatch({
+          id: "1-match-9",
+          round: 2,
+          matchNumber: 9,
+          label: "Upper Left",
+          roundLabel: "Quarterfinal",
+          bestOf: 3,
+          player1: findPlayer("user-123"),
+          player2: findPlayer("user-404"),
+          winnerId: "user-123",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-13",
+          previousMatchIds: ["1-match-1", "1-match-2"],
+          scheduledTime: "2026-03-25T20:10:00Z",
+          streamTitle: "ArenaX Main Broadcast",
+          venue: "Stage Alpha",
+        }),
+        createMatch({
+          id: "1-match-10",
+          round: 2,
+          matchNumber: 10,
+          roundLabel: "Quarterfinal",
+          bestOf: 3,
+          player1: findPlayer("user-456"),
+          player2: findPlayer("user-707"),
+          winnerId: "user-456",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "1-match-13",
+          previousMatchIds: ["1-match-3", "1-match-4"],
+          scheduledTime: "2026-03-25T20:25:00Z",
+          venue: "Stage Beta",
+        }),
+        createMatch({
+          id: "1-match-11",
+          round: 2,
+          matchNumber: 11,
+          roundLabel: "Quarterfinal",
+          bestOf: 3,
+          player1: findPlayer("user-789"),
+          player2: findPlayer("user-606"),
+          winnerId: "user-789",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-14",
+          previousMatchIds: ["1-match-5", "1-match-6"],
+          scheduledTime: "2026-03-25T20:40:00Z",
+          venue: "Stage Gamma",
+        }),
+        createMatch({
+          id: "1-match-12",
+          round: 2,
+          matchNumber: 12,
+          label: "Upset Watch",
+          roundLabel: "Quarterfinal",
+          bestOf: 3,
+          player1: findPlayer("user-101"),
+          player2: findPlayer("user-202"),
+          winnerId: "user-101",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "1-match-14",
+          previousMatchIds: ["1-match-7", "1-match-8"],
+          scheduledTime: "2026-03-25T20:55:00Z",
+          venue: "Stage Delta",
+        }),
+      ],
     },
     {
-      id: `${tournamentId}-match-3`,
-      round: 1,
-      matchNumber: 3,
-      player1: mockPlayers[2],
-      player2: mockPlayers[5],
-      status: "completed",
-      winnerId: mockPlayers[2].id,
-      scorePlayer1: 2,
-      scorePlayer2: 0,
-      nextMatchId: `${tournamentId}-match-6`,
+      roundNumber: 3,
+      roundName: "Semifinals",
+      shortLabel: "SF",
+      matches: [
+        createMatch({
+          id: "1-match-13",
+          round: 3,
+          matchNumber: 13,
+          roundLabel: "Semifinal",
+          bestOf: 3,
+          player1: findPlayer("user-123"),
+          player2: findPlayer("user-456"),
+          status: "in_progress",
+          scorePlayer1: 1,
+          scorePlayer2: 1,
+          nextMatchId: "1-match-15",
+          previousMatchIds: ["1-match-9", "1-match-10"],
+          scheduledTime: "2026-03-25T21:10:00Z",
+          streamTitle: "ArenaX Main Broadcast",
+          venue: "Stage Alpha",
+          reports: [
+            {
+              reporterId: "admin-ops",
+              reporterName: "ArenaX Referee",
+              player1Score: 1,
+              player2Score: 1,
+              submittedAt: "2026-03-25T21:27:00Z",
+            },
+          ],
+        }),
+        createMatch({
+          id: "1-match-14",
+          round: 3,
+          matchNumber: 14,
+          roundLabel: "Semifinal",
+          bestOf: 3,
+          player1: findPlayer("user-789"),
+          player2: findPlayer("user-101"),
+          status: "ready",
+          scorePlayer1: 0,
+          scorePlayer2: 0,
+          nextMatchId: "1-match-15",
+          previousMatchIds: ["1-match-11", "1-match-12"],
+          scheduledTime: "2026-03-25T21:35:00Z",
+          venue: "Stage Beta",
+          notes: "Teams are checking in for map veto.",
+        }),
+      ],
     },
     {
-      id: `${tournamentId}-match-4`,
-      round: 1,
-      matchNumber: 4,
-      player1: mockPlayers[3],
-      player2: mockPlayers[4],
-      status: "completed",
-      winnerId: mockPlayers[3].id,
-      scorePlayer1: 2,
-      scorePlayer2: 1,
-      nextMatchId: `${tournamentId}-match-6`,
+      roundNumber: 4,
+      roundName: "Grand Final",
+      shortLabel: "GF",
+      matches: [
+        createMatch({
+          id: "1-match-15",
+          round: 4,
+          matchNumber: 15,
+          label: "Championship",
+          roundLabel: "Grand Final",
+          bestOf: 5,
+          player1: null,
+          player2: null,
+          status: "pending",
+          previousMatchIds: ["1-match-13", "1-match-14"],
+          scheduledTime: "2026-03-25T22:15:00Z",
+          streamTitle: "ArenaX Finals Desk",
+          venue: "Main Arena",
+          notes: "Winner secures $25,000 and MVP vote access.",
+        }),
+      ],
+    },
+  ];
+}
+
+function buildDoubleEliminationSections(): BracketSection[] {
+  const winnersRounds: BracketRound[] = [
+    {
+      roundNumber: 1,
+      roundName: "Upper Quarterfinals",
+      shortLabel: "WQF",
+      matches: [
+        createMatch({
+          id: "2-match-1",
+          round: 1,
+          matchNumber: 1,
+          roundLabel: "Winners Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-123"),
+          player2: findPlayer("user-909"),
+          winnerId: "user-123",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "2-match-5",
+          scheduledTime: "2026-03-25T16:10:00Z",
+          venue: "Main Arena",
+        }),
+        createMatch({
+          id: "2-match-2",
+          round: 1,
+          matchNumber: 2,
+          roundLabel: "Winners Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-456"),
+          player2: findPlayer("user-808"),
+          winnerId: "user-456",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-5",
+          scheduledTime: "2026-03-25T16:15:00Z",
+          venue: "Stage Beta",
+        }),
+        createMatch({
+          id: "2-match-3",
+          round: 1,
+          matchNumber: 3,
+          roundLabel: "Winners Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-789"),
+          player2: findPlayer("user-303"),
+          winnerId: "user-789",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "2-match-6",
+          scheduledTime: "2026-03-25T16:25:00Z",
+          venue: "Stage Gamma",
+        }),
+        createMatch({
+          id: "2-match-4",
+          round: 1,
+          matchNumber: 4,
+          roundLabel: "Winners Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-101"),
+          player2: findPlayer("user-202"),
+          winnerId: "user-101",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-6",
+          scheduledTime: "2026-03-25T16:30:00Z",
+          venue: "Stage Delta",
+        }),
+      ],
+    },
+    {
+      roundNumber: 2,
+      roundName: "Upper Semifinals",
+      shortLabel: "WSF",
+      matches: [
+        createMatch({
+          id: "2-match-5",
+          round: 2,
+          matchNumber: 5,
+          roundLabel: "Winners Semifinal",
+          bestOf: 3,
+          player1: findPlayer("user-123"),
+          player2: findPlayer("user-456"),
+          winnerId: "user-123",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-7",
+          scheduledTime: "2026-03-25T17:10:00Z",
+          venue: "Main Arena",
+        }),
+        createMatch({
+          id: "2-match-6",
+          round: 2,
+          matchNumber: 6,
+          roundLabel: "Winners Semifinal",
+          bestOf: 3,
+          player1: findPlayer("user-789"),
+          player2: findPlayer("user-101"),
+          winnerId: "user-789",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 0,
+          nextMatchId: "2-match-7",
+          scheduledTime: "2026-03-25T17:20:00Z",
+          venue: "Stage Beta",
+        }),
+      ],
+    },
+    {
+      roundNumber: 3,
+      roundName: "Upper Final",
+      shortLabel: "WF",
+      matches: [
+        createMatch({
+          id: "2-match-7",
+          round: 3,
+          matchNumber: 7,
+          label: "Winner to Grand Final",
+          roundLabel: "Winners Final",
+          bestOf: 5,
+          player1: findPlayer("user-123"),
+          player2: findPlayer("user-789"),
+          status: "in_progress",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-11",
+          scheduledTime: "2026-03-25T18:05:00Z",
+          streamTitle: "ArenaX Main Broadcast",
+          venue: "Main Arena",
+          reports: [
+            {
+              reporterId: "observer-1",
+              reporterName: "Observer Feed",
+              player1Score: 2,
+              player2Score: 1,
+              submittedAt: "2026-03-25T18:46:00Z",
+            },
+          ],
+        }),
+      ],
     },
   ];
 
-  // Round 2: Semifinals (2 matches)
-  const round2Matches: BracketMatch[] = [
+  const losersRounds: BracketRound[] = [
     {
-      id: `${tournamentId}-match-5`,
-      round: 2,
-      matchNumber: 5,
-      player1: mockPlayers[0],
-      player2: mockPlayers[1],
-      status: "completed",
-      winnerId: mockPlayers[0].id,
-      scorePlayer1: 2,
-      scorePlayer2: 1,
-      nextMatchId: `${tournamentId}-match-7`,
+      roundNumber: 1,
+      roundName: "Lower Round 1",
+      shortLabel: "LR1",
+      matches: [
+        createMatch({
+          id: "2-match-8",
+          round: 1,
+          matchNumber: 8,
+          roundLabel: "Losers Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-909"),
+          player2: findPlayer("user-808"),
+          winnerId: "user-909",
+          status: "completed",
+          scorePlayer1: 2,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-10",
+          scheduledTime: "2026-03-25T17:00:00Z",
+          venue: "Stage Gamma",
+        }),
+        createMatch({
+          id: "2-match-9",
+          round: 1,
+          matchNumber: 9,
+          roundLabel: "Losers Round 1",
+          bestOf: 3,
+          player1: findPlayer("user-303"),
+          player2: findPlayer("user-202"),
+          winnerId: "user-202",
+          status: "completed",
+          scorePlayer1: 0,
+          scorePlayer2: 2,
+          nextMatchId: "2-match-10",
+          scheduledTime: "2026-03-25T17:05:00Z",
+          venue: "Stage Delta",
+        }),
+      ],
     },
     {
-      id: `${tournamentId}-match-6`,
-      round: 2,
-      matchNumber: 6,
-      player1: mockPlayers[2],
-      player2: mockPlayers[3],
-      status: "completed",
-      winnerId: mockPlayers[3].id,
-      scorePlayer1: 1,
-      scorePlayer2: 2,
-      nextMatchId: `${tournamentId}-match-7`,
+      roundNumber: 2,
+      roundName: "Lower Round 2",
+      shortLabel: "LR2",
+      matches: [
+        createMatch({
+          id: "2-match-10",
+          round: 2,
+          matchNumber: 10,
+          roundLabel: "Losers Round 2",
+          bestOf: 3,
+          player1: findPlayer("user-456"),
+          player2: findPlayer("user-202"),
+          status: "disputed",
+          scorePlayer1: 1,
+          scorePlayer2: 1,
+          nextMatchId: "2-match-12",
+          scheduledTime: "2026-03-25T18:00:00Z",
+          venue: "Stage Beta",
+          conflictReason: "Players reported different final round outcomes.",
+          reports: [
+            {
+              reporterId: "user-456",
+              reporterName: "ShadowNinja",
+              player1Score: 2,
+              player2Score: 1,
+              submittedAt: "2026-03-25T18:41:00Z",
+            },
+            {
+              reporterId: "user-202",
+              reporterName: "NightWalker",
+              player1Score: 1,
+              player2Score: 2,
+              submittedAt: "2026-03-25T18:42:00Z",
+            },
+          ],
+        }),
+      ],
+    },
+    {
+      roundNumber: 3,
+      roundName: "Lower Final",
+      shortLabel: "LF",
+      matches: [
+        createMatch({
+          id: "2-match-12",
+          round: 3,
+          matchNumber: 12,
+          label: "Last Chance",
+          roundLabel: "Losers Final",
+          bestOf: 5,
+          player1: null,
+          player2: findPlayer("user-101"),
+          status: "pending",
+          scheduledTime: "2026-03-25T19:10:00Z",
+          venue: "Main Arena",
+          nextMatchId: "2-match-11",
+        }),
+      ],
     },
   ];
 
-  // Round 3: Finals (1 match)
-  const round3Matches: BracketMatch[] = [
+  const finalRounds: BracketRound[] = [
     {
-      id: `${tournamentId}-match-7`,
-      round: 3,
-      matchNumber: 7,
-      player1: mockPlayers[0],
-      player2: mockPlayers[3],
-      status: "completed",
-      winnerId: mockPlayers[0].id,
-      scorePlayer1: 3,
-      scorePlayer2: 2,
+      roundNumber: 1,
+      roundName: "Grand Final",
+      shortLabel: "GF",
+      matches: [
+        createMatch({
+          id: "2-match-11",
+          round: 1,
+          matchNumber: 11,
+          label: "Grand Final",
+          roundLabel: "Championship",
+          bestOf: 5,
+          player1: null,
+          player2: null,
+          status: "pending",
+          scheduledTime: "2026-03-25T20:00:00Z",
+          streamTitle: "ArenaX Grand Final",
+          venue: "Main Arena",
+          notes: "Bracket reset enabled if lower finalist wins first series.",
+        }),
+      ],
     },
   ];
 
-  rounds.push({
-    roundNumber: 1,
-    roundName: "Quarterfinals",
-    matches: round1Matches,
-  });
+  return [
+    { id: "winners", title: "Winners Bracket", type: "winners", rounds: winnersRounds },
+    { id: "losers", title: "Losers Bracket", type: "losers", rounds: losersRounds },
+    { id: "finals", title: "Championship", type: "finals", rounds: finalRounds },
+  ];
+}
 
-  rounds.push({
-    roundNumber: 2,
-    roundName: "Semifinals",
-    matches: round2Matches,
-  });
-
-  rounds.push({
-    roundNumber: 3,
-    roundName: "Finals",
-    matches: round3Matches,
-  });
+function createSingleEliminationBracket(tournament: Tournament): BracketData {
+  const rounds = buildSingleEliminationRounds();
 
   return {
-    tournamentId,
-    tournamentName: "CS2 Pro League 2026",
+    tournamentId: tournament.id,
+    tournamentName: tournament.name,
+    format: "single_elimination",
     rounds,
-    totalRounds,
-    prizeDistribution,
+    sections: [
+      {
+        id: "main",
+        title: "Bracket",
+        type: "winners",
+        rounds,
+      },
+    ],
+    totalRounds: rounds.length,
+    prizeDistribution: calculatePrizeDistribution(tournament.prizePool),
+    activeMatchIds: ["1-match-13", "1-match-14"],
   };
 }
 
-// Generate a bracket with a match where the current user is playing
-export function generateMockBracketWithCurrentUser(
-  tournamentId: string,
-  currentUserId: string
-): BracketData {
-  const bracket = generateMockBracket(tournamentId);
-  
-  // Add current user to the first match as player 1
-  if (bracket.rounds[0]?.matches[0]) {
-    bracket.rounds[0].matches[0].player1 = {
-      id: currentUserId,
-      username: "CurrentUser",
-      elo: 1700,
-      isCurrentUser: true,
-    };
-    bracket.rounds[0].matches[0].player2 = mockPlayers[7];
-  }
-  
-  return bracket;
-}
-
-// Generate a bracket with some in-progress matches
-export function generateInProgressBracket(tournamentId: string): BracketData {
-  const bracket = generateMockBracket(tournamentId);
-  
-  // Make the semifinals in progress
-  if (bracket.rounds[1]?.matches[0]) {
-    bracket.rounds[1].matches[0].status = "in_progress";
-  }
-  
-  return bracket;
-}
-
-// Generate a bracket with pending matches (for upcoming tournaments)
-export function generatePendingBracket(tournamentId: string): BracketData {
-  const rounds: BracketRound[] = [];
-  const totalRounds = 3;
-
-  // Round 1: Quarterfinals - all pending
-  const round1Matches: BracketMatch[] = [
-    {
-      id: `${tournamentId}-match-1`,
-      round: 1,
-      matchNumber: 1,
-      player1: mockPlayers[0],
-      player2: mockPlayers[7],
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-5`,
-    },
-    {
-      id: `${tournamentId}-match-2`,
-      round: 1,
-      matchNumber: 2,
-      player1: mockPlayers[1],
-      player2: mockPlayers[6],
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-5`,
-    },
-    {
-      id: `${tournamentId}-match-3`,
-      round: 1,
-      matchNumber: 3,
-      player1: mockPlayers[2],
-      player2: mockPlayers[5],
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-6`,
-    },
-    {
-      id: `${tournamentId}-match-4`,
-      round: 1,
-      matchNumber: 4,
-      player1: mockPlayers[3],
-      player2: mockPlayers[4],
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-6`,
-    },
-  ];
-
-  // Round 2: Semifinals - no players yet
-  const round2Matches: BracketMatch[] = [
-    {
-      id: `${tournamentId}-match-5`,
-      round: 2,
-      matchNumber: 5,
-      player1: null,
-      player2: null,
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-7`,
-    },
-    {
-      id: `${tournamentId}-match-6`,
-      round: 2,
-      matchNumber: 6,
-      player1: null,
-      player2: null,
-      status: "pending",
-      nextMatchId: `${tournamentId}-match-7`,
-    },
-  ];
-
-  // Round 3: Finals - no players yet
-  const round3Matches: BracketMatch[] = [
-    {
-      id: `${tournamentId}-match-7`,
-      round: 3,
-      matchNumber: 7,
-      player1: null,
-      player2: null,
-      status: "pending",
-    },
-  ];
-
-  rounds.push({
-    roundNumber: 1,
-    roundName: "Quarterfinals",
-    matches: round1Matches,
-  });
-
-  rounds.push({
-    roundNumber: 2,
-    roundName: "Semifinals",
-    matches: round2Matches,
-  });
-
-  rounds.push({
-    roundNumber: 3,
-    roundName: "Finals",
-    matches: round3Matches,
-  });
+function createDoubleEliminationBracket(tournament: Tournament): BracketData {
+  const sections = buildDoubleEliminationSections();
 
   return {
-    tournamentId,
-    tournamentName: "Upcoming Tournament",
-    rounds,
-    totalRounds,
-    prizeDistribution,
+    tournamentId: tournament.id,
+    tournamentName: tournament.name,
+    format: "double_elimination",
+    rounds: sections[0].rounds,
+    sections,
+    totalRounds: sections.reduce((count, section) => count + section.rounds.length, 0),
+    prizeDistribution: calculatePrizeDistribution(tournament.prizePool),
+    activeMatchIds: ["2-match-7", "2-match-10"],
+  };
+}
+
+export function generateMockBracket(
+  tournament: Tournament,
+  currentUserId?: string,
+): BracketData {
+  const bracket =
+    tournament.tournamentType === "double_elimination"
+      ? createDoubleEliminationBracket(tournament)
+      : createSingleEliminationBracket(tournament);
+
+  const markCurrentUser = (player: BracketPlayer | null) =>
+    player ? { ...player, isCurrentUser: player.id === currentUserId } : null;
+
+  return {
+    ...bracket,
+    currentUserId,
+    sections: bracket.sections.map((section) => ({
+      ...section,
+      rounds: section.rounds.map((round) => ({
+        ...round,
+        matches: round.matches.map((match) => ({
+          ...match,
+          player1: markCurrentUser(match.player1),
+          player2: markCurrentUser(match.player2),
+        })),
+      })),
+    })),
+    rounds: bracket.rounds?.map((round) => ({
+      ...round,
+      matches: round.matches.map((match) => ({
+        ...match,
+        player1: markCurrentUser(match.player1),
+        player2: markCurrentUser(match.player2),
+      })),
+    })),
   };
 }
