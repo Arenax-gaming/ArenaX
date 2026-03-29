@@ -141,25 +141,31 @@ impl MatchService {
         user_id: Uuid,
         request: ReportScoreRequest,
     ) -> Result<MatchScore, ApiError> {
-        // Validate match and user
+        // Anti-spam: log and gate before any other validation.
+        // enforce_report_rate_limit inserts an attempt record first, then checks
+        // the running total — ensuring the limit holds under concurrent bursts.
+        self.enforce_report_rate_limit(match_id, user_id).await?;
+
+        // FSM + eligibility validation
         let match_record = self.get_match_by_id(match_id).await?;
         self.validate_score_report(&match_record, user_id).await?;
 
-        // Create score record
+        // Create score record — includes opponent_score for conflict detection
         let score_record = sqlx::query_as!(
             MatchScore,
             r#"
             INSERT INTO match_scores (
-                id, match_id, player_id, score, proof_url, telemetry_data,
-                submitted_at, verified
+                id, match_id, player_id, score, opponent_score, proof_url,
+                telemetry_data, submitted_at, verified
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
+                $1, $2, $3, $4, $5, $6, $7, $8, $9
             ) RETURNING *
             "#,
             Uuid::new_v4(),
             match_id,
             user_id,
             request.score,
+            request.opponent_score,
             request.proof_url,
             request.telemetry_data,
             Utc::now(),
@@ -169,7 +175,10 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Update match with score
+        // Mark this attempt as accepted
+        self.mark_last_attempt_accepted(match_id, user_id).await?;
+
+        // Update the match's score columns
         self.update_match_score(match_id, user_id, request.score)
             .await?;
 
@@ -183,10 +192,15 @@ impl MatchService {
         }))
         .await?;
 
-        // Check if both players have reported scores
+        // When both players have reported, detect conflicts before completing
         let both_reported = self.both_players_reported_scores(match_id).await?;
         if both_reported {
-            self.process_match_completion(match_id).await?;
+            let has_conflict = self.detect_score_conflict(match_id).await?;
+            if has_conflict {
+                self.process_conflict(match_id).await?;
+            } else {
+                self.process_match_completion(match_id).await?;
+            }
         }
 
         Ok(score_record)
@@ -457,7 +471,7 @@ impl MatchService {
             return Ok(false);
         }
 
-        // Check if match is in progress
+        // Only allow reporting when the match is actively in progress
         if match_record.status != MatchStatus::InProgress {
             return Ok(false);
         }
@@ -552,12 +566,28 @@ impl MatchService {
             return Err(ApiError::forbidden("User is not a player in this match"));
         }
 
-        // Check if match is in progress
-        if match_record.status != MatchStatus::InProgress {
-            return Err(ApiError::bad_request("Match is not in progress"));
+        // FSM guard: strictly prevent reporting for finished or cancelled matches.
+        // This is the single authoritative state-machine check — no other code path
+        // should bypass it.
+        match match_record.status {
+            MatchStatus::InProgress => {} // only valid state for score reporting
+            MatchStatus::Completed
+            | MatchStatus::Conflict
+            | MatchStatus::Cancelled
+            | MatchStatus::Abandoned => {
+                return Err(ApiError::bad_request(format!(
+                    "Cannot report score: match is already finished (status: {:?})",
+                    match_record.status
+                )));
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "Match has not started yet",
+                ));
+            }
         }
 
-        // Check if user has already reported score
+        // Check if user has already reported score for this match
         let existing_score = sqlx::query!(
             "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
             match_record.id,
@@ -1081,15 +1111,36 @@ impl MatchService {
         match_id: Uuid,
         status: MatchStatus,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3",
-            status as _,
-            Utc::now(),
-            match_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+        if status == MatchStatus::InProgress {
+            // Record when the match started and set the reporting deadline.
+            // The Reaper will forfeit non-reporters after this deadline passes.
+            let deadline = Utc::now() + chrono::Duration::hours(24);
+            sqlx::query!(
+                r#"
+                UPDATE matches
+                SET status = $1, started_at = $2, report_deadline = $3, updated_at = $4
+                WHERE id = $5
+                "#,
+                status as _,
+                Utc::now(),
+                deadline,
+                Utc::now(),
+                match_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        } else {
+            sqlx::query!(
+                "UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3",
+                status as _,
+                Utc::now(),
+                match_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
 
         Ok(())
     }
@@ -1501,6 +1552,223 @@ impl MatchService {
             page,
             per_page,
         })
+    }
+
+    // =========================================================================
+    // CONFLICT DETECTION
+    // =========================================================================
+
+    /// Returns `true` when both players have submitted reports that disagree on
+    /// who won the match.
+    ///
+    /// Each player reports `(score, opponent_score)` from their own perspective.
+    /// A conflict exists when the claimed winner differs between the two reports,
+    /// e.g. Player A says "I won 3-1" while Player B says "I won 3-1".
+    async fn detect_score_conflict(&self, match_id: Uuid) -> Result<bool, ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+
+        let p2_id = match match_record.player2_id {
+            Some(id) => id,
+            None => return Ok(false), // bye match — no second report, no conflict
+        };
+
+        let p1_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            match_record.player1_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let p2_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            p2_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let (p1, p2) = match (p1_report, p2_report) {
+            (Some(p1), Some(p2)) => (p1, p2),
+            _ => return Ok(false), // both reports not yet in — nothing to compare
+        };
+
+        // Derive the winner each player is claiming:
+        //   p1 claims: my score vs opponent_score → who wins?
+        //   p2 claims: my score vs opponent_score → who wins?
+        let p1_claims = match p1.score.cmp(&p1.opponent_score.unwrap_or(0)) {
+            std::cmp::Ordering::Greater => Some(match_record.player1_id),
+            std::cmp::Ordering::Less => Some(p2_id),
+            std::cmp::Ordering::Equal => None,
+        };
+        let p2_claims = match p2.score.cmp(&p2.opponent_score.unwrap_or(0)) {
+            std::cmp::Ordering::Greater => Some(p2_id),
+            std::cmp::Ordering::Less => Some(match_record.player1_id),
+            std::cmp::Ordering::Equal => None,
+        };
+
+        Ok(p1_claims != p2_claims)
+    }
+
+    /// Transition the match to `Conflict` status and persist a human-readable
+    /// description of the discrepancy for manual / oracle resolution.
+    async fn process_conflict(&self, match_id: Uuid) -> Result<(), ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+        let p2_id = match_record
+            .player2_id
+            .ok_or_else(|| ApiError::bad_request("Match has no second player"))?;
+
+        let p1_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            match_record.player1_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let p2_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            p2_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let conflict_reason = match (&p1_report, &p2_report) {
+            (Some(p1), Some(p2)) => format!(
+                "Score discrepancy: Player A reported {}-{}, Player B reported {}-{}",
+                p1.score,
+                p1.opponent_score.unwrap_or(0),
+                p2.opponent_score.unwrap_or(0),
+                p2.score,
+            ),
+            _ => "Conflict detected: unable to compare score reports".to_string(),
+        };
+
+        sqlx::query!(
+            r#"
+            UPDATE matches
+            SET status = $1, conflict_reason = $2, updated_at = $3
+            WHERE id = $4
+            "#,
+            MatchStatus::Conflict as _,
+            conflict_reason,
+            Utc::now(),
+            match_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "conflict_detected",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "conflict_reason": conflict_reason,
+        }))
+        .await?;
+
+        tracing::warn!(
+            match_id = %match_id,
+            conflict_reason = %conflict_reason,
+            "Match flagged as conflicted and queued for manual resolution"
+        );
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // ANTI-SPAM RATE LIMITING
+    // =========================================================================
+
+    /// Insert an attempt record first, then count the player's total attempts for
+    /// this match.  Rejecting AFTER the insert means the counter is always
+    /// incremented — even for requests that are ultimately denied — which
+    /// prevents flooding via rapid retries.
+    async fn enforce_report_rate_limit(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+    ) -> Result<(), ApiError> {
+        const MAX_ATTEMPTS_PER_MATCH: i64 = 5;
+
+        // Always record the attempt regardless of outcome
+        sqlx::query!(
+            r#"
+            INSERT INTO score_report_attempts
+                (id, match_id, player_id, attempted_at, accepted)
+            VALUES ($1, $2, $3, $4, FALSE)
+            "#,
+            Uuid::new_v4(),
+            match_id,
+            player_id,
+            Utc::now()
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Count total attempts AFTER the insert
+        let total = sqlx::query!(
+            r#"
+            SELECT COUNT(*) AS count
+            FROM score_report_attempts
+            WHERE match_id = $1 AND player_id = $2
+            "#,
+            match_id,
+            player_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .count
+        .unwrap_or(0);
+
+        if total > MAX_ATTEMPTS_PER_MATCH {
+            return Err(ApiError::TooManyRequests(format!(
+                "Score report rate limit exceeded (max {} attempts per match). \
+                 Please contact support if you believe this is an error.",
+                MAX_ATTEMPTS_PER_MATCH
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Update the most-recently inserted attempt record for this player/match to
+    /// `accepted = TRUE` once the score row has been successfully written.
+    async fn mark_last_attempt_accepted(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE score_report_attempts
+            SET accepted = TRUE
+            WHERE id = (
+                SELECT id FROM score_report_attempts
+                WHERE match_id = $1 AND player_id = $2
+                ORDER BY attempted_at DESC
+                LIMIT 1
+            )
+            "#,
+            match_id,
+            player_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(())
     }
 }
 

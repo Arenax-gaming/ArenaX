@@ -3,8 +3,14 @@ import rateLimit from 'express-rate-limit';
 import {
     createRecoveryChallenge,
     exportMyWallet,
+    getLedger,
     getMyWallet,
-    rotateWalletEncryption
+    getTransactions,
+    internalTransfer,
+    lockEscrow,
+    releaseEscrow,
+    rotateWalletEncryption,
+    slashEscrow
 } from '../controllers/wallet.controller';
 import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
 
@@ -29,10 +35,13 @@ router.get('/me', getMyWallet);
 router.post('/me/recovery/challenges', walletRecoveryLimiter, createRecoveryChallenge);
 router.post('/me/recovery/export', walletRecoveryLimiter, exportMyWallet);
 router.post('/me/rotate-encryption', rotateWalletEncryption);
-router.post(
-    '/rotate-encryption',
-    restrictTo('ADMIN'),
-    rotateWalletEncryption
-);
+router.post('/rotate-encryption', restrictTo('ADMIN'), rotateWalletEncryption);
+
+router.get('/ledger', getLedger);
+router.get('/transactions', getTransactions);
+router.post('/escrow/lock', lockEscrow);
+router.post('/escrow/release', releaseEscrow);
+router.post('/escrow/slash', slashEscrow);
+router.post('/transfer', internalTransfer);
 
 export default router;

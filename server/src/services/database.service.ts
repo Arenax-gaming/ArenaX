@@ -2,6 +2,8 @@ import { PrismaClient } from '@prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
+    'ledger'
+    | 'walletTransaction'
     | 'user'
     | 'refreshToken'
     | 'userWallet'
