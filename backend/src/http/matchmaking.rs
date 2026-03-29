@@ -1,10 +1,12 @@
 use crate::api_error::ApiError;
-use crate::auth::Claims;
+use crate::auth::jwt_service::Claims;
 use crate::db::DbPool;
 use crate::models::matchmaker::*;
-use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig};
+use crate::service::matchmaker::MatchmakerService;
 use actix_web::{web, HttpResponse, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,7 +38,7 @@ pub struct LeaveQueueResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueueStatusResponse {
     pub in_queue: bool,
-    pub queue_entry: Option<QueueEntry>,
+    pub queue_entry: Option<crate::service::matchmaker::QueueEntry>,
     pub queue_size: usize,
     pub estimated_wait_time: Option<i32>,
     pub wait_time_so_far: Option<i64>,
@@ -71,13 +73,14 @@ pub async fn join_queue(
     claims: web::ReqData<Claims>,
     request: web::Json<JoinQueueRequest>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| ApiError::bad_request(format!("Invalid user ID: {}", e)))?;
     let game = request.game.clone();
     let game_mode = request.game_mode.clone();
 
     // Check if user is already in queue
     match matchmaker.is_user_in_queue(user_id, &game, &game_mode).await {
-        Ok(Some(entry)) => {
+        Ok(Some(_entry)) => {
             return Ok(HttpResponse::BadRequest().json(JoinQueueResponse {
                 success: false,
                 queue_position: None,
@@ -90,8 +93,8 @@ pub async fn join_queue(
     }
 
     // Get user's current ELO rating
-    let current_elo = match get_user_elo(&db_pool, user_id, &game).await {
-        Ok(elo) => elo,
+    let current_elo: i32 = match get_user_elo(&db_pool, user_id, &game).await {
+        Ok(elo) => elo.current_rating,
         Err(_) => {
             // Create default ELO record if not exists
             create_default_elo(&db_pool, user_id, &game).await?;
@@ -126,7 +129,8 @@ pub async fn leave_queue(
     claims: web::ReqData<Claims>,
     request: web::Json<LeaveQueueRequest>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| ApiError::bad_request(format!("Invalid user ID: {}", e)))?;
     let game = request.game.clone();
     let game_mode = request.game_mode.clone();
 
@@ -142,11 +146,8 @@ pub async fn leave_queue(
         Err(e) => return Err(e.into()),
     }
 
-    // Remove from Redis queue
-    let mut conn = matchmaker.redis_client.get_multiplexed_async_connection().await
-        .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
-    
-    if let Err(e) = matchmaker.remove_from_queue(&mut conn, &user_id, &game, &game_mode).await {
+    // Remove from queue via the service's public API
+    if let Err(e) = matchmaker.leave_queue(user_id, &game, &game_mode).await {
         return Err(e.into());
     }
 
@@ -166,7 +167,8 @@ pub async fn get_queue_status(
     claims: web::ReqData<Claims>,
     path: web::Path<(String, String)>, // (game, game_mode)
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| ApiError::bad_request(format!("Invalid user ID: {}", e)))?;
     let (game, game_mode) = path.into_inner();
 
     // Check if user is in queue
@@ -194,21 +196,19 @@ pub async fn get_queue_status(
 /// Get matchmaking statistics
 pub async fn get_matchmaking_stats(
     db_pool: web::Data<DbPool>,
-    matchmaker: web::Data<MatchmakerService>,
+    _matchmaker: web::Data<MatchmakerService>,
 ) -> Result<HttpResponse> {
     // Get total players in queue from database
-    let total_query = sqlx::query!(
-        "SELECT COUNT(*) as count FROM matchmaking_queue WHERE status = $1",
-        QueueStatus::Waiting as _
-    )
-    .fetch_one(db_pool.as_ref())
-    .await
-    .map_err(|e| ApiError::database_error(e))?;
+    let total_row = sqlx::query("SELECT COUNT(*) as count FROM matchmaking_queue WHERE status = $1")
+        .bind(format!("{:?}", QueueStatus::Waiting))
+        .fetch_one(db_pool.as_ref())
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
 
-    let total_players_in_queue = total_query.count.unwrap_or(0) as usize;
+    let total_players_in_queue: i64 = total_row.try_get("count").unwrap_or(0);
 
     // Get stats by game and game mode
-    let game_stats_query = sqlx::query!(
+    let game_stats_rows = sqlx::query(
         r#"
         SELECT game, game_mode, COUNT(*) as player_count
         FROM matchmaking_queue 
@@ -216,27 +216,33 @@ pub async fn get_matchmaking_stats(
         GROUP BY game, game_mode
         ORDER BY game, game_mode
         "#,
-        QueueStatus::Waiting as _
     )
+    .bind(format!("{:?}", QueueStatus::Waiting))
     .fetch_all(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    let mut games_map: std::collections::HashMap<String, Vec<(String, usize)>> = std::collections::HashMap::new();
-    
-    for row in game_stats_query {
+    let mut games_map: std::collections::HashMap<String, Vec<(String, usize)>> =
+        std::collections::HashMap::new();
+
+    for row in game_stats_rows {
+        let game: String = row.try_get("game").unwrap_or_default();
+        let game_mode: String = row.try_get("game_mode").unwrap_or_default();
+        let player_count: i64 = row.try_get("player_count").unwrap_or(0);
         games_map
-            .entry(row.game)
+            .entry(game)
             .or_insert_with(Vec::new)
-            .push((row.game_mode, row.player_count.unwrap_or(0) as usize));
+            .push((game_mode, player_count as usize));
     }
 
     let mut games = Vec::new();
     for (game, modes) in games_map {
         let mut game_mode_stats = Vec::new();
         for (game_mode, player_count) in modes {
-            let matches_per_hour = get_matches_per_hour(&db_pool, &game, &game_mode).await.unwrap_or(0);
-            let average_wait_time = get_average_wait_time(&db_pool, &game, &game_mode).await.ok();
+            let matches_per_hour = get_matches_per_hour(&db_pool, &game, &game_mode)
+                .await
+                .unwrap_or(0);
+            let average_wait_time = get_average_wait_time(&db_pool, &game, &game_mode).await.ok().flatten();
 
             game_mode_stats.push(GameModeStats {
                 game_mode,
@@ -257,7 +263,7 @@ pub async fn get_matchmaking_stats(
     let average_wait_time = get_overall_average_wait_time(&db_pool).await.unwrap_or(0.0);
 
     Ok(HttpResponse::Ok().json(MatchmakingStatsResponse {
-        total_players_in_queue,
+        total_players_in_queue: total_players_in_queue as usize,
         games,
         matches_created_last_hour,
         average_wait_time,
@@ -270,15 +276,15 @@ pub async fn get_elo(
     claims: web::ReqData<Claims>,
     path: web::Path<String>, // game
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| ApiError::bad_request(format!("Invalid user ID: {}", e)))?;
     let game = path.into_inner();
 
-    let elo_record = sqlx::query_as!(
-        UserElo,
+    let elo_record = sqlx::query_as::<_, UserElo>(
         "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
     )
+    .bind(user_id)
+    .bind(&game)
     .fetch_optional(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -300,23 +306,23 @@ pub async fn get_elo_history(
     claims: web::ReqData<Claims>,
     path: web::Path<(String, i32, i32)>, // (game, page, limit)
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|e| ApiError::bad_request(format!("Invalid user ID: {}", e)))?;
     let (game, page, limit) = path.into_inner();
     let offset = (page - 1) * limit;
 
-    let history = sqlx::query_as!(
-        EloHistory,
+    let history = sqlx::query_as::<_, EloHistory>(
         r#"
         SELECT * FROM elo_history 
         WHERE user_id = $1 AND game = $2
         ORDER BY created_at DESC
         LIMIT $3 OFFSET $4
         "#,
-        user_id,
-        game,
-        limit,
-        offset
     )
+    .bind(user_id)
+    .bind(game)
+    .bind(limit as i64)
+    .bind(offset as i64)
     .fetch_all(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -327,12 +333,11 @@ pub async fn get_elo_history(
 // Helper functions
 
 async fn get_user_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<UserElo, ApiError> {
-    let elo_record = sqlx::query_as!(
-        UserElo,
+    let elo_record = sqlx::query_as::<_, UserElo>(
         "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
     )
+    .bind(user_id)
+    .bind(game)
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -340,18 +345,22 @@ async fn get_user_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<Use
     Ok(elo_record)
 }
 
-async fn create_default_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<(), ApiError> {
-    sqlx::query!(
+async fn create_default_elo(
+    db_pool: &DbPool,
+    user_id: Uuid,
+    game: &str,
+) -> Result<(), ApiError> {
+    sqlx::query(
         "INSERT INTO user_elo (user_id, game, current_rating, wins, losses, draws, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        user_id,
-        game,
-        1200i32, // Default ELO
-        0i32,
-        0i32,
-        0i32,
-        Utc::now(),
-        Utc::now()
     )
+    .bind(user_id)
+    .bind(game)
+    .bind(1200i32)
+    .bind(0i32)
+    .bind(0i32)
+    .bind(0i32)
+    .bind(Utc::now())
+    .bind(Utc::now())
     .execute(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -366,7 +375,7 @@ async fn add_to_database_queue(
     game_mode: &str,
     current_elo: i32,
 ) -> Result<(), ApiError> {
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO matchmaking_queue (
             id, user_id, game, game_mode, current_elo, min_elo, max_elo,
@@ -375,17 +384,17 @@ async fn add_to_database_queue(
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
         )
         "#,
-        Uuid::new_v4(),
-        user_id,
-        game,
-        game_mode,
-        current_elo,
-        current_elo - 100, // Initial range
-        current_elo + 100,
-        Utc::now(),
-        Utc::now() + chrono::Duration::minutes(10), // 10 minute expiry
-        QueueStatus::Waiting as _
     )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(game)
+    .bind(game_mode)
+    .bind(current_elo)
+    .bind(current_elo - 100)
+    .bind(current_elo + 100)
+    .bind(Utc::now())
+    .bind(Utc::now() + chrono::Duration::minutes(10))
+    .bind(format!("{:?}", QueueStatus::Waiting))
     .execute(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -399,13 +408,13 @@ async fn update_database_queue_status(
     game: &str,
     game_mode: &str,
 ) -> Result<(), ApiError> {
-    sqlx::query!(
+    sqlx::query(
         "UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND game = $3 AND game_mode = $4",
-        QueueStatus::Left as _,
-        user_id,
-        game,
-        game_mode
     )
+    .bind(format!("{:?}", QueueStatus::Left))
+    .bind(user_id)
+    .bind(game)
+    .bind(game_mode)
     .execute(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -413,23 +422,31 @@ async fn update_database_queue_status(
     Ok(())
 }
 
-async fn get_matches_per_hour(db_pool: &DbPool, game: &str, game_mode: &str) -> Result<i64, ApiError> {
+async fn get_matches_per_hour(
+    db_pool: &DbPool,
+    game: &str,
+    game_mode: &str,
+) -> Result<i64, ApiError> {
     let one_hour_ago = Utc::now() - chrono::Duration::hours(1);
-    
-    let result = sqlx::query!(
+
+    let result = sqlx::query(
         "SELECT COUNT(*) as count FROM matches WHERE game_mode = $1 AND created_at >= $2",
-        format!("{}:{}", game, game_mode),
-        one_hour_ago
     )
+    .bind(format!("{}:{}", game, game_mode))
+    .bind(one_hour_ago)
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(result.count.unwrap_or(0))
+    Ok(result.try_get::<i64, _>("count").unwrap_or(0))
 }
 
-async fn get_average_wait_time(db_pool: &DbPool, game: &str, game_mode: &str) -> Result<Option<i32>, ApiError> {
-    let result = sqlx::query!(
+async fn get_average_wait_time(
+    db_pool: &DbPool,
+    game: &str,
+    game_mode: &str,
+) -> Result<Option<i32>, ApiError> {
+    let result = sqlx::query(
         r#"
         SELECT AVG(EXTRACT(EPOCH FROM (matched_at - joined_at))::INTEGER) as avg_wait_seconds
         FROM matchmaking_queue 
@@ -438,34 +455,32 @@ async fn get_average_wait_time(db_pool: &DbPool, game: &str, game_mode: &str) ->
         AND matched_at IS NOT NULL
         AND created_at >= $4
         "#,
-        game,
-        game_mode,
-        QueueStatus::Matched as _,
-        Utc::now() - chrono::Duration::hours(1)
     )
+    .bind(game)
+    .bind(game_mode)
+    .bind(format!("{:?}", QueueStatus::Matched))
+    .bind(Utc::now() - chrono::Duration::hours(1))
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(result.avg_wait_seconds.map(|x| x as i32))
+    Ok(result.try_get::<Option<i32>, _>("avg_wait_seconds").unwrap_or(None))
 }
 
 async fn get_matches_created_last_hour(db_pool: &DbPool) -> Result<i64, ApiError> {
     let one_hour_ago = Utc::now() - chrono::Duration::hours(1);
-    
-    let result = sqlx::query!(
-        "SELECT COUNT(*) as count FROM matches WHERE created_at >= $1",
-        one_hour_ago
-    )
-    .fetch_one(db_pool)
-    .await
-    .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(result.count.unwrap_or(0))
+    let result = sqlx::query("SELECT COUNT(*) as count FROM matches WHERE created_at >= $1")
+        .bind(one_hour_ago)
+        .fetch_one(db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+    Ok(result.try_get::<i64, _>("count").unwrap_or(0))
 }
 
 async fn get_overall_average_wait_time(db_pool: &DbPool) -> Result<f64, ApiError> {
-    let result = sqlx::query!(
+    let result = sqlx::query(
         r#"
         SELECT AVG(EXTRACT(EPOCH FROM (matched_at - joined_at))::INTEGER) as avg_wait_seconds
         FROM matchmaking_queue 
@@ -473,36 +488,12 @@ async fn get_overall_average_wait_time(db_pool: &DbPool) -> Result<f64, ApiError
         AND matched_at IS NOT NULL
         AND created_at >= $2
         "#,
-        QueueStatus::Matched as _,
-        Utc::now() - chrono::Duration::hours(1)
     )
+    .bind(format!("{:?}", QueueStatus::Matched))
+    .bind(Utc::now() - chrono::Duration::hours(1))
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(result.avg_wait_seconds.unwrap_or(0.0))
-}
-
-// Helper functions for calculating ELO ranges and wait times
-fn calculate_elo_range(current_elo: i32, wait_time_minutes: i64) -> (i32, i32) {
-    let base_range = 100;
-    let expansion = (wait_time_minutes as f64 / 30.0).floor() as i32 * 50; // Expand by 50 every 30 minutes
-    let max_range = 500;
-    
-    let range = (base_range + expansion).min(max_range);
-    (current_elo - range, current_elo + range)
-}
-
-fn estimate_wait_time(queue_size: usize, player_elo: i32) -> i32 {
-    // Base wait time: 2 minutes per person in queue
-    let base_wait = queue_size as i32 * 120;
-    
-    // Adjust based on ELO (extreme ELOs wait longer)
-    let elo_adjustment = if player_elo < 1000 || player_elo > 2000 {
-        300 // 5 extra minutes
-    } else {
-        0
-    };
-    
-    base_wait + elo_adjustment
+    Ok(result.try_get::<f64, _>("avg_wait_seconds").unwrap_or(0.0))
 }

@@ -4,7 +4,7 @@ use crate::models::{Match, MatchType, MatchStatus, QueueStatus, UserElo};
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use sqlx::Row;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
@@ -142,14 +142,14 @@ impl MatchmakerService {
 
             // Find best match for this player
             if let Some(candidate) = self.find_best_match_for_player(entry, &sorted_entries[i..], &processed_players).await {
-                matches_found.push(candidate);
                 processed_players.insert(candidate.player1.user_id);
                 processed_players.insert(candidate.player2.user_id);
+                matches_found.push(candidate);
             }
         }
 
         // Create matches in database
-        for candidate in matches_found {
+        for candidate in &matches_found {
             self.create_match_from_candidate(candidate).await?;
             
             // Remove players from queue
@@ -239,7 +239,7 @@ impl MatchmakerService {
         game: &str,
         game_mode: &str,
     ) -> Result<Vec<QueueEntry>, ApiError> {
-        let pattern = format!("{}:{}:*", QUEUE_ENTRY_PREFIX, game, game_mode);
+        let pattern = format!("{}:{}:{}:*", QUEUE_ENTRY_PREFIX, game, game_mode);
         let keys: Vec<String> = conn.keys(&pattern).await
             .map_err(|e| ApiError::internal_error(&format!("Redis keys error: {}", e)))?;
 
@@ -287,17 +287,29 @@ impl MatchmakerService {
         let entry_json = serde_json::to_string(&entry)
             .map_err(|e| ApiError::internal_error(&format!("JSON serialization error: {}", e)))?;
 
-        conn.set_ex(&key, entry_json, 600).await // 10 minute TTL
+        conn.set_ex::<_, _, ()>(&key, entry_json, 600).await // 10 minute TTL
             .map_err(|e| ApiError::internal_error(&format!("Redis set error: {}", e)))?;
 
         // Add to sorted set for efficient ELO-based queries
         let elo_bucket = (current_elo / self.config.elo_bucket_size) * self.config.elo_bucket_size;
         let queue_key = format!("{}:{}:{}:{}", QUEUE_KEY_PREFIX, game, game_mode, elo_bucket);
         
-        conn.zadd(&queue_key, &user_id.to_string(), now.timestamp()).await
+        conn.zadd::<_, _, _, ()>(&queue_key, &user_id.to_string(), now.timestamp()).await
             .map_err(|e| ApiError::internal_error(&format!("Redis zadd error: {}", e)))?;
 
         Ok(())
+    }
+
+    /// Public method to leave the queue
+    pub async fn leave_queue(
+        &self,
+        user_id: Uuid,
+        game: &str,
+        game_mode: &str,
+    ) -> Result<(), ApiError> {
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+            .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
+        self.remove_from_queue(&mut conn, &user_id, game, game_mode).await
     }
 
     /// Remove player from matchmaking queue
@@ -310,7 +322,7 @@ impl MatchmakerService {
     ) -> Result<(), ApiError> {
         // Remove from entry storage
         let key = format!("{}:{}:{}:{}", QUEUE_ENTRY_PREFIX, game, game_mode, user_id);
-        conn.del(&key).await
+        conn.del::<_, ()>(&key).await
             .map_err(|e| ApiError::internal_error(&format!("Redis del error: {}", e)))?;
 
         // Remove from all ELO buckets
@@ -319,7 +331,7 @@ impl MatchmakerService {
             .map_err(|e| ApiError::internal_error(&format!("Redis keys error: {}", e)))?;
 
         for key in keys {
-            conn.zrem(&key, &user_id.to_string()).await
+            conn.zrem::<_, _, ()>(&key, &user_id.to_string()).await
                 .map_err(|e| ApiError::internal_error(&format!("Redis zrem error: {}", e)))?;
         }
 
@@ -336,12 +348,11 @@ impl MatchmakerService {
     }
 
     /// Create match in database from candidate
-    async fn create_match_from_candidate(&self, candidate: MatchCandidate) -> Result<Match, ApiError> {
+    async fn create_match_from_candidate(&self, candidate: &MatchCandidate) -> Result<Match, ApiError> {
         let match_id = Uuid::new_v4();
         let now = Utc::now();
 
-        let match_record: Match = sqlx::query_as!(
-            Match,
+        let match_record: Match = sqlx::query_as::<_, Match>(
             r#"
             INSERT INTO matches (
                 id, tournament_id, round_id, match_type, status, player1_id, player2_id,
@@ -350,19 +361,19 @@ impl MatchmakerService {
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
             ) RETURNING *
             "#,
-            match_id,
-            None::<Uuid>,
-            None::<Uuid>,
-            MatchType::Ranked as _,
-            MatchStatus::Pending as _,
-            candidate.player1.user_id,
-            Some(candidate.player2.user_id),
-            candidate.player1.current_elo,
-            candidate.player2.current_elo,
-            candidate.player1.game_mode,
-            now,
-            now
         )
+        .bind(match_id)
+        .bind(None::<Uuid>)
+        .bind(None::<Uuid>)
+        .bind(format!("{:?}", MatchType::Ranked))
+        .bind(format!("{:?}", MatchStatus::Pending))
+        .bind(candidate.player1.user_id)
+        .bind(Some(candidate.player2.user_id))
+        .bind(candidate.player1.current_elo)
+        .bind(candidate.player2.current_elo)
+        .bind(&candidate.player1.game_mode)
+        .bind(now)
+        .bind(now)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -381,26 +392,27 @@ impl MatchmakerService {
 
     /// Get all active games in the queue
     async fn get_active_games(&self) -> Result<Vec<String>, ApiError> {
-        let games = sqlx::query!("SELECT DISTINCT game FROM matchmaking_queue WHERE status = $1", QueueStatus::Waiting as _)
+        let rows = sqlx::query("SELECT DISTINCT game FROM matchmaking_queue WHERE status = $1")
+            .bind(format!("{:?}", QueueStatus::Waiting))
             .fetch_all(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
-        Ok(games.into_iter().map(|g| g.game).collect())
+        Ok(rows.into_iter().filter_map(|r| r.try_get("game").ok()).collect())
     }
 
     /// Get active game modes for a specific game
     async fn get_active_game_modes(&self, game: &str) -> Result<Vec<String>, ApiError> {
-        let modes = sqlx::query!(
+        let rows = sqlx::query(
             "SELECT DISTINCT game_mode FROM matchmaking_queue WHERE game = $1 AND status = $2",
-            game,
-            QueueStatus::Waiting as _
         )
+        .bind(game)
+        .bind(format!("{:?}", QueueStatus::Waiting))
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        Ok(modes.into_iter().map(|m| m.game_mode).collect())
+        Ok(rows.into_iter().filter_map(|r| r.try_get("game_mode").ok()).collect())
     }
 
     /// Check if user is in queue
@@ -442,7 +454,7 @@ impl MatchmakerService {
     /// Get estimated wait time for a player
     pub async fn get_estimated_wait_time(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         game: &str,
         game_mode: &str,
     ) -> Result<i32, ApiError> {
@@ -503,14 +515,15 @@ impl EloEngine {
         winner_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
         // Get match details
-        let match_record = sqlx::query_as!(Match, "SELECT * FROM matches WHERE id = $1", match_id)
+        let match_record = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
             .fetch_one(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
         // Calculate ELO changes
         let (new_elo1, new_elo2) = self.calculate_elo_change(
-            match_record.player1_elo_before,
+            match_record.player1_elo_before.unwrap_or(1200),
             match_record.player2_elo_before.unwrap_or(1200),
             winner_id,
             match_record.player1_id,
@@ -518,38 +531,52 @@ impl EloEngine {
         );
 
         // Update player 1 ELO
-        sqlx::query!(
+        sqlx::query(
             "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-            new_elo1,
-            Utc::now(),
-            match_record.player1_id,
-            match_record.game_mode
         )
+        .bind(new_elo1)
+        .bind(Utc::now())
+        .bind(match_record.player1_id)
+        .bind(&match_record.game_mode)
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
         // Update player 2 ELO if present
         if let Some(player2_id) = match_record.player2_id {
-            sqlx::query!(
+            sqlx::query(
                 "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-                new_elo2,
-                Utc::now(),
-                player2_id,
-                match_record.game_mode
             )
+            .bind(new_elo2)
+            .bind(Utc::now())
+            .bind(player2_id)
+            .bind(&match_record.game_mode)
             .execute(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
         }
 
         // Create ELO history records
-        self.create_elo_history(db_pool, match_record.player1_id, &match_record.game_mode, 
-                               match_record.player1_elo_before, new_elo1, match_id).await?;
-        
+        self.create_elo_history(
+            db_pool,
+            match_record.player1_id,
+            &match_record.game_mode,
+            match_record.player1_elo_before.unwrap_or(1200),
+            new_elo1,
+            match_id,
+        )
+        .await?;
+
         if let Some(player2_id) = match_record.player2_id {
-            self.create_elo_history(db_pool, player2_id, &match_record.game_mode,
-                                   match_record.player2_elo_before.unwrap_or(1200), new_elo2, match_id).await?;
+            self.create_elo_history(
+                db_pool,
+                player2_id,
+                &match_record.game_mode,
+                match_record.player2_elo_before.unwrap_or(1200),
+                new_elo2,
+                match_id,
+            )
+            .await?;
         }
 
         Ok(())
@@ -564,16 +591,16 @@ impl EloEngine {
         new_elo: i32,
         match_id: Uuid,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            user_id,
-            game,
-            old_elo,
-            new_elo,
-            new_elo - old_elo,
-            match_id,
-            Utc::now()
         )
+        .bind(user_id)
+        .bind(game)
+        .bind(old_elo)
+        .bind(new_elo)
+        .bind(new_elo - old_elo)
+        .bind(match_id)
+        .bind(Utc::now())
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

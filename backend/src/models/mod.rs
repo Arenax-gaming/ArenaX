@@ -23,7 +23,7 @@ pub use matchmaker::{
     GameModeStats, GameQueueStats, JoinQueueRequest,
     JoinQueueResponse, LeaveQueueRequest, LeaveQueueResponse, MatchCandidate,
     MatchHistoryResponse, MatchmakingConfig, MatchmakingQueueResponse,
-    MatchmakingStats, MatchmakingStatsResponse, QueueEntry,
+    MatchmakingStats, QueueEntry,
 };
 pub use reward_settlement::*;
 pub use stellar_account::{
