@@ -74,7 +74,9 @@ impl ContractRegistry {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::ContractList, &Vec::<Symbol>::new(&env));
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractList, &Vec::<Symbol>::new(&env));
 
         Initialized { admin }.publish(&env);
     }
@@ -94,11 +96,17 @@ impl ContractRegistry {
         Self::require_admin(&env);
         Self::require_not_paused(&env);
 
-        if name.is_empty() {
+        // Check if name is empty by comparing with a new empty symbol
+        use soroban_sdk::symbol_short;
+        if name == symbol_short!("") {
             panic!("contract name cannot be empty");
         }
 
-        if env.storage().instance().has(&DataKey::Contract(name.clone())) {
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::Contract(name.clone()))
+        {
             panic!("contract name already registered");
         }
 
@@ -119,7 +127,7 @@ impl ContractRegistry {
             .instance()
             .get(&DataKey::ContractList)
             .unwrap_or(Vec::new(&env));
-        
+
         contract_list.push_back(name.clone());
         env.storage()
             .instance()
@@ -206,9 +214,9 @@ impl ContractRegistry {
             .get(&DataKey::ContractList)
             .unwrap_or(Vec::new(&env));
 
-        let index = contract_list.iter().position(|&item| item == name);
+        let index = contract_list.iter().position(|item| item == name);
         if let Some(idx) = index {
-            contract_list.remove(idx);
+            contract_list.remove(idx.try_into().unwrap());
             env.storage()
                 .instance()
                 .set(&DataKey::ContractList, &contract_list);
@@ -266,9 +274,7 @@ impl ContractRegistry {
     /// # Returns
     /// True if the name is registered, false otherwise
     pub fn is_contract_registered(env: Env, name: Symbol) -> bool {
-        env.storage()
-            .instance()
-            .has(&DataKey::Contract(name))
+        env.storage().instance().has(&DataKey::Contract(name))
     }
 
     /// Get a list of all registered contract names
@@ -292,7 +298,7 @@ impl ContractRegistry {
             .instance()
             .get(&DataKey::ContractList)
             .unwrap_or(Vec::new(&env));
-        contract_list.len() as u32
+        contract_list.len()
     }
 
     /// Get all contracts registered by a specific address
@@ -311,10 +317,11 @@ impl ContractRegistry {
 
         let mut result = Vec::new(&env);
         for name in contract_list.iter() {
+            let name_clone = name.clone();
             if let Some(contract_info) = env
                 .storage()
                 .instance()
-                .get::<DataKey, ContractInfo>(&DataKey::Contract(name))
+                .get::<DataKey, ContractInfo>(&DataKey::Contract(name_clone))
             {
                 if contract_info.registered_by == registered_by {
                     result.push_back(name);
@@ -341,10 +348,11 @@ impl ContractRegistry {
 
         let mut result = Vec::new(&env);
         for name in contract_list.iter() {
+            let name_clone = name.clone();
             if let Some(contract_info) = env
                 .storage()
                 .instance()
-                .get::<DataKey, ContractInfo>(&DataKey::Contract(name))
+                .get::<DataKey, ContractInfo>(&DataKey::Contract(name_clone))
             {
                 if let Some(updated_at) = contract_info.updated_at {
                     if updated_at >= start_time && updated_at <= end_time {
@@ -366,7 +374,7 @@ impl ContractRegistry {
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
         let admin = env.current_contract_address();
-        
+
         env.storage().instance().set(&DataKey::Paused, &paused);
 
         RegistryPaused {
@@ -421,15 +429,21 @@ impl ContractRegistry {
         }
 
         for (i, name) in names.iter().enumerate() {
-            if name.is_empty() {
+            // Check if name is empty by comparing with a new empty symbol
+            use soroban_sdk::symbol_short;
+            if name == symbol_short!("") {
                 panic!("contract name cannot be empty");
             }
 
-            if env.storage().instance().has(&DataKey::Contract(name.clone())) {
+            if env
+                .storage()
+                .instance()
+                .has(&DataKey::Contract(name.clone()))
+            {
                 panic!("contract name already registered");
             }
 
-            let address = addresses.get(i).unwrap();
+            let address = addresses.get(i.try_into().unwrap()).unwrap();
             let contract_info = ContractInfo {
                 address: address.clone(),
                 name: name.clone(),
@@ -480,7 +494,7 @@ impl ContractRegistry {
     }
 
     // Helper functions for internal use
-    
+
     fn require_admin(env: &Env) {
         let admin = Self::get_admin(env.clone());
         admin.require_auth();

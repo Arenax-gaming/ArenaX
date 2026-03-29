@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "007849a0fa2c846ef90b3c876ea444b99dac4bea48839cf6a5690eeb99846199"
+                  "bytes": "44598cfd83cce77d42403d4c8e4adeab2ca7a89d020a28d8505a260f96cba389"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -87,7 +87,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "007849a0fa2c846ef90b3c876ea444b99dac4bea48839cf6a5690eeb99846199"
+                              "bytes": "44598cfd83cce77d42403d4c8e4adeab2ca7a89d020a28d8505a260f96cba389"
                             }
                           ]
                         }
@@ -99,7 +99,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "007849a0fa2c846ef90b3c876ea444b99dac4bea48839cf6a5690eeb99846199"
+                              "bytes": "44598cfd83cce77d42403d4c8e4adeab2ca7a89d020a28d8505a260f96cba389"
                             }
                           ]
                         },
@@ -118,7 +118,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "007849a0fa2c846ef90b3c876ea444b99dac4bea48839cf6a5690eeb99846199"
+                                "bytes": "44598cfd83cce77d42403d4c8e4adeab2ca7a89d020a28d8505a260f96cba389"
                               }
                             },
                             {
