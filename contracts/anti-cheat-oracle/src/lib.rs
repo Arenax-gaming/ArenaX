@@ -1,8 +1,9 @@
 #![no_std]
 
 mod error;
-mod events;
 mod storage;
+
+use arenax_events::anti_cheat as events;
 
 use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
 use soroban_sdk::{contract, contractimpl, Address, Env, IntoVal, Symbol, Vec};

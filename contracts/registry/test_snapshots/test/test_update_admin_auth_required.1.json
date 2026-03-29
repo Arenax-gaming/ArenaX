@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                  "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -39,7 +39,7 @@
               "function_name": "update_contract",
               "args": [
                 {
-                  "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                  "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -108,7 +108,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                              "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                             }
                           ]
                         }
@@ -120,7 +120,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                              "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                             }
                           ]
                         },
@@ -139,7 +139,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                                "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                               }
                             },
                             {
@@ -270,7 +270,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "ArenaX"
+                "symbol": "ArenaXReg_v1"
               },
               {
                 "symbol": "UPDATE"
@@ -283,7 +283,7 @@
                     "symbol": "name"
                   },
                   "val": {
-                    "bytes": "c0d022cbf4b742179f6ab4eda54bf9784bf76cc65afbb9240c43cca319138747"
+                    "bytes": "409fd03d7371a13f056c15097726aa6a3e6d27c2cc8349b497a0228cc6e91e1c"
                   }
                 },
                 {

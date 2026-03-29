@@ -1,8 +1,9 @@
 #![no_std]
 
 mod error;
-mod events;
 mod storage;
+
+use arenax_events::registry as events;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 

@@ -1,6 +1,7 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use arenax_events::contract_registry as events;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,39 +20,6 @@ pub struct ContractInfo {
     pub registered_at: u64,
     pub updated_at: Option<u64>,
     pub registered_by: Address,
-}
-
-#[contractevent]
-pub struct Initialized {
-    pub admin: Address,
-}
-
-#[contractevent]
-pub struct ContractRegistered {
-    pub name: Symbol,
-    pub address: Address,
-    pub registered_by: Address,
-}
-
-#[contractevent]
-pub struct ContractUpdated {
-    pub name: Symbol,
-    pub old_address: Address,
-    pub new_address: Address,
-    pub updated_by: Address,
-}
-
-#[contractevent]
-pub struct ContractRemoved {
-    pub name: Symbol,
-    pub address: Address,
-    pub removed_by: Address,
-}
-
-#[contractevent]
-pub struct RegistryPaused {
-    pub paused: bool,
-    pub paused_by: Address,
 }
 
 #[contract]
@@ -78,7 +46,7 @@ impl ContractRegistry {
             .instance()
             .set(&DataKey::ContractList, &Vec::<Symbol>::new(&env));
 
-        Initialized { admin }.publish(&env);
+        events::emit_initialized(&env, &admin);
     }
 
     /// Register a new contract with a unique name
@@ -127,12 +95,7 @@ impl ContractRegistry {
             .instance()
             .set(&DataKey::ContractList, &contract_list);
 
-        ContractRegistered {
-            name,
-            address,
-            registered_by: env.current_contract_address(),
-        }
-        .publish(&env);
+        events::emit_contract_registered(&env, name, &address, &env.current_contract_address());
     }
 
     /// Update an existing contract's address
@@ -168,13 +131,7 @@ impl ContractRegistry {
             .instance()
             .set(&DataKey::Contract(name.clone()), &contract_info);
 
-        ContractUpdated {
-            name,
-            old_address,
-            new_address,
-            updated_by: env.current_contract_address(),
-        }
-        .publish(&env);
+        events::emit_contract_updated(&env, name, &old_address, &new_address, &env.current_contract_address());
     }
 
     /// Remove a contract from the registry
@@ -222,12 +179,7 @@ impl ContractRegistry {
                 .set(&DataKey::ContractList, &contract_list);
         }
 
-        ContractRemoved {
-            name,
-            address,
-            removed_by: env.current_contract_address(),
-        }
-        .publish(&env);
+        events::emit_contract_removed(&env, name, &address, &env.current_contract_address());
     }
 
     /// Get the address of a registered contract
@@ -375,11 +327,7 @@ impl ContractRegistry {
 
         env.storage().instance().set(&DataKey::Paused, &paused);
 
-        RegistryPaused {
-            paused,
-            paused_by: admin,
-        }
-        .publish(&env);
+        events::emit_registry_paused(&env, paused, &admin);
     }
 
     /// Get the admin address
@@ -448,12 +396,7 @@ impl ContractRegistry {
                 .instance()
                 .set(&DataKey::Contract(name.clone()), &contract_info);
 
-            ContractRegistered {
-                name: name.clone(),
-                address: address.clone(),
-                registered_by: env.current_contract_address(),
-            }
-            .publish(&env);
+            events::emit_contract_registered(&env, name.clone(), &address, &env.current_contract_address());
         }
 
         let mut contract_list: Vec<Symbol> = env

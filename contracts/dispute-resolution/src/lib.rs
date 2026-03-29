@@ -1,25 +1,10 @@
 #![no_std]
 
+use arenax_events::dispute as events;
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String,
     Symbol,
 };
-
-#[contractevent(topics = ["ArenaXDispute", "OPENED"])]
-pub struct DisputeOpened {
-    pub match_id: BytesN<32>,
-    pub reason: String,
-    pub evidence_ref: String,
-    pub deadline: u64,
-}
-
-#[contractevent(topics = ["ArenaXDispute", "RESOLVED"])]
-pub struct DisputeResolved {
-    pub match_id: BytesN<32>,
-    pub decision: String,
-    pub resolved_at: u64,
-    pub operator: Address,
-}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -107,13 +92,7 @@ impl DisputeResolutionContract {
             .persistent()
             .set(&DataKey::Dispute(match_id.clone()), &dispute);
 
-        DisputeOpened {
-            match_id,
-            reason,
-            evidence_ref,
-            deadline,
-        }
-        .publish(&env);
+        events::emit_dispute_opened(&env, &match_id, &reason, &evidence_ref, deadline);
     }
 
     pub fn resolve_dispute(env: Env, match_id: BytesN<32>, caller: Address, decision: String) {
@@ -146,13 +125,7 @@ impl DisputeResolutionContract {
             .persistent()
             .set(&DataKey::Dispute(match_id.clone()), &dispute);
 
-        DisputeResolved {
-            match_id,
-            decision,
-            resolved_at: current_time,
-            operator: caller,
-        }
-        .publish(&env);
+        events::emit_dispute_resolved(&env, &match_id, &decision, current_time, &caller);
     }
 
     pub fn is_disputed(env: Env, match_id: BytesN<32>) -> bool {

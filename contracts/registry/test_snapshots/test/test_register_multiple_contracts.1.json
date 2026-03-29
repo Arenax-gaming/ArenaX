@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "0558219ab1a315c60e50e6c6512db6bbcfdffe863b177a3542431ad02b406f41"
+                  "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -39,7 +39,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "450d45d80ed43d7c410d114f0798496f01734d79c6f5147078bb7168ae0ce80d"
+                  "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -61,7 +61,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "6be92e4550df2fc70dd188a42637acf45551676e3db0d19d6002332e33a765f5"
+                  "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -133,13 +133,13 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "0558219ab1a315c60e50e6c6512db6bbcfdffe863b177a3542431ad02b406f41"
+                              "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
                             },
                             {
-                              "bytes": "450d45d80ed43d7c410d114f0798496f01734d79c6f5147078bb7168ae0ce80d"
+                              "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
                             },
                             {
-                              "bytes": "6be92e4550df2fc70dd188a42637acf45551676e3db0d19d6002332e33a765f5"
+                              "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
                             }
                           ]
                         }
@@ -151,103 +151,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "0558219ab1a315c60e50e6c6512db6bbcfdffe863b177a3542431ad02b406f41"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "address"
-                              },
-                              "val": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "name"
-                              },
-                              "val": {
-                                "bytes": "0558219ab1a315c60e50e6c6512db6bbcfdffe863b177a3542431ad02b406f41"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "registered_at"
-                              },
-                              "val": {
-                                "u64": "0"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "updated_at"
-                              },
-                              "val": {
-                                "u64": "0"
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Registry"
-                            },
-                            {
-                              "bytes": "450d45d80ed43d7c410d114f0798496f01734d79c6f5147078bb7168ae0ce80d"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "address"
-                              },
-                              "val": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "name"
-                              },
-                              "val": {
-                                "bytes": "450d45d80ed43d7c410d114f0798496f01734d79c6f5147078bb7168ae0ce80d"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "registered_at"
-                              },
-                              "val": {
-                                "u64": "0"
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "updated_at"
-                              },
-                              "val": {
-                                "u64": "0"
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Registry"
-                            },
-                            {
-                              "bytes": "6be92e4550df2fc70dd188a42637acf45551676e3db0d19d6002332e33a765f5"
+                              "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
                             }
                           ]
                         },
@@ -266,7 +170,103 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "6be92e4550df2fc70dd188a42637acf45551676e3db0d19d6002332e33a765f5"
+                                "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "registered_at"
+                              },
+                              "val": {
+                                "u64": "0"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "updated_at"
+                              },
+                              "val": {
+                                "u64": "0"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Registry"
+                            },
+                            {
+                              "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "address"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "name"
+                              },
+                              "val": {
+                                "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "registered_at"
+                              },
+                              "val": {
+                                "u64": "0"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "updated_at"
+                              },
+                              "val": {
+                                "u64": "0"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Registry"
+                            },
+                            {
+                              "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "address"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "name"
+                              },
+                              "val": {
+                                "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
                               }
                             },
                             {

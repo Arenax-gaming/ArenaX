@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                  "bytes": "6e4ab2b3598a59b69c53dbb2efc28aa74a30e529a86c87d5c6df73616eed5e67"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -40,7 +40,7 @@
               "function_name": "update_contract",
               "args": [
                 {
-                  "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                  "bytes": "6e4ab2b3598a59b69c53dbb2efc28aa74a30e529a86c87d5c6df73616eed5e67"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -111,7 +111,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                              "bytes": "6e4ab2b3598a59b69c53dbb2efc28aa74a30e529a86c87d5c6df73616eed5e67"
                             }
                           ]
                         }
@@ -123,7 +123,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                              "bytes": "6e4ab2b3598a59b69c53dbb2efc28aa74a30e529a86c87d5c6df73616eed5e67"
                             }
                           ]
                         },
@@ -142,7 +142,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "0c7b29f1d16e2103cff7908480788811921407ef533e20e7c074bf791b0529e5"
+                                "bytes": "6e4ab2b3598a59b69c53dbb2efc28aa74a30e529a86c87d5c6df73616eed5e67"
                               }
                             },
                             {

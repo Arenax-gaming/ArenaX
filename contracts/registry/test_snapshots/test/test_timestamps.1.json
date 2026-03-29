@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                  "bytes": "b70601cbc1c48fc7fd37b5947ccbebc4d1a39495062689115ebb5baabfc80ec1"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -40,7 +40,7 @@
               "function_name": "update_contract",
               "args": [
                 {
-                  "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                  "bytes": "b70601cbc1c48fc7fd37b5947ccbebc4d1a39495062689115ebb5baabfc80ec1"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -110,7 +110,7 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                              "bytes": "b70601cbc1c48fc7fd37b5947ccbebc4d1a39495062689115ebb5baabfc80ec1"
                             }
                           ]
                         }
@@ -122,7 +122,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                              "bytes": "b70601cbc1c48fc7fd37b5947ccbebc4d1a39495062689115ebb5baabfc80ec1"
                             }
                           ]
                         },
@@ -141,7 +141,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "a1d84f583aca99945a837882cbefe7b51f2c48650d65cb2450ff8959441fef6e"
+                                "bytes": "b70601cbc1c48fc7fd37b5947ccbebc4d1a39495062689115ebb5baabfc80ec1"
                               }
                             },
                             {
