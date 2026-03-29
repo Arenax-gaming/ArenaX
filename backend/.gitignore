@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Backend .gitignore
 
 # Rust
@@ -51,6 +50,3 @@ keys/
 # Build artifacts
 build/
 dist/
-=======
-target
->>>>>>> upstream/main

@@ -1,10 +1,9 @@
 version: '3.8'
 
 services:
-<<<<<<< HEAD
   # PostgreSQL Database
   postgres:
-    image: postgres:13
+    image: postgres:15
     environment:
       POSTGRES_DB: arenax
       POSTGRES_USER: arenax
@@ -21,7 +20,7 @@ services:
 
   # Redis Cache
   redis:
-    image: redis:6
+    image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
@@ -49,32 +48,12 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-=======
-  # Database
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: arenax
-      POSTGRES_USER: arenax_user
-      POSTGRES_PASSWORD: arenax_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  # Redis for caching and queues
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
->>>>>>> upstream/main
 
   # Backend API
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-<<<<<<< HEAD
     ports:
       - "8080:8080"
     environment:
@@ -119,29 +98,3 @@ volumes:
   redis_data:
   minio_data:
   cargo_cache:
-=======
-    environment:
-      - DATABASE_URL=postgres://arenax_user:arenax_password@postgres:5432/arenax
-      - REDIS_URL=redis://redis:6379
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./backend:/app
-
-  # Frontend
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-
-volumes:
-  postgres_data:
->>>>>>> upstream/main
