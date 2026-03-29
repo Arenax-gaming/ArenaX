@@ -58,6 +58,16 @@ pub struct WsEnvelope {
 pub enum ClientMessage {
     Ping,
     Pong,
+    Subscribe {
+        channel: String,
+    },
+    Unsubscribe {
+        channel: String,
+    },
+    Publish {
+        channel: String,
+        event: RealtimeEvent,
+    },
 }
 
 /// Actix message for delivering a realtime event to an actor.
