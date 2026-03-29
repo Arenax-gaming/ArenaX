@@ -263,12 +263,17 @@ model AuditLog {
   action     String   // e.g., "MATCH_OVERRIDE", "PROPOSAL_EXECUTE", "MANUAL_PAYOUT"
   targetType String   // e.g., "MATCH", "PROPOSAL", "USER"
   targetId   String
-  details    Json?
-  ipAddress  String?
-  createdAt  DateTime @default(now())
+  details        Json?
+  requestId      String?
+  snapshotBefore Json?
+  snapshotAfter  Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
 
   @@index([adminId])
   @@index([action])
+  @@index([requestId])
 }
 
 enum RefundStatus {
@@ -295,3 +300,4 @@ model RefundRequest {
   @@index([paymentId])
   @@index([status])
 }
+

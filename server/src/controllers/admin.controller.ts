@@ -24,6 +24,19 @@ export const resolveDispute = async (req: Request, res: Response): Promise<void>
             resolution,
             winnerOverrideId
         });
+
+        // Detailed Audit
+        await AuditService.logAction({
+            adminId: req.user!.id,
+            action: 'RESOLVE_DISPUTE',
+            targetType: 'DISPUTE',
+            targetId: id,
+            details: { status, resolution },
+            requestId: req.auditContext?.requestId,
+            ipAddress: req.auditContext?.ipAddress,
+            userAgent: req.auditContext?.userAgent
+        });
+
         res.status(200).json(result);
     } catch (error) {
         res.status(400).json({ error: (error as Error).message });
@@ -61,14 +74,16 @@ export const replayPayment = async (req: Request, res: Response): Promise<void> 
             }
         });
 
-        // Log the action
+        // Log the action with detailed context
         await AuditService.logAction({
             adminId: req.user!.id,
             action: 'REPLAY_PAYMENT',
             targetType: 'PAYMENT',
             targetId: id,
             details: { previousStatus: payment.status },
-            ipAddress: req.ip
+            requestId: req.auditContext?.requestId,
+            ipAddress: req.auditContext?.ipAddress,
+            userAgent: req.auditContext?.userAgent
         });
 
         res.status(200).json({ message: 'Payment replay triggered successfully.' });

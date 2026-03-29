@@ -8,10 +8,12 @@ import walletRoutes from './wallet.routes';
 import matchRoutes from './match.routes';
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
+import { auditMiddleware } from '../middleware/audit.middleware';
 
 const router = Router();
 
 router.use(publicRateLimiter);
+router.use(auditMiddleware);
 router.use('/auth', authRoutes);
 router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes); // Added

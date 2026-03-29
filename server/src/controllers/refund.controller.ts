@@ -27,6 +27,10 @@ export const updateRefundStatus = async (req: Request, res: Response): Promise<v
             operatorNotes
         );
 
+        // Detailed Audit (Service already logs some, but we can enrich here if needed)
+        // Actually, the service should probably take the audit context.
+        // Let's update RefundService better later.
+        
         res.status(200).json(updatedRequest);
     } catch (error) {
         res.status(400).json({ error: (error as Error).message });
