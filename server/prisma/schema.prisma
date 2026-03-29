@@ -21,6 +21,14 @@ model User {
   projects      Project[]
   wallet        UserWallet?
   refreshTokens RefreshToken[]
+  ledger        Ledger?
+  walletTransactions WalletTransaction[]
+  proposals     Proposal[] @relation("UserProposals")
+  votes         Vote[]     @relation("UserVotes")
+  reportedDisputes Dispute[] @relation("ReportedDisputes")
+  resolvedDisputes Dispute[] @relation("ResolvedDisputes")
+  auditLogs     AuditLog[]
+  refundsReviewed RefundRequest[] @relation("OperatorReviews")
 }
 
 model UserWallet {
@@ -71,16 +79,73 @@ model Payment {
   toAddress   String
   amount      String
   asset       String   @default("USDC")
-  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED, DEAD_LETTER
   txHash      String?  @unique
+  retryCount  Int      @default(0)
+  nextRetryAt DateTime?
+  lastError   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  refundRequests RefundRequest[]
 }
 
 enum TxStatus {
   PENDING
   SUCCESS
   FAILED
+}
+
+enum Currency {
+  XLM
+  USDC
+  AX
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  ESCROW_LOCK
+  ESCROW_RELEASE
+  ESCROW_SLASH
+  PLATFORM_FEE
+  PRIZE_POOL_FUND
+}
+
+// High-precision financial ledger per user per currency
+model Ledger {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  xlmBalance    Decimal  @default(0) @db.Decimal(20, 7)
+  xlmEscrowed   Decimal  @default(0) @db.Decimal(20, 7)
+  usdcBalance   Decimal  @default(0) @db.Decimal(20, 7)
+  usdcEscrowed  Decimal  @default(0) @db.Decimal(20, 7)
+  axBalance     Decimal  @default(0) @db.Decimal(20, 7)
+  axEscrowed    Decimal  @default(0) @db.Decimal(20, 7)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Immutable transaction history with idempotency key
+model WalletTransaction {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  idempotencyKey String          @unique
+  type           TransactionType
+  currency       Currency
+  amount         Decimal         @db.Decimal(20, 7)
+  balanceBefore  Decimal         @db.Decimal(20, 7)
+  balanceAfter   Decimal         @db.Decimal(20, 7)
+  escrowBefore   Decimal         @db.Decimal(20, 7)
+  escrowAfter    Decimal         @db.Decimal(20, 7)
+  matchId        String?
+  note           String?
+  createdAt      DateTime        @default(now())
+
+  @@index([userId])
+  @@index([idempotencyKey])
+  @@index([matchId])
 }
 
 model BlockchainTransaction {
@@ -103,4 +168,130 @@ model BlockchainEvent {
   ledger      Int
   data        Json
   createdAt   DateTime @default(now())
+}
+
+enum ProposalStatus {
+  DRAFT
+  VOTING
+  APPROVED
+  EXECUTED
+  CANCELLED
+  FAILED
+}
+
+model Proposal {
+  id             String         @id @default(uuid())
+  onChainId      String?        @unique // Map to hex-encoded 32 bytes on-chain
+  targetContract String
+  functionName   String
+  args           Json           @default("{}")
+  description    String?
+  status         ProposalStatus @default(DRAFT)
+  proposerId     String
+  proposer       User           @relation("UserProposals", fields: [proposerId], references: [id])
+  executeAfter   DateTime?
+  executedAt     DateTime?
+  lastChainTx    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  votes          Vote[]
+
+  @@index([status])
+  @@index([proposerId])
+}
+
+model Vote {
+  id         String   @id @default(uuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  voterId    String
+  voter      User     @relation("UserVotes", fields: [voterId], references: [id])
+  signature  String?  // If multisig requires signatures
+  chainTx    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([proposalId, voterId])
+}
+
+enum MatchStatus {
+  CREATED
+  STARTED
+  COMPLETED
+  DISPUTED
+  FINALIZED
+}
+
+model Match {
+  id             String      @id @default(uuid())
+  onChainId      String      @unique
+  playerAId      String
+  playerBId      String
+  winnerId       String?
+  status         MatchStatus @default(CREATED)
+  metadata       Json        @default("{}")
+  lastChainTx    String?
+  createdAt      DateTime    @default(now())
+  startedAt      DateTime?
+  endedAt        DateTime?
+  updatedAt      DateTime    @updatedAt
+  disputes       Dispute[]
+
+  @@index([status])
+}
+
+model Dispute {
+  id           String   @id @default(uuid())
+  matchId      String
+  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  reporterId   String
+  reporter     User     @relation("ReportedDisputes", fields: [reporterId], references: [id])
+  reason       String
+  evidenceUrls String[] // Array of S3/MinIO links
+  status       String   @default("OPEN") // OPEN, RESOLVED, DISMISSED
+  resolution   String?
+  resolvedById String?
+  resolvedBy   User?    @relation("ResolvedDisputes", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  admin      User     @relation(fields: [adminId], references: [id])
+  action     String   // e.g., "MATCH_OVERRIDE", "PROPOSAL_EXECUTE", "MANUAL_PAYOUT"
+  targetType String   // e.g., "MATCH", "PROPOSAL", "USER"
+  targetId   String
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+}
+
+enum RefundStatus {
+  REQUESTED
+  REVIEWING
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+model RefundRequest {
+  id            String       @id @default(uuid())
+  paymentId     String
+  payment       Payment      @relation(fields: [paymentId], references: [id])
+  amount        String
+  status        RefundStatus @default(REQUESTED)
+  reason        String
+  operatorId    String?
+  operator      User?        @relation("OperatorReviews", fields: [operatorId], references: [id])
+  operatorNotes String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([paymentId])
+  @@index([status])
 }

@@ -1,8 +1,21 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '.prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
-    'user' | 'refreshToken' | 'userWallet' | 'blockchainTransaction'
+    'ledger'
+    | 'walletTransaction'
+    | 'user'
+    | 'refreshToken'
+    | 'userWallet'
+    | 'blockchainTransaction'
+    | 'proposal'
+    | 'vote'
+    | 'match'
+    | 'dispute'
+    | 'auditLog'
+    | 'refundRequest'
+    | 'project'
+    | 'payment'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

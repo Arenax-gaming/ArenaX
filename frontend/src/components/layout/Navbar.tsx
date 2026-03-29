@@ -71,7 +71,7 @@ export function Navbar() {
         </nav>
       </div>
       <div className="flex items-center gap-2">
-        <NotificationBell />
+        {user && <NotificationBell />}
         {user && <UserMenu />}
         {authItems.map((item) => {
           const isActive = isActiveRoute(pathname, item.href);

@@ -60,4 +60,8 @@ pub struct UserProfile {
     pub avatar_url: Option<String>,
     pub is_verified: bool,
     pub created_at: DateTime<Utc>,
+    // Reputation fields
+    pub skill_score: Option<i32>,
+    pub fair_play_score: Option<i32>,
+    pub is_bad_actor: Option<bool>,
 }

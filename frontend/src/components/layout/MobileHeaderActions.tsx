@@ -10,7 +10,7 @@ export function MobileHeaderActions() {
   const { user } = useAuth();
   return (
     <div className="flex items-center gap-2 md:hidden">
-      <NotificationBell />
+      {user && <NotificationBell />}
       {user && <UserMenu />}
       <ThemeToggle />
       <MobileNav />

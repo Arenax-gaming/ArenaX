@@ -1,18 +1,20 @@
 use crate::api_error::ApiError;
+use crate::config::Config;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Utc};
-use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct MatchService {
     db_pool: DbPool,
     redis_client: Option<Arc<RedisClient>>,
+    reputation_service: Option<Arc<ReputationService>>,
+    event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl MatchService {
@@ -20,11 +22,18 @@ impl MatchService {
         Self {
             db_pool,
             redis_client: None,
+            reputation_service: None,
+            event_bus: None,
         }
     }
 
-    pub fn with_redis(mut self, redis_client: RedisClient) -> Self {
-        self.redis_client = Some(redis_client);
+    pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn with_reputation_service(mut self, reputation_service: ReputationService) -> Self {
+        self.reputation_service = Some(Arc::new(reputation_service));
         self
     }
 
@@ -132,25 +141,31 @@ impl MatchService {
         user_id: Uuid,
         request: ReportScoreRequest,
     ) -> Result<MatchScore, ApiError> {
-        // Validate match and user
+        // Anti-spam: log and gate before any other validation.
+        // enforce_report_rate_limit inserts an attempt record first, then checks
+        // the running total — ensuring the limit holds under concurrent bursts.
+        self.enforce_report_rate_limit(match_id, user_id).await?;
+
+        // FSM + eligibility validation
         let match_record = self.get_match_by_id(match_id).await?;
         self.validate_score_report(&match_record, user_id).await?;
 
-        // Create score record
+        // Create score record — includes opponent_score for conflict detection
         let score_record = sqlx::query_as!(
             MatchScore,
             r#"
             INSERT INTO match_scores (
-                id, match_id, player_id, score, proof_url, telemetry_data,
-                submitted_at, verified
+                id, match_id, player_id, score, opponent_score, proof_url,
+                telemetry_data, submitted_at, verified
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
+                $1, $2, $3, $4, $5, $6, $7, $8, $9
             ) RETURNING *
             "#,
             Uuid::new_v4(),
             match_id,
             user_id,
             request.score,
+            request.opponent_score,
             request.proof_url,
             request.telemetry_data,
             Utc::now(),
@@ -160,7 +175,10 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Update match with score
+        // Mark this attempt as accepted
+        self.mark_last_attempt_accepted(match_id, user_id).await?;
+
+        // Update the match's score columns
         self.update_match_score(match_id, user_id, request.score)
             .await?;
 
@@ -174,10 +192,15 @@ impl MatchService {
         }))
         .await?;
 
-        // Check if both players have reported scores
+        // When both players have reported, detect conflicts before completing
         let both_reported = self.both_players_reported_scores(match_id).await?;
         if both_reported {
-            self.process_match_completion(match_id).await?;
+            let has_conflict = self.detect_score_conflict(match_id).await?;
+            if has_conflict {
+                self.process_conflict(match_id).await?;
+            } else {
+                self.process_match_completion(match_id).await?;
+            }
         }
 
         Ok(score_record)
@@ -248,6 +271,19 @@ impl MatchService {
             return Err(ApiError::bad_request(
                 "User is already in matchmaking queue",
             ));
+        }
+
+        // Check player reputation (filter bad actors)
+        if let Some(rep_service) = &self.reputation_service {
+            let reputation = rep_service.get_player_reputation(user_id).await
+                .map_err(|e| ApiError::internal_server_error(&format!("Reputation check failed: {}", e)))?;
+            
+            // Filter players with very low fair play score
+            if reputation.should_filter(30) {
+                return Err(ApiError::bad_request(
+                    "Account restricted due to behavioral violations. Please contact support.",
+                ));
+            }
         }
 
         // Get user's current Elo rating
@@ -435,7 +471,7 @@ impl MatchService {
             return Ok(false);
         }
 
-        // Check if match is in progress
+        // Only allow reporting when the match is actively in progress
         if match_record.status != MatchStatus::InProgress {
             return Ok(false);
         }
@@ -530,12 +566,28 @@ impl MatchService {
             return Err(ApiError::forbidden("User is not a player in this match"));
         }
 
-        // Check if match is in progress
-        if match_record.status != MatchStatus::InProgress {
-            return Err(ApiError::bad_request("Match is not in progress"));
+        // FSM guard: strictly prevent reporting for finished or cancelled matches.
+        // This is the single authoritative state-machine check — no other code path
+        // should bypass it.
+        match match_record.status {
+            MatchStatus::InProgress => {} // only valid state for score reporting
+            MatchStatus::Completed
+            | MatchStatus::Conflict
+            | MatchStatus::Cancelled
+            | MatchStatus::Abandoned => {
+                return Err(ApiError::bad_request(format!(
+                    "Cannot report score: match is already finished (status: {:?})",
+                    match_record.status
+                )));
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "Match has not started yet",
+                ));
+            }
         }
 
-        // Check if user has already reported score
+        // Check if user has already reported score for this match
         let existing_score = sqlx::query!(
             "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
             match_record.id,
@@ -650,6 +702,21 @@ impl MatchService {
         // Create Elo history records
         self.create_elo_history(&match_record, winner_id).await?;
 
+        // Update on-chain reputation (if service is available)
+        if let Some(rep_service) = &self.reputation_service {
+            let players = vec![match_record.player1_id];
+            let skill_deltas = vec![25]; // Example: +25 for win, would be calculated based on outcome
+            
+            if let Err(e) = rep_service.update_reputation_on_match(
+                match_id,
+                &players,
+                &skill_deltas,
+            ).await {
+                error!("Failed to update reputation for match {}: {}", match_id, e);
+                // Don't fail the match completion, just log the error
+            }
+        }
+
         // Publish match completed event
         self.publish_match_event(serde_json::json!({
             "type": "completed",
@@ -671,6 +738,21 @@ impl MatchService {
                     "winner_id": winner
                 }))
                 .await?;
+            }
+        }
+
+        // If this was a tournament match, trigger round advancement
+        if let Some(tournament_id) = match_record.tournament_id {
+            if let Some(round_id) = match_record.round_id {
+                let advancement = crate::orchestrator::RoundAdvancementWorker::new(self.db_pool.clone());
+                if let Err(e) = advancement.on_match_completed(tournament_id, round_id).await {
+                    tracing::error!(
+                        "Round advancement failed for tournament {} round {}: {}",
+                        tournament_id,
+                        round_id,
+                        e
+                    );
+                }
             }
         }
 
@@ -1029,15 +1111,36 @@ impl MatchService {
         match_id: Uuid,
         status: MatchStatus,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3",
-            status as _,
-            Utc::now(),
-            match_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+        if status == MatchStatus::InProgress {
+            // Record when the match started and set the reporting deadline.
+            // The Reaper will forfeit non-reporters after this deadline passes.
+            let deadline = Utc::now() + chrono::Duration::hours(24);
+            sqlx::query!(
+                r#"
+                UPDATE matches
+                SET status = $1, started_at = $2, report_deadline = $3, updated_at = $4
+                WHERE id = $5
+                "#,
+                status as _,
+                Utc::now(),
+                deadline,
+                Utc::now(),
+                match_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        } else {
+            sqlx::query!(
+                "UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3",
+                status as _,
+                Utc::now(),
+                match_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
 
         Ok(())
     }
@@ -1081,11 +1184,24 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        // Filter out bad actors if reputation service is available
+        let filtered_candidates = if let Some(rep_service) = &self.reputation_service {
+            let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.user_id).collect();
+            let filtered_ids = rep_service.filter_bad_actors(&candidate_ids, 50).await
+                .unwrap_or(candidate_ids); // If filtering fails, use original list
+            
+            candidates.into_iter()
+                .filter(|c| filtered_ids.contains(&c.user_id))
+                .collect::<Vec<_>>()
+        } else {
+            candidates
+        };
+
         // Try to match players
-        for i in 0..candidates.len() {
-            for j in (i + 1)..candidates.len() {
-                let player1 = &candidates[i];
-                let player2 = &candidates[j];
+        for i in 0..filtered_candidates.len() {
+            for j in (i + 1)..filtered_candidates.len() {
+                let player1 = &filtered_candidates[i];
+                let player2 = &filtered_candidates[j];
 
                 // Check if Elo ranges overlap
                 if self.elo_ranges_overlap(player1, player2) {
@@ -1437,6 +1553,223 @@ impl MatchService {
             per_page,
         })
     }
+
+    // =========================================================================
+    // CONFLICT DETECTION
+    // =========================================================================
+
+    /// Returns `true` when both players have submitted reports that disagree on
+    /// who won the match.
+    ///
+    /// Each player reports `(score, opponent_score)` from their own perspective.
+    /// A conflict exists when the claimed winner differs between the two reports,
+    /// e.g. Player A says "I won 3-1" while Player B says "I won 3-1".
+    async fn detect_score_conflict(&self, match_id: Uuid) -> Result<bool, ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+
+        let p2_id = match match_record.player2_id {
+            Some(id) => id,
+            None => return Ok(false), // bye match — no second report, no conflict
+        };
+
+        let p1_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            match_record.player1_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let p2_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            p2_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let (p1, p2) = match (p1_report, p2_report) {
+            (Some(p1), Some(p2)) => (p1, p2),
+            _ => return Ok(false), // both reports not yet in — nothing to compare
+        };
+
+        // Derive the winner each player is claiming:
+        //   p1 claims: my score vs opponent_score → who wins?
+        //   p2 claims: my score vs opponent_score → who wins?
+        let p1_claims = match p1.score.cmp(&p1.opponent_score.unwrap_or(0)) {
+            std::cmp::Ordering::Greater => Some(match_record.player1_id),
+            std::cmp::Ordering::Less => Some(p2_id),
+            std::cmp::Ordering::Equal => None,
+        };
+        let p2_claims = match p2.score.cmp(&p2.opponent_score.unwrap_or(0)) {
+            std::cmp::Ordering::Greater => Some(p2_id),
+            std::cmp::Ordering::Less => Some(match_record.player1_id),
+            std::cmp::Ordering::Equal => None,
+        };
+
+        Ok(p1_claims != p2_claims)
+    }
+
+    /// Transition the match to `Conflict` status and persist a human-readable
+    /// description of the discrepancy for manual / oracle resolution.
+    async fn process_conflict(&self, match_id: Uuid) -> Result<(), ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+        let p2_id = match_record
+            .player2_id
+            .ok_or_else(|| ApiError::bad_request("Match has no second player"))?;
+
+        let p1_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            match_record.player1_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let p2_report = sqlx::query_as!(
+            MatchScore,
+            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
+            match_id,
+            p2_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let conflict_reason = match (&p1_report, &p2_report) {
+            (Some(p1), Some(p2)) => format!(
+                "Score discrepancy: Player A reported {}-{}, Player B reported {}-{}",
+                p1.score,
+                p1.opponent_score.unwrap_or(0),
+                p2.opponent_score.unwrap_or(0),
+                p2.score,
+            ),
+            _ => "Conflict detected: unable to compare score reports".to_string(),
+        };
+
+        sqlx::query!(
+            r#"
+            UPDATE matches
+            SET status = $1, conflict_reason = $2, updated_at = $3
+            WHERE id = $4
+            "#,
+            MatchStatus::Conflict as _,
+            conflict_reason,
+            Utc::now(),
+            match_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "conflict_detected",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "conflict_reason": conflict_reason,
+        }))
+        .await?;
+
+        tracing::warn!(
+            match_id = %match_id,
+            conflict_reason = %conflict_reason,
+            "Match flagged as conflicted and queued for manual resolution"
+        );
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // ANTI-SPAM RATE LIMITING
+    // =========================================================================
+
+    /// Insert an attempt record first, then count the player's total attempts for
+    /// this match.  Rejecting AFTER the insert means the counter is always
+    /// incremented — even for requests that are ultimately denied — which
+    /// prevents flooding via rapid retries.
+    async fn enforce_report_rate_limit(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+    ) -> Result<(), ApiError> {
+        const MAX_ATTEMPTS_PER_MATCH: i64 = 5;
+
+        // Always record the attempt regardless of outcome
+        sqlx::query!(
+            r#"
+            INSERT INTO score_report_attempts
+                (id, match_id, player_id, attempted_at, accepted)
+            VALUES ($1, $2, $3, $4, FALSE)
+            "#,
+            Uuid::new_v4(),
+            match_id,
+            player_id,
+            Utc::now()
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Count total attempts AFTER the insert
+        let total = sqlx::query!(
+            r#"
+            SELECT COUNT(*) AS count
+            FROM score_report_attempts
+            WHERE match_id = $1 AND player_id = $2
+            "#,
+            match_id,
+            player_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .count
+        .unwrap_or(0);
+
+        if total > MAX_ATTEMPTS_PER_MATCH {
+            return Err(ApiError::TooManyRequests(format!(
+                "Score report rate limit exceeded (max {} attempts per match). \
+                 Please contact support if you believe this is an error.",
+                MAX_ATTEMPTS_PER_MATCH
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Update the most-recently inserted attempt record for this player/match to
+    /// `accepted = TRUE` once the score row has been successfully written.
+    async fn mark_last_attempt_accepted(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE score_report_attempts
+            SET accepted = TRUE
+            WHERE id = (
+                SELECT id FROM score_report_attempts
+                WHERE match_id = $1 AND player_id = $2
+                ORDER BY attempted_at DESC
+                LIMIT 1
+            )
+            "#,
+            match_id,
+            player_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1473,17 +1806,44 @@ pub struct LeaderboardEntry {
 }
 
 impl MatchService {
-    // Real-time event publishing methods
-    // TODO: Implement proper realtime module with event types
-    async fn publish_match_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time match event publishing
-        // Will be implemented when realtime module is added
+    async fn publish_match_event(&self, event_data: serde_json::Value) -> Result<(), ApiError> {
+        if let Some(ref event_bus) = self.event_bus {
+            if let (Some(match_id_str), Some(event_type)) = (
+                event_data.get("match_id").and_then(|v| v.as_str()),
+                event_data.get("event").and_then(|v| v.as_str()),
+            ) {
+                let match_id = Uuid::parse_str(match_id_str).unwrap_or_default();
+                let timestamp = chrono::Utc::now().to_rfc3339();
+
+                let event = crate::realtime::events::RealtimeEvent::MatchStatusChange {
+                    match_id,
+                    from_status: event_data
+                        .get("from_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    to_status: event_type.to_string(),
+                    timestamp,
+                };
+
+                event_bus.publish_to_match(match_id, &event).await;
+
+                // Also publish to participant user channels
+                for key in ["player1_id", "player2_id", "user_id"] {
+                    if let Some(uid_str) = event_data.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(uid) = Uuid::parse_str(uid_str) {
+                            event_bus.publish_to_user(uid, &event).await;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
     async fn publish_global_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time global event publishing
-        // Will be implemented when realtime module is added
+        // Global events (e.g., tournament announcements) to be implemented
+        // when a global subscription mechanism is added.
         Ok(())
     }
 
