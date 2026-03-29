@@ -11,6 +11,7 @@ export type DatabaseTransactionClient = Pick<
     | 'match'
     | 'dispute'
     | 'auditLog'
+    | 'refundRequest'
     | 'project'
     | 'payment'
 >;
