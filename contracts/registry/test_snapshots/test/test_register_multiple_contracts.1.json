@@ -17,7 +17,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
+                  "bytes": "78b4dfd20a2ce86f534e317f433d4aa2199efb7779aed9308a28b52b97caa567"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -39,7 +39,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                  "bytes": "77f3cc735eb0f7f894f444e9f6dc3d358ec86fc85400b121d615d6c2ec7d8adf"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -61,7 +61,7 @@
               "function_name": "register_contract",
               "args": [
                 {
-                  "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
+                  "bytes": "5e0eb73f825611d1ef77ae09da94db796f259b21e155e41665fb5c567a75ad29"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
@@ -133,13 +133,13 @@
                         "val": {
                           "vec": [
                             {
-                              "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
+                              "bytes": "78b4dfd20a2ce86f534e317f433d4aa2199efb7779aed9308a28b52b97caa567"
                             },
                             {
-                              "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                              "bytes": "77f3cc735eb0f7f894f444e9f6dc3d358ec86fc85400b121d615d6c2ec7d8adf"
                             },
                             {
-                              "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
+                              "bytes": "5e0eb73f825611d1ef77ae09da94db796f259b21e155e41665fb5c567a75ad29"
                             }
                           ]
                         }
@@ -151,7 +151,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
+                              "bytes": "5e0eb73f825611d1ef77ae09da94db796f259b21e155e41665fb5c567a75ad29"
                             }
                           ]
                         },
@@ -170,7 +170,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "3ec9758b8ef19cea6ce315ab48eb0c18f6dfef28b6531f30a52cde7e94d414aa"
+                                "bytes": "5e0eb73f825611d1ef77ae09da94db796f259b21e155e41665fb5c567a75ad29"
                               }
                             },
                             {
@@ -199,7 +199,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                              "bytes": "77f3cc735eb0f7f894f444e9f6dc3d358ec86fc85400b121d615d6c2ec7d8adf"
                             }
                           ]
                         },
@@ -218,7 +218,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "5d3bfc6d7011dc3992d43df017f8e8ced7d5c2fb5da1de97bc6a20ab80540286"
+                                "bytes": "77f3cc735eb0f7f894f444e9f6dc3d358ec86fc85400b121d615d6c2ec7d8adf"
                               }
                             },
                             {
@@ -247,7 +247,7 @@
                               "symbol": "Registry"
                             },
                             {
-                              "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
+                              "bytes": "78b4dfd20a2ce86f534e317f433d4aa2199efb7779aed9308a28b52b97caa567"
                             }
                           ]
                         },
@@ -266,7 +266,7 @@
                                 "symbol": "name"
                               },
                               "val": {
-                                "bytes": "edb388082e35d912ec1c66c887909e6c3582de460a3e721153b9ba6daa770fbf"
+                                "bytes": "78b4dfd20a2ce86f534e317f433d4aa2199efb7779aed9308a28b52b97caa567"
                               }
                             },
                             {
