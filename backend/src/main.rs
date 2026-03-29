@@ -22,6 +22,7 @@ use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
+use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -53,9 +54,29 @@ async fn main() -> io::Result<()> {
     // Create Redis connection manager
     let redis_client = redis::Client::open(config.redis.url.clone())
         .expect("Failed to create Redis client");
-    let redis_conn = redis::aio::ConnectionManager::new(redis_client)
+    let redis_conn = redis::aio::ConnectionManager::new(redis_client.clone())
         .await
         .expect("Failed to create Redis connection manager");
+
+    // Initialize matchmaking service
+    let matchmaking_config = MatchmakingConfig::default();
+    let matchmaker_service = Arc::new(MatchmakerService::new(
+        db_pool.clone(),
+        redis_client.clone(),
+        matchmaking_config,
+    ));
+    
+    // Start background matchmaker worker
+    let matchmaker_worker = matchmaker_service.clone();
+    tokio::spawn(async move {
+        if let Err(e) = matchmaker_worker.start_matchmaker_worker().await {
+            tracing::error!("Matchmaker worker error: {:?}", e);
+        }
+    });
+    tracing::info!("Matchmaker worker started");
+
+    // Initialize ELO engine
+    let elo_engine = Arc::new(EloEngine::new(32.0)); // K-Factor 32
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
@@ -82,6 +103,8 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
+            .app_data(web::Data::new(matchmaker_service.clone()))
+            .app_data(web::Data::new(elo_engine.clone()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
@@ -127,6 +150,16 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/reputation/stats",
                         web::get().to(crate::http::reputation_handler::get_reputation_stats),
+                    )
+                    // Matchmaking endpoints
+                    .service(
+                        web::scope("/matchmaking")
+                            .route("/join", web::post().to(crate::http::matchmaking::join_queue))
+                            .route("/leave", web::post().to(crate::http::matchmaking::leave_queue))
+                            .route("/status/{game}/{game_mode}", web::get().to(crate::http::matchmaking::get_queue_status))
+                            .route("/stats", web::get().to(crate::http::matchmaking::get_matchmaking_stats))
+                            .route("/elo/{game}", web::get().to(crate::http::matchmaking::get_elo))
+                            .route("/elo/{game}/{page}/{limit}", web::get().to(crate::http::matchmaking::get_elo_history))
                     ),
             )
             .configure(crate::realtime::user_ws::configure_ws_route)

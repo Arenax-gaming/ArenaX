@@ -5,8 +5,11 @@ import governanceRoutes from './governance.routes';
 import profileRoutes from './profile.routes';
 import matchRoutes from './match.routes';
 
+import { publicRateLimiter } from '../middleware/rate-limit.middleware';
+
 const router = Router();
 
+router.use(publicRateLimiter);
 router.use('/auth', authRoutes);
 router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes); // Added
