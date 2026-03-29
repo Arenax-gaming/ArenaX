@@ -22,76 +22,10 @@
 //! - Only authorized contracts can trigger releases
 //! - All actions emit events for auditability
 
+use arenax_events::escrow as events;
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal,
-    Symbol,
+    contract, contractimpl, contracttype, token, Address, BytesN, Env, IntoVal, Symbol,
 };
-
-#[contractevent(topics = ["ArenaXEscrow", "INIT"])]
-pub struct Initialized {
-    pub admin: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "MATCH_SET"])]
-pub struct MatchContractSet {
-    pub match_contract: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "ID_SET"])]
-pub struct IdentityContractSet {
-    pub identity_contract: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "TREASURY"])]
-pub struct TreasurySet {
-    pub treasury: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "DEPOSIT"])]
-pub struct Deposited {
-    pub match_id: BytesN<32>,
-    pub player: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "LOCKED"])]
-pub struct MatchLocked {
-    pub match_id: BytesN<32>,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "RELEASED"])]
-pub struct FundsReleased {
-    pub match_id: BytesN<32>,
-    pub winner: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "REFUNDED"])]
-pub struct FundsRefunded {
-    pub match_id: BytesN<32>,
-    pub player_a: Address,
-    pub player_b: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "SLASHED"])]
-pub struct StakeSlashed {
-    pub match_id: BytesN<32>,
-    pub subject: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXEscrow", "EMERGENCY"])]
-pub struct EmergencyWithdraw {
-    pub match_id: BytesN<32>,
-    pub admin: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -156,7 +90,7 @@ impl MatchEscrowVault {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
 
-        Initialized { admin }.publish(&env);
+        events::emit_initialized(&env, &admin);
     }
 
     /// Set the Match Contract address for state verification
@@ -173,7 +107,7 @@ impl MatchEscrowVault {
             .instance()
             .set(&DataKey::MatchContract, &match_contract);
 
-        MatchContractSet { match_contract }.publish(&env);
+        events::emit_match_contract_set(&env, &match_contract);
     }
 
     /// Set the Identity Contract address for role verification
@@ -190,7 +124,7 @@ impl MatchEscrowVault {
             .instance()
             .set(&DataKey::IdentityContract, &identity_contract);
 
-        IdentityContractSet { identity_contract }.publish(&env);
+        events::emit_identity_contract_set(&env, &identity_contract);
     }
 
     /// Set the treasury address for slashed funds
@@ -205,7 +139,7 @@ impl MatchEscrowVault {
 
         env.storage().instance().set(&DataKey::Treasury, &treasury);
 
-        TreasurySet { treasury }.publish(&env);
+        events::emit_treasury_set(&env, &treasury);
     }
 
     /// Pause/unpause the contract
@@ -357,13 +291,7 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        Deposited {
-            match_id,
-            player,
-            amount: escrow.amount,
-            asset: escrow.asset,
-        }
-        .publish(&env);
+        events::emit_deposited(&env, &match_id, &player, escrow.amount, &escrow.asset);
     }
 
     /// Lock funds when match starts
@@ -402,7 +330,7 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        MatchLocked { match_id }.publish(&env);
+        events::emit_match_locked(&env, &match_id);
     }
 
     /// Release funds to the winner after match completion
@@ -458,13 +386,7 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        FundsReleased {
-            match_id,
-            winner,
-            amount: total_amount,
-            asset: escrow.asset,
-        }
-        .publish(&env);
+        events::emit_funds_released(&env, &match_id, &winner, total_amount, &escrow.asset);
     }
 
     /// Refund both players when match is cancelled
@@ -517,14 +439,7 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        FundsRefunded {
-            match_id,
-            player_a: escrow.player_a,
-            player_b: escrow.player_b,
-            amount: escrow.amount,
-            asset: escrow.asset,
-        }
-        .publish(&env);
+        events::emit_funds_refunded(&env, &match_id, &escrow.player_a, &escrow.player_b, escrow.amount, &escrow.asset);
     }
 
     /// Mark escrow as disputed
@@ -612,13 +527,7 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        FundsReleased {
-            match_id,
-            winner,
-            amount: total_amount,
-            asset: escrow.asset,
-        }
-        .publish(&env);
+        events::emit_funds_released(&env, &match_id, &winner, total_amount, &escrow.asset);
     }
 
     /// Slash a player's stake (called by Slashing Contract)
@@ -654,13 +563,8 @@ impl MatchEscrowVault {
 
         token_client.transfer(&contract_address, &treasury, &amount);
 
-        StakeSlashed {
-            match_id: BytesN::from_array(&env, &[0u8; 32]), // Generic slash, no specific match
-            subject,
-            amount,
-            asset,
-        }
-        .publish(&env);
+        let zero_match_id = BytesN::from_array(&env, &[0u8; 32]);
+        events::emit_stake_slashed(&env, &zero_match_id, &subject, amount, &asset);
     }
 
     /// Confiscate rewards (called by Slashing Contract)
@@ -711,13 +615,7 @@ impl MatchEscrowVault {
             .get(&DataKey::Admin)
             .expect("not initialized");
 
-        EmergencyWithdraw {
-            match_id,
-            admin,
-            amount: total,
-            asset: escrow.asset,
-        }
-        .publish(&env);
+        events::emit_emergency_withdraw(&env, &match_id, &admin, total, &escrow.asset);
     }
 
     /// Get escrow data for a match

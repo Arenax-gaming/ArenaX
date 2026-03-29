@@ -20,82 +20,10 @@
 //! - Financial penalties reference escrowed funds
 //! - All actions emit events for auditability
 
+use arenax_events::slashing as events;
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol,
 };
-
-// ============================================================================
-// Events
-// ============================================================================
-
-#[contractevent(topics = ["ArenaXSlashing", "INIT"])]
-pub struct Initialized {
-    pub admin: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "ID_SET"])]
-pub struct IdentityContractSet {
-    pub identity_contract: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "ESC_SET"])]
-pub struct EscrowContractSet {
-    pub escrow_contract: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "CASE_OPEN"])]
-pub struct CaseOpened {
-    pub case_id: BytesN<32>,
-    pub subject: Address,
-    pub initiator: Address,
-    pub reason_code: u32,
-    pub evidence_hash: BytesN<32>,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "APPROVED"])]
-pub struct CaseApproved {
-    pub case_id: BytesN<32>,
-    pub approver: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "EXECUTED"])]
-pub struct PenaltyExecuted {
-    pub case_id: BytesN<32>,
-    pub penalty_type: u32,
-    pub subject: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "CANCELED"])]
-pub struct CaseCancelled {
-    pub case_id: BytesN<32>,
-    pub subject: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "SLASHED"])]
-pub struct StakeSlashed {
-    pub subject: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "CONFISCT"])]
-pub struct RewardConfiscated {
-    pub subject: Address,
-    pub amount: i128,
-    pub asset: Address,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "SUSPEND"])]
-pub struct TemporarySuspension {
-    pub subject: Address,
-    pub duration: u64,
-    pub expires_at: u64,
-}
-
-#[contractevent(topics = ["ArenaXSlashing", "PERMA_BN"])]
-pub struct PermanentBan {
-    pub subject: Address,
-}
 
 // ============================================================================
 // Data Types
@@ -188,7 +116,7 @@ impl SlashingContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
 
-        Initialized { admin }.publish(&env);
+        events::emit_initialized(&env, &admin);
     }
 
     /// Set the Identity Contract address for role verification
@@ -210,7 +138,7 @@ impl SlashingContract {
             .instance()
             .set(&DataKey::IdentityContract, &identity_contract);
 
-        IdentityContractSet { identity_contract }.publish(&env);
+        events::emit_identity_contract_set(&env, &identity_contract);
     }
 
     /// Set the Escrow Contract address for fund slashing
@@ -232,7 +160,7 @@ impl SlashingContract {
             .instance()
             .set(&DataKey::EscrowContract, &escrow_contract);
 
-        EscrowContractSet { escrow_contract }.publish(&env);
+        events::emit_escrow_contract_set(&env, &escrow_contract);
     }
 
     /// Open a new slashing case against a subject
@@ -288,14 +216,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::SlashCase(case_id.clone()), &slash_case);
 
-        CaseOpened {
-            case_id,
-            subject,
-            initiator,
-            reason_code,
-            evidence_hash,
-        }
-        .publish(&env);
+        events::emit_case_opened(&env, &case_id, &subject, &initiator, reason_code, &evidence_hash);
     }
 
     /// Approve a slashing case for execution
@@ -329,7 +250,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::SlashCase(case_id.clone()), &slash_case);
 
-        CaseApproved { case_id, approver }.publish(&env);
+        events::emit_case_approved(&env, &case_id, &approver);
     }
 
     /// Execute a penalty against the subject of an approved case
@@ -413,12 +334,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::CaseExecuted(case_id.clone()), &true);
 
-        PenaltyExecuted {
-            case_id,
-            penalty_type,
-            subject: slash_case.subject,
-        }
-        .publish(&env);
+        events::emit_penalty_executed(&env, &case_id, penalty_type, &slash_case.subject);
     }
 
     /// Cancel a proposed case before approval
@@ -455,11 +371,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::SlashCase(case_id.clone()), &slash_case);
 
-        CaseCancelled {
-            case_id,
-            subject: slash_case.subject,
-        }
-        .publish(&env);
+        events::emit_case_cancelled(&env, &case_id, &slash_case.subject);
     }
 
     /// Get case details
@@ -622,12 +534,7 @@ impl SlashingContract {
             (subject.clone(), amount, asset.clone()).into_val(env),
         );
 
-        StakeSlashed {
-            subject: subject.clone(),
-            amount,
-            asset,
-        }
-        .publish(env);
+        events::emit_stake_slashed(env, subject, amount, &asset);
     }
 
     /// Execute reward confiscation penalty
@@ -659,12 +566,7 @@ impl SlashingContract {
             (subject.clone(), amount, asset.clone()).into_val(env),
         );
 
-        RewardConfiscated {
-            subject: subject.clone(),
-            amount,
-            asset,
-        }
-        .publish(env);
+        events::emit_reward_confiscated(env, subject, amount, &asset);
     }
 
     /// Execute temporary suspension penalty
@@ -695,12 +597,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::BannedUsers(subject.clone()), &ban_record);
 
-        TemporarySuspension {
-            subject: subject.clone(),
-            duration,
-            expires_at,
-        }
-        .publish(env);
+        events::emit_temporary_suspension(env, subject, duration, expires_at);
     }
 
     /// Execute permanent ban penalty (irreversible)
@@ -717,10 +614,7 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::BannedUsers(subject.clone()), &ban_record);
 
-        PermanentBan {
-            subject: subject.clone(),
-        }
-        .publish(env);
+        events::emit_permanent_ban(env, subject);
     }
 }
 
