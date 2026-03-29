@@ -10,6 +10,7 @@ use crate::models::ApiResponse;
 use crate::service::reputation_service::{PlayerReputation, ReputationService};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use uuid::Uuid;
 
 /// Player reputation response
@@ -65,8 +66,7 @@ pub async fn get_player_reputation(
 ) -> Result<HttpResponse, ApiError> {
     let user_id = path.into_inner();
     
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(
         r#"
         SELECT 
             id as user_id,
@@ -77,8 +77,8 @@ pub async fn get_player_reputation(
         FROM users
         WHERE id = $1
         "#,
-        user_id
     )
+    .bind(user_id)
     .fetch_optional(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?
@@ -98,7 +98,7 @@ pub async fn get_player_reputation(
     Ok(HttpResponse::Ok().json(ApiResponse::success(reputation)))
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, serde::Serialize)]
 struct PlayerReputationData {
     user_id: Uuid,
     skill_score: i32,
@@ -114,8 +114,7 @@ pub async fn get_my_reputation(
 ) -> Result<HttpResponse, ApiError> {
     let uid = user_id.into_inner();
     
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(
         r#"
         SELECT 
             id as user_id,
@@ -126,8 +125,8 @@ pub async fn get_my_reputation(
         FROM users
         WHERE id = $1
         "#,
-        uid
     )
+    .bind(uid)
     .fetch_one(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -156,8 +155,7 @@ pub async fn get_reputation_history(
     let limit = query.limit.unwrap_or(20);
     let offset = query.offset.unwrap_or(0);
 
-    let history = sqlx::query_as!(
-        ReputationEventResponse,
+    let history = sqlx::query_as::<_, ReputationEventResponse>(
         r#"
         SELECT 
             id,
@@ -173,10 +171,10 @@ pub async fn get_reputation_history(
         ORDER BY created_at DESC
         LIMIT $2 OFFSET $3
         "#,
-        user_id,
-        limit as i64,
-        offset as i64
     )
+    .bind(user_id)
+    .bind(limit as i64)
+    .bind(offset as i64)
     .fetch_all(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -192,7 +190,7 @@ pub async fn get_bad_actors(
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
 
-    let bad_actors = sqlx::query!(
+    let rows = sqlx::query(
         r#"
         SELECT 
             id,
@@ -207,12 +205,29 @@ pub async fn get_bad_actors(
         ORDER BY fair_play_score ASC, created_at DESC
         LIMIT $1 OFFSET $2
         "#,
-        limit as i64,
-        offset as i64
     )
+    .bind(limit as i64)
+    .bind(offset as i64)
     .fetch_all(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
+
+    let bad_actors: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<uuid::Uuid, _>("id").ok(),
+                "username": row.try_get::<Option<String>, _>("username").unwrap_or(None),
+                "email": row.try_get::<Option<String>, _>("email").unwrap_or(None),
+                "skill_score": row.try_get::<Option<i32>, _>("skill_score").unwrap_or(None),
+                "fair_play_score": row.try_get::<Option<i32>, _>("fair_play_score").unwrap_or(None),
+                "anticheat_flags_count": row.try_get::<Option<i32>, _>("anticheat_flags_count").unwrap_or(None),
+                "reputation_last_updated": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reputation_last_updated")
+                    .unwrap_or(None)
+                    .map(|t| t.to_rfc3339()),
+            })
+        })
+        .collect();
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(bad_actors)))
 }
@@ -224,14 +239,14 @@ pub async fn remove_bad_actor_flag(
 ) -> Result<HttpResponse, ApiError> {
     let user_id = path.into_inner();
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE users
         SET is_bad_actor = false, updated_at = NOW()
         WHERE id = $1
         "#,
-        user_id
     )
+    .bind(user_id)
     .execute(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -246,7 +261,7 @@ pub async fn remove_bad_actor_flag(
 pub async fn get_reputation_stats(
     pool: web::Data<sqlx::PgPool>,
 ) -> Result<HttpResponse, ApiError> {
-    let stats = sqlx::query!(
+    let stats = sqlx::query(
         r#"
         SELECT 
             COUNT(*) FILTER (WHERE is_bad_actor = true) as bad_actors_count,
@@ -256,18 +271,18 @@ pub async fn get_reputation_stats(
             AVG(COALESCE(fair_play_score, 100)) as avg_fair_play
         FROM users
         WHERE is_active = true
-        "#
+        "#,
     )
     .fetch_one(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
     let response = serde_json::json!({
-        "bad_actors_count": stats.bad_actors_count.unwrap_or(0),
-        "low_fair_play_count": stats.low_fair_play_count.unwrap_or(0),
-        "high_skill_count": stats.high_skill_count.unwrap_or(0),
-        "avg_skill": stats.avg_skill.unwrap_or(1000.0),
-        "avg_fair_play": stats.avg_fair_play.unwrap_or(100.0)
+        "bad_actors_count": stats.try_get::<i64, _>("bad_actors_count").unwrap_or(0),
+        "low_fair_play_count": stats.try_get::<i64, _>("low_fair_play_count").unwrap_or(0),
+        "high_skill_count": stats.try_get::<i64, _>("high_skill_count").unwrap_or(0),
+        "avg_skill": stats.try_get::<f64, _>("avg_skill").unwrap_or(1000.0),
+        "avg_fair_play": stats.try_get::<f64, _>("avg_fair_play").unwrap_or(100.0)
     });
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))

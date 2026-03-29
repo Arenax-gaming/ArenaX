@@ -7,6 +7,12 @@ pub struct SessionRegistry {
     inner: RwLock<HashMap<Uuid, HashSet<Uuid>>>,
 }
 
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionRegistry {
     pub fn new() -> Self {
         Self {

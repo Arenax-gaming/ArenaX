@@ -1,14 +1,46 @@
+﻿#![allow(dead_code)]
+
 use crate::api_error::ApiError;
-use crate::config::Config;
 use crate::db::DbPool;
-use crate::models::*;
+use crate::models::match_models::*;
+use crate::models::user::User;
 use crate::service::reputation_service::ReputationService;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
+use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::info;
 use uuid::Uuid;
+
+// ===== Service-local response types =====
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MatchHistoryResponse {
+    pub matches: Vec<MatchResponse>,
+    pub total: i64,
+    pub page: i32,
+    pub per_page: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LeaderboardResponse {
+    pub entries: Vec<LeaderboardEntry>,
+    pub total: i64,
+    pub game: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    pub rank: i64,
+    pub user_id: Uuid,
+    pub username: String,
+    pub elo_rating: i32,
+    pub games_played: i32,
+    pub wins: i32,
+    pub losses: i32,
+    pub win_rate: f64,
+}
 
 pub struct MatchService {
     db_pool: DbPool,
@@ -37,226 +69,28 @@ impl MatchService {
         self
     }
 
-    /// Create a new match
-    pub async fn create_match(
-        &self,
-        player1_id: Uuid,
-        player2_id: Option<Uuid>,
-        match_type: MatchType,
-        game_mode: String,
-        tournament_id: Option<Uuid>,
-        round_id: Option<Uuid>,
-    ) -> Result<Match, ApiError> {
-        let match_id = Uuid::new_v4();
+    // ========================================================================
+    // MATCHMAKING
+    // ========================================================================
 
-        // Get player Elo ratings
-        let player1_elo = self.get_user_elo(player1_id, &game_mode).await?;
-        let player2_elo = if let Some(p2_id) = player2_id {
-            Some(self.get_user_elo(p2_id, &game_mode).await?)
-        } else {
-            None
-        };
-
-        let match_record = sqlx::query_as!(
-            Match,
-            r#"
-            INSERT INTO matches (
-                id, tournament_id, round_id, match_type, status, player1_id, player2_id,
-                player1_elo_before, player2_elo_before, game_mode, created_at, updated_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-            ) RETURNING *
-            "#,
-            match_id,
-            tournament_id,
-            round_id,
-            match_type as _,
-            MatchStatus::Pending as _,
-            player1_id,
-            player2_id,
-            player1_elo,
-            player2_elo,
-            game_mode,
-            Utc::now(),
-            Utc::now()
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(match_record)
-    }
-
-    /// Get match details
-    pub async fn get_match(
-        &self,
-        match_id: Uuid,
-        user_id: Option<Uuid>,
-    ) -> Result<MatchResponse, ApiError> {
-        let match_record = sqlx::query_as!(Match, "SELECT * FROM matches WHERE id = $1", match_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .ok_or(ApiError::not_found("Match not found"))?;
-
-        // Get player information
-        let player1 = self.get_player_info(match_record.player1_id).await?;
-        let player2 = if let Some(p2_id) = match_record.player2_id {
-            Some(self.get_player_info(p2_id).await?)
-        } else {
-            None
-        };
-
-        // Check if user can report score or dispute
-        let can_report_score = self.can_user_report_score(user_id, &match_record).await?;
-        let can_dispute = self.can_user_dispute_match(user_id, &match_record).await?;
-        let dispute_status = self.get_match_dispute_status(match_id).await?;
-
-        Ok(MatchResponse {
-            id: match_record.id,
-            tournament_id: match_record.tournament_id,
-            match_type: match_record.match_type.into(),
-            status: match_record.status.into(),
-            player1,
-            player2,
-            winner_id: match_record.winner_id,
-            player1_score: match_record.player1_score,
-            player2_score: match_record.player2_score,
-            scheduled_time: match_record.scheduled_time,
-            started_at: match_record.started_at,
-            completed_at: match_record.completed_at,
-            game_mode: match_record.game_mode,
-            map: match_record.map,
-            match_duration: match_record.match_duration,
-            can_report_score,
-            can_dispute,
-            dispute_status,
-        })
-    }
-
-    /// Report match score
-    pub async fn report_score(
-        &self,
-        match_id: Uuid,
-        user_id: Uuid,
-        request: ReportScoreRequest,
-    ) -> Result<MatchScore, ApiError> {
-        // Validate match and user
-        let match_record = self.get_match_by_id(match_id).await?;
-        self.validate_score_report(&match_record, user_id).await?;
-
-        // Create score record
-        let score_record = sqlx::query_as!(
-            MatchScore,
-            r#"
-            INSERT INTO match_scores (
-                id, match_id, player_id, score, proof_url, telemetry_data,
-                submitted_at, verified
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
-            ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            match_id,
-            user_id,
-            request.score,
-            request.proof_url,
-            request.telemetry_data,
-            Utc::now(),
-            false
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Update match with score
-        self.update_match_score(match_id, user_id, request.score)
-            .await?;
-
-        // Publish score reported event
-        self.publish_match_event(serde_json::json!({
-            "type": "score_reported",
-            "match_id": match_id,
-            "tournament_id": match_record.tournament_id,
-            "user_id": user_id,
-            "score": request.score
-        }))
-        .await?;
-
-        // Check if both players have reported scores
-        let both_reported = self.both_players_reported_scores(match_id).await?;
-        if both_reported {
-            self.process_match_completion(match_id).await?;
-        }
-
-        Ok(score_record)
-    }
-
-    /// Create a match dispute
-    pub async fn create_dispute(
-        &self,
-        match_id: Uuid,
-        user_id: Uuid,
-        request: CreateDisputeRequest,
-    ) -> Result<MatchDispute, ApiError> {
-        // Validate dispute creation
-        let match_record = self.get_match_by_id(match_id).await?;
-        self.validate_dispute_creation(&match_record, user_id)
-            .await?;
-
-        // Create dispute record
-        let dispute = sqlx::query_as!(
-            MatchDispute,
-            r#"
-            INSERT INTO match_disputes (
-                id, match_id, disputing_player_id, reason, evidence_urls,
-                status, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7
-            ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            match_id,
-            user_id,
-            request.reason,
-            request
-                .evidence_urls
-                .map(|urls| serde_json::to_string(&urls).unwrap_or_default()),
-            DisputeStatus::Pending as _,
-            Utc::now()
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Update match status to disputed
-        self.update_match_status(match_id, MatchStatus::Disputed)
-            .await?;
-
-        // Publish dispute event
-        self.publish_match_event(serde_json::json!({
-            "type": "disputed",
-            "match_id": match_id,
-            "tournament_id": match_record.tournament_id,
-            "user_id": user_id,
-            "reason": request.reason
-        }))
-        .await?;
-
-        Ok(dispute)
-    }
-
-    /// Join matchmaking queue
+    /// Join the matchmaking queue
     pub async fn join_matchmaking(
         &self,
         user_id: Uuid,
         request: JoinMatchmakingRequest,
     ) -> Result<MatchmakingQueue, ApiError> {
         // Check if user is already in queue
-        if self.is_user_in_queue(user_id, &request.game).await? {
-            return Err(ApiError::bad_request(
-                "User is already in matchmaking queue",
-            ));
+        let existing = sqlx::query_as::<_, MatchmakingQueue>(
+            "SELECT * FROM matchmaking_queue WHERE user_id = $1 AND status = $2",
+        )
+        .bind(user_id)
+        .bind(QueueStatus::Waiting)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if let Some(queue_entry) = existing {
+            return Ok(queue_entry);
         }
 
         // Check player reputation (filter bad actors)
@@ -272,1152 +106,799 @@ impl MatchService {
             }
         }
 
-        // Get user's current Elo rating
-        let current_elo = self.get_user_elo(user_id, &request.game).await?;
+        // Get user's ELO for the game
+        let elo = self.get_or_create_elo(user_id, &request.game).await?;
 
-        // Calculate Elo range for matchmaking
-        let (min_elo, max_elo) = self.calculate_elo_range(current_elo);
+        let elo_range = 200; // Match within 200 ELO points
+        let max_wait_minutes = request.max_wait_time.unwrap_or(5);
 
-        // Set expiration time
-        let expires_at =
-            Utc::now() + chrono::Duration::minutes(request.max_wait_time.unwrap_or(10) as i64);
-
-        // Add to queue
-        let queue_entry = sqlx::query_as!(
-            MatchmakingQueue,
+        let queue_entry = sqlx::query_as::<_, MatchmakingQueue>(
             r#"
             INSERT INTO matchmaking_queue (
-                id, user_id, game, game_mode, current_elo, min_elo, max_elo,
-                joined_at, expires_at, status
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-            ) RETURNING *
+                id, user_id, game, game_mode, current_elo,
+                min_elo, max_elo, joined_at, expires_at, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            request.game,
-            request.game_mode,
-            current_elo,
-            min_elo,
-            max_elo,
-            Utc::now(),
-            expires_at,
-            QueueStatus::Waiting as _
         )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(&request.game)
+        .bind(&request.game_mode)
+        .bind(elo.current_rating)
+        .bind(elo.current_rating - elo_range)
+        .bind(elo.current_rating + elo_range)
+        .bind(Utc::now())
+        .bind(Utc::now() + Duration::minutes(max_wait_minutes as i64))
+        .bind(QueueStatus::Waiting)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         // Try to find a match immediately
-        self.try_matchmaking(&request.game, &request.game_mode)
+        self.try_match_players(&request.game, &request.game_mode)
             .await?;
 
         Ok(queue_entry)
     }
 
-    /// Get matchmaking status for user
+    /// Leave the matchmaking queue
+    pub async fn leave_matchmaking(&self, user_id: Uuid) -> Result<(), ApiError> {
+        sqlx::query("UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND status = $3")
+            .bind(QueueStatus::Cancelled)
+            .bind(user_id)
+            .bind(QueueStatus::Waiting)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+
+    /// Get matchmaking status for a user
     pub async fn get_matchmaking_status(
         &self,
         user_id: Uuid,
     ) -> Result<MatchmakingStatusResponse, ApiError> {
-        let queue_entry = sqlx::query_as!(
-            MatchmakingQueue,
+        let queue_entry = sqlx::query_as::<_, MatchmakingQueue>(
             "SELECT * FROM matchmaking_queue WHERE user_id = $1 AND status = $2",
-            user_id,
-            QueueStatus::Waiting as _
         )
+        .bind(user_id)
+        .bind(QueueStatus::Waiting)
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        if let Some(entry) = queue_entry {
-            // Calculate queue position
-            let position = self.get_queue_position(user_id, &entry.game).await?;
+        let in_queue = queue_entry.is_some();
 
-            // Estimate wait time
-            let estimated_wait = self
-                .estimate_wait_time(&entry.game, &entry.game_mode)
-                .await?;
+        // Check for current active match
+        let current_match = sqlx::query_as::<_, Match>(
+            r#"
+            SELECT * FROM matches
+            WHERE (player1_id = $1 OR player2_id = $1)
+            AND status IN ('pending', 'in_progress')
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
 
-            Ok(MatchmakingStatusResponse {
-                in_queue: true,
-                queue_position: Some(position),
-                estimated_wait_time: Some(estimated_wait),
-                current_match: None,
-            })
+        let current_match_response = if let Some(m) = current_match {
+            Some(self.match_to_response(m).await?)
         } else {
-            // Check if user has an active match
-            let active_match = self.get_user_active_match(user_id).await?;
+            None
+        };
 
-            Ok(MatchmakingStatusResponse {
-                in_queue: false,
-                queue_position: None,
-                estimated_wait_time: None,
-                current_match: active_match,
-            })
-        }
+        Ok(MatchmakingStatusResponse {
+            in_queue,
+            queue_position: None,
+            estimated_wait_time: None,
+            current_match: current_match_response,
+        })
     }
 
-    /// Get user's Elo rating
-    pub async fn get_user_elo_rating(
-        &self,
-        user_id: Uuid,
-        game: &str,
-    ) -> Result<EloResponse, ApiError> {
-        let elo_record = sqlx::query_as!(
-            UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
+    /// Try to match players in the queue
+    async fn try_match_players(&self, game: &str, game_mode: &str) -> Result<(), ApiError> {
+        // Get all waiting players for this game/mode
+        let waiting = sqlx::query_as::<_, MatchmakingQueue>(
+            r#"
+            SELECT * FROM matchmaking_queue
+            WHERE game = $1 AND game_mode = $2 AND status = $3 AND expires_at > $4
+            ORDER BY joined_at ASC
+            "#,
         )
-        .fetch_optional(&self.db_pool)
+        .bind(game)
+        .bind(game_mode)
+        .bind(QueueStatus::Waiting)
+        .bind(Utc::now())
+        .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or(ApiError::not_found("Elo rating not found"))?;
+        .map_err(ApiError::database_error)?;
 
-        // Calculate win rate
-        let total_games = elo_record.games_played;
-        let win_rate = if total_games > 0 {
-            (elo_record.wins as f64 / total_games as f64) * 100.0
+        // Try to pair players with compatible ELO ranges
+        let mut matched_ids: Vec<Uuid> = Vec::new();
+
+        for i in 0..waiting.len() {
+            if matched_ids.contains(&waiting[i].id) {
+                continue;
+            }
+
+            for j in (i + 1)..waiting.len() {
+                if matched_ids.contains(&waiting[j].id) {
+                    continue;
+                }
+
+                let p1 = &waiting[i];
+                let p2 = &waiting[j];
+
+                // Check ELO compatibility
+                if p1.current_elo >= p2.min_elo
+                    && p1.current_elo <= p2.max_elo
+                    && p2.current_elo >= p1.min_elo
+                    && p2.current_elo <= p1.max_elo
+                {
+                    // Create a match
+                    let match_id = self
+                        .create_match(p1.user_id, p2.user_id, game, game_mode)
+                        .await?;
+
+                    // Update queue entries
+                    sqlx::query(
+                        "UPDATE matchmaking_queue SET status = $1, matched_at = $2, match_id = $3 WHERE id = $4 OR id = $5",
+                    )
+                    .bind(QueueStatus::Matched)
+                    .bind(Utc::now())
+                    .bind(match_id)
+                    .bind(p1.id)
+                    .bind(p2.id)
+                    .execute(&self.db_pool)
+                    .await
+                    .map_err(ApiError::database_error)?;
+
+                    matched_ids.push(p1.id);
+                    matched_ids.push(p2.id);
+
+                    info!(
+                        match_id = %match_id,
+                        player1 = %p1.user_id,
+                        player2 = %p2.user_id,
+                        "Players matched"
+                    );
+
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // ========================================================================
+    // MATCH CRUD
+    // ========================================================================
+
+    /// Create a new match
+    pub async fn create_match(
+        &self,
+        player1_id: Uuid,
+        player2_id: Uuid,
+        game: &str,
+        game_mode: &str,
+    ) -> Result<Uuid, ApiError> {
+        let match_id = Uuid::new_v4();
+
+        // Get ELO ratings
+        let p1_elo = self.get_or_create_elo(player1_id, game).await?;
+        let p2_elo = self.get_or_create_elo(player2_id, game).await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO matches (
+                id, match_type, status, player1_id, player2_id,
+                player1_elo_before, player2_elo_before,
+                game_mode, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            "#,
+        )
+        .bind(match_id)
+        .bind(MatchType::Ranked)
+        .bind(MatchStatus::Pending)
+        .bind(player1_id)
+        .bind(player2_id)
+        .bind(p1_elo.current_rating)
+        .bind(p2_elo.current_rating)
+        .bind(game_mode)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(match_id)
+    }
+
+    /// Get a match by ID
+    pub async fn get_match(&self, match_id: Uuid) -> Result<MatchResponse, ApiError> {
+        let m = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))?;
+
+        self.match_to_response(m).await
+    }
+
+    /// Start a match
+    pub async fn start_match(&self, match_id: Uuid) -> Result<MatchResponse, ApiError> {
+        let m = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))?;
+
+        if m.status != MatchStatus::Pending {
+            return Err(ApiError::bad_request("Match is not in pending state"));
+        }
+
+        sqlx::query(
+            "UPDATE matches SET status = $1, started_at = $2, updated_at = $3 WHERE id = $4",
+        )
+        .bind(MatchStatus::InProgress)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .bind(match_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        self.get_match(match_id).await
+    }
+
+    /// Report match score
+    pub async fn report_score(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+        request: ReportScoreRequest,
+    ) -> Result<MatchScore, ApiError> {
+        // Verify player is in this match
+        let m = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))?;
+
+        if m.player1_id != player_id && m.player2_id != Some(player_id) {
+            return Err(ApiError::forbidden("You are not a player in this match"));
+        }
+
+        if m.status != MatchStatus::InProgress {
+            return Err(ApiError::bad_request("Match is not in progress"));
+        }
+
+        let score = sqlx::query_as::<_, MatchScore>(
+            r#"
+            INSERT INTO match_scores (
+                id, match_id, player_id, score, proof_url,
+                telemetry_data, submitted_at, verified
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(match_id)
+        .bind(player_id)
+        .bind(request.score)
+        .bind(&request.proof_url)
+        .bind(&request.telemetry_data)
+        .bind(Utc::now())
+        .bind(false)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        // Check if both players have reported scores
+        self.check_and_complete_match(match_id).await?;
+
+        Ok(score)
+    }
+
+    /// Complete a match (called when both scores are reported or by admin)
+    async fn check_and_complete_match(&self, match_id: Uuid) -> Result<(), ApiError> {
+        let scores = sqlx::query_as::<_, MatchScore>(
+            "SELECT * FROM match_scores WHERE match_id = $1 ORDER BY submitted_at",
+        )
+        .bind(match_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if scores.len() < 2 {
+            return Ok(()); // Wait for both players
+        }
+
+        let m = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))?;
+
+        // Check if scores agree
+        let p1_score = scores
+            .iter()
+            .find(|s| s.player_id == m.player1_id)
+            .map(|s| s.score);
+        let p2_score = scores
+            .iter()
+            .find(|s| m.player2_id == Some(s.player_id))
+            .map(|s| s.score);
+
+        if let (Some(s1), Some(s2)) = (p1_score, p2_score) {
+            // Determine winner
+            let winner_id = if s1 > s2 {
+                Some(m.player1_id)
+            } else if s2 > s1 {
+                m.player2_id
+            } else {
+                None // Draw
+            };
+
+            // Calculate match duration
+            let duration = m
+                .started_at
+                .map(|start| (Utc::now() - start).num_seconds() as i32);
+
+            // Update match
+            sqlx::query(
+                r#"
+                UPDATE matches
+                SET status = $1, winner_id = $2, player1_score = $3, player2_score = $4,
+                    completed_at = $5, match_duration = $6, updated_at = $7
+                WHERE id = $8
+                "#,
+            )
+            .bind(MatchStatus::Completed)
+            .bind(winner_id)
+            .bind(s1)
+            .bind(s2)
+            .bind(Utc::now())
+            .bind(duration)
+            .bind(Utc::now())
+            .bind(match_id)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+
+            // Update ELO ratings
+            if let Some(game) = m.game_mode.split('_').next() {
+                self.update_elo_ratings(m.player1_id, m.player2_id, winner_id, game, match_id)
+                    .await?;
+            }
+
+            info!(match_id = %match_id, winner = ?winner_id, "Match completed");
+        }
+
+        Ok(())
+    }
+
+    // ========================================================================
+    // DISPUTES
+    // ========================================================================
+
+    /// Create a dispute for a match
+    pub async fn create_dispute(
+        &self,
+        match_id: Uuid,
+        player_id: Uuid,
+        request: CreateDisputeRequest,
+    ) -> Result<MatchDispute, ApiError> {
+        // Verify player is in this match
+        let m = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))?;
+
+        if m.player1_id != player_id && m.player2_id != Some(player_id) {
+            return Err(ApiError::forbidden("You are not a player in this match"));
+        }
+
+        let evidence_urls = request
+            .evidence_urls
+            .map(|urls| serde_json::to_string(&urls).unwrap_or_default());
+
+        let dispute = sqlx::query_as::<_, MatchDispute>(
+            r#"
+            INSERT INTO match_disputes (
+                id, match_id, disputing_player_id, reason, evidence_urls,
+                status, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(match_id)
+        .bind(player_id)
+        .bind(&request.reason)
+        .bind(&evidence_urls)
+        .bind(DisputeStatus::Pending)
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        // Update match status to disputed
+        sqlx::query("UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3")
+            .bind(MatchStatus::Disputed)
+            .bind(Utc::now())
+            .bind(match_id)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+
+        Ok(dispute)
+    }
+
+    /// Get disputes for a match
+    pub async fn get_match_disputes(&self, match_id: Uuid) -> Result<Vec<MatchDispute>, ApiError> {
+        let disputes = sqlx::query_as::<_, MatchDispute>(
+            "SELECT * FROM match_disputes WHERE match_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(match_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(disputes)
+    }
+
+    // ========================================================================
+    // ELO RATING
+    // ========================================================================
+
+    /// Get or create ELO record for a user/game
+    async fn get_or_create_elo(&self, user_id: Uuid, game: &str) -> Result<UserElo, ApiError> {
+        let existing =
+            sqlx::query_as::<_, UserElo>("SELECT * FROM user_elo WHERE user_id = $1 AND game = $2")
+                .bind(user_id)
+                .bind(game)
+                .fetch_optional(&self.db_pool)
+                .await
+                .map_err(ApiError::database_error)?;
+
+        if let Some(elo) = existing {
+            return Ok(elo);
+        }
+
+        // Create default ELO record
+        let elo = sqlx::query_as::<_, UserElo>(
+            r#"
+            INSERT INTO user_elo (
+                id, user_id, game, current_rating, peak_rating,
+                games_played, wins, losses, draws, win_streak, loss_streak,
+                last_updated
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING *
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(game)
+        .bind(1200i32) // Default ELO
+        .bind(1200i32)
+        .bind(0i32)
+        .bind(0i32)
+        .bind(0i32)
+        .bind(0i32)
+        .bind(0i32)
+        .bind(0i32)
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(elo)
+    }
+
+    /// Update ELO ratings after a match
+    async fn update_elo_ratings(
+        &self,
+        player1_id: Uuid,
+        player2_id: Option<Uuid>,
+        winner_id: Option<Uuid>,
+        game: &str,
+        match_id: Uuid,
+    ) -> Result<(), ApiError> {
+        let player2_id = match player2_id {
+            Some(id) => id,
+            None => return Ok(()), // No opponent (bye)
+        };
+
+        let p1_elo = self.get_or_create_elo(player1_id, game).await?;
+        let p2_elo = self.get_or_create_elo(player2_id, game).await?;
+
+        let k_factor = 32.0_f64;
+
+        // Calculate expected scores
+        let p1_expected = 1.0
+            / (1.0 + 10.0_f64.powf((p2_elo.current_rating - p1_elo.current_rating) as f64 / 400.0));
+        let p2_expected = 1.0 - p1_expected;
+
+        // Actual scores
+        let (p1_actual, p2_actual, p1_result, p2_result) = match winner_id {
+            Some(id) if id == player1_id => (1.0, 0.0, MatchResult::Win, MatchResult::Loss),
+            Some(_) => (0.0, 1.0, MatchResult::Loss, MatchResult::Win),
+            None => (0.5, 0.5, MatchResult::Draw, MatchResult::Draw),
+        };
+
+        // Calculate new ratings
+        let p1_new_rating = p1_elo.current_rating + (k_factor * (p1_actual - p1_expected)) as i32;
+        let p2_new_rating = p2_elo.current_rating + (k_factor * (p2_actual - p2_expected)) as i32;
+
+        let p1_change = p1_new_rating - p1_elo.current_rating;
+        let p2_change = p2_new_rating - p2_elo.current_rating;
+
+        // Update player 1 ELO
+        let (p1_wins, p1_losses, p1_draws) = match p1_result {
+            MatchResult::Win => (p1_elo.wins + 1, p1_elo.losses, p1_elo.draws),
+            MatchResult::Loss => (p1_elo.wins, p1_elo.losses + 1, p1_elo.draws),
+            MatchResult::Draw => (p1_elo.wins, p1_elo.losses, p1_elo.draws + 1),
+        };
+
+        let p1_win_streak = if p1_result == MatchResult::Win {
+            p1_elo.win_streak + 1
+        } else {
+            0
+        };
+        let p1_loss_streak = if p1_result == MatchResult::Loss {
+            p1_elo.loss_streak + 1
+        } else {
+            0
+        };
+        let p1_peak = p1_elo.peak_rating.max(p1_new_rating);
+
+        sqlx::query(
+            r#"
+            UPDATE user_elo
+            SET current_rating = $1, peak_rating = $2, games_played = games_played + 1,
+                wins = $3, losses = $4, draws = $5,
+                win_streak = $6, loss_streak = $7, last_updated = $8
+            WHERE user_id = $9 AND game = $10
+            "#,
+        )
+        .bind(p1_new_rating)
+        .bind(p1_peak)
+        .bind(p1_wins)
+        .bind(p1_losses)
+        .bind(p1_draws)
+        .bind(p1_win_streak)
+        .bind(p1_loss_streak)
+        .bind(Utc::now())
+        .bind(player1_id)
+        .bind(game)
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        // Update player 2 ELO (same pattern)
+        let (p2_wins, p2_losses, p2_draws) = match p2_result {
+            MatchResult::Win => (p2_elo.wins + 1, p2_elo.losses, p2_elo.draws),
+            MatchResult::Loss => (p2_elo.wins, p2_elo.losses + 1, p2_elo.draws),
+            MatchResult::Draw => (p2_elo.wins, p2_elo.losses, p2_elo.draws + 1),
+        };
+
+        let p2_win_streak = if p2_result == MatchResult::Win {
+            p2_elo.win_streak + 1
+        } else {
+            0
+        };
+        let p2_loss_streak = if p2_result == MatchResult::Loss {
+            p2_elo.loss_streak + 1
+        } else {
+            0
+        };
+        let p2_peak = p2_elo.peak_rating.max(p2_new_rating);
+
+        sqlx::query(
+            r#"
+            UPDATE user_elo
+            SET current_rating = $1, peak_rating = $2, games_played = games_played + 1,
+                wins = $3, losses = $4, draws = $5,
+                win_streak = $6, loss_streak = $7, last_updated = $8
+            WHERE user_id = $9 AND game = $10
+            "#,
+        )
+        .bind(p2_new_rating)
+        .bind(p2_peak)
+        .bind(p2_wins)
+        .bind(p2_losses)
+        .bind(p2_draws)
+        .bind(p2_win_streak)
+        .bind(p2_loss_streak)
+        .bind(Utc::now())
+        .bind(player2_id)
+        .bind(game)
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        // Record ELO history for both players
+        sqlx::query(
+            r#"
+            INSERT INTO elo_history (
+                id, user_id, game, match_id, rating_before, rating_after,
+                rating_change, opponent_id, opponent_rating, result, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(player1_id)
+        .bind(game)
+        .bind(match_id)
+        .bind(p1_elo.current_rating)
+        .bind(p1_new_rating)
+        .bind(p1_change)
+        .bind(player2_id)
+        .bind(p2_elo.current_rating)
+        .bind(p1_result)
+        .bind(Utc::now())
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO elo_history (
+                id, user_id, game, match_id, rating_before, rating_after,
+                rating_change, opponent_id, opponent_rating, result, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(player2_id)
+        .bind(game)
+        .bind(match_id)
+        .bind(p2_elo.current_rating)
+        .bind(p2_new_rating)
+        .bind(p2_change)
+        .bind(player1_id)
+        .bind(p1_elo.current_rating)
+        .bind(p2_result)
+        .bind(Utc::now())
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        // Update match with new ELO values
+        sqlx::query(
+            "UPDATE matches SET player1_elo_after = $1, player2_elo_after = $2 WHERE id = $3",
+        )
+        .bind(p1_new_rating)
+        .bind(p2_new_rating)
+        .bind(match_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+
+    /// Get ELO stats for a user
+    pub async fn get_elo_stats(&self, user_id: Uuid, game: &str) -> Result<EloResponse, ApiError> {
+        let elo = self.get_or_create_elo(user_id, game).await?;
+
+        let win_rate = if elo.games_played > 0 {
+            elo.wins as f64 / elo.games_played as f64
         } else {
             0.0
         };
 
-        // Get global rank and percentile
-        let (rank, percentile) = self.calculate_rank_and_percentile(user_id, game).await?;
+        // Get rank
+        let rank_row = sqlx::query(
+            r#"
+            SELECT COUNT(*) + 1 as rank
+            FROM user_elo
+            WHERE game = $1 AND current_rating > $2
+            "#,
+        )
+        .bind(game)
+        .bind(elo.current_rating)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let rank: i64 = rank_row.try_get("rank").unwrap_or(0);
 
         Ok(EloResponse {
-            game: elo_record.game,
-            current_rating: elo_record.current_rating,
-            peak_rating: elo_record.peak_rating,
-            games_played: elo_record.games_played,
-            wins: elo_record.wins,
-            losses: elo_record.losses,
-            draws: elo_record.draws,
+            game: game.to_string(),
+            current_rating: elo.current_rating,
+            peak_rating: elo.peak_rating,
+            games_played: elo.games_played,
+            wins: elo.wins,
+            losses: elo.losses,
+            draws: elo.draws,
             win_rate,
-            win_streak: elo_record.win_streak,
-            loss_streak: elo_record.loss_streak,
-            rank,
-            percentile,
+            win_streak: elo.win_streak,
+            loss_streak: elo.loss_streak,
+            rank: Some(rank as i32),
+            percentile: None,
         })
     }
 
-    // Private helper methods
-
-    async fn get_user_elo(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
-        let elo_record = sqlx::query_as!(
-            UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(elo_record.map(|r| r.current_rating).unwrap_or(1200)) // Default Elo rating
-    }
-
-    async fn get_player_info(&self, user_id: Uuid) -> Result<PlayerInfo, ApiError> {
-        let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", user_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .ok_or(ApiError::not_found("User not found"))?;
-
-        // Get user's Elo rating for the game (assuming we have a default game)
-        let elo_rating = self.get_user_elo(user_id, "default").await?;
-
-        Ok(PlayerInfo {
-            id: user.id,
-            username: user.username,
-            elo_rating,
-            avatar_url: user.avatar_url,
-        })
-    }
-
-    async fn can_user_report_score(
-        &self,
-        user_id: Option<Uuid>,
-        match_record: &Match,
-    ) -> Result<bool, ApiError> {
-        if user_id.is_none() {
-            return Ok(false);
-        }
-
-        let user_id = user_id.unwrap();
-
-        // Check if user is a player in this match
-        if user_id != match_record.player1_id
-            && match_record
-                .player2_id
-                .map(|p2| p2 != user_id)
-                .unwrap_or(true)
-        {
-            return Ok(false);
-        }
-
-        // Check if match is in progress
-        if match_record.status != MatchStatus::InProgress {
-            return Ok(false);
-        }
-
-        // Check if user has already reported score
-        let existing_score = sqlx::query!(
-            "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_record.id,
-            user_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(existing_score.is_none())
-    }
-
-    async fn can_user_dispute_match(
-        &self,
-        user_id: Option<Uuid>,
-        match_record: &Match,
-    ) -> Result<bool, ApiError> {
-        if user_id.is_none() {
-            return Ok(false);
-        }
-
-        let user_id = user_id.unwrap();
-
-        // Check if user is a player in this match
-        if user_id != match_record.player1_id
-            && match_record
-                .player2_id
-                .map(|p2| p2 != user_id)
-                .unwrap_or(true)
-        {
-            return Ok(false);
-        }
-
-        // Check if match is completed
-        if match_record.status != MatchStatus::Completed {
-            return Ok(false);
-        }
-
-        // Check if there's already a pending dispute
-        let existing_dispute = sqlx::query!(
-            "SELECT id FROM match_disputes WHERE match_id = $1 AND status = $2",
-            match_record.id,
-            DisputeStatus::Pending as _
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(existing_dispute.is_none())
-    }
-
-    async fn get_match_dispute_status(
-        &self,
-        match_id: Uuid,
-    ) -> Result<Option<DisputeStatus>, ApiError> {
-        let dispute = sqlx::query!(
-            "SELECT status FROM match_disputes WHERE match_id = $1 ORDER BY created_at DESC LIMIT 1",
-            match_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(dispute.map(|d| d.status.into()))
-    }
-
-    async fn get_match_by_id(&self, match_id: Uuid) -> Result<Match, ApiError> {
-        sqlx::query_as!(Match, "SELECT * FROM matches WHERE id = $1", match_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .ok_or(ApiError::not_found("Match not found".to_string()))
-    }
-
-    async fn validate_score_report(
-        &self,
-        match_record: &Match,
-        user_id: Uuid,
-    ) -> Result<(), ApiError> {
-        // Check if user is a player in this match
-        if user_id != match_record.player1_id
-            && match_record
-                .player2_id
-                .map(|p2| p2 != user_id)
-                .unwrap_or(true)
-        {
-            return Err(ApiError::forbidden("User is not a player in this match"));
-        }
-
-        // Check if match is in progress
-        if match_record.status != MatchStatus::InProgress {
-            return Err(ApiError::bad_request("Match is not in progress"));
-        }
-
-        // Check if user has already reported score
-        let existing_score = sqlx::query!(
-            "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_record.id,
-            user_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        if existing_score.is_some() {
-            return Err(ApiError::bad_request(
-                "Score already reported for this match",
-            ));
-        }
-
-        Ok(())
-    }
-
-    async fn update_match_score(
-        &self,
-        match_id: Uuid,
-        user_id: Uuid,
-        score: i32,
-    ) -> Result<(), ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
-
-        if user_id == match_record.player1_id {
-            sqlx::query!(
-                "UPDATE matches SET player1_score = $1, updated_at = $2 WHERE id = $3",
-                score,
-                Utc::now(),
-                match_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        } else if match_record
-            .player2_id
-            .map(|p2| p2 == user_id)
-            .unwrap_or(false)
-        {
-            sqlx::query!(
-                "UPDATE matches SET player2_score = $1, updated_at = $2 WHERE id = $3",
-                score,
-                Utc::now(),
-                match_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        }
-
-        Ok(())
-    }
-
-    async fn both_players_reported_scores(&self, match_id: Uuid) -> Result<bool, ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
-
-        let player1_reported = sqlx::query!(
-            "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_id,
-            match_record.player1_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .is_some();
-
-        let player2_reported = if let Some(p2_id) = match_record.player2_id {
-            sqlx::query!(
-                "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-                match_id,
-                p2_id
-            )
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .is_some()
-        } else {
-            true // Bye match - no player2 needed
-        };
-
-        Ok(player1_reported && player2_reported)
-    }
-
-    async fn process_match_completion(&self, match_id: Uuid) -> Result<(), ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
-
-        // Determine winner
-        let winner_id = self.determine_winner(&match_record).await?;
-
-        // Update match with winner and completion time
-        sqlx::query!(
-            r#"
-            UPDATE matches
-            SET winner_id = $1, status = $2, completed_at = $3, updated_at = $4
-            WHERE id = $5
-            "#,
-            winner_id,
-            MatchStatus::Completed as _,
-            Utc::now(),
-            Utc::now(),
-            match_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Update Elo ratings
-        self.update_elo_ratings(&match_record, winner_id).await?;
-
-        // Create Elo history records
-        self.create_elo_history(&match_record, winner_id).await?;
-
-        // Update on-chain reputation (if service is available)
-        if let Some(rep_service) = &self.reputation_service {
-            let players = vec![match_record.player1_id];
-            let skill_deltas = vec![25]; // Example: +25 for win, would be calculated based on outcome
-            
-            if let Err(e) = rep_service.update_reputation_on_match(
-                match_id,
-                &players,
-                &skill_deltas,
-            ).await {
-                error!("Failed to update reputation for match {}: {}", match_id, e);
-                // Don't fail the match completion, just log the error
-            }
-        }
-
-        // Publish match completed event
-        self.publish_match_event(serde_json::json!({
-            "type": "completed",
-            "match_id": match_id,
-            "tournament_id": match_record.tournament_id,
-            "winner_id": winner_id,
-            "player1_score": match_record.player1_score.unwrap_or(0),
-            "player2_score": match_record.player2_score.unwrap_or(0)
-        }))
-        .await?;
-
-        // Publish global event if it's a ranked match
-        if match_record.match_type == MatchType::Ranked {
-            if let Some(winner) = winner_id {
-                self.publish_global_event(serde_json::json!({
-                    "type": "match_completed",
-                    "match_id": match_id,
-                    "game_mode": match_record.game_mode,
-                    "winner_id": winner
-                }))
-                .await?;
-            }
-        }
-
-        // If this was a tournament match, trigger round advancement
-        if let Some(tournament_id) = match_record.tournament_id {
-            if let Some(round_id) = match_record.round_id {
-                let advancement = crate::orchestrator::RoundAdvancementWorker::new(self.db_pool.clone());
-                if let Err(e) = advancement.on_match_completed(tournament_id, round_id).await {
-                    tracing::error!(
-                        "Round advancement failed for tournament {} round {}: {}",
-                        tournament_id,
-                        round_id,
-                        e
-                    );
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn determine_winner(&self, match_record: &Match) -> Result<Option<Uuid>, ApiError> {
-        let player1_score = match_record.player1_score.unwrap_or(0);
-        let player2_score = match_record.player2_score.unwrap_or(0);
-
-        match player1_score.cmp(&player2_score) {
-            Ordering::Greater => Ok(Some(match_record.player1_id)),
-            Ordering::Less => Ok(match_record.player2_id),
-            Ordering::Equal => Ok(None), // Draw
-        }
-    }
-
-    async fn update_elo_ratings(
-        &self,
-        match_record: &Match,
-        winner_id: Option<Uuid>,
-    ) -> Result<(), ApiError> {
-        if match_record.player2_id.is_none() {
-            return Ok(()); // Bye match, no Elo update needed
-        }
-
-        let player1_elo = match_record.player1_elo_before.unwrap_or(1200);
-        let player2_elo = match_record.player2_elo_before.unwrap_or(1200);
-
-        // Calculate new Elo ratings
-        let (new_player1_elo, new_player2_elo) = self.calculate_elo_change(
-            player1_elo,
-            player2_elo,
-            winner_id,
-            match_record.player1_id,
-            match_record.player2_id.unwrap(),
-        );
-
-        // Determine results for each player
-        let player1_result = if winner_id == Some(match_record.player1_id) {
-            MatchResult::Win
-        } else if winner_id == match_record.player2_id {
-            MatchResult::Loss
-        } else {
-            MatchResult::Draw
-        };
-
-        let player2_result = if winner_id == match_record.player2_id {
-            MatchResult::Win
-        } else if winner_id == Some(match_record.player1_id) {
-            MatchResult::Loss
-        } else {
-            MatchResult::Draw
-        };
-
-        // Update player 1 Elo
-        self.update_user_elo(
-            match_record.player1_id,
-            &match_record.game_mode,
-            new_player1_elo,
-            player1_result,
-        )
-        .await?;
-
-        // Update player 2 Elo
-        self.update_user_elo(
-            match_record.player2_id.unwrap(),
-            &match_record.game_mode,
-            new_player2_elo,
-            player2_result,
-        )
-        .await?;
-
-        // Update match record with new Elo ratings
-        sqlx::query!(
-            r#"
-            UPDATE matches
-            SET player1_elo_after = $1, player2_elo_after = $2, updated_at = $3
-            WHERE id = $4
-            "#,
-            new_player1_elo,
-            new_player2_elo,
-            Utc::now(),
-            match_record.id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
-    fn calculate_elo_change(
-        &self,
-        player1_elo: i32,
-        player2_elo: i32,
-        winner_id: Option<Uuid>,
-        player1_id: Uuid,
-        player2_id: Uuid,
-    ) -> (i32, i32) {
-        const K_FACTOR: f64 = 32.0;
-
-        // Calculate expected scores
-        let expected_player1 =
-            1.0 / (1.0 + 10.0_f64.powf((player2_elo - player1_elo) as f64 / 400.0));
-        let expected_player2 = 1.0 - expected_player1;
-
-        // Determine actual scores
-        let (actual_player1, actual_player2) = match winner_id {
-            Some(winner) => {
-                if winner == player1_id {
-                    (1.0, 0.0) // Player 1 wins
-                } else if winner == player2_id {
-                    (0.0, 1.0) // Player 2 wins
-                } else {
-                    (0.5, 0.5) // Draw
-                }
-            }
-            None => (0.5, 0.5), // Draw
-        };
-
-        // Calculate new ratings
-        let new_player1_elo = player1_elo + (K_FACTOR * (actual_player1 - expected_player1)) as i32;
-        let new_player2_elo = player2_elo + (K_FACTOR * (actual_player2 - expected_player2)) as i32;
-
-        (new_player1_elo, new_player2_elo)
-    }
-
-    async fn update_user_elo(
+    /// Get ELO history for a user
+    pub async fn get_elo_history(
         &self,
         user_id: Uuid,
         game: &str,
-        new_elo: i32,
-        result: MatchResult,
-    ) -> Result<(), ApiError> {
-        // Get current Elo record
-        let current_elo = sqlx::query_as!(
-            UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        if let Some(elo_record) = current_elo {
-            // Update existing record
-            let peak_rating = elo_record.peak_rating.max(new_elo);
-
-            // Calculate new win/loss/draw counts and streaks
-            let (wins, losses, draws) = match result {
-                MatchResult::Win => (elo_record.wins + 1, elo_record.losses, elo_record.draws),
-                MatchResult::Loss => (elo_record.wins, elo_record.losses + 1, elo_record.draws),
-                MatchResult::Draw => (elo_record.wins, elo_record.losses, elo_record.draws + 1),
-            };
-
-            let (win_streak, loss_streak) = match result {
-                MatchResult::Win => (elo_record.win_streak + 1, 0),
-                MatchResult::Loss => (0, elo_record.loss_streak + 1),
-                MatchResult::Draw => (0, 0), // Draws reset both streaks
-            };
-
-            sqlx::query!(
-                r#"
-                UPDATE user_elo
-                SET current_rating = $1, peak_rating = $2, games_played = games_played + 1,
-                    wins = $3, losses = $4, draws = $5, win_streak = $6, loss_streak = $7,
-                    last_updated = $8
-                WHERE user_id = $9 AND game = $10
-                "#,
-                new_elo,
-                peak_rating,
-                wins,
-                losses,
-                draws,
-                win_streak,
-                loss_streak,
-                Utc::now(),
-                user_id,
-                game
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        } else {
-            // Create new record
-            let (wins, losses, draws) = match result {
-                MatchResult::Win => (1, 0, 0),
-                MatchResult::Loss => (0, 1, 0),
-                MatchResult::Draw => (0, 0, 1),
-            };
-
-            let (win_streak, loss_streak) = match result {
-                MatchResult::Win => (1, 0),
-                MatchResult::Loss => (0, 1),
-                MatchResult::Draw => (0, 0),
-            };
-
-            sqlx::query!(
-                r#"
-                INSERT INTO user_elo (
-                    id, user_id, game, current_rating, peak_rating, games_played,
-                    wins, losses, draws, win_streak, loss_streak, last_updated
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-                )
-                "#,
-                Uuid::new_v4(),
-                user_id,
-                game,
-                new_elo,
-                new_elo,
-                1,
-                wins,
-                losses,
-                draws,
-                win_streak,
-                loss_streak,
-                Utc::now()
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        }
-
-        Ok(())
-    }
-
-    async fn create_elo_history(
-        &self,
-        match_record: &Match,
-        winner_id: Option<Uuid>,
-    ) -> Result<(), ApiError> {
-        if match_record.player2_id.is_none() {
-            return Ok(()); // Bye match, no history needed
-        }
-
-        let player1_elo_before = match_record.player1_elo_before.unwrap_or(1200);
-        let player2_elo_before = match_record.player2_elo_before.unwrap_or(1200);
-        let player1_elo_after = match_record.player1_elo_after.unwrap_or(1200);
-        let player2_elo_after = match_record.player2_elo_after.unwrap_or(1200);
-
-        // Create history for player 1
-        let player1_result = if winner_id == Some(match_record.player1_id) {
-            MatchResult::Win
-        } else if winner_id == match_record.player2_id {
-            MatchResult::Loss
-        } else {
-            MatchResult::Draw
-        };
-
-        sqlx::query!(
+        limit: i32,
+    ) -> Result<Vec<EloHistory>, ApiError> {
+        let history = sqlx::query_as::<_, EloHistory>(
             r#"
-            INSERT INTO elo_history (
-                id, user_id, game, match_id, rating_before, rating_after, rating_change,
-                opponent_id, opponent_rating, result, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-            )
+            SELECT * FROM elo_history
+            WHERE user_id = $1 AND game = $2
+            ORDER BY created_at DESC
+            LIMIT $3
             "#,
-            Uuid::new_v4(),
-            match_record.player1_id,
-            match_record.game_mode,
-            match_record.id,
-            player1_elo_before,
-            player1_elo_after,
-            player1_elo_after - player1_elo_before,
-            match_record.player2_id.unwrap(),
-            player2_elo_before,
-            player1_result as _,
-            Utc::now()
         )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Create history for player 2
-        let player2_result = if winner_id == match_record.player2_id {
-            MatchResult::Win
-        } else if winner_id == Some(match_record.player1_id) {
-            MatchResult::Loss
-        } else {
-            MatchResult::Draw
-        };
-
-        sqlx::query!(
-            r#"
-            INSERT INTO elo_history (
-                id, user_id, game, match_id, rating_before, rating_after, rating_change,
-                opponent_id, opponent_rating, result, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-            )
-            "#,
-            Uuid::new_v4(),
-            match_record.player2_id.unwrap(),
-            match_record.game_mode,
-            match_record.id,
-            player2_elo_before,
-            player2_elo_after,
-            player2_elo_after - player2_elo_before,
-            match_record.player1_id,
-            player1_elo_before,
-            player2_result as _,
-            Utc::now()
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
-    async fn validate_dispute_creation(
-        &self,
-        match_record: &Match,
-        user_id: Uuid,
-    ) -> Result<(), ApiError> {
-        // Check if user is a player in this match
-        if user_id != match_record.player1_id
-            && match_record
-                .player2_id
-                .map(|p2| p2 != user_id)
-                .unwrap_or(true)
-        {
-            return Err(ApiError::forbidden("User is not a player in this match"));
-        }
-
-        // Check if match is completed
-        if match_record.status != MatchStatus::Completed {
-            return Err(ApiError::bad_request("Match is not completed"));
-        }
-
-        // Check if there's already a pending dispute
-        let existing_dispute = sqlx::query!(
-            "SELECT id FROM match_disputes WHERE match_id = $1 AND status = $2",
-            match_record.id,
-            DisputeStatus::Pending as _
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        if existing_dispute.is_some() {
-            return Err(ApiError::bad_request(
-                "Dispute already exists for this match",
-            ));
-        }
-
-        Ok(())
-    }
-
-    async fn update_match_status(
-        &self,
-        match_id: Uuid,
-        status: MatchStatus,
-    ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE matches SET status = $1, updated_at = $2 WHERE id = $3",
-            status as _,
-            Utc::now(),
-            match_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
-    async fn is_user_in_queue(&self, user_id: Uuid, game: &str) -> Result<bool, ApiError> {
-        let count = sqlx::query!(
-            "SELECT COUNT(*) as count FROM matchmaking_queue WHERE user_id = $1 AND game = $2 AND status = $3",
-            user_id,
-            game,
-            QueueStatus::Waiting as _
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        Ok(count > 0)
-    }
-
-    fn calculate_elo_range(&self, current_elo: i32) -> (i32, i32) {
-        const ELO_RANGE: i32 = 200; // ±200 Elo points
-        (current_elo - ELO_RANGE, current_elo + ELO_RANGE)
-    }
-
-    async fn try_matchmaking(&self, game: &str, game_mode: &str) -> Result<(), ApiError> {
-        // Find potential matches
-        let candidates = sqlx::query_as!(
-            MatchmakingQueue,
-            r#"
-            SELECT * FROM matchmaking_queue
-            WHERE game = $1 AND game_mode = $2 AND status = $3
-            ORDER BY joined_at ASC
-            LIMIT 10
-            "#,
-            game,
-            game_mode,
-            QueueStatus::Waiting as _
-        )
+        .bind(user_id)
+        .bind(game)
+        .bind(limit as i64)
         .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Filter out bad actors if reputation service is available
-        let filtered_candidates = if let Some(rep_service) = &self.reputation_service {
-            let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.user_id).collect();
-            let filtered_ids = rep_service.filter_bad_actors(&candidate_ids, 50).await
-                .unwrap_or(candidate_ids); // If filtering fails, use original list
-            
-            candidates.into_iter()
-                .filter(|c| filtered_ids.contains(&c.user_id))
-                .collect::<Vec<_>>()
-        } else {
-            candidates
-        };
-
-        // Try to match players
-        for i in 0..filtered_candidates.len() {
-            for j in (i + 1)..filtered_candidates.len() {
-                let player1 = &filtered_candidates[i];
-                let player2 = &filtered_candidates[j];
-
-                // Check if Elo ranges overlap
-                if self.elo_ranges_overlap(player1, player2) {
-                    // Create match
-                    let match_record = self
-                        .create_match(
-                            player1.user_id,
-                            Some(player2.user_id),
-                            MatchType::Ranked,
-                            game_mode.to_string(),
-                            None,
-                            None,
-                        )
-                        .await?;
-
-                    // Update queue entries
-                    self.update_queue_entries_to_matched(player1.id, player2.id, match_record.id)
-                        .await?;
-
-                    // Only create one match per call
-                    return Ok(());
-                }
-            }
-        }
-
-        Ok(())
+        Ok(history)
     }
 
-    fn elo_ranges_overlap(&self, player1: &MatchmakingQueue, player2: &MatchmakingQueue) -> bool {
-        player1.min_elo <= player2.max_elo && player2.min_elo <= player1.max_elo
-    }
+    // ========================================================================
+    // MATCH HISTORY & LEADERBOARD
+    // ========================================================================
 
-    async fn update_queue_entries_to_matched(
-        &self,
-        player1_queue_id: Uuid,
-        player2_queue_id: Uuid,
-        match_id: Uuid,
-    ) -> Result<(), ApiError> {
-        // Update player 1
-        sqlx::query!(
-            "UPDATE matchmaking_queue SET status = $1, matched_at = $2, match_id = $3 WHERE id = $4",
-            QueueStatus::Matched as _,
-            Utc::now(),
-            match_id,
-            player1_queue_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Update player 2
-        sqlx::query!(
-            "UPDATE matchmaking_queue SET status = $1, matched_at = $2, match_id = $3 WHERE id = $4",
-            QueueStatus::Matched as _,
-            Utc::now(),
-            match_id,
-            player2_queue_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
-    async fn get_queue_position(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
-        let position = sqlx::query!(
-            r#"
-            SELECT COUNT(*) as position FROM matchmaking_queue
-            WHERE game = $1 AND status = $2 AND joined_at < (
-                SELECT joined_at FROM matchmaking_queue WHERE user_id = $3 AND game = $1 AND status = $2
-            )
-            "#,
-            game,
-            QueueStatus::Waiting as _,
-            user_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .position
-        .unwrap_or(0);
-
-        Ok(position as i32 + 1) // 1-indexed position
-    }
-
-    async fn estimate_wait_time(&self, game: &str, game_mode: &str) -> Result<i32, ApiError> {
-        // Simple estimation based on queue size and average match duration
-        let queue_size = sqlx::query!(
-            "SELECT COUNT(*) as count FROM matchmaking_queue WHERE game = $1 AND game_mode = $2 AND status = $3",
-            game,
-            game_mode,
-            QueueStatus::Waiting as _
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        // Estimate 2 minutes per person in queue (rough approximation)
-        Ok((queue_size as i32) * 120)
-    }
-
-    async fn get_user_active_match(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Option<MatchResponse>, ApiError> {
-        let match_record = sqlx::query_as!(
-            Match,
-            r#"
-            SELECT m.* FROM matches m
-            WHERE (m.player1_id = $1 OR m.player2_id = $1)
-            AND m.status IN ($2, $3)
-            ORDER BY m.created_at DESC
-            LIMIT 1
-            "#,
-            user_id,
-            MatchStatus::Pending as _,
-            MatchStatus::InProgress as _
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        if let Some(match_record) = match_record {
-            Ok(Some(self.get_match(match_record.id, Some(user_id)).await?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn calculate_rank_and_percentile(
-        &self,
-        user_id: Uuid,
-        game: &str,
-    ) -> Result<(Option<i32>, Option<f64>), ApiError> {
-        // Get user's current rating
-        let user_rating = self.get_user_elo(user_id, game).await?;
-
-        // Count players with higher ratings
-        let higher_rated_count = sqlx::query!(
-            "SELECT COUNT(*) as count FROM user_elo WHERE game = $1 AND current_rating > $2",
-            game,
-            user_rating
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        // Get total player count
-        let total_players = sqlx::query!(
-            "SELECT COUNT(*) as count FROM user_elo WHERE game = $1",
-            game
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        if total_players == 0 {
-            return Ok((None, None));
-        }
-
-        let rank = higher_rated_count as i32 + 1;
-        let percentile =
-            ((total_players - higher_rated_count) as f64 / total_players as f64) * 100.0;
-
-        Ok((Some(rank), Some(percentile)))
-    }
-
-    /// Leave matchmaking queue
-    pub async fn leave_matchmaking(&self, user_id: Uuid) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND status = $3",
-            QueueStatus::Cancelled as _,
-            user_id,
-            QueueStatus::Waiting as _
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
-    /// Get user's match history
-    pub async fn get_user_match_history(
+    /// Get match history for a user
+    pub async fn get_match_history(
         &self,
         user_id: Uuid,
         page: i32,
         per_page: i32,
-        game: Option<String>,
     ) -> Result<MatchHistoryResponse, ApiError> {
         let offset = (page - 1) * per_page;
 
-        let matches = sqlx::query_as!(
-            Match,
+        let matches = sqlx::query_as::<_, Match>(
             r#"
             SELECT * FROM matches
-            WHERE (player1_id = $1 OR player2_id = $1)
-            AND ($2::text IS NULL OR game_mode = $2)
-            AND status = $3
-            ORDER BY completed_at DESC
-            LIMIT $4 OFFSET $5
+            WHERE player1_id = $1 OR player2_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
             "#,
-            user_id,
-            game,
-            MatchStatus::Completed as _,
-            per_page,
-            offset
         )
+        .bind(user_id)
+        .bind(per_page as i64)
+        .bind(offset as i64)
         .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Get total count
-        let total = sqlx::query!(
-            r#"
-            SELECT COUNT(*) as count FROM matches
-            WHERE (player1_id = $1 OR player2_id = $1)
-            AND ($2::text IS NULL OR game_mode = $2)
-            AND status = $3
-            "#,
-            user_id,
-            game,
-            MatchStatus::Completed as _
+        let total_row = sqlx::query(
+            "SELECT COUNT(*) as count FROM matches WHERE player1_id = $1 OR player2_id = $1",
         )
+        .bind(user_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
+        .map_err(ApiError::database_error)?;
 
-        // Convert to response format
+        let total: i64 = total_row.try_get("count").unwrap_or(0);
+
         let mut match_responses = Vec::new();
-        for match_record in matches {
-            let player1 = self.get_player_info(match_record.player1_id).await?;
-            let player2 = if let Some(p2_id) = match_record.player2_id {
-                Some(self.get_player_info(p2_id).await?)
-            } else {
-                None
-            };
-
-            match_responses.push(MatchResponse {
-                id: match_record.id,
-                tournament_id: match_record.tournament_id,
-                match_type: match_record.match_type.into(),
-                status: match_record.status.into(),
-                player1,
-                player2,
-                winner_id: match_record.winner_id,
-                player1_score: match_record.player1_score,
-                player2_score: match_record.player2_score,
-                scheduled_time: match_record.scheduled_time,
-                started_at: match_record.started_at,
-                completed_at: match_record.completed_at,
-                game_mode: match_record.game_mode,
-                map: match_record.map,
-                match_duration: match_record.match_duration,
-                can_report_score: false,
-                can_dispute: false,
-                dispute_status: None,
-            });
+        for m in matches {
+            match_responses.push(self.match_to_response(m).await?);
         }
 
         Ok(MatchHistoryResponse {
@@ -1428,116 +909,152 @@ impl MatchService {
         })
     }
 
-    /// Get leaderboard
+    /// Get leaderboard for a game
     pub async fn get_leaderboard(
         &self,
-        game: String,
-        page: i32,
-        per_page: i32,
+        game: &str,
+        limit: i32,
     ) -> Result<LeaderboardResponse, ApiError> {
-        let offset = (page - 1) * per_page;
-
-        let rankings = sqlx::query!(
+        let rows = sqlx::query(
             r#"
-            SELECT ue.*, u.username, u.avatar_url
+            SELECT ue.user_id, u.username, ue.current_rating, ue.games_played,
+                   ue.wins, ue.losses,
+                   ROW_NUMBER() OVER (ORDER BY ue.current_rating DESC) as rank
             FROM user_elo ue
             JOIN users u ON ue.user_id = u.id
-            WHERE ue.game = $1
-            ORDER BY ue.current_rating DESC, ue.games_played DESC
-            LIMIT $2 OFFSET $3
+            WHERE ue.game = $1 AND ue.games_played > 0
+            ORDER BY ue.current_rating DESC
+            LIMIT $2
             "#,
-            game,
-            per_page,
-            offset
         )
+        .bind(game)
+        .bind(limit as i64)
         .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Get total count
-        let total = sqlx::query!(
-            "SELECT COUNT(*) as count FROM user_elo WHERE game = $1",
-            game
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
+        let entries: Vec<LeaderboardEntry> = rows
+            .iter()
+            .map(|row| {
+                let games_played: i32 = row.try_get("games_played").unwrap_or(0);
+                let wins: i32 = row.try_get("wins").unwrap_or(0);
+                let losses: i32 = row.try_get("losses").unwrap_or(0);
+                let win_rate = if games_played > 0 {
+                    wins as f64 / games_played as f64
+                } else {
+                    0.0
+                };
 
-        // Convert to response format
-        let mut leaderboard_entries = Vec::new();
-        for (index, ranking) in rankings.iter().enumerate() {
-            let rank = offset as usize + index + 1;
-            let win_rate = if ranking.games_played > 0 {
-                (ranking.wins as f64 / ranking.games_played as f64) * 100.0
-            } else {
-                0.0
-            };
+                LeaderboardEntry {
+                    rank: row.try_get("rank").unwrap_or(0),
+                    user_id: row.try_get("user_id").unwrap_or_default(),
+                    username: row.try_get("username").unwrap_or_default(),
+                    elo_rating: row.try_get("current_rating").unwrap_or(1200),
+                    games_played,
+                    wins,
+                    losses,
+                    win_rate,
+                }
+            })
+            .collect();
 
-            leaderboard_entries.push(LeaderboardEntry {
-                rank: rank as i32,
-                user_id: ranking.user_id,
-                username: ranking
-                    .username
-                    .clone()
-                    .unwrap_or_else(|| "Unknown".to_string()),
-                avatar_url: ranking.avatar_url.clone(),
-                current_rating: ranking.current_rating,
-                peak_rating: ranking.peak_rating,
-                games_played: ranking.games_played,
-                wins: ranking.wins,
-                losses: ranking.losses,
-                draws: ranking.draws,
-                win_rate,
-                win_streak: ranking.win_streak,
-            });
-        }
+        let total = entries.len() as i64;
 
         Ok(LeaderboardResponse {
-            game,
-            entries: leaderboard_entries,
+            entries,
             total,
-            page,
-            per_page,
+            game: game.to_string(),
         })
     }
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MatchHistoryResponse {
-    pub matches: Vec<MatchResponse>,
-    pub total: i64,
-    pub page: i32,
-    pub per_page: i32,
-}
+    // ========================================================================
+    // HELPERS
+    // ========================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LeaderboardResponse {
-    pub game: String,
-    pub entries: Vec<LeaderboardEntry>,
-    pub total: i64,
-    pub page: i32,
-    pub per_page: i32,
-}
+    /// Get raw Match entity by ID (for internal use)
+    async fn get_match_raw(&self, match_id: Uuid) -> Result<Match, ApiError> {
+        sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Match not found"))
+    }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LeaderboardEntry {
-    pub rank: i32,
-    pub user_id: Uuid,
-    pub username: String,
-    pub avatar_url: Option<String>,
-    pub current_rating: i32,
-    pub peak_rating: i32,
-    pub games_played: i32,
-    pub wins: i32,
-    pub losses: i32,
-    pub draws: i32,
-    pub win_rate: f64,
-    pub win_streak: i32,
-}
+    /// Convert a Match entity to a MatchResponse
+    async fn match_to_response(&self, m: Match) -> Result<MatchResponse, ApiError> {
+        let player1 = self.get_player_info(m.player1_id).await?;
+        let player2 = if let Some(p2_id) = m.player2_id {
+            Some(self.get_player_info(p2_id).await?)
+        } else {
+            None
+        };
 
-impl MatchService {
+        // Check for disputes
+        let dispute = sqlx::query_as::<_, MatchDispute>(
+            "SELECT * FROM match_disputes WHERE match_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(m.id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(MatchResponse {
+            id: m.id,
+            tournament_id: m.tournament_id,
+            match_type: m.match_type,
+            status: m.status,
+            player1,
+            player2,
+            winner_id: m.winner_id,
+            player1_score: m.player1_score,
+            player2_score: m.player2_score,
+            scheduled_time: m.scheduled_time,
+            started_at: m.started_at,
+            completed_at: m.completed_at,
+            game_mode: m.game_mode,
+            map: m.map,
+            match_duration: m.match_duration,
+            can_report_score: m.status == MatchStatus::InProgress,
+            can_dispute: m.status == MatchStatus::Completed,
+            dispute_status: dispute.map(|d| d.status),
+        })
+    }
+
+    /// Get player info for match responses
+    async fn get_player_info(&self, user_id: Uuid) -> Result<PlayerInfo, ApiError> {
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Player not found"))?;
+
+        // Get current ELO (default game)
+        let elo_row = sqlx::query(
+            "SELECT current_rating FROM user_elo WHERE user_id = $1 ORDER BY last_updated DESC LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let elo_rating: i32 = elo_row
+            .and_then(|r| r.try_get("current_rating").ok())
+            .unwrap_or(1200);
+
+        Ok(PlayerInfo {
+            id: user.id,
+            username: user.username,
+            elo_rating,
+            avatar_url: user.avatar_url,
+        })
+    }
+
+    // ========================================================================
+    // REALTIME EVENT PUBLISHING
+    // ========================================================================
+
     async fn publish_match_event(&self, event_data: serde_json::Value) -> Result<(), ApiError> {
         if let Some(ref event_bus) = self.event_bus {
             if let (Some(match_id_str), Some(event_type)) = (
@@ -1579,6 +1096,10 @@ impl MatchService {
         Ok(())
     }
 
+    // ========================================================================
+    // DISPUTE MANAGEMENT (ADMIN)
+    // ========================================================================
+
     /// Resolve a match dispute (admin function)
     pub async fn resolve_dispute(
         &self,
@@ -1587,41 +1108,43 @@ impl MatchService {
         resolution: String,
         winner_id: Option<Uuid>,
     ) -> Result<MatchDispute, ApiError> {
-        // Update dispute record
-        let dispute = sqlx::query_as!(
-            MatchDispute,
+        let dispute = sqlx::query_as::<_, MatchDispute>(
             r#"
             UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, resolution = $3, resolved_at = $4
             WHERE id = $5
             RETURNING *
             "#,
-            DisputeStatus::Resolved as _,
-            admin_id,
-            resolution,
-            Utc::now(),
-            dispute_id
         )
+        .bind(DisputeStatus::Resolved)
+        .bind(admin_id)
+        .bind(&resolution)
+        .bind(Utc::now())
+        .bind(dispute_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Update match record if winner needs to be reassigned
         if let Some(new_winner) = winner_id {
-            sqlx::query!(
-                "UPDATE matches SET winner_id = $1, updated_at = $2 WHERE id = $3",
-                new_winner,
-                Utc::now(),
-                dispute.match_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
+            sqlx::query("UPDATE matches SET winner_id = $1, updated_at = $2 WHERE id = $3")
+                .bind(new_winner)
+                .bind(Utc::now())
+                .bind(dispute.match_id)
+                .execute(&self.db_pool)
+                .await
+                .map_err(ApiError::database_error)?;
 
-            // Recalculate Elo ratings with new winner
-            let match_record = self.get_match_by_id(dispute.match_id).await?;
-            self.update_elo_ratings(&match_record, Some(new_winner))
+            let match_record = self.get_match_raw(dispute.match_id).await?;
+            if let Some(game) = match_record.game_mode.split('_').next() {
+                self.update_elo_ratings(
+                    match_record.player1_id,
+                    match_record.player2_id,
+                    Some(new_winner),
+                    game,
+                    dispute.match_id,
+                )
                 .await?;
+            }
         }
 
         tracing::info!("Dispute {} resolved by admin {}", dispute_id, admin_id);
@@ -1635,31 +1158,34 @@ impl MatchService {
         admin_id: Uuid,
         reason: String,
     ) -> Result<MatchDispute, ApiError> {
-        let dispute = sqlx::query_as!(
-            MatchDispute,
+        let dispute = sqlx::query_as::<_, MatchDispute>(
             r#"
             UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, admin_notes = $3, resolved_at = $4
             WHERE id = $5
             RETURNING *
             "#,
-            DisputeStatus::Rejected as _,
-            admin_id,
-            reason,
-            Utc::now(),
-            dispute_id
         )
+        .bind(DisputeStatus::Rejected)
+        .bind(admin_id)
+        .bind(&reason)
+        .bind(Utc::now())
+        .bind(dispute_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         tracing::info!("Dispute {} rejected by admin {}", dispute_id, admin_id);
         Ok(dispute)
     }
 
+    // ========================================================================
+    // MATCH LIFECYCLE
+    // ========================================================================
+
     /// Start a match (transition from scheduled to in_progress)
-    pub async fn start_match(&self, match_id: Uuid) -> Result<Match, ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
+    pub async fn start_match_lifecycle(&self, match_id: Uuid) -> Result<Match, ApiError> {
+        let match_record = self.get_match_raw(match_id).await?;
 
         if match_record.status != MatchStatus::Scheduled {
             return Err(ApiError::bad_request(
@@ -1667,27 +1193,26 @@ impl MatchService {
             ));
         }
 
-        let updated_match = sqlx::query_as!(
-            Match,
+        let now = Utc::now();
+        let updated_match = sqlx::query_as::<_, Match>(
             r#"
             UPDATE matches
             SET status = $1, started_at = $2, updated_at = $3
             WHERE id = $4
             RETURNING *
             "#,
-            MatchStatus::InProgress as _,
-            Utc::now(),
-            Utc::now(),
-            match_id
         )
+        .bind(MatchStatus::InProgress)
+        .bind(now)
+        .bind(now)
+        .bind(match_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Publish match started event
         self.publish_match_event(serde_json::json!({
             "type": "started",
-            "match_id": match_id,
+            "match_id": match_id.to_string(),
             "tournament_id": match_record.tournament_id
         }))
         .await?;
@@ -1701,7 +1226,7 @@ impl MatchService {
         match_id: Uuid,
         scheduled_time: DateTime<Utc>,
     ) -> Result<Match, ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
+        let match_record = self.get_match_raw(match_id).await?;
 
         if match_record.status != MatchStatus::Pending {
             return Err(ApiError::bad_request(
@@ -1715,27 +1240,25 @@ impl MatchService {
             ));
         }
 
-        let updated_match = sqlx::query_as!(
-            Match,
+        let updated_match = sqlx::query_as::<_, Match>(
             r#"
             UPDATE matches
             SET status = $1, scheduled_time = $2, updated_at = $3
             WHERE id = $4
             RETURNING *
             "#,
-            MatchStatus::Scheduled as _,
-            scheduled_time,
-            Utc::now(),
-            match_id
         )
+        .bind(MatchStatus::Scheduled)
+        .bind(scheduled_time)
+        .bind(Utc::now())
+        .bind(match_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
-        // Publish match scheduled event
         self.publish_match_event(serde_json::json!({
             "type": "scheduled",
-            "match_id": match_id,
+            "match_id": match_id.to_string(),
             "tournament_id": match_record.tournament_id,
             "scheduled_time": scheduled_time
         }))
@@ -1750,7 +1273,7 @@ impl MatchService {
         match_id: Uuid,
         reason: Option<String>,
     ) -> Result<Match, ApiError> {
-        let match_record = self.get_match_by_id(match_id).await?;
+        let match_record = self.get_match_raw(match_id).await?;
 
         if match_record.status == MatchStatus::Completed
             || match_record.status == MatchStatus::Cancelled
@@ -1760,21 +1283,20 @@ impl MatchService {
             ));
         }
 
-        let updated_match = sqlx::query_as!(
-            Match,
+        let updated_match = sqlx::query_as::<_, Match>(
             r#"
             UPDATE matches
             SET status = $1, updated_at = $2
             WHERE id = $3
             RETURNING *
             "#,
-            MatchStatus::Cancelled as _,
-            Utc::now(),
-            match_id
         )
+        .bind(MatchStatus::Cancelled)
+        .bind(Utc::now())
+        .bind(match_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         tracing::info!("Match {} cancelled. Reason: {:?}", match_id, reason);
         Ok(updated_match)
@@ -1782,19 +1304,19 @@ impl MatchService {
 
     /// Clean up expired matchmaking queue entries
     pub async fn cleanup_expired_queue_entries(&self) -> Result<i64, ApiError> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             UPDATE matchmaking_queue
             SET status = $1
             WHERE status = $2 AND expires_at < $3
             "#,
-            QueueStatus::Expired as _,
-            QueueStatus::Waiting as _,
-            Utc::now()
         )
+        .bind(QueueStatus::Expired)
+        .bind(QueueStatus::Waiting)
+        .bind(Utc::now())
         .execute(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         let rows_affected = result.rows_affected();
         if rows_affected > 0 {
@@ -1806,128 +1328,11 @@ impl MatchService {
 
     /// Get dispute details
     pub async fn get_dispute(&self, dispute_id: Uuid) -> Result<MatchDispute, ApiError> {
-        sqlx::query_as!(
-            MatchDispute,
-            "SELECT * FROM match_disputes WHERE id = $1",
-            dispute_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or(ApiError::not_found("Dispute not found".to_string()))
-    }
-
-    /// Get all disputes for a match
-    pub async fn get_match_disputes(&self, match_id: Uuid) -> Result<Vec<MatchDispute>, ApiError> {
-        sqlx::query_as!(
-            MatchDispute,
-            "SELECT * FROM match_disputes WHERE match_id = $1 ORDER BY created_at DESC",
-            match_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))
-    }
-
-    /// Get pending disputes for admin review
-    pub async fn get_pending_disputes(
-        &self,
-        page: i32,
-        per_page: i32,
-    ) -> Result<DisputeListResponse, ApiError> {
-        let offset = (page - 1) * per_page;
-
-        let disputes = sqlx::query_as!(
-            MatchDispute,
-            r#"
-            SELECT * FROM match_disputes
-            WHERE status = $1
-            ORDER BY created_at ASC
-            LIMIT $2 OFFSET $3
-            "#,
-            DisputeStatus::Pending as _,
-            per_page,
-            offset
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let total = sqlx::query!(
-            "SELECT COUNT(*) as count FROM match_disputes WHERE status = $1",
-            DisputeStatus::Pending as _
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        Ok(DisputeListResponse {
-            disputes,
-            total,
-            page,
-            per_page,
-        })
-    }
-
-    /// Enhanced Elo calculation with consideration for player stats
-    pub fn calculate_elo_change_enhanced(
-        &self,
-        player1_elo: i32,
-        player2_elo: i32,
-        winner_id: Option<Uuid>,
-        player1_id: Uuid,
-        player2_id: Uuid,
-        player1_games: i32,
-        player2_games: i32,
-    ) -> (i32, i32) {
-        let mut k_factor = 32.0;
-
-        // Adjust K-factor based on number of games played
-        if player1_games < 30 {
-            k_factor = 48.0; // New players have higher K-factor for faster rating changes
-        } else if player1_games > 100 {
-            k_factor = 24.0; // Established players have lower K-factor
-        }
-
-        let k_factor_p2 = if player2_games < 30 {
-            48.0
-        } else if player2_games > 100 {
-            24.0
-        } else {
-            32.0
-        };
-
-        // Calculate expected scores
-        let expected_player1 =
-            1.0 / (1.0 + 10.0_f64.powf((player2_elo - player1_elo) as f64 / 400.0));
-        let expected_player2 = 1.0 - expected_player1;
-
-        // Determine actual scores
-        let (actual_player1, actual_player2) = match winner_id {
-            Some(winner) => {
-                if winner == player1_id {
-                    (1.0, 0.0)
-                } else if winner == player2_id {
-                    (0.0, 1.0)
-                } else {
-                    (0.5, 0.5)
-                }
-            }
-            None => (0.5, 0.5),
-        };
-
-        // Calculate new ratings with adjusted K-factors
-        let new_player1_elo =
-            (player1_elo as f64 + k_factor * (actual_player1 - expected_player1)).round() as i32;
-        let new_player2_elo =
-            (player2_elo as f64 + k_factor_p2 * (actual_player2 - expected_player2)).round() as i32;
-
-        // Ensure ratings don't go below 100 or above 3000
-        let new_player1_elo = new_player1_elo.max(100).min(3000);
-        let new_player2_elo = new_player2_elo.max(100).min(3000);
-
-        (new_player1_elo, new_player2_elo)
+        sqlx::query_as::<_, MatchDispute>("SELECT * FROM match_disputes WHERE id = $1")
+            .bind(dispute_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Dispute not found"))
     }
 }

@@ -4,7 +4,7 @@ use crate::service::match_authority_service::MatchAuthorityService;
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
 /// Application state containing the Match Authority Service

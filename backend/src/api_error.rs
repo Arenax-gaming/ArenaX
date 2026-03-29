@@ -41,7 +41,11 @@ impl ApiError {
         ApiError::BadRequest(message.into())
     }
 
-    pub fn internal_error(message: impl Into<String>) -> Self {
+    pub fn internal_error(_message: impl Into<String>) -> Self {
+        ApiError::InternalServerError
+    }
+
+    pub fn internal_server_error(message: impl Into<String>) -> Self {
         ApiError::InternalServerError
     }
 
@@ -49,15 +53,15 @@ impl ApiError {
         ApiError::DatabaseError(e.into())
     }
 
-    pub fn not_found(message: impl Into<String>) -> Self {
+    pub fn not_found(_message: impl Into<String>) -> Self {
         ApiError::NotFound
     }
 
-    pub fn unauthorized(message: impl Into<String>) -> Self {
+    pub fn unauthorized(_message: impl Into<String>) -> Self {
         ApiError::Unauthorized
     }
 
-    pub fn forbidden(message: impl Into<String>) -> Self {
+    pub fn forbidden(_message: impl Into<String>) -> Self {
         ApiError::Forbidden
     }
 

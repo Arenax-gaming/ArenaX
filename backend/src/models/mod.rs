@@ -9,30 +9,23 @@ pub mod user;
 pub mod wallet;
 
 // Re-export commonly used types - explicit to avoid ambiguity
-pub use match_authority::*;
-pub use match_models::{
-    CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory, EloResponse,
-    JoinMatchmakingRequest, Match, MatchDispute, MatchResponse, MatchResult, MatchScore,
-    MatchStatus, MatchType, MatchmakingQueue, MatchmakingStatusResponse, PlayerInfo, QueueStatus,
-    ReportScoreRequest, UserElo,
-};
-pub use reward_settlement::*;
-pub use stellar_account::{
-    CreateStellarAccountRequest, StellarAccount, StellarAccountResponse, StellarAccountType,
-};
-pub use stellar_transaction::{
-    CreateStellarTransactionRequest, StellarTransaction, StellarTransactionResponse,
-    StellarTransactionStatus, StellarTransactionType,
-};
-pub use tournament::{
-    BracketType, CreateTournamentRequest, JoinTournamentRequest, ParticipantStatus, PrizePool,
-    RoundStatus, RoundType, Tournament, TournamentListResponse, TournamentMatch,
-    TournamentParticipant, TournamentResponse, TournamentRound, TournamentStanding,
-    TournamentStatus, TournamentType, TournamentVisibility, UpdateTournamentRequest,
-};
-pub use user::*;
-pub use wallet::{
-    CreateWalletRequest, DepositRequest, PaymentMethod, PaymentProvider, Transaction,
-    TransactionResponse, TransactionStatus, TransactionType, UpdateWalletRequest, Wallet,
-    WalletBalance, WalletResponse, WithdrawalRequest,
-};
+pub use stellar_account::StellarAccount;
+pub use stellar_transaction::StellarTransaction;
+pub use user::User;
+pub use wallet::{Transaction, TransactionStatus, TransactionType, Wallet};
+
+/// Generic API response wrapper
+#[derive(Debug, serde::Serialize)]
+pub struct ApiResponse<T: serde::Serialize> {
+    pub success: bool,
+    pub data: T,
+}
+
+impl<T: serde::Serialize> ApiResponse<T> {
+    pub fn success(data: T) -> Self {
+        Self {
+            success: true,
+            data,
+        }
+    }
+}

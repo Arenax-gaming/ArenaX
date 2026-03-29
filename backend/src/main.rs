@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use actix_web::{web, App, HttpServer};
 use std::io;
 use std::sync::Arc;
@@ -44,8 +46,8 @@ async fn main() -> io::Result<()> {
     tracing::info!("Tournament orchestrator polling worker started");
 
     // Create Redis connection manager
-    let redis_client = redis::Client::open(config.redis.url.clone())
-        .expect("Failed to create Redis client");
+    let redis_client =
+        redis::Client::open(config.redis.url.clone()).expect("Failed to create Redis client");
     let redis_conn = redis::aio::ConnectionManager::new(redis_client)
         .await
         .expect("Failed to create Redis connection manager");

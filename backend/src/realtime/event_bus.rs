@@ -1,7 +1,7 @@
 use crate::realtime::events::{channels, RealtimeEvent};
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
-use tracing::{error, debug};
+use tracing::{debug, error};
 use uuid::Uuid;
 
 /// Publishes domain events to Redis Pub/Sub channels.
