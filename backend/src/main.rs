@@ -14,6 +14,7 @@ mod middleware;
 mod models;
 mod realtime;
 mod service;
+mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
@@ -36,6 +37,13 @@ async fn main() -> io::Result<()> {
     let db_pool = create_pool(&config)
         .await
         .expect("Failed to create database pool");
+
+    // Spawn tournament orchestrator polling worker
+    let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
+        db_pool.clone(),
+        60,
+    );
+    tracing::info!("Tournament orchestrator polling worker started");
 
     // Create Redis connection manager
     let redis_client =
@@ -93,6 +101,27 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/notifications/{id}",
                         web::delete().to(crate::http::notification_handler::delete_notification),
+                    )
+                    // Reputation endpoints
+                    .route(
+                        "/reputation/player/{user_id}",
+                        web::get().to(crate::http::reputation_handler::get_player_reputation),
+                    )
+                    .route(
+                        "/reputation/history/{user_id}",
+                        web::get().to(crate::http::reputation_handler::get_reputation_history),
+                    )
+                    .route(
+                        "/reputation/bad-actors",
+                        web::get().to(crate::http::reputation_handler::get_bad_actors),
+                    )
+                    .route(
+                        "/reputation/bad-actors/{user_id}/remove",
+                        web::post().to(crate::http::reputation_handler::remove_bad_actor_flag),
+                    )
+                    .route(
+                        "/reputation/stats",
+                        web::get().to(crate::http::reputation_handler::get_reputation_stats),
                     ),
             )
             .configure(crate::realtime::user_ws::configure_ws_route)

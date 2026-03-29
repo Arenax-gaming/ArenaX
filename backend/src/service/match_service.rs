@@ -1,12 +1,15 @@
-#![allow(dead_code)]
+﻿#![allow(dead_code)]
 
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::match_models::*;
 use crate::models::user::User;
+use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Duration, Utc};
+use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -41,6 +44,8 @@ pub struct LeaderboardEntry {
 
 pub struct MatchService {
     db_pool: DbPool,
+    redis_client: Option<Arc<RedisClient>>,
+    reputation_service: Option<Arc<ReputationService>>,
     event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
@@ -48,12 +53,19 @@ impl MatchService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
             db_pool,
+            redis_client: None,
+            reputation_service: None,
             event_bus: None,
         }
     }
 
     pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
         self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn with_reputation_service(mut self, reputation_service: ReputationService) -> Self {
+        self.reputation_service = Some(Arc::new(reputation_service));
         self
     }
 
@@ -79,6 +91,19 @@ impl MatchService {
 
         if let Some(queue_entry) = existing {
             return Ok(queue_entry);
+        }
+
+        // Check player reputation (filter bad actors)
+        if let Some(rep_service) = &self.reputation_service {
+            let reputation = rep_service.get_player_reputation(user_id).await
+                .map_err(|e| ApiError::internal_server_error(&format!("Reputation check failed: {}", e)))?;
+            
+            // Filter players with very low fair play score
+            if reputation.should_filter(30) {
+                return Err(ApiError::bad_request(
+                    "Account restricted due to behavioral violations. Please contact support.",
+                ));
+            }
         }
 
         // Get user's ELO for the game

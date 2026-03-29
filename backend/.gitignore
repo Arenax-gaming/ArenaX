@@ -2,14 +2,12 @@
 
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
-migrations/*.sql
 
 # Logs
 *.log

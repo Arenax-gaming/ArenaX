@@ -45,6 +45,10 @@ impl ApiError {
         ApiError::InternalServerError
     }
 
+    pub fn internal_server_error(message: impl Into<String>) -> Self {
+        ApiError::InternalServerError
+    }
+
     pub fn database_error(e: impl Into<sqlx::Error>) -> Self {
         ApiError::DatabaseError(e.into())
     }

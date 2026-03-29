@@ -1,464 +1,580 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { useMatchWebSocket, useMatchScoreReporting } from "@/hooks/useMatchWebSocket";
-import { ArrowLeft, RefreshCw, Wifi, WifiOff, AlertTriangle, CheckCircle, User, Trophy } from "lucide-react";
-import Link from "next/link";
-
-// Mock match data
-interface MatchDetail {
-  id: string;
-  tournamentId: string;
-  tournamentName: string;
-  player1Id: string;
-  player1Username: string;
-  player2Id: string;
-  player2Username: string;
-  gameType: string;
-  status: "pending" | "in_progress" | "completed" | "disputed" | "cancelled";
-  scorePlayer1: number;
-  scorePlayer2: number;
-  winnerId?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-// Mock data for demonstration
-const mockMatchDetails: Record<string, MatchDetail> = {
-  "match-1": {
-    id: "match-1",
-    tournamentId: "1",
-    tournamentName: "CS2 Pro League 2026",
-    player1Id: "user-123",
-    player1Username: "ProGamer99",
-    player2Id: "user-456",
-    player2Username: "ShadowNinja",
-    gameType: "Counter-Strike 2",
-    status: "in_progress",
-    scorePlayer1: 8,
-    scorePlayer2: 7,
-    startedAt: "2026-02-24T18:00:00Z",
-  },
-  "match-2": {
-    id: "match-2",
-    tournamentId: "1",
-    tournamentName: "CS2 Pro League 2026",
-    player1Id: "user-789",
-    player1Username: "EliteSniper",
-    player2Id: "user-101",
-    player2Username: "DragonSlayer",
-    gameType: "Counter-Strike 2",
-    status: "in_progress",
-    scorePlayer1: 5,
-    scorePlayer2: 3,
-    startedAt: "2026-02-24T18:30:00Z",
-  },
-};
+import { Input } from "@/components/ui/Input";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  useMatchScoreReporting,
+  useMatchWebSocket,
+} from "@/hooks/useMatchWebSocket";
+import { matchHubDetails } from "@/data/matchHub";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle2,
+  RadioTower,
+  RefreshCw,
+  ShieldAlert,
+  Trophy,
+  User,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
+import { formatDate } from "@/lib/utils";
 
 export default function MatchHubPage() {
   const params = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const matchId = params.id as string;
+  const currentUserId = user?.id ?? "user-123";
 
-  // Get current user (mock)
-  const currentUserId = "user-123"; // Would come from auth context
+  const [match, setMatch] = useState(matchHubDetails[matchId] ?? null);
+  const [player1Score, setPlayer1Score] = useState("");
+  const [player2Score, setPlayer2Score] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [liveFeed, setLiveFeed] = useState(match?.feed ?? []);
 
-  // Local match state (simulated real-time updates)
-  const [match, setMatch] = useState<MatchDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Load match data
   useEffect(() => {
-    const loadMatch = async () => {
-      setIsLoading(true);
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      
-      const matchData = mockMatchDetails[matchId];
-      if (matchData) {
-        setMatch(matchData);
-      }
-      setIsLoading(false);
-    };
-
-    loadMatch();
+    const details = matchHubDetails[matchId] ?? null;
+    setMatch(details);
+    setLiveFeed(details?.feed ?? []);
   }, [matchId]);
 
-  // WebSocket connection for real-time updates
-  const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
-    matchId,
-    enabled: match?.status === "in_progress",
-  });
-
-  // Score reporting hook
-  const { 
-    reportScore, 
-    isReporting, 
-    conflictDetected, 
-    conflictingReport, 
-    clearConflict 
-  } = useMatchScoreReporting();
-
-  // Score input states
-  const [player1Score, setPlayer1Score] = useState(0);
-  const [player2Score, setPlayer2Score] = useState(0);
-  const [submitted, setSubmitted] = useState(false);
-
-  // Check if current user is a participant
-  const isParticipant = useMemo(() => {
-    if (!match) return false;
-    return match.player1Id === currentUserId || match.player2Id === currentUserId;
-  }, [match, currentUserId]);
-
-  // Check if current user is the reporter
-  const isReporter = isParticipant;
-
-  // Update local state when match loads
   useEffect(() => {
-    if (match) {
-      setPlayer1Score(match.scorePlayer1);
-      setPlayer2Score(match.scorePlayer2);
+    if (!match) {
+      return;
     }
+
+    setPlayer1Score(String(match.scorePlayer1));
+    setPlayer2Score(String(match.scorePlayer2));
   }, [match]);
 
-  // Apply real-time score updates
-  useEffect(() => {
-    if (lastUpdate && match) {
-      setMatch((prevMatch) => {
-        if (!prevMatch) return prevMatch;
-        return {
-          ...prevMatch,
-          scorePlayer1: lastUpdate.scorePlayer1 ?? prevMatch.scorePlayer1,
-          scorePlayer2: lastUpdate.scorePlayer2 ?? prevMatch.scorePlayer2,
-        };
-      });
-      setPlayer1Score(lastUpdate.scorePlayer1 ?? match.scorePlayer1);
-      setPlayer2Score(lastUpdate.scorePlayer2 ?? match.scorePlayer2);
+  const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
+    matchId,
+    enabled: match?.status === "in_progress" || match?.status === "disputed",
+  });
+
+  const expectedOpponentReport = useMemo(() => {
+    if (!match?.reports.length) {
+      return null;
     }
-  }, [lastUpdate, match]);
 
-  const handleSubmitScore = async () => {
-    if (!match) return;
-
-    const success = await reportScore({
-      matchId: match.id,
-      player1Score,
-      player2Score,
-      reporterId: currentUserId,
-    });
-
-    if (success) {
-      setSubmitted(true);
-      // Reset after 2 seconds
-      setTimeout(() => setSubmitted(false), 2000);
-    }
-  };
-
-  const handleResolveConflict = () => {
-    // In a real app, this would open a dispute resolution flow
-    clearConflict();
-  };
-
-  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading match...</p>
-        </div>
-      </div>
+      match.reports.find((report) => report.reporterId !== currentUserId) ??
+      match.reports[0]
     );
-  }
+  }, [currentUserId, match?.reports]);
+
+  const {
+    reportScore,
+    pendingReport,
+    isReporting,
+    conflictDetected,
+    conflictingReport,
+    clearConflict,
+  } = useMatchScoreReporting({
+    expectedReport: match?.status === "disputed" ? expectedOpponentReport : undefined,
+  });
+
+  const isParticipant = useMemo(() => {
+    if (!match) {
+      return false;
+    }
+
+    return match.player1.id === currentUserId || match.player2.id === currentUserId;
+  }, [currentUserId, match]);
+
+  useEffect(() => {
+    if (!lastUpdate) {
+      return;
+    }
+
+    setMatch((previous) =>
+      previous
+        ? {
+            ...previous,
+            status: lastUpdate.status ?? previous.status,
+            scorePlayer1: lastUpdate.scorePlayer1 ?? previous.scorePlayer1,
+            scorePlayer2: lastUpdate.scorePlayer2 ?? previous.scorePlayer2,
+            winnerId: lastUpdate.winnerId ?? previous.winnerId,
+          }
+        : previous,
+    );
+
+    if (typeof lastUpdate.scorePlayer1 === "number") {
+      setPlayer1Score(String(lastUpdate.scorePlayer1));
+    }
+    if (typeof lastUpdate.scorePlayer2 === "number") {
+      setPlayer2Score(String(lastUpdate.scorePlayer2));
+    }
+
+    if (lastUpdate.message) {
+      setLiveFeed((previous) => [
+        {
+          id: `live-${lastUpdate.timestamp}`,
+          type: lastUpdate.status === "disputed" ? "alert" : "score",
+          message: lastUpdate.message!,
+          createdAt: new Date(lastUpdate.timestamp).toISOString(),
+        },
+        ...previous,
+      ]);
+    }
+  }, [lastUpdate]);
 
   if (!match) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Match Not Found</h1>
-          <p className="text-muted-foreground mb-6">
-            The match you&apos;re looking for doesn&apos;t exist.
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
+          <p className="mb-6 text-muted-foreground">
+            The match hub you&apos;re looking for doesn&apos;t exist.
           </p>
-          <Button onClick={() => router.push("/tournaments")}>
-            Back to Tournaments
-          </Button>
+          <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
         </div>
       </div>
     );
   }
 
   const isLive = match.status === "in_progress";
+  const isDisputed = match.status === "disputed";
+  const submissionLocked =
+    !isParticipant || (!isLive && !isDisputed) || !player1Score.length || !player2Score.length;
+
+  const handleSubmitScore = async () => {
+    const nextPlayer1Score = Number(player1Score);
+    const nextPlayer2Score = Number(player2Score);
+
+    if (Number.isNaN(nextPlayer1Score) || Number.isNaN(nextPlayer2Score)) {
+      return;
+    }
+
+    const success = await reportScore({
+      matchId: match.id,
+      player1Score: nextPlayer1Score,
+      player2Score: nextPlayer2Score,
+      reporterId: currentUserId,
+      reporterName: user?.username ?? "You",
+    });
+
+    if (!success) {
+      setLiveFeed((previous) => [
+        {
+          id: `conflict-${Date.now()}`,
+          type: "alert",
+          message: "Your submission conflicts with the opponent report. ArenaX flagged the series for review.",
+          createdAt: new Date().toISOString(),
+        },
+        ...previous,
+      ]);
+      return;
+    }
+
+    setSubmitted(true);
+    setLiveFeed((previous) => [
+      {
+        id: `submit-${Date.now()}`,
+        type: "report",
+        message: "Your score report has been submitted and is waiting for final confirmation.",
+        createdAt: new Date().toISOString(),
+      },
+      ...previous,
+    ]);
+    setTimeout(() => setSubmitted(false), 2200);
+  };
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8">
-      {/* Back Button */}
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="gap-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
-      </div>
+    <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+            className="gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        </div>
 
-      <div className="max-w-4xl mx-auto">
-        {/* Match Header */}
-        <div className="bg-card border rounded-lg p-6 mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Match Hub</h1>
-              <p className="text-muted-foreground">{match.tournamentName}</p>
-              <p className="text-sm text-muted-foreground">{match.gameType}</p>
-            </div>
-            <div className="flex items-center gap-4">
-              {/* Connection Status */}
-              {isLive && (
-                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-                  isConnected 
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
-                    : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                }`}>
-                  {isConnected ? (
-                    <>
-                      <Wifi className="h-4 w-4" />
-                      Live
-                    </>
-                  ) : (
-                    <>
-                      <WifiOff className="h-4 w-4" />
-                      Disconnected
-                    </>
-                  )}
+        <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
+          <section className="space-y-6">
+            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_30%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(30,41,59,0.96))] p-6 text-white shadow-[0_30px_80px_-45px_rgba(14,165,233,0.7)]">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">
+                    Match Hub
+                  </p>
+                  <h1 className="mt-2 text-3xl font-semibold">{match.tournamentName}</h1>
+                  <p className="mt-2 text-sm text-slate-300">
+                    {match.gameType} | {match.roundLabel} | {match.bestOf > 0 ? `Best of ${match.bestOf}` : "Series"}
+                  </p>
                 </div>
-              )}
-              
-              {/* Match Status */}
-              <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                isLive 
-                  ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" 
-                  : match.status === "completed"
-                    ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-                    : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
-              }`}>
-                {isLive ? "In Progress" : match.status.charAt(0).toUpperCase() + match.status.slice(1)}
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <ConnectionPill isConnected={isConnected} active={isLive || isDisputed} />
+                  <StatusPill status={match.status} />
+                </div>
+              </div>
+
+              {connectionError ? (
+                <div className="mt-4 flex items-center justify-between rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  <span>{connectionError}</span>
+                  <Button variant="ghost" size="sm" onClick={reconnect} className="text-white hover:bg-white/10">
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="mt-6 grid gap-4 md:grid-cols-[1fr_auto_1fr]">
+                <CompetitorCard
+                  player={match.player1}
+                  score={match.scorePlayer1}
+                  isWinner={match.winnerId === match.player1.id}
+                  isCurrentUser={match.player1.id === currentUserId}
+                />
+                <div className="flex items-center justify-center">
+                  <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.3em] text-slate-300">
+                    VS
+                  </div>
+                </div>
+                <CompetitorCard
+                  player={match.player2}
+                  score={match.scorePlayer2}
+                  isWinner={match.winnerId === match.player2.id}
+                  isCurrentUser={match.player2.id === currentUserId}
+                />
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <HubStat label="Scheduled" value={formatDate(match.scheduledTime)} />
+                <HubStat label="Arena" value={match.arenaLabel} />
+                <HubStat label="Broadcast" value={match.streamTitle ?? "ArenaX Feed"} />
+                <HubStat label="Dispute Window" value={formatDate(match.canDisputeUntil)} />
               </div>
             </div>
-          </div>
 
-          {/* Connection Error */}
-          {connectionError && (
-            <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-red-700 dark:text-red-300">{connectionError}</p>
-                <Button variant="ghost" size="sm" onClick={reconnect}>
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Score Display */}
-        <div className="bg-card border rounded-lg p-6 mb-6">
-          <div className="flex items-center justify-center gap-8">
-            {/* Player 1 */}
-            <div className="text-center">
-              <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
-                <User className="h-10 w-10 text-muted-foreground" />
-              </div>
-              <p className="font-semibold text-lg text-foreground">{match.player1Username}</p>
-              {match.player1Id === currentUserId && (
-                <span className="text-xs text-blue-600">(You)</span>
-              )}
-              <p className="text-4xl font-bold text-foreground mt-2">
-                {match.scorePlayer1}
-              </p>
-            </div>
-
-            {/* VS */}
-            <div className="text-center">
-              <p className="text-2xl font-bold text-muted-foreground">VS</p>
-            </div>
-
-            {/* Player 2 */}
-            <div className="text-center">
-              <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center mx-auto mb-3">
-                <User className="h-10 w-10 text-muted-foreground" />
-              </div>
-              <p className="font-semibold text-lg text-foreground">{match.player2Username}</p>
-              {match.player2Id === currentUserId && (
-                <span className="text-xs text-blue-600">(You)</span>
-              )}
-              <p className="text-4xl font-bold text-foreground mt-2">
-                {match.scorePlayer2}
-              </p>
-            </div>
-          </div>
-
-          {/* Winner Display */}
-          {match.status === "completed" && match.winnerId && (
-            <div className="mt-6 pt-6 border-t text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <Trophy className="h-5 w-5 text-yellow-600" />
-                <span className="font-medium text-yellow-800 dark:text-yellow-200">
-                  Winner: {match.winnerId === match.player1Id ? match.player1Username : match.player2Username}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Score Reporting Form (only for participants) */}
-        {isReporter && isLive && (
-          <div className="bg-card border rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-foreground mb-4">
-              Report Match Score
-            </h2>
-
-            {/* Conflict Alert */}
-            {conflictDetected && (
-              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="font-medium text-red-800 dark:text-red-200 mb-2">
-                      Score Conflict Detected!
-                    </h3>
-                    <p className="text-sm text-red-700 dark:text-red-300 mb-3">
-                      The other player reported a different score. Please resolve this discrepancy.
-                    </p>
-                    {conflictingReport && (
-                      <div className="bg-white dark:bg-red-950/30 rounded p-3 text-sm">
-                        <p className="font-medium text-foreground">Their report:</p>
-                        <p className="text-muted-foreground">
-                          {match.player1Username}: {conflictingReport.player1Score} - {match.player2Username}: {conflictingReport.player2Score}
-                        </p>
+            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <RadioTower className="h-4 w-4 text-cyan-600" />
+                  Real-Time Event Feed
+                </div>
+                <div className="mt-5 space-y-3">
+                  {liveFeed.map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <EventTypeBadge type={event.type} />
+                        <span className="text-xs text-slate-500">
+                          {formatDate(event.createdAt)}
+                        </span>
                       </div>
-                    )}
-                    <div className="flex gap-2 mt-3">
-                      <Button size="sm" variant="primary" onClick={handleResolveConflict}>
-                        Resolve Dispute
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={clearConflict}>
-                        Dismiss
-                      </Button>
+                      <p className="mt-3 text-sm leading-6 text-slate-700">{event.message}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Trophy className="h-4 w-4 text-amber-500" />
+                  Match Context
+                </div>
+                <div className="mt-5 space-y-4 text-sm text-slate-700">
+                  <InfoRow label="Tournament" value={match.tournamentName} href={`/tournaments/${match.tournamentId}`} />
+                  <InfoRow label="Bracket Type" value={match.bracketFormat.replace(/_/g, " ")} />
+                  <InfoRow label="Prize Pool" value={`$${match.prizePool.toLocaleString()}`} />
+                  <InfoRow label="Series Notes" value={match.notes} />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside className="space-y-6">
+            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <ShieldAlert className="h-4 w-4 text-rose-500" />
+                Dual Score Reporting
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                Both players submit the same final score. ArenaX compares reports in real time and pauses progression if they disagree.
+              </p>
+
+              {isDisputed ? (
+                <div className="mt-5 rounded-2xl border border-rose-300 bg-rose-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-600" />
+                    <div className="text-sm">
+                      <p className="font-semibold text-rose-900">Conflict detected</p>
+                      <p className="mt-1 text-rose-800">
+                        ArenaX received mismatched reports. Submit your verified score or escalate with evidence.
+                      </p>
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              ) : null}
 
-            {/* Score Input */}
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  {match.player1Username} Score
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={player1Score}
-                  onChange={(e) => setPlayer1Score(parseInt(e.target.value) || 0)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
+              {conflictDetected && conflictingReport ? (
+                <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-semibold">Submission conflict</p>
+                  <p className="mt-2">
+                    Opponent report from {conflictingReport.reporterName}:{" "}
+                    {conflictingReport.player1Score} - {conflictingReport.player2Score}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={clearConflict}>
+                      Review Again
+                    </Button>
+                    <Button size="sm" variant="outline">
+                      Escalate to Admin
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-900">
+                    {match.player1.username} Score
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={player1Score}
+                    onChange={(event) => setPlayer1Score(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-900">
+                    {match.player2.username} Score
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={player2Score}
+                    onChange={(event) => setPlayer2Score(event.target.value)}
+                  />
+                </div>
               </div>
 
-              <div className="flex items-end justify-center pb-2">
-                <span className="text-muted-foreground">-</span>
+              <div className="mt-5 grid gap-3">
+                <Button
+                  onClick={handleSubmitScore}
+                  disabled={submissionLocked || isReporting || submitted}
+                  className="w-full"
+                >
+                  {submitted ? (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Report Submitted
+                    </>
+                  ) : isReporting ? (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                      Validating Report
+                    </>
+                  ) : (
+                    "Submit Verified Score"
+                  )}
+                </Button>
+                <Button variant="outline" className="w-full">
+                  Open Dispute Evidence Flow
+                </Button>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  {match.player2Username} Score
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={player2Score}
-                  onChange={(e) => setPlayer2Score(parseInt(e.target.value) || 0)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </div>
+              {pendingReport ? (
+                <div className="mt-5 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-900">
+                  Latest submission by {pendingReport.reporterName}: {pendingReport.player1Score} -{" "}
+                  {pendingReport.player2Score}
+                </div>
+              ) : null}
             </div>
 
-            {/* Submit Button */}
-            <div className="mt-6">
-              <Button
-                onClick={handleSubmitScore}
-                disabled={isReporting || submitted}
-                className="w-full"
-              >
-                {submitted ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Score Submitted
-                  </>
-                ) : isReporting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  "Submit Score"
-                )}
-              </Button>
-            </div>
-
-            <p className="text-xs text-muted-foreground mt-3 text-center">
-              Both players must report the same score for the match to be confirmed.
-            </p>
-          </div>
-        )}
-
-        {/* Not a participant */}
-        {!isReporter && isLive && (
-          <div className="bg-card border rounded-lg p-6 text-center">
-            <p className="text-muted-foreground">
-              Only participants can report scores for this match.
-            </p>
-          </div>
-        )}
-
-        {/* Match Info */}
-        <div className="mt-6 bg-muted/30 rounded-lg p-4">
-          <h3 className="font-medium text-foreground mb-2">Match Information</h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">Match ID</p>
-              <p className="text-foreground font-medium">{match.id}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Tournament</p>
-              <Link 
-                href={`/tournaments/${match.tournamentId}`}
-                className="text-blue-600 hover:underline"
-              >
-                {match.tournamentName}
-              </Link>
-            </div>
-            {match.startedAt && (
-              <div>
-                <p className="text-muted-foreground">Started</p>
-                <p className="text-foreground">
-                  {new Date(match.startedAt).toLocaleString()}
-                </p>
+            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <User className="h-4 w-4 text-slate-700" />
+                Submitted Reports
               </div>
-            )}
-            {match.completedAt && (
-              <div>
-                <p className="text-muted-foreground">Completed</p>
-                <p className="text-foreground">
-                  {new Date(match.completedAt).toLocaleString()}
-                </p>
+              <div className="mt-5 space-y-3">
+                {match.reports.map((report) => (
+                  <div
+                    key={`${report.reporterId}-${report.submittedAt}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{report.reporterName}</p>
+                        <p className="text-xs text-slate-500">
+                          {formatDate(report.submittedAt)}
+                        </p>
+                      </div>
+                      <p className="text-lg font-semibold text-slate-900">
+                        {report.player1Score} - {report.player2Score}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            </div>
+          </aside>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ConnectionPill({
+  isConnected,
+  active,
+}: {
+  isConnected: boolean;
+  active: boolean;
+}) {
+  if (!active) {
+    return (
+      <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300">
+        Feed idle
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm ${
+        isConnected ? "bg-emerald-400/15 text-emerald-200" : "bg-rose-400/15 text-rose-100"
+      }`}
+    >
+      {isConnected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+      {isConnected ? "Live relay connected" : "Relay reconnecting"}
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const className =
+    status === "in_progress"
+      ? "bg-emerald-400/15 text-emerald-200"
+      : status === "disputed"
+        ? "bg-rose-400/15 text-rose-100"
+        : status === "completed"
+          ? "bg-cyan-400/15 text-cyan-100"
+          : "bg-white/10 text-white";
+
+  return (
+    <div className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${className}`}>
+      {status.replace("_", " ")}
+    </div>
+  );
+}
+
+function CompetitorCard({
+  player,
+  score,
+  isWinner,
+  isCurrentUser,
+}: {
+  player: (typeof matchHubDetails)[string]["player1"];
+  score: number;
+  isWinner: boolean;
+  isCurrentUser: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-[28px] border p-5 ${
+        isWinner ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5">
+            <User className="h-6 w-6 text-slate-300" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-lg font-semibold">{player.username}</p>
+              {isCurrentUser ? (
+                <span className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-[11px] text-cyan-100">
+                  You
+                </span>
+              ) : null}
+            </div>
+            <p className="text-sm text-slate-400">
+              Seed {player.seed} | {player.region} | ELO {player.elo}
+            </p>
+          </div>
+        </div>
+        <p className="text-5xl font-semibold">{score}</p>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        {player.stats.map((stat) => (
+          <div
+            key={`${player.id}-${stat.label}`}
+            className="rounded-2xl border border-white/10 bg-black/10 px-3 py-2"
+          >
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+              {stat.label}
+            </p>
+            <p className="mt-1 text-sm font-medium text-white">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HubStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">{label}</p>
+      <p className="mt-2 text-sm font-medium text-white">{value}</p>
+    </div>
+  );
+}
+
+function EventTypeBadge({ type }: { type: string }) {
+  const classes =
+    type === "alert"
+      ? "bg-rose-100 text-rose-700"
+      : type === "report"
+        ? "bg-cyan-100 text-cyan-700"
+        : type === "score"
+          ? "bg-emerald-100 text-emerald-700"
+          : "bg-slate-200 text-slate-700";
+
+  return (
+    <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${classes}`}>
+      {type}
+    </span>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+}) {
+  return (
+    <div className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
+      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</p>
+      {href ? (
+        <Link href={href} className="mt-2 inline-block font-medium text-cyan-700 hover:underline">
+          {value}
+        </Link>
+      ) : (
+        <p className="mt-2 font-medium text-slate-900">{value}</p>
+      )}
     </div>
   );
 }

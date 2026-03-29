@@ -5,3 +5,4 @@ pub mod match_authority_handler;
 #[allow(deprecated)]
 pub mod match_ws_handler;
 pub mod notification_handler;
+pub mod reputation_handler;

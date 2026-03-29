@@ -75,11 +75,11 @@ services:
       - ./backend:/app
       - cargo_cache:/usr/local/cargo/registry
 
-  # Frontend (Development)
+  # Frontend
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     environment:

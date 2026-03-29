@@ -574,28 +574,14 @@ impl TournamentService {
     }
 
     async fn start_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
-        self.generate_tournament_bracket(tournament_id).await?;
-
-        sqlx::query(
-            r#"
-            UPDATE tournament_participants
-            SET status = $1
-            WHERE tournament_id = $2 AND status = $3
-            "#,
-        )
-        .bind(ParticipantStatus::Active)
-        .bind(tournament_id)
-        .bind(ParticipantStatus::Paid)
-        .execute(&self.db_pool)
-        .await
-        .map_err(ApiError::database_error)?;
-
+        let seeding = crate::orchestrator::SeedingEngine::new(self.db_pool.clone());
+        seeding.seed_and_generate_bracket(tournament_id).await?;
         Ok(())
     }
 
     async fn complete_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
-        self.calculate_final_rankings(tournament_id).await?;
-        self.distribute_prizes(tournament_id).await?;
+        let payout = crate::orchestrator::PayoutSettler::new(self.db_pool.clone());
+        payout.finalize_tournament(tournament_id).await?;
         Ok(())
     }
 

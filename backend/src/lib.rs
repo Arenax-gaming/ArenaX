@@ -7,6 +7,7 @@ pub mod db;
 pub mod http;
 pub mod middleware;
 pub mod models;
+pub mod orchestrator;
 pub mod realtime;
 pub mod service;
 pub mod telemetry;

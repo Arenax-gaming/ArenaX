@@ -97,6 +97,9 @@ impl AuthService {
                 avatar_url: user.avatar_url.clone(),
                 is_verified: user.is_verified,
                 created_at: user.created_at,
+                skill_score: user.reputation_score,
+                fair_play_score: None,
+                is_bad_actor: None,
             },
         })
     }
@@ -157,6 +160,9 @@ impl AuthService {
                 avatar_url: user.avatar_url.clone(),
                 is_verified: user.is_verified,
                 created_at: user.created_at,
+                skill_score: user.reputation_score,
+                fair_play_score: None,
+                is_bad_actor: None,
             },
         })
     }

@@ -1,6 +1,6 @@
 # ArenaX Development Makefile
 
-.PHONY: help install build test clean lint format check-all
+.PHONY: help install build test clean lint format check-all docker-build docker-up docker-down
 
 # Default target
 help:
@@ -33,6 +33,11 @@ help:
 	@echo "  lint             Lint all code"
 	@echo "  format           Format all code"
 	@echo "  check-all        Run all checks (lint, format, test)"
+	@echo ""
+	@echo "Docker:"
+	@echo "  docker-build     Build Docker images"
+	@echo "  docker-up        Start services with Docker Compose"
+	@echo "  docker-down      Stop Docker services"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  clean            Clean all build artifacts"
@@ -117,6 +122,19 @@ format:
 
 check-all: lint format test
 	@echo "All checks completed!"
+
+# Docker
+docker-build:
+	@echo "Building Docker images..."
+	@docker-compose build
+
+docker-up:
+	@echo "Starting services with Docker Compose..."
+	@docker-compose up -d
+
+docker-down:
+	@echo "Stopping Docker services..."
+	@docker-compose down
 
 # Utilities
 clean:
