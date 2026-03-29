@@ -2,6 +2,8 @@
 
 export type NotificationType = "info" | "success" | "warning" | "error" | "match";
 
+export type NotificationPreferences = Record<NotificationType, boolean>;
+
 export interface PersistentNotification {
   id: string;
   type: NotificationType;

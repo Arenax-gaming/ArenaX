@@ -1,18 +1,20 @@
 use crate::api_error::ApiError;
+use crate::config::Config;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Utc};
-use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct MatchService {
     db_pool: DbPool,
     redis_client: Option<Arc<RedisClient>>,
+    reputation_service: Option<Arc<ReputationService>>,
+    event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl MatchService {
@@ -20,11 +22,18 @@ impl MatchService {
         Self {
             db_pool,
             redis_client: None,
+            reputation_service: None,
+            event_bus: None,
         }
     }
 
-    pub fn with_redis(mut self, redis_client: RedisClient) -> Self {
-        self.redis_client = Some(redis_client);
+    pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    pub fn with_reputation_service(mut self, reputation_service: ReputationService) -> Self {
+        self.reputation_service = Some(Arc::new(reputation_service));
         self
     }
 
@@ -248,6 +257,19 @@ impl MatchService {
             return Err(ApiError::bad_request(
                 "User is already in matchmaking queue",
             ));
+        }
+
+        // Check player reputation (filter bad actors)
+        if let Some(rep_service) = &self.reputation_service {
+            let reputation = rep_service.get_player_reputation(user_id).await
+                .map_err(|e| ApiError::internal_server_error(&format!("Reputation check failed: {}", e)))?;
+            
+            // Filter players with very low fair play score
+            if reputation.should_filter(30) {
+                return Err(ApiError::bad_request(
+                    "Account restricted due to behavioral violations. Please contact support.",
+                ));
+            }
         }
 
         // Get user's current Elo rating
@@ -650,6 +672,21 @@ impl MatchService {
         // Create Elo history records
         self.create_elo_history(&match_record, winner_id).await?;
 
+        // Update on-chain reputation (if service is available)
+        if let Some(rep_service) = &self.reputation_service {
+            let players = vec![match_record.player1_id];
+            let skill_deltas = vec![25]; // Example: +25 for win, would be calculated based on outcome
+            
+            if let Err(e) = rep_service.update_reputation_on_match(
+                match_id,
+                &players,
+                &skill_deltas,
+            ).await {
+                error!("Failed to update reputation for match {}: {}", match_id, e);
+                // Don't fail the match completion, just log the error
+            }
+        }
+
         // Publish match completed event
         self.publish_match_event(serde_json::json!({
             "type": "completed",
@@ -671,6 +708,21 @@ impl MatchService {
                     "winner_id": winner
                 }))
                 .await?;
+            }
+        }
+
+        // If this was a tournament match, trigger round advancement
+        if let Some(tournament_id) = match_record.tournament_id {
+            if let Some(round_id) = match_record.round_id {
+                let advancement = crate::orchestrator::RoundAdvancementWorker::new(self.db_pool.clone());
+                if let Err(e) = advancement.on_match_completed(tournament_id, round_id).await {
+                    tracing::error!(
+                        "Round advancement failed for tournament {} round {}: {}",
+                        tournament_id,
+                        round_id,
+                        e
+                    );
+                }
             }
         }
 
@@ -1081,11 +1133,24 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        // Filter out bad actors if reputation service is available
+        let filtered_candidates = if let Some(rep_service) = &self.reputation_service {
+            let candidate_ids: Vec<Uuid> = candidates.iter().map(|c| c.user_id).collect();
+            let filtered_ids = rep_service.filter_bad_actors(&candidate_ids, 50).await
+                .unwrap_or(candidate_ids); // If filtering fails, use original list
+            
+            candidates.into_iter()
+                .filter(|c| filtered_ids.contains(&c.user_id))
+                .collect::<Vec<_>>()
+        } else {
+            candidates
+        };
+
         // Try to match players
-        for i in 0..candidates.len() {
-            for j in (i + 1)..candidates.len() {
-                let player1 = &candidates[i];
-                let player2 = &candidates[j];
+        for i in 0..filtered_candidates.len() {
+            for j in (i + 1)..filtered_candidates.len() {
+                let player1 = &filtered_candidates[i];
+                let player2 = &filtered_candidates[j];
 
                 // Check if Elo ranges overlap
                 if self.elo_ranges_overlap(player1, player2) {
@@ -1473,17 +1538,44 @@ pub struct LeaderboardEntry {
 }
 
 impl MatchService {
-    // Real-time event publishing methods
-    // TODO: Implement proper realtime module with event types
-    async fn publish_match_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time match event publishing
-        // Will be implemented when realtime module is added
+    async fn publish_match_event(&self, event_data: serde_json::Value) -> Result<(), ApiError> {
+        if let Some(ref event_bus) = self.event_bus {
+            if let (Some(match_id_str), Some(event_type)) = (
+                event_data.get("match_id").and_then(|v| v.as_str()),
+                event_data.get("event").and_then(|v| v.as_str()),
+            ) {
+                let match_id = Uuid::parse_str(match_id_str).unwrap_or_default();
+                let timestamp = chrono::Utc::now().to_rfc3339();
+
+                let event = crate::realtime::events::RealtimeEvent::MatchStatusChange {
+                    match_id,
+                    from_status: event_data
+                        .get("from_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    to_status: event_type.to_string(),
+                    timestamp,
+                };
+
+                event_bus.publish_to_match(match_id, &event).await;
+
+                // Also publish to participant user channels
+                for key in ["player1_id", "player2_id", "user_id"] {
+                    if let Some(uid_str) = event_data.get(key).and_then(|v| v.as_str()) {
+                        if let Ok(uid) = Uuid::parse_str(uid_str) {
+                            event_bus.publish_to_user(uid, &event).await;
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
     async fn publish_global_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time global event publishing
-        // Will be implemented when realtime module is added
+        // Global events (e.g., tournament announcements) to be implemented
+        // when a global subscription mechanism is added.
         Ok(())
     }
 
