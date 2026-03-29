@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 soroban-sdk.workspace = true
+arenax-events = { path = "../arenax-events" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

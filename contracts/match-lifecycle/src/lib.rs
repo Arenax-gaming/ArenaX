@@ -6,34 +6,10 @@
 //! with strict state transitions and authorization. Supports dual-reporting:
 //! two participants must submit matching results before a match can be finalized.
 
+use arenax_events::match_lifecycle as events;
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol, Vec,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol, Vec,
 };
-
-// Events (match_created, result_submitted, match_finalized)
-#[contractevent(topics = ["ArenaXMatchLifecycle", "CREATED"])]
-pub struct MatchCreated {
-    pub match_id: BytesN<32>,
-    pub players: Vec<Address>,
-    pub stake_asset: Address,
-    pub stake_amount: i128,
-    pub created_at: u64,
-}
-
-#[contractevent(topics = ["ArenaXMatchLifecycle", "RESULT"])]
-pub struct ResultSubmitted {
-    pub match_id: BytesN<32>,
-    pub reporter: Address,
-    pub score: i64,
-    pub report_number: u32,
-}
-
-#[contractevent(topics = ["ArenaXMatchLifecycle", "FINALIZED"])]
-pub struct MatchFinalized {
-    pub match_id: BytesN<32>,
-    pub winner: Address,
-    pub finalized_at: u64,
-}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,14 +115,7 @@ impl MatchLifecycleContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchCreated {
-            match_id,
-            players,
-            stake_asset: match_data.stake_asset.clone(),
-            stake_amount: match_data.stake_amount,
-            created_at,
-        }
-        .publish(&env);
+        events::emit_match_created(&env, &match_id, &players, &match_data.stake_asset, match_data.stake_amount, created_at);
     }
 
     /// Submit a result for a match. Reporter must be a participant.
@@ -180,13 +149,7 @@ impl MatchLifecycleContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::Match(match_id.clone()), &match_data);
-            ResultSubmitted {
-                match_id: match_id.clone(),
-                reporter,
-                score,
-                report_number: 1,
-            }
-            .publish(&env);
+            events::emit_result_submitted(&env, &match_id, &reporter, score, 1);
             return;
         }
 
@@ -208,13 +171,7 @@ impl MatchLifecycleContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        ResultSubmitted {
-            match_id,
-            reporter,
-            score,
-            report_number: 2,
-        }
-        .publish(&env);
+        events::emit_result_submitted(&env, &match_id, &reporter, score, 2);
     }
 
     /// Finalize a match. Caller must be a participant or an operator (Referee/Admin via identity contract).
@@ -251,12 +208,7 @@ impl MatchLifecycleContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchFinalized {
-            match_id,
-            winner,
-            finalized_at: match_data.finalized_at.unwrap(),
-        }
-        .publish(&env);
+        events::emit_match_finalized(&env, &match_id, &winner, match_data.finalized_at.unwrap());
     }
 
     /// Mark match as disputed (e.g. from external dispute flow). Operator or participant only.

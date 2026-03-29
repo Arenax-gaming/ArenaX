@@ -1,8 +1,9 @@
 #![no_std]
 
 mod error;
-mod events;
 mod storage;
+
+use arenax_events::reputation;
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 use storage::{DataKey, MatchOutcome, PlayerReputation, ReputationConfig};
@@ -35,7 +36,7 @@ impl ArenaXReputationAggregation {
             .set(&DataKey::Config, &default_config);
 
         let timestamp = env.ledger().timestamp();
-        events::emit_initialized(&env, &admin, timestamp);
+        reputation::emit_initialized(&env, &admin, timestamp);
         Ok(())
     }
 
@@ -54,7 +55,7 @@ impl ArenaXReputationAggregation {
             .set(&DataKey::AuthorizedResolver(resolver.clone()), &true);
 
         let timestamp = env.ledger().timestamp();
-        events::emit_authorizer_added(&env, &resolver, timestamp);
+        reputation::emit_authorizer_added(&env, &resolver, timestamp);
         Ok(())
     }
 
@@ -73,7 +74,7 @@ impl ArenaXReputationAggregation {
             .remove(&DataKey::AuthorizedResolver(resolver.clone()));
 
         let timestamp = env.ledger().timestamp();
-        events::emit_authorizer_removed(&env, &resolver, timestamp);
+        reputation::emit_authorizer_removed(&env, &resolver, timestamp);
         Ok(())
     }
 
@@ -183,15 +184,16 @@ impl ArenaXReputationAggregation {
             .set(&DataKey::PlayerReputation(player.clone()), &reputation);
 
         // Emit events
-        events::emit_reputation_updated(
+        reputation::emit_reputation_updated(
             &env,
             &player,
             previous_score,
             reputation.score,
             match_id,
             timestamp,
+            0, // source: 0 = match
         );
-        events::emit_match_recorded(&env, &player, outcome, match_id, timestamp);
+        reputation::emit_match_recorded(&env, &player, outcome, match_id, timestamp);
 
         Ok(())
     }

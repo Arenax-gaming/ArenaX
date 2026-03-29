@@ -21,7 +21,7 @@ pub enum DataKey {
 #[contract]
 pub struct ReputationIndex;
 
-mod events;
+use arenax_events::reputation_index;
 
 #[contractimpl]
 impl ReputationIndex {
@@ -76,13 +76,7 @@ impl ReputationIndex {
                 .set(&DataKey::Reputation(player.clone()), &rep);
 
             // Emit reputation_changed event
-            events::ReputationChanged {
-                player: player.clone(),
-                skill_delta,
-                fair_play_delta,
-                match_id,
-            }
-            .publish(&env);
+            reputation_index::emit_reputation_changed(&env, &player, skill_delta, fair_play_delta, match_id);
         }
     }
 
@@ -98,12 +92,7 @@ impl ReputationIndex {
             .set(&DataKey::Reputation(addr.clone()), &rep);
 
         // Emit decay event
-        events::ReputationDecayed {
-            player: addr,
-            skill_decayed: old_skill - rep.skill,
-            fair_play_decayed: old_fair_play - rep.fair_play,
-        }
-        .publish(&env);
+        reputation_index::emit_reputation_decayed(&env, &addr, old_skill - rep.skill, old_fair_play - rep.fair_play);
     }
 
     /// Get current reputation for a player.
@@ -200,13 +189,7 @@ impl ReputationIndex {
         env.storage()
             .persistent()
             .set(&DataKey::Reputation(player.clone()), &rep);
-        events::ReputationChanged {
-            player,
-            skill_delta: 0,
-            fair_play_delta: -capped,
-            match_id,
-        }
-        .publish(&env);
+        reputation_index::emit_reputation_changed(&env, &player, 0, -capped, match_id);
     }
 }
 

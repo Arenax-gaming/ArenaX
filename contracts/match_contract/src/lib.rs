@@ -1,6 +1,7 @@
 #![no_std]
+use arenax_events::match_contract as events;
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
 };
 
 #[contracttype]
@@ -31,41 +32,6 @@ pub struct MatchData {
     pub ended_at: Option<u64>,
 }
 
-#[contractevent]
-pub struct MatchCreated {
-    pub match_id: BytesN<32>,
-    pub player_a: Address,
-    pub player_b: Address,
-}
-
-#[contractevent]
-pub struct MatchStarted {
-    pub match_id: BytesN<32>,
-    pub started_at: u64,
-}
-
-#[contractevent]
-pub struct MatchCompleted {
-    pub match_id: BytesN<32>,
-    pub winner: Address,
-}
-
-#[contractevent]
-pub struct MatchDisputed {
-    pub match_id: BytesN<32>,
-}
-
-#[contractevent]
-pub struct MatchCancelled {
-    pub match_id: BytesN<32>,
-}
-
-#[contractevent]
-pub struct MatchResolved {
-    pub match_id: BytesN<32>,
-    pub winner: Address,
-}
-
 #[contract]
 pub struct MatchContract;
 
@@ -93,12 +59,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchCreated {
-            match_id,
-            player_a: match_data.player_a,
-            player_b: match_data.player_b,
-        }
-        .publish(&env);
+        events::emit_match_created(&env, &match_id, &match_data.player_a, &match_data.player_b);
     }
 
     pub fn start_match(env: Env, match_id: BytesN<32>) {
@@ -119,11 +80,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchStarted {
-            match_id,
-            started_at: match_data.started_at,
-        }
-        .publish(&env);
+        events::emit_match_started(&env, &match_id, match_data.started_at);
     }
 
     pub fn complete_match(env: Env, match_id: BytesN<32>, winner: Address) {
@@ -149,7 +106,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchCompleted { match_id, winner }.publish(&env);
+        events::emit_match_completed(&env, &match_id, &winner);
     }
 
     pub fn raise_dispute(env: Env, match_id: BytesN<32>) {
@@ -169,7 +126,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchDisputed { match_id }.publish(&env);
+        events::emit_match_disputed(&env, &match_id);
     }
 
     pub fn cancel_match(env: Env, match_id: BytesN<32>) {
@@ -189,7 +146,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchCancelled { match_id }.publish(&env);
+        events::emit_match_cancelled(&env, &match_id);
     }
 
     pub fn resolve_dispute(
@@ -235,7 +192,7 @@ impl MatchContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        MatchResolved { match_id, winner }.publish(&env);
+        events::emit_match_resolved(&env, &match_id, &winner);
     }
 
     pub fn get_match(env: Env, match_id: BytesN<32>) -> MatchData {
