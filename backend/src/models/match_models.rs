@@ -30,6 +30,14 @@ pub struct Match {
     pub match_duration: Option<i32>, // in seconds
     pub round_number: Option<i32>,
     pub match_number: Option<i32>,
+    // --- Conflict & Reaper fields (migration 20250325000001) ---
+    /// Deadline by which both players must submit a score report.
+    /// Set automatically when the match moves to in_progress.
+    pub report_deadline: Option<DateTime<Utc>>,
+    /// The player who was auto-forfeited by the Reaper for not reporting in time.
+    pub forfeited_by: Option<Uuid>,
+    /// Human-readable description of the score discrepancy that caused a conflict.
+    pub conflict_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -38,6 +46,10 @@ pub struct MatchScore {
     pub match_id: Uuid,
     pub player_id: Uuid,
     pub score: i32,
+    /// What this player claims their opponent scored.
+    /// Combined with `score`, this lets the system determine each player's
+    /// claimed winner without requiring a separate "winner" field.
+    pub opponent_score: Option<i32>,
     pub proof_url: Option<String>,      // URL to screenshot/video proof
     pub telemetry_data: Option<String>, // JSON string of game telemetry
     pub submitted_at: DateTime<Utc>,
@@ -130,6 +142,9 @@ pub enum MatchStatus {
     Scheduled,
     InProgress,
     Completed,
+    /// Automatically set when both players submit contradictory score reports.
+    /// Requires manual or oracle-based resolution before the match can be finalized.
+    Conflict,
     Disputed,
     Cancelled,
     Abandoned,
@@ -162,11 +177,32 @@ pub enum MatchResult {
 }
 
 // DTOs for API requests/responses
+
+/// Score report submitted by a player.
+///
+/// Both `score` (the reporter's own score) and `opponent_score` (what the reporter
+/// claims the opponent scored) are required.  The server compares both players'
+/// reports to detect conflicting claims about who won.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReportScoreRequest {
     pub score: i32,
+    /// What the reporter believes the opponent scored.
+    /// Used alongside `score` for automatic conflict detection.
+    pub opponent_score: i32,
     pub proof_url: Option<String>,
     pub telemetry_data: Option<String>,
+}
+
+/// One attempt to submit a score report, recorded for anti-spam enforcement.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ScoreReportAttempt {
+    pub id: Uuid,
+    pub match_id: Uuid,
+    pub player_id: Uuid,
+    pub attempted_at: DateTime<Utc>,
+    /// Whether this attempt passed all validation and created a `match_scores` row.
+    pub accepted: bool,
+    pub rejection_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -254,6 +290,7 @@ impl std::str::FromStr for MatchStatus {
             "scheduled" => Ok(MatchStatus::Scheduled),
             "in_progress" => Ok(MatchStatus::InProgress),
             "completed" => Ok(MatchStatus::Completed),
+            "conflict" => Ok(MatchStatus::Conflict),
             "disputed" => Ok(MatchStatus::Disputed),
             "cancelled" => Ok(MatchStatus::Cancelled),
             "abandoned" => Ok(MatchStatus::Abandoned),

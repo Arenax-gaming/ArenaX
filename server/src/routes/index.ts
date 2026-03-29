@@ -16,6 +16,6 @@ router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes); // Added
 router.use('/admin', adminRoutes);
 router.use('/governance', governanceRoutes);
-router.use('/wallets', walletRoutes);
+router.use('/wallet', walletRoutes);
 
 export default router;
