@@ -83,6 +83,11 @@ async fn main() -> io::Result<()> {
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
+    // Initialize Auth Services for Realtime
+    let jwt_config = crate::auth::jwt_service::JwtConfig::default();
+    let jwt_service = Arc::new(crate::auth::jwt_service::JwtService::new(jwt_config, redis_conn.clone()));
+    let auth_guard = Arc::new(crate::realtime::auth::RealtimeAuth::new(db_pool.clone()));
+
     // Start Redis Pub/Sub subscriber (broadcasts to local WebSocket actors)
     let broadcaster = WsBroadcaster::new(
         config.redis.url.clone(),
@@ -103,6 +108,8 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
+            .app_data(web::Data::new(jwt_service.clone()))
+            .app_data(web::Data::new(auth_guard.clone()))
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .wrap(cors_middleware())
