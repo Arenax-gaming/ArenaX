@@ -18,6 +18,7 @@ mod telemetry;
 use crate::config::Config;
 use crate::db::create_pool;
 use crate::middleware::cors_middleware;
+use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
@@ -112,6 +113,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(auth_guard.clone()))
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
+            .wrap(IdempotencyMiddleware::default(db_pool.clone()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
@@ -167,6 +169,32 @@ async fn main() -> io::Result<()> {
                             .route("/stats", web::get().to(crate::http::matchmaking::get_matchmaking_stats))
                             .route("/elo/{game}", web::get().to(crate::http::matchmaking::get_elo))
                             .route("/elo/{game}/{page}/{limit}", web::get().to(crate::http::matchmaking::get_elo_history))
+                    )
+                    // Idempotency endpoints
+                    .service(
+                        web::scope("/idempotency")
+                            .route("/generate-key", web::post().to(crate::http::idempotency::generate_key))
+                            .route("/stats", web::get().to(crate::http::idempotency::get_stats))
+                            .route("/user-keys", web::get().to(crate::http::idempotency::get_user_keys))
+                            .route("/invalidate/{key}", web::delete().to(crate::http::idempotency::invalidate_key))
+                            .route("/cleanup", web::post().to(crate::http::idempotency::cleanup_expired))
+                            .route("/config", web::put().to(crate::http::idempotency::update_config))
+                            .route("/config/{route}", web::get().to(crate::http::idempotency::get_route_config))
+                            .route("/validate", web::post().to(crate::http::idempotency::validate_key))
+                            .route("/info", web::get().to(crate::http::idempotency::get_framework_info))
+                    )
+                    // Idempotency test endpoints
+                    .service(
+                        web::scope("/test")
+                            .route("/idempotency", web::post().to(crate::http::idempotency_examples::test_idempotency_behavior))
+                            .route("/payment", web::post().to(crate::http::idempotency_examples::create_payment_simulation))
+                            .route("/refund", web::post().to(crate::http::idempotency_examples::create_refund_simulation))
+                            .route("/deposit", web::post().to(crate::http::idempotency_examples::wallet_deposit_simulation))
+                            .route("/conflict", web::post().to(crate::http::idempotency_examples::demonstrate_conflict))
+                            .route("/performance", web::get().to(crate::http::idempotency_examples::performance_test))
+                            .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
+                            .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
+                            .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
                     ),
             )
             .configure(crate::realtime::user_ws::configure_ws_route)
