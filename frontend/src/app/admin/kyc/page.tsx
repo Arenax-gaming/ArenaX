@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -31,9 +32,9 @@ export default function KycDashboard() {
 
   useEffect(() => {
     fetchReviews();
-  }, [filterStatus]);
+  }, [fetchReviews]);
 
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async () => {
     setLoading(true);
     try {
       const params = filterStatus !== "ALL" ? { status: filterStatus } : {};
@@ -44,7 +45,7 @@ export default function KycDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterStatus]);
 
   const handleProcess = async (id: string, status: KycStatus) => {
     if (status === "REJECTED" && !decisionNotes) {
@@ -171,10 +172,11 @@ export default function KycDashboard() {
                     {Array.isArray(selectedReview.documents) && selectedReview.documents.length > 0 ? (
                       selectedReview.documents.map((doc: any, i: number) => (
                         <div key={i} className="group relative aspect-video bg-muted rounded-xl overflow-hidden border-2 border-transparent hover:border-primary transition-all">
-                          <img 
+                          <Image 
                             src={doc.url} 
                             alt={`Document ${i + 1}`} 
-                            className="w-full h-full object-cover"
+                            fill
+                            className="object-cover"
                           />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                             <Button variant="secondary" className="scale-90" onClick={() => window.open(doc.url, '_blank')}>View Original</Button>
@@ -241,7 +243,7 @@ export default function KycDashboard() {
                         <div className="flex items-center gap-3">
                           <span className="font-bold uppercase tracking-wider text-xs">Final State: {selectedReview.status}</span>
                         </div>
-                        {selectedReview.notes && <p className="text-sm italic">"{selectedReview.notes}"</p>}
+                        {selectedReview.notes && <p className="text-sm italic">&quot;{selectedReview.notes}&quot;</p>}
                       </div>
                     )}
                   </div>
