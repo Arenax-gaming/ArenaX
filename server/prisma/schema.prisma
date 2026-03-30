@@ -38,13 +38,14 @@ model User {
 }
 
 model UserWallet {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  publicKey          String   @unique
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  publicKey          String    @unique
   encryptedSecretKey String
-  encryptionVersion  Int      @default(1)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  encryptionVersion  Int       @default(1)
+  lastRotatedAt      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id])
 }
@@ -331,21 +332,47 @@ model KycReview {
 }
 
 model WalletKeyAccessAudit {
-  id        String   @id @default(uuid())
-  actorId   String
-  actor     User     @relation("WalletKeyAccessActor", fields: [actorId], references: [id])
-  action    String
-  details   Json?
-  createdAt DateTime @default(now())
+  id           String   @id @default(uuid())
+  walletId     String
+  actorUserId  String?
+  actor        User?    @relation("WalletKeyAccessActor", fields: [actorUserId], references: [id])
+  action       String
+  success      Boolean  @default(true)
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  reason       String?
+  keyVersion   Int?
+  metadata     Json?
+  previousHash String?
+  entryHash    String?
+  createdAt    DateTime @default(now())
+
+  @@index([walletId])
+  @@index([actorUserId])
 }
 
 model WalletRecoveryChallenge {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  status    String   @default("OPEN")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id])
+  walletId           String
+  status             String    @default("PENDING")
+  codeHash           String
+  expiresAt          DateTime
+  maxAttempts        Int       @default(5)
+  attempts           Int       @default(0)
+  lastAttemptAt      DateTime?
+  completedAt        DateTime?
+  requestId          String?
+  requestedFromIp    String?
+  requestedUserAgent String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([status])
 }
 
 
