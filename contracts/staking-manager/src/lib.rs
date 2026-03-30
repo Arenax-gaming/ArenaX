@@ -35,7 +35,6 @@ pub struct StakeInfo {
     pub amount: i128,
     pub staked_at: u64,
     pub is_locked: bool,
-    pub can_withdraw: bool,
 }
 
 #[contracttype]
@@ -268,15 +267,11 @@ impl StakingManager {
             .get(&DataKey::TournamentInfo(tournament_id.clone()))
             .expect("tournament not found");
 
-        let _old_state = tournament_info.state;
         tournament_info.state = state;
 
         if state == TournamentState::Completed as u32 || state == TournamentState::Cancelled as u32
         {
             tournament_info.completed_at = Some(env.ledger().timestamp());
-
-            // Unlock all stakes for this tournament
-            Self::unlock_tournament_stakes(&env, &tournament_id);
         }
 
         env.storage().persistent().set(
@@ -343,7 +338,6 @@ impl StakingManager {
             amount,
             staked_at: env.ledger().timestamp(),
             is_locked: true,
-            can_withdraw: false,
         };
 
         env.storage().persistent().set(&stake_key, &stake_info);
@@ -377,7 +371,7 @@ impl StakingManager {
     /// # Panics
     /// * If contract is paused
     /// * If user has no stake for this tournament
-    /// * If stake is still locked
+    /// * If tournament is not completed or cancelled
     pub fn withdraw(env: Env, user: Address, tournament_id: BytesN<32>) {
         Self::require_not_paused(&env);
         user.require_auth();
@@ -389,8 +383,17 @@ impl StakingManager {
             .get(&stake_key)
             .expect("no stake found");
 
-        if !stake_info.can_withdraw {
-            panic!("stake is not withdrawable");
+        // Check if tournament is in a withdrawable state
+        let tournament_info: TournamentInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TournamentInfo(tournament_id.clone()))
+            .expect("tournament not found");
+
+        if tournament_info.state != TournamentState::Completed as u32
+            && tournament_info.state != TournamentState::Cancelled as u32
+        {
+            panic!("tournament not completed or cancelled");
         }
 
         // Transfer tokens back to user
@@ -555,14 +558,25 @@ impl StakingManager {
     /// * `tournament_id` - Tournament identifier
     ///
     /// # Returns
-    /// True if withdrawal is allowed
+    /// True if withdrawal is allowed (tournament is completed or cancelled)
     pub fn can_withdraw(env: Env, user: Address, tournament_id: BytesN<32>) -> bool {
-        if let Some(stake_info) = env
+        // Check if stake exists
+        if !env
             .storage()
             .persistent()
-            .get::<DataKey, StakeInfo>(&DataKey::Stake(tournament_id, user))
+            .has(&DataKey::Stake(tournament_id.clone(), user))
         {
-            stake_info.can_withdraw
+            return false;
+        }
+
+        // Check if tournament is in withdrawable state
+        if let Some(tournament_info) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, TournamentInfo>(&DataKey::TournamentInfo(tournament_id))
+        {
+            tournament_info.state == TournamentState::Completed as u32
+                || tournament_info.state == TournamentState::Cancelled as u32
         } else {
             false
         }
@@ -645,10 +659,6 @@ impl StakingManager {
 
     // Helper functions for internal use
 
-    fn unlock_tournament_stakes(_env: &Env, _tournament_id: &BytesN<32>) {
-        // Placeholder - in a real implementation you'd iterate all stakes
-    }
-
     fn update_user_stake_info(
         env: &Env,
         user: &Address,
@@ -717,3 +727,6 @@ impl StakingManager {
         panic!("caller not authorized");
     }
 }
+
+#[cfg(test)]
+mod test;
