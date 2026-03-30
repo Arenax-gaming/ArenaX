@@ -1,5 +1,6 @@
 // Service layer module for ArenaX
 pub mod governance_service;
+pub mod idempotency_service;
 pub mod match_authority_service;
 pub mod match_service;
 pub mod reaper_service;
@@ -15,6 +16,7 @@ pub use governance_service::{
     CreateProposalDto, GovernanceService, GovernanceServiceError, ProposalRecord,
     ProposalStatus as GovProposalStatus,
 };
+pub use idempotency_service::IdempotencyService;
 pub use match_authority_service::MatchAuthorityService;
 pub use match_service::MatchService;
 pub use reaper_service::ReaperService;
