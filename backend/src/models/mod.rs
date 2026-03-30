@@ -1,6 +1,7 @@
 // Core models
 pub mod match_authority;
 pub mod match_models;
+pub mod matchmaker;
 pub mod reward_settlement;
 pub mod stellar_account;
 pub mod stellar_transaction;
@@ -15,6 +16,13 @@ pub use match_models::{
     JoinMatchmakingRequest, Match, MatchDispute, MatchResponse, MatchResult, MatchScore,
     MatchStatus, MatchType, MatchmakingQueue, MatchmakingStatusResponse, PlayerInfo, QueueStatus,
     ReportScoreRequest, UserElo,
+};
+pub use matchmaker::{
+    DisputeStatus, EloHistory, EloResponse, GameModeStats, GameQueueStats, JoinQueueRequest,
+    JoinQueueResponse, LeaveQueueRequest, LeaveQueueResponse, Match, MatchCandidate, MatchDispute,
+    MatchHistoryResponse, MatchmakingConfig, MatchmakingQueue, MatchmakingQueueResponse,
+    MatchmakingStats, MatchmakingStatsResponse, MatchmakingStatusResponse, MatchResult, MatchScore,
+    MatchStatus, MatchType, PlayerInfo, QueueEntry, QueueStatus, ReportScoreRequest, UserElo,
 };
 pub use reward_settlement::*;
 pub use stellar_account::{
