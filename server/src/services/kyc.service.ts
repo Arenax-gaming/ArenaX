@@ -97,10 +97,7 @@ export class KycService {
             await prisma.user.update({
                 where: { id: review.userId },
                 data: {
-                    // Assuming we have an isVerified field or similar in User
-                    // Based on schema.prisma check, User doesn't have isVerified but let's check it again.
-                    // Wait, I saw role = "USER" but didn't see isVerified.
-                    // Oh, I added kycReview to User.
+                    isVerified: true
                 }
             });
         }

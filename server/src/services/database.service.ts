@@ -16,6 +16,7 @@ export type DatabaseTransactionClient = Pick<
     | 'refundRequest'
     | 'project'
     | 'payment'
+    | 'kycReview'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

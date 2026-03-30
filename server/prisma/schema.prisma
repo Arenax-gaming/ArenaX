@@ -13,6 +13,7 @@ model User {
   username      String    @unique
   passwordHash  String
   role          String    @default("USER")
+  isVerified    Boolean   @default(false)
   bio           String?
   socials       Json?
   walletAddress String?   @unique
