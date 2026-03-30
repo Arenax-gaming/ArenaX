@@ -32,63 +32,90 @@ model User {
   refundsReviewed RefundRequest[] @relation("OperatorReviews")
   kycReview     KycReview?
   reviewedKycs  KycReview[]     @relation("ReviewerKyc")
+  id                       String                    @id @default(uuid())
+  email                    String                    @unique
+  username                 String                    @unique
+  passwordHash             String
+  role                     String                    @default("USER")
+  bio                      String?
+  socials                  Json?
+  walletAddress            String?                   @unique
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  projects                 Project[]
+  wallet                   UserWallet?
+  refreshTokens            RefreshToken[]
+  ledger                   Ledger?
+  walletTransactions       WalletTransaction[]
+  walletKeyAccessAudits    WalletKeyAccessAudit[]    @relation("WalletKeyAccessActor")
+  walletRecoveryChallenges WalletRecoveryChallenge[]
+  proposals                Proposal[]                @relation("UserProposals")
+  votes                    Vote[]                    @relation("UserVotes")
+  reportedDisputes         Dispute[]                 @relation("ReportedDisputes")
+  resolvedDisputes         Dispute[]                 @relation("ResolvedDisputes")
+  auditLogs                AuditLog[]
+  refundsReviewed          RefundRequest[]           @relation("OperatorReviews")
 }
 
 model UserWallet {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  publicKey          String   @unique
-  encryptedSecretKey String
-  encryptionVersion  Int      @default(1)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                        String    @id @default(uuid())
+  userId                    String    @unique
+  publicKey                 String    @unique
+  encryptedSecretKey        String
+  encryptionVersion         Int       @default(1)
+  encryptedSecretKeyVersion Int       @default(1)
+  lastRotatedAt             DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
+  user               User                      @relation(fields: [userId], references: [id])
+  keyAccessAudits    WalletKeyAccessAudit[]
+  recoveryChallenges WalletRecoveryChallenge[]
 }
 
 model RefreshToken {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   familyId          String
-  tokenHash         String   @unique
+  tokenHash         String    @unique
   expiresAt         DateTime
   revokedAt         DateTime?
   parentTokenId     String?
   replacedByTokenId String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([userId])
   @@index([familyId])
 }
 
 model Project {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
   description String?
   ownerId     String
-  owner       User     @relation(fields: [ownerId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  owner       User      @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   payments    Payment[]
 }
 
 model Payment {
-  id          String   @id @default(uuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id])
-  fromAddress String
-  toAddress   String
-  amount      String
-  asset       String   @default("USDC")
-  status      String   @default("PENDING") // PENDING, COMPLETED, FAILED, DEAD_LETTER
-  txHash      String?  @unique
-  retryCount  Int      @default(0)
-  nextRetryAt DateTime?
-  lastError   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String          @id @default(uuid())
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id])
+  fromAddress    String
+  toAddress      String
+  amount         String
+  asset          String          @default("USDC")
+  status         String          @default("PENDING") // PENDING, COMPLETED, FAILED, DEAD_LETTER
+  txHash         String?         @unique
+  retryCount     Int             @default(0)
+  nextRetryAt    DateTime?
+  lastError      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   refundRequests RefundRequest[]
 }
 
@@ -155,7 +182,7 @@ model BlockchainTransaction {
   id        String   @id @default(uuid())
   userId    String?
   txHash    String   @unique
-  type      String   // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
+  type      String // e.g., "WALLET_REGISTRATION", "CONTRACT_INVOKE"
   status    TxStatus @default(PENDING)
   payload   Json?
   error     String?
@@ -164,13 +191,75 @@ model BlockchainTransaction {
 }
 
 model BlockchainEvent {
-  id          String   @id @default(uuid())
-  eventType   String   // e.g., PAY_DONE
-  contractId  String
-  txHash      String
-  ledger      Int
-  data        Json
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  eventType  String // e.g., PAY_DONE
+  contractId String
+  txHash     String
+  ledger     Int
+  data       Json
+  createdAt  DateTime @default(now())
+}
+
+enum WalletKeyAccessAction {
+  SIGN
+  EXPORT
+  RECOVERY_CHALLENGE_CREATED
+  RECOVERY_CHALLENGE_COMPLETED
+  ROTATION
+}
+
+enum WalletRecoveryChallengeStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+model WalletKeyAccessAudit {
+  id           String                @id @default(uuid())
+  walletId     String
+  actorUserId  String?
+  action       WalletKeyAccessAction
+  success      Boolean               @default(true)
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  reason       String?
+  keyVersion   Int?
+  metadata     Json?
+  previousHash String?
+  entryHash    String                @unique
+  createdAt    DateTime              @default(now())
+
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  actor  User?      @relation("WalletKeyAccessActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model WalletRecoveryChallenge {
+  id                 String                        @id @default(uuid())
+  userId             String
+  walletId           String
+  codeHash           String
+  expiresAt          DateTime
+  completedAt        DateTime?
+  status             WalletRecoveryChallengeStatus @default(PENDING)
+  attempts           Int                           @default(0)
+  maxAttempts        Int                           @default(5)
+  requestId          String?
+  requestedFromIp    String?
+  requestedUserAgent String?
+  lastAttemptAt      DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, expiresAt])
+  @@index([walletId, status])
 }
 
 enum ProposalStatus {
@@ -209,7 +298,7 @@ model Vote {
   proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   voterId    String
   voter      User     @relation("UserVotes", fields: [voterId], references: [id])
-  signature  String?  // If multisig requires signatures
+  signature  String? // If multisig requires signatures
   chainTx    String?
   createdAt  DateTime @default(now())
 
@@ -225,46 +314,46 @@ enum MatchStatus {
 }
 
 model Match {
-  id             String      @id @default(uuid())
-  onChainId      String      @unique
-  playerAId      String
-  playerBId      String
-  winnerId       String?
-  status         MatchStatus @default(CREATED)
-  metadata       Json        @default("{}")
-  lastChainTx    String?
-  createdAt      DateTime    @default(now())
-  startedAt      DateTime?
-  endedAt        DateTime?
-  updatedAt      DateTime    @updatedAt
-  disputes       Dispute[]
+  id          String      @id @default(uuid())
+  onChainId   String      @unique
+  playerAId   String
+  playerBId   String
+  winnerId    String?
+  status      MatchStatus @default(CREATED)
+  metadata    Json        @default("{}")
+  lastChainTx String?
+  createdAt   DateTime    @default(now())
+  startedAt   DateTime?
+  endedAt     DateTime?
+  updatedAt   DateTime    @updatedAt
+  disputes    Dispute[]
 
   @@index([status])
 }
 
 model Dispute {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   matchId      String
-  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  match        Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
   reporterId   String
-  reporter     User     @relation("ReportedDisputes", fields: [reporterId], references: [id])
+  reporter     User      @relation("ReportedDisputes", fields: [reporterId], references: [id])
   reason       String
   evidenceUrls String[] // Array of S3/MinIO links
-  status       String   @default("OPEN") // OPEN, RESOLVED, DISMISSED
+  status       String    @default("OPEN") // OPEN, RESOLVED, DISMISSED
   resolution   String?
   resolvedById String?
-  resolvedBy   User?    @relation("ResolvedDisputes", fields: [resolvedById], references: [id])
+  resolvedBy   User?     @relation("ResolvedDisputes", fields: [resolvedById], references: [id])
   resolvedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model AuditLog {
   id         String   @id @default(uuid())
   adminId    String
   admin      User     @relation(fields: [adminId], references: [id])
-  action     String   // e.g., "MATCH_OVERRIDE", "PROPOSAL_EXECUTE", "MANUAL_PAYOUT"
-  targetType String   // e.g., "MATCH", "PROPOSAL", "USER"
+  action     String // e.g., "MATCH_OVERRIDE", "PROPOSAL_EXECUTE", "MANUAL_PAYOUT"
+  targetType String // e.g., "MATCH", "PROPOSAL", "USER"
   targetId   String
   details        Json?
   requestId      String?

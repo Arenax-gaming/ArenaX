@@ -1,5 +1,5 @@
 import { getDatabaseClient } from './database.service';
-import { RefundStatus } from '.prisma/client';
+import { RefundStatus } from '@prisma/client';
 import { AuditService } from './audit.service';
 
 export class RefundService {

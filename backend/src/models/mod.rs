@@ -1,4 +1,5 @@
 // Core models
+pub mod idempotency;
 pub mod match_authority;
 pub mod match_models;
 pub mod matchmaker;
@@ -10,6 +11,7 @@ pub mod user;
 pub mod wallet;
 
 // Re-export commonly used types - explicit to avoid ambiguity
+pub use idempotency::*;
 pub use match_authority::*;
 pub use match_models::{
     CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory, EloResponse,

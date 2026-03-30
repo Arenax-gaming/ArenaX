@@ -1,4 +1,4 @@
-import { PrismaClient } from '.prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
@@ -8,6 +8,8 @@ export type DatabaseTransactionClient = Pick<
     | 'refreshToken'
     | 'userWallet'
     | 'blockchainTransaction'
+    | 'walletKeyAccessAudit'
+    | 'walletRecoveryChallenge'
     | 'proposal'
     | 'vote'
     | 'match'
