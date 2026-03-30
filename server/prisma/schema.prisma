@@ -29,6 +29,8 @@ model User {
   resolvedDisputes Dispute[] @relation("ResolvedDisputes")
   auditLogs     AuditLog[]
   refundsReviewed RefundRequest[] @relation("OperatorReviews")
+  kycReview     KycReview?
+  reviewedKycs  KycReview[]     @relation("ReviewerKyc")
 }
 
 model UserWallet {
@@ -298,6 +300,29 @@ model RefundRequest {
   updatedAt     DateTime     @updatedAt
 
   @@index([paymentId])
+  @@index([status])
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ESCALATED
+}
+
+model KycReview {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status       KycStatus @default(PENDING)
+  documents    Json      @default("[]") // URLs and metadata
+  notes        String?
+  reviewerId   String?
+  reviewer     User?     @relation("ReviewerKyc", fields: [reviewerId], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
   @@index([status])
 }
 

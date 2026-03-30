@@ -231,6 +231,22 @@ class ApiClient {
     const queryString = params ? "?" + new URLSearchParams(params) : "";
     return this.request(`/admin/audit-logs${queryString}`);
   }
+
+  async getKycReviews(params?: Record<string, any>) {
+    const queryString = params ? "?" + new URLSearchParams(params) : "";
+    return this.request(`/admin/kyc${queryString}`);
+  }
+
+  async getKycReview(id: string) {
+    return this.request(`/admin/kyc/${id}`);
+  }
+
+  async processKycReview(id: string, data: { status: string; notes?: string }) {
+    return this.request(`/admin/kyc/${id}/process`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 export const api = new ApiClient();
