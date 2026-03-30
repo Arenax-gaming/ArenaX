@@ -7,6 +7,7 @@ import {
     getDatabaseClient
 } from './database.service';
 import { HttpError } from '../utils/http-error';
+import stellarWalletService from './stellar-wallet.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -253,12 +254,17 @@ export const registerUser = async (input: RegisterInput) => {
     for (let attempt = 0; attempt < MAX_USERNAME_ATTEMPTS; attempt += 1) {
         const candidate = buildCandidateUsername(usernameBase, attempt);
         try {
-            const createdUser = await prisma.user.create({
-                data: {
-                    email: normalizedEmail,
-                    username: candidate,
-                    passwordHash
-                }
+            const createdUser = await prisma.$transaction(async (tx) => {
+                const user = await tx.user.create({
+                    data: {
+                        email: normalizedEmail,
+                        username: candidate,
+                        passwordHash
+                    }
+                });
+
+                await stellarWalletService.registerUserWallet(user.id, tx);
+                return user;
             });
 
             const tokens = await issueSessionTokens(createdUser);

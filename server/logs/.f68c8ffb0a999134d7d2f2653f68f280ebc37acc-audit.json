@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/chinonso-peter/ArenaX/server/logs/.f68c8ffb0a999134d7d2f2653f68f280ebc37acc-audit.json",
+    "files": [
+        {
+            "date": 1774516614622,
+            "name": "/home/chinonso-peter/ArenaX/server/logs/application-2026-03-26.log",
+            "hash": "eb075c54d23a86039e49ce7c55a70bdfb1f2c9a230e11fee7bc0d23e0dbca8db"
+        }
+    ],
+    "hashType": "sha256"
+}
