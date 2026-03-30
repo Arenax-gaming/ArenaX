@@ -32,6 +32,9 @@ model User {
   refundsReviewed RefundRequest[] @relation("OperatorReviews")
   kycReview     KycReview?
   reviewedKycs  KycReview[]     @relation("ReviewerKyc")
+  walletKeyAccessAudits    WalletKeyAccessAudit[]    @relation("WalletKeyAccessActor")
+  walletRecoveryChallenges WalletRecoveryChallenge[]
+
 }
 
 model UserWallet {
@@ -326,4 +329,23 @@ model KycReview {
 
   @@index([status])
 }
+
+model WalletKeyAccessAudit {
+  id        String   @id @default(uuid())
+  actorId   String
+  actor     User     @relation("WalletKeyAccessActor", fields: [actorId], references: [id])
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+}
+
+model WalletRecoveryChallenge {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  status    String   @default("OPEN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 
