@@ -20,7 +20,11 @@ async function verifyEncryption() {
     console.log('Original Secret Key:', secret.substring(0, 4) + '...');
 
     const encrypted = encryptionService.encrypt(secret);
-    console.log('Encrypted Format (iv:tag:cipher):', encrypted.split(':').length === 3 ? 'PASS' : 'FAIL');
+    const parsed = JSON.parse(encrypted);
+    console.log(
+        'Encrypted Format (versioned payload):',
+        parsed.format === 'arenax-wallet-v1' ? 'PASS' : 'FAIL'
+    );
 
     const decrypted = encryptionService.decrypt(encrypted);
     if (decrypted === secret) {
@@ -63,7 +67,10 @@ async function verifyWalletGeneration() {
 
         if (dbWallet && dbWallet.publicKey === wallet.publicKey) {
             console.log('Database Persistence: PASS');
-            console.log('Encryption Version:', dbWallet.encryptionVersion === 1 ? 'PASS' : 'FAIL');
+            console.log(
+                'Encryption Version:',
+                dbWallet.encryptionVersion >= 1 ? 'PASS' : 'FAIL'
+            );
         } else {
             throw new Error('Database Persistence: FAIL');
         }

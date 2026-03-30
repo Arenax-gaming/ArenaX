@@ -13,6 +13,8 @@ process.env.JWT_PRIVATE_KEY = '';
 process.env.JWT_PUBLIC_KEY = '';
 process.env.JWT_PRIVATE_KEY_FILE = '';
 process.env.JWT_PUBLIC_KEY_FILE = '';
+process.env.ENCRYPTION_SECRET =
+    'test-wallet-encryption-secret-with-sufficient-length-123456';
 
 const { createApp } = require('../dist/app');
 const {
@@ -45,6 +47,9 @@ const uniqueConstraintError = (field) => ({
 const createMockDatabase = () => {
     const users = [];
     const refreshTokens = [];
+    const userWallets = [];
+    const walletKeyAccessAudits = [];
+    const walletRecoveryChallenges = [];
 
     const userDelegate = {
         findUnique: async ({ where, select }) => {
@@ -210,13 +215,201 @@ const createMockDatabase = () => {
         }
     };
 
+    const userWalletDelegate = {
+        findUnique: async ({ where, select }) => {
+            const wallet = userWallets.find((candidate) => {
+                if (where.id) {
+                    return candidate.id === where.id;
+                }
+                if (where.userId) {
+                    return candidate.userId === where.userId;
+                }
+                if (where.publicKey) {
+                    return candidate.publicKey === where.publicKey;
+                }
+                return false;
+            });
+
+            if (!wallet) {
+                return null;
+            }
+
+            return pickSelectedFields(wallet, select);
+        },
+
+        create: async ({ data }) => {
+            if (userWallets.some((wallet) => wallet.userId === data.userId)) {
+                throw uniqueConstraintError('userId');
+            }
+
+            if (userWallets.some((wallet) => wallet.publicKey === data.publicKey)) {
+                throw uniqueConstraintError('publicKey');
+            }
+
+            const now = new Date();
+            const wallet = {
+                id: crypto.randomUUID(),
+                userId: data.userId,
+                publicKey: data.publicKey,
+                encryptedSecretKey: data.encryptedSecretKey,
+                encryptionVersion: data.encryptionVersion ?? 1,
+                encryptedSecretKeyVersion: data.encryptedSecretKeyVersion ?? 1,
+                lastRotatedAt: data.lastRotatedAt ?? null,
+                createdAt: now,
+                updatedAt: now
+            };
+
+            userWallets.push(wallet);
+            return { ...wallet };
+        },
+
+        update: async ({ where, data, select }) => {
+            const wallet = userWallets.find((candidate) => candidate.id === where.id);
+            if (!wallet) {
+                throw new Error('Wallet not found');
+            }
+
+            for (const [key, value] of Object.entries(data)) {
+                if (value && typeof value === 'object' && 'increment' in value) {
+                    wallet[key] += value.increment;
+                } else {
+                    wallet[key] = value;
+                }
+            }
+
+            wallet.updatedAt = new Date();
+            return pickSelectedFields(wallet, select);
+        }
+    };
+
+    const walletKeyAccessAuditDelegate = {
+        findFirst: async ({ orderBy, select } = {}) => {
+            const sorted = [...walletKeyAccessAudits];
+            if (orderBy?.createdAt === 'desc') {
+                sorted.sort((left, right) => right.createdAt - left.createdAt);
+            }
+
+            const entry = sorted[0] || null;
+            if (!entry) {
+                return null;
+            }
+
+            return pickSelectedFields(entry, select);
+        },
+
+        create: async ({ data }) => {
+            const audit = {
+                id: crypto.randomUUID(),
+                ...data,
+                createdAt: new Date()
+            };
+            walletKeyAccessAudits.push(audit);
+            return { ...audit };
+        }
+    };
+
+    const walletRecoveryChallengeDelegate = {
+        updateMany: async ({ where, data }) => {
+            let count = 0;
+            for (const challenge of walletRecoveryChallenges) {
+                const matchesUserId =
+                    where.userId === undefined || challenge.userId === where.userId;
+                const matchesStatus =
+                    where.status === undefined || challenge.status === where.status;
+
+                if (matchesUserId && matchesStatus) {
+                    Object.assign(challenge, data);
+                    challenge.updatedAt = new Date();
+                    count += 1;
+                }
+            }
+
+            return { count };
+        },
+
+        create: async ({ data }) => {
+            const now = new Date();
+            const challenge = {
+                id: crypto.randomUUID(),
+                userId: data.userId,
+                walletId: data.walletId,
+                codeHash: data.codeHash,
+                expiresAt: new Date(data.expiresAt),
+                completedAt: data.completedAt ?? null,
+                status: data.status ?? 'PENDING',
+                attempts: data.attempts ?? 0,
+                maxAttempts: data.maxAttempts ?? 5,
+                requestId: data.requestId ?? null,
+                requestedFromIp: data.requestedFromIp ?? null,
+                requestedUserAgent: data.requestedUserAgent ?? null,
+                lastAttemptAt: data.lastAttemptAt ?? null,
+                createdAt: now,
+                updatedAt: now
+            };
+
+            walletRecoveryChallenges.push(challenge);
+            return { ...challenge };
+        },
+
+        findFirst: async ({ where, orderBy } = {}) => {
+            let matches = walletRecoveryChallenges.filter((challenge) => {
+                const userMatch =
+                    where?.userId === undefined || challenge.userId === where.userId;
+                const walletMatch =
+                    where?.walletId === undefined || challenge.walletId === where.walletId;
+                const statusMatch =
+                    where?.status === undefined || challenge.status === where.status;
+                return userMatch && walletMatch && statusMatch;
+            });
+
+            if (orderBy?.createdAt === 'desc') {
+                matches = matches.sort((left, right) => right.createdAt - left.createdAt);
+            }
+
+            return matches[0] ? { ...matches[0] } : null;
+        },
+
+        findUnique: async ({ where }) => {
+            const challenge = walletRecoveryChallenges.find(
+                (candidate) => candidate.id === where.id
+            );
+            return challenge ? { ...challenge } : null;
+        },
+
+        update: async ({ where, data }) => {
+            const challenge = walletRecoveryChallenges.find(
+                (candidate) => candidate.id === where.id
+            );
+            if (!challenge) {
+                throw new Error('Recovery challenge not found');
+            }
+
+            for (const [key, value] of Object.entries(data)) {
+                if (value && typeof value === 'object' && 'increment' in value) {
+                    challenge[key] += value.increment;
+                } else {
+                    challenge[key] = value;
+                }
+            }
+
+            challenge.updatedAt = new Date();
+            return { ...challenge };
+        }
+    };
+
     const database = {
         user: userDelegate,
         refreshToken: refreshTokenDelegate,
+        userWallet: userWalletDelegate,
+        walletKeyAccessAudit: walletKeyAccessAuditDelegate,
+        walletRecoveryChallenge: walletRecoveryChallengeDelegate,
         $transaction: async (callback) => callback(database),
         _state: {
             users,
-            refreshTokens
+            refreshTokens,
+            userWallets,
+            walletKeyAccessAudits,
+            walletRecoveryChallenges
         }
     };
 
@@ -317,6 +510,13 @@ test('registration normalizes email, hashes password, and auto-generates unique 
         secondResponse.body.user.username,
         firstResponse.body.user.username
     );
+
+    const firstWallet = database._state.userWallets.find(
+        (wallet) => wallet.userId === firstStoredUser.id
+    );
+    assert.ok(firstWallet);
+    assert.ok(firstWallet.publicKey.startsWith('G'));
+    assert.notEqual(firstWallet.encryptedSecretKey.includes('SD'), true);
 });
 
 test('login issues access and refresh tokens with expected TTL', async () => {
@@ -504,4 +704,68 @@ test('profiles endpoints return public profile and validate social URLs on patch
         validPatchResponse.body.socials.twitter,
         'https://twitter.com/profileuser'
     );
+});
+
+test('wallet recovery export requires password plus verification code and audits key access', async () => {
+    const registerResponse = await request('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+            email: 'walletrecovery@example.com',
+            password: 'strongpassword123',
+            username: 'walletrecover'
+        })
+    });
+
+    const accessToken = registerResponse.body.tokens.accessToken;
+
+    const challengeResponse = await request('/api/wallets/me/recovery/challenges', {
+        method: 'POST',
+        headers: {
+            authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+            password: 'strongpassword123'
+        })
+    });
+
+    assert.equal(challengeResponse.status, 201);
+    assert.ok(challengeResponse.body.challenge.challengeId);
+    assert.ok(challengeResponse.body.challenge.verificationCode);
+
+    const failedExport = await request('/api/wallets/me/recovery/export', {
+        method: 'POST',
+        headers: {
+            authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+            password: 'strongpassword123',
+            challengeId: challengeResponse.body.challenge.challengeId,
+            verificationCode: '000000'
+        })
+    });
+
+    assert.equal(failedExport.status, 401);
+
+    const exportResponse = await request('/api/wallets/me/recovery/export', {
+        method: 'POST',
+        headers: {
+            authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+            password: 'strongpassword123',
+            challengeId: challengeResponse.body.challenge.challengeId,
+            verificationCode: challengeResponse.body.challenge.verificationCode
+        })
+    });
+
+    assert.equal(exportResponse.status, 200);
+    assert.ok(exportResponse.body.wallet.publicKey.startsWith('G'));
+    assert.ok(exportResponse.body.wallet.secretKey.startsWith('S'));
+
+    const auditActions = database._state.walletKeyAccessAudits.map(
+        (entry) => entry.action
+    );
+    assert.ok(auditActions.includes('RECOVERY_CHALLENGE_CREATED'));
+    assert.ok(auditActions.includes('RECOVERY_CHALLENGE_COMPLETED'));
+    assert.ok(auditActions.includes('EXPORT'));
 });

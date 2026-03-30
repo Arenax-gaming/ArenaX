@@ -2,6 +2,23 @@ import { Request, Response, NextFunction } from 'express';
 import { BaseError, InternalServerError, isBaseError } from '../errors';
 import { logger } from '../services/logger.service';
 import { captureException } from '../services/telemetry.service';
+import { HttpError } from '../utils/http-error';
+
+const normalizeError = (err: unknown): BaseError => {
+    if (isBaseError(err)) {
+        return err;
+    }
+
+    if (err instanceof HttpError) {
+        return new BaseError(
+            err.message,
+            err.status,
+            err.status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'HTTP_ERROR'
+        );
+    }
+
+    return new InternalServerError();
+};
 
 export const errorHandler = (
     err: unknown,
@@ -9,7 +26,7 @@ export const errorHandler = (
     res: Response,
     next: NextFunction
 ) => {
-    const normalizedError: BaseError = isBaseError(err) ? err : new InternalServerError();
+    const normalizedError = normalizeError(err);
     const isProduction = process.env.NODE_ENV === 'production';
     const requestId = req.requestId ?? 'unknown';
     const requestLogger = req.log ?? logger;
