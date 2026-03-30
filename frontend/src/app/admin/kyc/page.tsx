@@ -30,10 +30,6 @@ export default function KycDashboard() {
   const [decisionNotes, setDecisionNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchReviews();
-  }, [fetchReviews]);
-
   const fetchReviews = useCallback(async () => {
     setLoading(true);
     try {
@@ -47,6 +43,10 @@ export default function KycDashboard() {
     }
   }, [filterStatus]);
 
+  useEffect(() => {
+    fetchReviews();
+  }, [fetchReviews]);
+
   const handleProcess = async (id: string, status: KycStatus) => {
     if (status === "REJECTED" && !decisionNotes) {
       alert("Please provide a reason for rejection.");
@@ -57,7 +57,7 @@ export default function KycDashboard() {
     
     // Optimistic Update
     const previousReviews = [...reviews];
-    setReviews(reviews.map(r => r.id === id ? { ...r, status } : r));
+    setReviews(reviews.map((r: KycReview) => r.id === id ? { ...r, status } : r));
     if (selectedReview?.id === id) {
       setSelectedReview({ ...selectedReview, status });
     }
@@ -101,7 +101,7 @@ export default function KycDashboard() {
             id="status-filter"
             className="bg-background border border-input h-10 px-3 py-2 rounded-md text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as any)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterStatus(e.target.value as any)}
           >
             <option value="ALL">All Reviews</option>
             <option value="PENDING">Pending</option>
@@ -122,7 +122,7 @@ export default function KycDashboard() {
               </CardContent>
             </Card>
           ) : (
-            reviews.map((review) => (
+            reviews.map((review: KycReview) => (
               <Card 
                 key={review.id} 
                 className={`cursor-pointer transition-all duration-200 border-2 ${selectedReview?.id === review.id ? 'border-primary ring-2 ring-primary/20' : 'hover:border-primary/50'}`}
@@ -202,7 +202,7 @@ export default function KycDashboard() {
                         className="w-full bg-background border border-input rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
                         placeholder="Provide reasoning for your decision (required for rejections)..."
                         value={decisionNotes}
-                        onChange={(e) => setDecisionNotes(e.target.value)}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDecisionNotes(e.target.value)}
                         disabled={isSubmitting || selectedReview.status !== 'PENDING'}
                       />
                     </div>
