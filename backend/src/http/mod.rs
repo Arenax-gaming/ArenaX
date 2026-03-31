@@ -1,4 +1,6 @@
 pub mod health;
+pub mod idempotency;
+pub mod idempotency_examples;
 pub mod match_authority_handler;
 pub mod matchmaking;
 #[deprecated(note = "Use realtime::user_ws instead for authenticated WebSocket connections")]

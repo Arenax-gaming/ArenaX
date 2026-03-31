@@ -3,6 +3,7 @@ pub mod event_bus;
 pub mod ws_broadcaster;
 pub mod user_ws;
 pub mod session_registry;
+pub mod auth;
 
 pub use events::*;
 pub use event_bus::EventBus;

@@ -174,13 +174,20 @@ impl WsBroadcaster {
     }
 
     fn route_match_event(
-        _channel: &str,
-        _event: &RealtimeEvent,
-        _registry: &Arc<SessionRegistry>,
-        _address_book: &Arc<WsAddressBook>,
+        channel: &str,
+        event: &RealtimeEvent,
+        registry: &Arc<SessionRegistry>,
+        address_book: &Arc<WsAddressBook>,
     ) {
-        // Match events are primarily routed via user channels.
-        // This handler is for future spectator/admin features.
-        debug!("Match channel event received (spectator routing not yet implemented)");
+        // Channel format: "match:<uuid>"
+        let subscribers = registry.get_subscribers(channel);
+        
+        for session_id in subscribers {
+            if let Some(addr) = address_book.get(&session_id) {
+                addr.do_send(DeliverEvent(event.clone()));
+            }
+        }
+        
+        debug!(channel = %channel, subscriber_count = %registry.get_subscribers(channel).len(), "Routed event to match subscribers");
     }
 }
