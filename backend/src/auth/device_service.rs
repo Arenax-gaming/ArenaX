@@ -147,7 +147,7 @@ impl SecurityMonitor {
     ) -> Result<(), DeviceError> {
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -188,7 +188,7 @@ impl SecurityMonitor {
     ) -> Result<u32, DeviceError> {
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -487,7 +487,7 @@ impl DeviceService {
         // Clean up Redis cache
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 

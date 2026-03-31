@@ -1,3 +1,4 @@
+use crate::db::DbPool;
 use crate::models::{
     Transaction, TransactionResponse, TransactionStatus, TransactionType, Wallet, WalletResponse,
 };
@@ -5,7 +6,6 @@ use anyhow::Result;
 use chrono::Utc;
 // EventBus is used via crate::realtime::event_bus::EventBus
 use rust_decimal::Decimal;
-use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -28,8 +28,6 @@ pub enum WalletError {
     RedisError(String),
 }
 
-pub type DbPool = Arc<PgPool>;
-
 #[derive(Clone)]
 pub struct WalletService {
     db_pool: DbPool,
@@ -50,15 +48,14 @@ impl WalletService {
 
     /// Get wallet for a user
     pub async fn get_wallet(&self, user_id: Uuid) -> Result<Wallet, WalletError> {
-        let wallet = sqlx::query_as!(
-            Wallet,
+        let wallet = sqlx::query_as::<_, Wallet>(
             r#"
             SELECT * FROM wallets
             WHERE user_id = $1
             "#,
-            user_id
         )
-        .fetch_optional(&*self.db_pool)
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
         .await?;
 
         wallet.ok_or(WalletError::WalletNotFound)
@@ -75,8 +72,7 @@ impl WalletService {
 
     /// Create a new wallet for a user
     pub async fn create_wallet(&self, user_id: Uuid) -> Result<Wallet, WalletError> {
-        let wallet = sqlx::query_as!(
-            Wallet,
+        let wallet = sqlx::query_as::<_, Wallet>(
             r#"
             INSERT INTO wallets (
                 id, user_id, balance, escrow_balance, currency,
@@ -86,19 +82,19 @@ impl WalletService {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            "NGN",
-            0i64, // balance_ngn
-            0i64, // balance_arenax_tokens
-            0i64, // balance_xlm
-            true,
-            Utc::now(),
-            Utc::now()
         )
-        .fetch_one(&*self.db_pool)
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(Decimal::ZERO)
+        .bind(Decimal::ZERO)
+        .bind("NGN")
+        .bind(0i64)
+        .bind(0i64)
+        .bind(0i64)
+        .bind(true)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
         .await?;
 
         Ok(wallet)
@@ -112,17 +108,17 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_ngn = balance_ngn + $1, updated_at = $2
             WHERE user_id = $3
             "#,
-            amount,
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         // Publish balance update event
@@ -148,17 +144,17 @@ impl WalletService {
             });
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_ngn = balance_ngn - $1, updated_at = $2
             WHERE user_id = $3
             "#,
-            amount,
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         // Publish balance update event
@@ -175,17 +171,17 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_arenax_tokens = balance_arenax_tokens + $1, updated_at = $2
             WHERE user_id = $3
             "#,
-            amount,
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         // Publish balance update event
@@ -215,17 +211,17 @@ impl WalletService {
             });
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_arenax_tokens = balance_arenax_tokens - $1, updated_at = $2
             WHERE user_id = $3
             "#,
-            amount,
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         // Publish balance update event
@@ -251,7 +247,7 @@ impl WalletService {
             });
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_ngn = balance_ngn - $1,
@@ -259,12 +255,12 @@ impl WalletService {
                 updated_at = $3
             WHERE user_id = $4
             "#,
-            amount,
-            Decimal::from(amount),
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Decimal::from(amount))
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         Ok(())
@@ -278,7 +274,7 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE wallets
             SET balance_ngn = balance_ngn + $1,
@@ -286,12 +282,12 @@ impl WalletService {
                 updated_at = $3
             WHERE user_id = $4
             "#,
-            amount,
-            Decimal::from(amount),
-            Utc::now(),
-            user_id
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Decimal::from(amount))
+        .bind(Utc::now())
+        .bind(user_id)
+        .execute(&self.db_pool)
         .await?;
 
         Ok(())
@@ -313,8 +309,7 @@ impl WalletService {
     ) -> Result<Transaction, WalletError> {
         let reference = reference.unwrap_or_else(|| format!("TXN-{}", Uuid::new_v4()));
 
-        let transaction = sqlx::query_as!(
-            Transaction,
+        let transaction = sqlx::query_as::<_, Transaction>(
             r#"
             INSERT INTO transactions (
                 id, user_id, transaction_type, amount, currency,
@@ -322,24 +317,22 @@ impl WalletService {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, user_id,
-                transaction_type as "transaction_type: TransactionType",
-                amount, currency,
-                status as "status: TransactionStatus",
-                reference, description, metadata,
+                transaction_type, amount, currency,
+                status, reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             "#,
-            Uuid::new_v4(),
-            user_id,
-            transaction_type as TransactionType,
-            Decimal::from(amount),
-            currency,
-            TransactionStatus::Pending as TransactionStatus,
-            reference,
-            description,
-            Utc::now(),
-            Utc::now()
         )
-        .fetch_one(&*self.db_pool)
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(transaction_type)
+        .bind(Decimal::from(amount))
+        .bind(&currency)
+        .bind(TransactionStatus::Pending)
+        .bind(&reference)
+        .bind(&description)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
         .await?;
 
         Ok(transaction)
@@ -357,18 +350,18 @@ impl WalletService {
             None
         };
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE transactions
             SET status = $1, completed_at = $2, updated_at = $3
             WHERE id = $4
             "#,
-            status as TransactionStatus,
-            completed_at,
-            Utc::now(),
-            transaction_id
         )
-        .execute(&*self.db_pool)
+        .bind(status)
+        .bind(completed_at)
+        .bind(Utc::now())
+        .bind(transaction_id)
+        .execute(&self.db_pool)
         .await?;
 
         Ok(())
@@ -383,25 +376,22 @@ impl WalletService {
     ) -> Result<Vec<Transaction>, WalletError> {
         let offset = (page - 1) * per_page;
 
-        let transactions = sqlx::query_as!(
-            Transaction,
+        let transactions = sqlx::query_as::<_, Transaction>(
             r#"
             SELECT id, user_id,
-                transaction_type as "transaction_type: TransactionType",
-                amount, currency,
-                status as "status: TransactionStatus",
-                reference, description, metadata,
+                transaction_type, amount, currency,
+                status, reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             FROM transactions
             WHERE user_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
             "#,
-            user_id,
-            per_page as i64,
-            offset as i64
         )
-        .fetch_all(&*self.db_pool)
+        .bind(user_id)
+        .bind(per_page as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.db_pool)
         .await?;
 
         Ok(transactions)
@@ -412,21 +402,18 @@ impl WalletService {
         &self,
         reference: &str,
     ) -> Result<Transaction, WalletError> {
-        let transaction = sqlx::query_as!(
-            Transaction,
+        let transaction = sqlx::query_as::<_, Transaction>(
             r#"
             SELECT id, user_id,
-                transaction_type as "transaction_type: TransactionType",
-                amount, currency,
-                status as "status: TransactionStatus",
-                reference, description, metadata,
+                transaction_type, amount, currency,
+                status, reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             FROM transactions
             WHERE reference = $1
             "#,
-            reference
         )
-        .fetch_optional(&*self.db_pool)
+        .bind(reference)
+        .fetch_optional(&self.db_pool)
         .await?;
 
         transaction.ok_or(WalletError::TransactionNotFound)

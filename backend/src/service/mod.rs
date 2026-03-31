@@ -1,7 +1,10 @@
 // Service layer module for ArenaX
+pub mod auth_service;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod match_authority_service;
+#[cfg(test)]
+mod match_authority_service_test;
 pub mod match_service;
 pub mod reaper_service;
 pub mod matchmaker;
@@ -12,6 +15,7 @@ pub mod stellar_service;
 pub mod tournament_service;
 pub mod wallet_service;
 
+pub use auth_service::AuthService;
 pub use governance_service::{
     CreateProposalDto, GovernanceService, GovernanceServiceError, ProposalRecord,
     ProposalStatus as GovProposalStatus,

@@ -151,7 +151,13 @@ mod tests {
     use super::*;
 
     fn create_test_service() -> RewardSettlementService {
-        RewardSettlementService::new(DbPool)
+        // Pool is unused in current implementation (in-memory storage),
+        // so we create a lazy pool that won't actually connect.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/test")
+            .expect("failed to create lazy pool");
+        RewardSettlementService::new(pool)
     }
 
     #[test]

@@ -1,8 +1,8 @@
+use crate::db::DbPool;
 use crate::models::{StellarAccount, StellarTransaction};
 use anyhow::Result;
 use chrono::Utc;
 use redis::Client as RedisClient;
-use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -24,8 +24,6 @@ pub enum StellarError {
     #[error("Stellar SDK error: {0}")]
     StellarSdkError(String),
 }
-
-pub type DbPool = Arc<PgPool>;
 
 #[derive(Clone)]
 pub struct StellarService {
@@ -70,8 +68,7 @@ impl StellarService {
         let encrypted_secret = self.encrypt_secret_key(&secret_key)?;
 
         // Store in database
-        let account = sqlx::query_as!(
-            StellarAccount,
+        let account = sqlx::query_as::<_, StellarAccount>(
             r#"
             INSERT INTO stellar_accounts (
                 id, user_id, public_key, encrypted_secret_key, account_type,
@@ -80,18 +77,18 @@ impl StellarService {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            public_key,
-            Some(encrypted_secret),
-            account_type,
-            false,
-            true,
-            0i64,
-            Utc::now(),
-            Utc::now()
         )
-        .fetch_one(&*self.db_pool)
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(&public_key)
+        .bind(Some(&encrypted_secret))
+        .bind(account_type)
+        .bind(false)
+        .bind(true)
+        .bind(0i64)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
         .await?;
 
         tracing::info!(
@@ -105,17 +102,16 @@ impl StellarService {
 
     /// Get Stellar account by user ID
     pub async fn get_account(&self, user_id: Uuid) -> Result<StellarAccount, StellarError> {
-        let account = sqlx::query_as!(
-            StellarAccount,
+        let account = sqlx::query_as::<_, StellarAccount>(
             r#"
             SELECT * FROM stellar_accounts
             WHERE user_id = $1 AND is_active = true
             ORDER BY created_at DESC
             LIMIT 1
             "#,
-            user_id
         )
-        .fetch_optional(&*self.db_pool)
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
         .await?;
 
         account.ok_or(StellarError::AccountNotFound)
@@ -126,15 +122,14 @@ impl StellarService {
         &self,
         public_key: &str,
     ) -> Result<StellarAccount, StellarError> {
-        let account = sqlx::query_as!(
-            StellarAccount,
+        let account = sqlx::query_as::<_, StellarAccount>(
             r#"
             SELECT * FROM stellar_accounts
             WHERE public_key = $1
             "#,
-            public_key
         )
-        .fetch_optional(&*self.db_pool)
+        .bind(public_key)
+        .fetch_optional(&self.db_pool)
         .await?;
 
         account.ok_or(StellarError::AccountNotFound)
@@ -161,17 +156,17 @@ impl StellarService {
         //     .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
         // Mark account as funded
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE stellar_accounts
             SET is_funded = true, balance_xlm = $1, updated_at = $2
             WHERE public_key = $3
             "#,
-            amount,
-            Utc::now(),
-            public_key
         )
-        .execute(&*self.db_pool)
+        .bind(amount)
+        .bind(Utc::now())
+        .bind(public_key)
+        .execute(&self.db_pool)
         .await?;
 
         Ok("testnet-funding-tx-hash".to_string())
@@ -183,17 +178,17 @@ impl StellarService {
         public_key: &str,
         balance_xlm: i64,
     ) -> Result<(), StellarError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE stellar_accounts
             SET balance_xlm = $1, updated_at = $2
             WHERE public_key = $3
             "#,
-            balance_xlm,
-            Utc::now(),
-            public_key
         )
-        .execute(&*self.db_pool)
+        .bind(balance_xlm)
+        .bind(Utc::now())
+        .bind(public_key)
+        .execute(&self.db_pool)
         .await?;
 
         Ok(())
@@ -387,8 +382,7 @@ impl StellarService {
         memo: Option<String>,
         user_id: Option<Uuid>,
     ) -> Result<StellarTransaction, StellarError> {
-        let transaction = sqlx::query_as!(
-            StellarTransaction,
+        let transaction = sqlx::query_as::<_, StellarTransaction>(
             r#"
             INSERT INTO stellar_transactions (
                 id, user_id, transaction_hash, source_account, destination_account,
@@ -398,20 +392,20 @@ impl StellarService {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            tx_hash,
-            source_account,
-            destination_account,
-            amount,
-            asset_code,
-            asset_issuer,
-            operation_type,
-            memo,
-            "pending",
-            Utc::now()
         )
-        .fetch_one(&*self.db_pool)
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(tx_hash)
+        .bind(source_account)
+        .bind(destination_account)
+        .bind(amount)
+        .bind(asset_code)
+        .bind(asset_issuer)
+        .bind(operation_type)
+        .bind(&memo)
+        .bind("pending")
+        .bind(Utc::now())
+        .fetch_one(&self.db_pool)
         .await?;
 
         Ok(transaction)
@@ -449,15 +443,14 @@ impl StellarService {
 
     /// Get transaction by hash
     pub async fn get_transaction(&self, tx_hash: &str) -> Result<StellarTransaction, StellarError> {
-        let transaction = sqlx::query_as!(
-            StellarTransaction,
+        let transaction = sqlx::query_as::<_, StellarTransaction>(
             r#"
             SELECT * FROM stellar_transactions
             WHERE transaction_hash = $1
             "#,
-            tx_hash
         )
-        .fetch_optional(&*self.db_pool)
+        .bind(tx_hash)
+        .fetch_optional(&self.db_pool)
         .await?;
 
         transaction.ok_or(StellarError::TransactionFailed(

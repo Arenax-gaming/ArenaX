@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::DbPool;
     use crate::models::match_authority::*;
     use crate::service::match_authority_service::MatchAuthorityService;
     use crate::service::soroban_service::{NetworkConfig, SorobanService};
@@ -9,7 +8,10 @@ mod tests {
 
     /// Helper to create a test service instance
     fn create_test_service() -> MatchAuthorityService {
-        let db_pool = DbPool::default(); // Mock pool for unit tests
+        let db_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/test")
+            .expect("failed to create lazy pool");
         let soroban_service = Arc::new(SorobanService::new(NetworkConfig::testnet()));
         let contract_id = "CTEST123".to_string();
 
