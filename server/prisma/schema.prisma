@@ -178,6 +178,13 @@ model BlockchainEvent {
   createdAt     DateTime @default(now())
 
   @@index([namespace, schemaVersion, eventType])
+  id         String   @id @default(uuid())
+  eventType  String // e.g., PAY_DONE
+  contractId String
+  txHash     String
+  ledger     Int
+  data       Json
+  createdAt  DateTime @default(now())
 }
 
 enum WalletKeyAccessAction {

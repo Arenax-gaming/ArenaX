@@ -10,5 +10,9 @@ pub struct TournamentFinalized {
 }
 
 pub fn emit_tournament_finalized(env: &Env, tournament_id: &BytesN<32>, finalized_at: u64) {
-    TournamentFinalized { tournament_id: tournament_id.clone(), finalized_at }.publish(env);
+    TournamentFinalized {
+        tournament_id: tournament_id.clone(),
+        finalized_at,
+    }
+    .publish(env);
 }

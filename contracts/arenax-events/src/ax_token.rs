@@ -23,13 +23,26 @@ pub struct TransferEvent {
 }
 
 pub fn emit_mint(env: &Env, to: &Address, amount: i128) {
-    MintEvent { to: to.clone(), amount }.publish(env);
+    MintEvent {
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emit_burn(env: &Env, from: &Address, amount: i128) {
-    BurnEvent { from: from.clone(), amount }.publish(env);
+    BurnEvent {
+        from: from.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emit_transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
-    TransferEvent { from: from.clone(), to: to.clone(), amount }.publish(env);
+    TransferEvent {
+        from: from.clone(),
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
 }

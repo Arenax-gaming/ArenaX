@@ -83,7 +83,13 @@ pub fn emit_reputation_updated(
     .publish(env);
 }
 
-pub fn emit_match_recorded(env: &Env, player: &Address, outcome: u32, match_id: u64, timestamp: u64) {
+pub fn emit_match_recorded(
+    env: &Env,
+    player: &Address,
+    outcome: u32,
+    match_id: u64,
+    timestamp: u64,
+) {
     MatchRecorded {
         player: player.clone(),
         outcome,

@@ -38,7 +38,12 @@ pub struct MatchResolved {
     pub winner: Address,
 }
 
-pub fn emit_match_created(env: &Env, match_id: &BytesN<32>, player_a: &Address, player_b: &Address) {
+pub fn emit_match_created(
+    env: &Env,
+    match_id: &BytesN<32>,
+    player_a: &Address,
+    player_b: &Address,
+) {
     MatchCreated {
         match_id: match_id.clone(),
         player_a: player_a.clone(),

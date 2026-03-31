@@ -137,7 +137,13 @@ impl ContractRegistry {
             .instance()
             .set(&DataKey::Contract(name.clone()), &contract_info);
 
-        events::emit_contract_updated(&env, name, &old_address, &new_address, &env.current_contract_address());
+        events::emit_contract_updated(
+            &env,
+            name,
+            &old_address,
+            &new_address,
+            &env.current_contract_address(),
+        );
     }
 
     /// Remove a contract from the registry
@@ -404,7 +410,12 @@ impl ContractRegistry {
                 .instance()
                 .set(&DataKey::Contract(name.clone()), &contract_info);
 
-            events::emit_contract_registered(&env, name.clone(), &address, &env.current_contract_address());
+            events::emit_contract_registered(
+                &env,
+                name.clone(),
+                &address,
+                &env.current_contract_address(),
+            );
         }
 
         let mut contract_list: Vec<Symbol> = env

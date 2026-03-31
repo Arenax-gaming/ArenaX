@@ -1,18 +1,18 @@
 #![no_std]
 
-pub mod reputation;
-pub mod reputation_index;
+pub mod anti_cheat;
+pub mod auth_gateway;
+pub mod ax_token;
+pub mod contract_registry;
+pub mod dispute;
+pub mod escrow;
+pub mod governance;
+pub mod identity;
 pub mod match_contract;
 pub mod match_lifecycle;
-pub mod escrow;
+pub mod registry;
+pub mod reputation;
+pub mod reputation_index;
 pub mod slashing;
-pub mod governance;
 pub mod staking;
 pub mod tournament;
-pub mod anti_cheat;
-pub mod dispute;
-pub mod registry;
-pub mod contract_registry;
-pub mod auth_gateway;
-pub mod identity;
-pub mod ax_token;

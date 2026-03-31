@@ -19,10 +19,34 @@ pub struct DisputeResolved {
     pub operator: Address,
 }
 
-pub fn emit_dispute_opened(env: &Env, match_id: &BytesN<32>, reason: &String, evidence_ref: &String, deadline: u64) {
-    DisputeOpened { match_id: match_id.clone(), reason: reason.clone(), evidence_ref: evidence_ref.clone(), deadline }.publish(env);
+pub fn emit_dispute_opened(
+    env: &Env,
+    match_id: &BytesN<32>,
+    reason: &String,
+    evidence_ref: &String,
+    deadline: u64,
+) {
+    DisputeOpened {
+        match_id: match_id.clone(),
+        reason: reason.clone(),
+        evidence_ref: evidence_ref.clone(),
+        deadline,
+    }
+    .publish(env);
 }
 
-pub fn emit_dispute_resolved(env: &Env, match_id: &BytesN<32>, decision: &String, resolved_at: u64, operator: &Address) {
-    DisputeResolved { match_id: match_id.clone(), decision: decision.clone(), resolved_at, operator: operator.clone() }.publish(env);
+pub fn emit_dispute_resolved(
+    env: &Env,
+    match_id: &BytesN<32>,
+    decision: &String,
+    resolved_at: u64,
+    operator: &Address,
+) {
+    DisputeResolved {
+        match_id: match_id.clone(),
+        decision: decision.clone(),
+        resolved_at,
+        operator: operator.clone(),
+    }
+    .publish(env);
 }

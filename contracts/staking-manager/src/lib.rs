@@ -1,9 +1,7 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, BytesN, Env,
-};
 use arenax_events::staking as events;
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -21,10 +21,8 @@
 //! - Cannot call itself directly (SelfCallNotAllowed)
 //! - Threshold invariants enforced at all times
 
-use soroban_sdk::{
-    contract, contractimpl, Address, Bytes, BytesN, Env, Symbol, Vec,
-};
 use arenax_events::governance as events;
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 mod error;
 mod storage;
@@ -185,7 +183,14 @@ impl GovernanceMultisig {
         storage::set_proposal_approvals(&env, &proposal_id, &approvals);
 
         // Emit event
-        events::emit_proposal_created(&env, &proposal_id, &proposer, &target_contract, function, execute_after);
+        events::emit_proposal_created(
+            &env,
+            &proposal_id,
+            &proposer,
+            &target_contract,
+            function,
+            execute_after,
+        );
 
         Ok(())
     }
@@ -269,7 +274,13 @@ impl GovernanceMultisig {
         storage::set_proposal(&env, &proposal);
 
         // Emit event
-        events::emit_proposal_approved(&env, &proposal_id, &signer, proposal.approval_count, config.threshold);
+        events::emit_proposal_approved(
+            &env,
+            &proposal_id,
+            &signer,
+            proposal.approval_count,
+            config.threshold,
+        );
 
         Ok(())
     }
@@ -441,7 +452,13 @@ impl GovernanceMultisig {
             env.invoke_contract(&proposal.target_contract, &proposal.function, empty_args);
 
         // Emit event
-        events::emit_proposal_executed(&env, &proposal_id, &executor, &proposal.target_contract, proposal.function);
+        events::emit_proposal_executed(
+            &env,
+            &proposal_id,
+            &executor,
+            &proposal.target_contract,
+            proposal.function,
+        );
 
         Ok(())
     }

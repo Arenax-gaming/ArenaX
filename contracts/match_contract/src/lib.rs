@@ -1,8 +1,6 @@
 #![no_std]
 use arenax_events::match_contract as events;
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -115,7 +115,14 @@ impl MatchLifecycleContract {
             .persistent()
             .set(&DataKey::Match(match_id.clone()), &match_data);
 
-        events::emit_match_created(&env, &match_id, &players, &match_data.stake_asset, match_data.stake_amount, created_at);
+        events::emit_match_created(
+            &env,
+            &match_id,
+            &players,
+            &match_data.stake_asset,
+            match_data.stake_amount,
+            created_at,
+        );
     }
 
     /// Submit a result for a match. Reporter must be a participant.

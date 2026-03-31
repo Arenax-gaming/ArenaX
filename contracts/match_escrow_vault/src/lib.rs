@@ -439,7 +439,14 @@ impl MatchEscrowVault {
 
         Self::release_reentrancy_guard(&env, &match_id);
 
-        events::emit_funds_refunded(&env, &match_id, &escrow.player_a, &escrow.player_b, escrow.amount, &escrow.asset);
+        events::emit_funds_refunded(
+            &env,
+            &match_id,
+            &escrow.player_a,
+            &escrow.player_b,
+            escrow.amount,
+            &escrow.asset,
+        );
     }
 
     /// Mark escrow as disputed

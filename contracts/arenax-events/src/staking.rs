@@ -65,41 +65,88 @@ pub struct ContractPaused {
 }
 
 pub fn emit_initialized(env: &Env, admin: &Address, ax_token: &Address) {
-    Initialized { admin: admin.clone(), ax_token: ax_token.clone() }.publish(env);
+    Initialized {
+        admin: admin.clone(),
+        ax_token: ax_token.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_token_set(env: &Env, token: &Address) {
-    TokenSet { token: token.clone() }.publish(env);
+    TokenSet {
+        token: token.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_tournament_contract_set(env: &Env, contract: &Address) {
-    TournamentContractSet { contract: contract.clone() }.publish(env);
+    TournamentContractSet {
+        contract: contract.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_dispute_contract_set(env: &Env, contract: &Address) {
-    DisputeContractSet { contract: contract.clone() }.publish(env);
+    DisputeContractSet {
+        contract: contract.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_staked(env: &Env, user: &Address, tournament_id: &BytesN<32>, amount: i128) {
-    Staked { user: user.clone(), tournament_id: tournament_id.clone(), amount }.publish(env);
+    Staked {
+        user: user.clone(),
+        tournament_id: tournament_id.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emit_withdrawn(env: &Env, user: &Address, tournament_id: &BytesN<32>, amount: i128) {
-    Withdrawn { user: user.clone(), tournament_id: tournament_id.clone(), amount }.publish(env);
+    Withdrawn {
+        user: user.clone(),
+        tournament_id: tournament_id.clone(),
+        amount,
+    }
+    .publish(env);
 }
 
-pub fn emit_slashed(env: &Env, user: &Address, tournament_id: &BytesN<32>, amount: i128, slashed_by: &Address) {
-    Slashed { user: user.clone(), tournament_id: tournament_id.clone(), amount, slashed_by: slashed_by.clone() }.publish(env);
+pub fn emit_slashed(
+    env: &Env,
+    user: &Address,
+    tournament_id: &BytesN<32>,
+    amount: i128,
+    slashed_by: &Address,
+) {
+    Slashed {
+        user: user.clone(),
+        tournament_id: tournament_id.clone(),
+        amount,
+        slashed_by: slashed_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_tournament_created(env: &Env, tournament_id: &BytesN<32>, stake_requirement: i128) {
-    TournamentCreated { tournament_id: tournament_id.clone(), stake_requirement }.publish(env);
+    TournamentCreated {
+        tournament_id: tournament_id.clone(),
+        stake_requirement,
+    }
+    .publish(env);
 }
 
 pub fn emit_tournament_updated(env: &Env, tournament_id: &BytesN<32>, state: u32) {
-    TournamentUpdated { tournament_id: tournament_id.clone(), state }.publish(env);
+    TournamentUpdated {
+        tournament_id: tournament_id.clone(),
+        state,
+    }
+    .publish(env);
 }
 
 pub fn emit_contract_paused(env: &Env, paused: bool, paused_by: &Address) {
-    ContractPaused { paused, paused_by: paused_by.clone() }.publish(env);
+    ContractPaused {
+        paused,
+        paused_by: paused_by.clone(),
+    }
+    .publish(env);
 }

@@ -70,37 +70,109 @@ pub struct ThresholdUpdated {
 }
 
 pub fn emit_governance_initialized(env: &Env, signers_count: u32, threshold: u32, timestamp: u64) {
-    GovernanceInitialized { signers_count, threshold, timestamp }.publish(env);
+    GovernanceInitialized {
+        signers_count,
+        threshold,
+        timestamp,
+    }
+    .publish(env);
 }
 
-pub fn emit_proposal_created(env: &Env, proposal_id: &BytesN<32>, proposer: &Address, target: &Address, function: Symbol, execute_after: Option<u64>) {
-    ProposalCreated { proposal_id: proposal_id.clone(), proposer: proposer.clone(), target: target.clone(), function, execute_after }.publish(env);
+pub fn emit_proposal_created(
+    env: &Env,
+    proposal_id: &BytesN<32>,
+    proposer: &Address,
+    target: &Address,
+    function: Symbol,
+    execute_after: Option<u64>,
+) {
+    ProposalCreated {
+        proposal_id: proposal_id.clone(),
+        proposer: proposer.clone(),
+        target: target.clone(),
+        function,
+        execute_after,
+    }
+    .publish(env);
 }
 
-pub fn emit_proposal_approved(env: &Env, proposal_id: &BytesN<32>, signer: &Address, approval_count: u32, threshold: u32) {
-    ProposalApproved { proposal_id: proposal_id.clone(), signer: signer.clone(), approval_count, threshold }.publish(env);
+pub fn emit_proposal_approved(
+    env: &Env,
+    proposal_id: &BytesN<32>,
+    signer: &Address,
+    approval_count: u32,
+    threshold: u32,
+) {
+    ProposalApproved {
+        proposal_id: proposal_id.clone(),
+        signer: signer.clone(),
+        approval_count,
+        threshold,
+    }
+    .publish(env);
 }
 
-pub fn emit_approval_revoked(env: &Env, proposal_id: &BytesN<32>, signer: &Address, approval_count: u32) {
-    ApprovalRevoked { proposal_id: proposal_id.clone(), signer: signer.clone(), approval_count }.publish(env);
+pub fn emit_approval_revoked(
+    env: &Env,
+    proposal_id: &BytesN<32>,
+    signer: &Address,
+    approval_count: u32,
+) {
+    ApprovalRevoked {
+        proposal_id: proposal_id.clone(),
+        signer: signer.clone(),
+        approval_count,
+    }
+    .publish(env);
 }
 
-pub fn emit_proposal_executed(env: &Env, proposal_id: &BytesN<32>, executor: &Address, target: &Address, function: Symbol) {
-    ProposalExecuted { proposal_id: proposal_id.clone(), executor: executor.clone(), target: target.clone(), function }.publish(env);
+pub fn emit_proposal_executed(
+    env: &Env,
+    proposal_id: &BytesN<32>,
+    executor: &Address,
+    target: &Address,
+    function: Symbol,
+) {
+    ProposalExecuted {
+        proposal_id: proposal_id.clone(),
+        executor: executor.clone(),
+        target: target.clone(),
+        function,
+    }
+    .publish(env);
 }
 
 pub fn emit_proposal_cancelled(env: &Env, proposal_id: &BytesN<32>, cancelled_by: &Address) {
-    ProposalCancelled { proposal_id: proposal_id.clone(), cancelled_by: cancelled_by.clone() }.publish(env);
+    ProposalCancelled {
+        proposal_id: proposal_id.clone(),
+        cancelled_by: cancelled_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_signer_added(env: &Env, signer: &Address, proposal_id: &BytesN<32>, new_count: u32) {
-    SignerAdded { signer: signer.clone(), proposal_id: proposal_id.clone(), new_count }.publish(env);
+    SignerAdded {
+        signer: signer.clone(),
+        proposal_id: proposal_id.clone(),
+        new_count,
+    }
+    .publish(env);
 }
 
 pub fn emit_signer_removed(env: &Env, signer: &Address, proposal_id: &BytesN<32>, new_count: u32) {
-    SignerRemoved { signer: signer.clone(), proposal_id: proposal_id.clone(), new_count }.publish(env);
+    SignerRemoved {
+        signer: signer.clone(),
+        proposal_id: proposal_id.clone(),
+        new_count,
+    }
+    .publish(env);
 }
 
 pub fn emit_threshold_updated(env: &Env, old: u32, new: u32, proposal_id: &BytesN<32>) {
-    ThresholdUpdated { old, new, proposal_id: proposal_id.clone() }.publish(env);
+    ThresholdUpdated {
+        old,
+        new,
+        proposal_id: proposal_id.clone(),
+    }
+    .publish(env);
 }

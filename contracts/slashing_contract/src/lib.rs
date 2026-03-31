@@ -21,9 +21,7 @@
 //! - All actions emit events for auditability
 
 use arenax_events::slashing as events;
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol};
 
 // ============================================================================
 // Data Types
@@ -216,7 +214,14 @@ impl SlashingContract {
             .persistent()
             .set(&DataKey::SlashCase(case_id.clone()), &slash_case);
 
-        events::emit_case_opened(&env, &case_id, &subject, &initiator, reason_code, &evidence_hash);
+        events::emit_case_opened(
+            &env,
+            &case_id,
+            &subject,
+            &initiator,
+            reason_code,
+            &evidence_hash,
+        );
     }
 
     /// Approve a slashing case for execution

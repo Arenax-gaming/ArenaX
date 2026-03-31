@@ -13,6 +13,22 @@ pub struct AntiCheatFlag {
     pub timestamp: u64,
 }
 
-pub fn emit_anticheat_flag(env: &Env, player: &Address, match_id: u64, severity: u32, penalty_applied: i128, oracle: &Address, timestamp: u64) {
-    AntiCheatFlag { player: player.clone(), match_id, severity, penalty_applied, oracle: oracle.clone(), timestamp }.publish(env);
+pub fn emit_anticheat_flag(
+    env: &Env,
+    player: &Address,
+    match_id: u64,
+    severity: u32,
+    penalty_applied: i128,
+    oracle: &Address,
+    timestamp: u64,
+) {
+    AntiCheatFlag {
+        player: player.clone(),
+        match_id,
+        severity,
+        penalty_applied,
+        oracle: oracle.clone(),
+        timestamp,
+    }
+    .publish(env);
 }

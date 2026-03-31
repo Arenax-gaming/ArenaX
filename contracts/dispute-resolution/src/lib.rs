@@ -2,8 +2,7 @@
 
 use arenax_events::dispute as events;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String,
-    Symbol,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String, Symbol,
 };
 
 #[contracttype]

@@ -1,8 +1,6 @@
 #![no_std]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec,
-};
 use arenax_events::tournament as events;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec};
 
 // Data Structures
 

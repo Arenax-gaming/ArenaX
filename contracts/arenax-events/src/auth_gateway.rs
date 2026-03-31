@@ -54,25 +54,50 @@ pub struct ContractPaused {
 }
 
 pub fn emit_initialized(env: &Env, admin: &Address) {
-    Initialized { admin: admin.clone() }.publish(env);
+    Initialized {
+        admin: admin.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_role_assigned(env: &Env, address: &Address, role: Role, assigned_by: &Address) {
-    RoleAssigned { address: address.clone(), role, assigned_by: assigned_by.clone() }.publish(env);
+    RoleAssigned {
+        address: address.clone(),
+        role,
+        assigned_by: assigned_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_role_revoked(env: &Env, address: &Address, role: Role, revoked_by: &Address) {
-    RoleRevoked { address: address.clone(), role, revoked_by: revoked_by.clone() }.publish(env);
+    RoleRevoked {
+        address: address.clone(),
+        role,
+        revoked_by: revoked_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_contract_whitelisted(env: &Env, contract_address: &Address, whitelisted_by: &Address) {
-    ContractWhitelisted { contract_address: contract_address.clone(), whitelisted_by: whitelisted_by.clone() }.publish(env);
+    ContractWhitelisted {
+        contract_address: contract_address.clone(),
+        whitelisted_by: whitelisted_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_contract_removed(env: &Env, contract_address: &Address, removed_by: &Address) {
-    ContractRemoved { contract_address: contract_address.clone(), removed_by: removed_by.clone() }.publish(env);
+    ContractRemoved {
+        contract_address: contract_address.clone(),
+        removed_by: removed_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_contract_paused(env: &Env, paused: bool, paused_by: &Address) {
-    ContractPaused { paused, paused_by: paused_by.clone() }.publish(env);
+    ContractPaused {
+        paused,
+        paused_by: paused_by.clone(),
+    }
+    .publish(env);
 }

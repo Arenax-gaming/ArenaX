@@ -37,21 +37,55 @@ pub struct RegistryPaused {
 }
 
 pub fn emit_initialized(env: &Env, admin: &Address) {
-    Initialized { admin: admin.clone() }.publish(env);
+    Initialized {
+        admin: admin.clone(),
+    }
+    .publish(env);
 }
 
-pub fn emit_contract_registered(env: &Env, name: Symbol, address: &Address, registered_by: &Address) {
-    ContractRegistered { name, address: address.clone(), registered_by: registered_by.clone() }.publish(env);
+pub fn emit_contract_registered(
+    env: &Env,
+    name: Symbol,
+    address: &Address,
+    registered_by: &Address,
+) {
+    ContractRegistered {
+        name,
+        address: address.clone(),
+        registered_by: registered_by.clone(),
+    }
+    .publish(env);
 }
 
-pub fn emit_contract_updated(env: &Env, name: Symbol, old_address: &Address, new_address: &Address, updated_by: &Address) {
-    ContractUpdated { name, old_address: old_address.clone(), new_address: new_address.clone(), updated_by: updated_by.clone() }.publish(env);
+pub fn emit_contract_updated(
+    env: &Env,
+    name: Symbol,
+    old_address: &Address,
+    new_address: &Address,
+    updated_by: &Address,
+) {
+    ContractUpdated {
+        name,
+        old_address: old_address.clone(),
+        new_address: new_address.clone(),
+        updated_by: updated_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_contract_removed(env: &Env, name: Symbol, address: &Address, removed_by: &Address) {
-    ContractRemoved { name, address: address.clone(), removed_by: removed_by.clone() }.publish(env);
+    ContractRemoved {
+        name,
+        address: address.clone(),
+        removed_by: removed_by.clone(),
+    }
+    .publish(env);
 }
 
 pub fn emit_registry_paused(env: &Env, paused: bool, paused_by: &Address) {
-    RegistryPaused { paused, paused_by: paused_by.clone() }.publish(env);
+    RegistryPaused {
+        paused,
+        paused_by: paused_by.clone(),
+    }
+    .publish(env);
 }

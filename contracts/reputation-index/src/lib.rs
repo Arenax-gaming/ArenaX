@@ -76,7 +76,13 @@ impl ReputationIndex {
                 .set(&DataKey::Reputation(player.clone()), &rep);
 
             // Emit reputation_changed event
-            reputation_index::emit_reputation_changed(&env, &player, skill_delta, fair_play_delta, match_id);
+            reputation_index::emit_reputation_changed(
+                &env,
+                &player,
+                skill_delta,
+                fair_play_delta,
+                match_id,
+            );
         }
     }
 
@@ -92,7 +98,12 @@ impl ReputationIndex {
             .set(&DataKey::Reputation(addr.clone()), &rep);
 
         // Emit decay event
-        reputation_index::emit_reputation_decayed(&env, &addr, old_skill - rep.skill, old_fair_play - rep.fair_play);
+        reputation_index::emit_reputation_decayed(
+            &env,
+            &addr,
+            old_skill - rep.skill,
+            old_fair_play - rep.fair_play,
+        );
     }
 
     /// Get current reputation for a player.

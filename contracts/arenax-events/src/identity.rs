@@ -10,5 +10,9 @@ pub struct RoleSet {
 }
 
 pub fn emit_role_set(env: &Env, user: &Address, role: u32) {
-    RoleSet { user: user.clone(), role }.publish(env);
+    RoleSet {
+        user: user.clone(),
+        role,
+    }
+    .publish(env);
 }
