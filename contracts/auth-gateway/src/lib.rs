@@ -1,19 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env, Vec};
-
-#[contracttype]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum Role {
-    None = 0,
-    Admin = 1,
-    Operator = 2,
-    Referee = 3,
-    Player = 4,
-    TournamentManager = 5,
-    Treasury = 6,
-}
+use arenax_events::auth_gateway as events;
+pub use arenax_events::auth_gateway::Role;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,43 +11,6 @@ pub enum DataKey {
     Role(Address),
     ContractWhitelist(Address),
     Paused,
-}
-
-#[contractevent]
-pub struct Initialized {
-    pub admin: Address,
-}
-
-#[contractevent]
-pub struct RoleAssigned {
-    pub address: Address,
-    pub role: Role,
-    pub assigned_by: Address,
-}
-
-#[contractevent]
-pub struct RoleRevoked {
-    pub address: Address,
-    pub role: Role,
-    pub revoked_by: Address,
-}
-
-#[contractevent]
-pub struct ContractWhitelisted {
-    pub contract_address: Address,
-    pub whitelisted_by: Address,
-}
-
-#[contractevent]
-pub struct ContractRemoved {
-    pub contract_address: Address,
-    pub removed_by: Address,
-}
-
-#[contractevent]
-pub struct ContractPaused {
-    pub paused: bool,
-    pub paused_by: Address,
 }
 
 #[contract]
@@ -82,7 +34,7 @@ impl AuthGateway {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
 
-        Initialized { admin }.publish(&env);
+        events::emit_initialized(&env, &admin);
     }
 
     /// Assign a role to an address
@@ -114,12 +66,7 @@ impl AuthGateway {
             .instance()
             .set(&DataKey::Role(address.clone()), &role);
 
-        RoleAssigned {
-            address,
-            role,
-            assigned_by: admin,
-        }
-        .publish(&env);
+        events::emit_role_assigned(&env, &address, role, &admin);
     }
 
     /// Revoke a role from an address
@@ -149,12 +96,7 @@ impl AuthGateway {
             .instance()
             .remove(&DataKey::Role(address.clone()));
 
-        RoleRevoked {
-            address,
-            role: current_role,
-            revoked_by: admin,
-        }
-        .publish(&env);
+        events::emit_role_revoked(&env, &address, current_role, &admin);
     }
 
     /// Whitelist a contract to use the auth gateway
@@ -183,11 +125,7 @@ impl AuthGateway {
             .instance()
             .set(&DataKey::ContractWhitelist(contract_address.clone()), &true);
 
-        ContractWhitelisted {
-            contract_address,
-            whitelisted_by: admin,
-        }
-        .publish(&env);
+        events::emit_contract_whitelisted(&env, &contract_address, &admin);
     }
 
     /// Remove a contract from the whitelist
@@ -216,11 +154,7 @@ impl AuthGateway {
             .instance()
             .remove(&DataKey::ContractWhitelist(contract_address.clone()));
 
-        ContractRemoved {
-            contract_address,
-            removed_by: admin,
-        }
-        .publish(&env);
+        events::emit_contract_removed(&env, &contract_address, &admin);
     }
 
     /// Pause/unpause the contract
@@ -236,11 +170,7 @@ impl AuthGateway {
 
         env.storage().instance().set(&DataKey::Paused, &paused);
 
-        ContractPaused {
-            paused,
-            paused_by: admin,
-        }
-        .publish(&env);
+        events::emit_contract_paused(&env, paused, &admin);
     }
 
     /// Get the role of an address
@@ -350,12 +280,7 @@ impl AuthGateway {
                 .instance()
                 .set(&DataKey::Role(address.clone()), &role);
 
-            RoleAssigned {
-                address: address.clone(),
-                role,
-                assigned_by: env.current_contract_address(),
-            }
-            .publish(&env);
+            events::emit_role_assigned(&env, &address, role, &env.current_contract_address());
         }
     }
 
@@ -399,19 +324,8 @@ impl AuthGateway {
             .instance()
             .set(&DataKey::Role(new_admin.clone()), &Role::Admin);
 
-        RoleAssigned {
-            address: new_admin.clone(),
-            role: Role::Admin,
-            assigned_by: current_admin.clone(),
-        }
-        .publish(&env);
-
-        RoleRevoked {
-            address: current_admin,
-            role: Role::Admin,
-            revoked_by: new_admin,
-        }
-        .publish(&env);
+        events::emit_role_assigned(&env, &new_admin, Role::Admin, &current_admin);
+        events::emit_role_revoked(&env, &current_admin, Role::Admin, &new_admin);
     }
 
     // Helper functions for internal use

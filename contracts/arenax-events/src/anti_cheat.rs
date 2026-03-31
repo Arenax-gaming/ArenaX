@@ -1,7 +1,9 @@
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, Env};
 
-/// Event type for anti-cheat; includes AntiCheatFlag for confirmations.
-#[contractevent(topics = ["ArenaXAntiCheat", "FLAG"])]
+pub const NAMESPACE: &str = "ArenaXAntiCheat";
+pub const VERSION: &str = "v1";
+
+#[contractevent(topics = ["ArenaXAC_v1", "FLAG"])]
 pub struct AntiCheatFlag {
     pub player: Address,
     pub match_id: u64,
@@ -12,7 +14,7 @@ pub struct AntiCheatFlag {
 }
 
 pub fn emit_anticheat_flag(
-    env: &soroban_sdk::Env,
+    env: &Env,
     player: &Address,
     match_id: u64,
     severity: u32,
