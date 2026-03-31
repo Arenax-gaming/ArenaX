@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/Users/user/Desktop/Projects/ArenaX/server/logs/.025f5e66b7d83365685fb718859d677c45fd6748-audit.json",
+    "files": [
+        {
+            "date": 1774801577870,
+            "name": "/Users/user/Desktop/Projects/ArenaX/server/logs/error-2026-03-29.log",
+            "hash": "ce33207732450567f998d269123777796ad6a5b892d0151044302d2f5421c514"
+        }
+    ],
+    "hashType": "sha256"
+}
