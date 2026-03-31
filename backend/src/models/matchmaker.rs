@@ -95,7 +95,7 @@ pub struct MatchmakingConfig {
     pub elo_bucket_size: i32,
     pub max_elo_gap: i32,
     pub expansion_intervals: Vec<i64>, // in seconds
-    pub max_wait_time: i64, // in seconds
+    pub max_wait_time: i64,            // in seconds
     pub min_players_per_match: usize,
     pub max_players_per_match: usize,
 }
@@ -106,7 +106,7 @@ impl Default for MatchmakingConfig {
             elo_bucket_size: 100,
             max_elo_gap: 500,
             expansion_intervals: vec![30, 60, 120, 300], // 30s, 1m, 2m, 5m
-            max_wait_time: 600, // 10 minutes
+            max_wait_time: 600,                          // 10 minutes
             min_players_per_match: 2,
             max_players_per_match: 2,
         }

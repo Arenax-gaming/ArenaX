@@ -102,7 +102,7 @@ pub async fn get_player_reputation(
     .bind(user_id)
     .fetch_optional(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?
+    .map_err(ApiError::database_error)?
     .ok_or_else(|| ApiError::not_found("User not found"))?;
 
     let response = ReputationResponse::from(PlayerReputation {
@@ -141,7 +141,7 @@ pub async fn get_my_reputation(
     .bind(uid)
     .fetch_one(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     let rep = ReputationResponse::from(PlayerReputation {
         user_id: reputation.user_id,
@@ -189,7 +189,7 @@ pub async fn get_reputation_history(
     .bind(offset)
     .fetch_all(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(history)))
 }
@@ -222,7 +222,7 @@ pub async fn get_bad_actors(
     .bind(offset)
     .fetch_all(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     let bad_actors: Vec<serde_json::Value> = rows
         .iter()
@@ -258,18 +258,18 @@ pub async fn remove_bad_actor_flag(
     .bind(user_id)
     .execute(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
-        "message": "Bad actor flag removed",
-        "user_id": user_id
-    }))))
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
+            "message": "Bad actor flag removed",
+            "user_id": user_id
+        }))),
+    )
 }
 
 /// Get reputation statistics (admin only)
-pub async fn get_reputation_stats(
-    pool: web::Data<sqlx::PgPool>,
-) -> Result<HttpResponse, ApiError> {
+pub async fn get_reputation_stats(pool: web::Data<sqlx::PgPool>) -> Result<HttpResponse, ApiError> {
     let row = sqlx::query(
         r#"
         SELECT 
@@ -284,7 +284,7 @@ pub async fn get_reputation_stats(
     )
     .fetch_one(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     let response = serde_json::json!({
         "bad_actors_count": row.try_get::<i64, _>("bad_actors_count").unwrap_or(0),

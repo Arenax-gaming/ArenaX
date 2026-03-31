@@ -1,6 +1,6 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
-use crate::models::{Match, MatchType, MatchStatus, QueueStatus, UserElo};
+use crate::models::{Match, MatchStatus, MatchType, QueueStatus};
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -82,10 +82,10 @@ impl MatchmakerService {
     /// Start the background matchmaker worker
     pub async fn start_matchmaker_worker(&self) -> Result<(), ApiError> {
         let mut interval = interval(MATCHMAKER_INTERVAL);
-        
+
         loop {
             interval.tick().await;
-            
+
             if let Err(e) = self.process_matchmaking().await {
                 tracing::error!("Matchmaker processing error: {:?}", e);
             }
@@ -94,19 +94,23 @@ impl MatchmakerService {
 
     /// Main matchmaking processing loop
     async fn process_matchmaking(&self) -> Result<(), ApiError> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
 
         // Get all active games
         let active_games = self.get_active_games().await?;
-        
+
         for game in active_games {
             // Process each game mode
             let game_modes = self.get_active_game_modes(&game).await?;
-            
+
             for game_mode in game_modes {
                 // Find matches for this game/mode combination
-                self.find_matches_for_game_mode(&mut conn, &game, &game_mode).await?;
+                self.find_matches_for_game_mode(&mut conn, &game, &game_mode)
+                    .await?;
             }
         }
 
@@ -122,7 +126,7 @@ impl MatchmakerService {
     ) -> Result<(), ApiError> {
         // Get all queue entries for this game/mode
         let queue_entries = self.get_queue_entries(conn, game, game_mode).await?;
-        
+
         if queue_entries.len() < self.config.min_players_per_match {
             return Ok(());
         }
@@ -141,7 +145,10 @@ impl MatchmakerService {
             }
 
             // Find best match for this player
-            if let Some(candidate) = self.find_best_match_for_player(entry, &sorted_entries[i..], &processed_players).await {
+            if let Some(candidate) = self
+                .find_best_match_for_player(entry, &sorted_entries[i..], &processed_players)
+                .await
+            {
                 processed_players.insert(candidate.player1.user_id);
                 processed_players.insert(candidate.player2.user_id);
                 matches_found.push(candidate);
@@ -151,10 +158,12 @@ impl MatchmakerService {
         // Create matches in database
         for candidate in &matches_found {
             self.create_match_from_candidate(candidate).await?;
-            
+
             // Remove players from queue
-            self.remove_from_queue(conn, &candidate.player1.user_id, game, game_mode).await?;
-            self.remove_from_queue(conn, &candidate.player2.user_id, game, game_mode).await?;
+            self.remove_from_queue(conn, &candidate.player1.user_id, game, game_mode)
+                .await?;
+            self.remove_from_queue(conn, &candidate.player2.user_id, game, game_mode)
+                .await?;
         }
 
         Ok(())
@@ -171,13 +180,14 @@ impl MatchmakerService {
         let mut best_score = -1.0;
 
         for candidate in candidates {
-            if candidate.user_id == player.user_id || processed_players.contains(&candidate.user_id) {
+            if candidate.user_id == player.user_id || processed_players.contains(&candidate.user_id)
+            {
                 continue;
             }
 
             // Calculate ELO gap
             let elo_gap = (player.current_elo - candidate.current_elo).abs();
-            
+
             // Skip if ELO gap exceeds maximum for current wait time
             let max_gap = self.calculate_max_elo_gap(player);
             if elo_gap > max_gap {
@@ -186,7 +196,7 @@ impl MatchmakerService {
 
             // Calculate match quality score (0.0 to 1.0)
             let match_quality = self.calculate_match_quality(player, candidate, elo_gap);
-            
+
             // Update best candidate if this is better
             if match_quality > best_score {
                 best_score = match_quality;
@@ -208,7 +218,7 @@ impl MatchmakerService {
         let wait_seconds = wait_time.num_seconds() as u64;
 
         let mut max_gap = self.config.elo_bucket_size;
-        
+
         for interval in &self.config.expansion_intervals {
             if wait_seconds > interval.as_secs() {
                 max_gap = (max_gap * 2).min(self.config.max_elo_gap);
@@ -219,13 +229,22 @@ impl MatchmakerService {
     }
 
     /// Calculate match quality score based on ELO gap and wait time
-    fn calculate_match_quality(&self, player1: &QueueEntry, player2: &QueueEntry, elo_gap: i32) -> f64 {
+    fn calculate_match_quality(
+        &self,
+        player1: &QueueEntry,
+        player2: &QueueEntry,
+        elo_gap: i32,
+    ) -> f64 {
         // ELO compatibility (0.0 to 1.0, higher is better)
         let elo_score = 1.0 - (elo_gap as f64 / self.config.max_elo_gap as f64);
-        
+
         // Wait time bonus (0.0 to 0.5, longer wait gets higher bonus)
-        let wait_time1 = Utc::now().signed_duration_since(player1.joined_at).num_seconds() as f64;
-        let wait_time2 = Utc::now().signed_duration_since(player2.joined_at).num_seconds() as f64;
+        let wait_time1 = Utc::now()
+            .signed_duration_since(player1.joined_at)
+            .num_seconds() as f64;
+        let wait_time2 = Utc::now()
+            .signed_duration_since(player2.joined_at)
+            .num_seconds() as f64;
         let avg_wait_time = (wait_time1 + wait_time2) / 2.0;
         let wait_bonus = (avg_wait_time / 600.0).min(0.5); // Max 0.5 bonus after 10 minutes
 
@@ -240,15 +259,19 @@ impl MatchmakerService {
         game_mode: &str,
     ) -> Result<Vec<QueueEntry>, ApiError> {
         let pattern = format!("{}:{}:{}:*", QUEUE_ENTRY_PREFIX, game, game_mode);
-        let keys: Vec<String> = conn.keys(&pattern).await
+        let keys: Vec<String> = conn
+            .keys(&pattern)
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis keys error: {}", e)))?;
 
         let mut entries = Vec::new();
-        
+
         for key in keys {
-            let entry_json: String = conn.get(&key).await
+            let entry_json: String = conn
+                .get(&key)
+                .await
                 .map_err(|e| ApiError::internal_error(&format!("Redis get error: {}", e)))?;
-            
+
             if let Ok(entry) = serde_json::from_str::<QueueEntry>(&entry_json) {
                 entries.push(entry);
             }
@@ -265,7 +288,10 @@ impl MatchmakerService {
         game_mode: String,
         current_elo: i32,
     ) -> Result<(), ApiError> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
 
         let now = Utc::now();
@@ -287,14 +313,16 @@ impl MatchmakerService {
         let entry_json = serde_json::to_string(&entry)
             .map_err(|e| ApiError::internal_error(&format!("JSON serialization error: {}", e)))?;
 
-        conn.set_ex::<_, _, ()>(&key, entry_json, 600).await // 10 minute TTL
+        conn.set_ex::<_, _, ()>(&key, entry_json, 600)
+            .await // 10 minute TTL
             .map_err(|e| ApiError::internal_error(&format!("Redis set error: {}", e)))?;
 
         // Add to sorted set for efficient ELO-based queries
         let elo_bucket = (current_elo / self.config.elo_bucket_size) * self.config.elo_bucket_size;
         let queue_key = format!("{}:{}:{}:{}", QUEUE_KEY_PREFIX, game, game_mode, elo_bucket);
-        
-        conn.zadd::<_, _, _, ()>(&queue_key, &user_id.to_string(), now.timestamp()).await
+
+        conn.zadd::<_, _, _, ()>(&queue_key, &user_id.to_string(), now.timestamp())
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis zadd error: {}", e)))?;
 
         Ok(())
@@ -307,9 +335,13 @@ impl MatchmakerService {
         game: &str,
         game_mode: &str,
     ) -> Result<(), ApiError> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
-        self.remove_from_queue(&mut conn, &user_id, game, game_mode).await
+        self.remove_from_queue(&mut conn, &user_id, game, game_mode)
+            .await
     }
 
     /// Remove player from matchmaking queue
@@ -322,16 +354,20 @@ impl MatchmakerService {
     ) -> Result<(), ApiError> {
         // Remove from entry storage
         let key = format!("{}:{}:{}:{}", QUEUE_ENTRY_PREFIX, game, game_mode, user_id);
-        conn.del::<_, ()>(&key).await
+        conn.del::<_, ()>(&key)
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis del error: {}", e)))?;
 
         // Remove from all ELO buckets
         let pattern = format!("{}:{}:{}:*", QUEUE_KEY_PREFIX, game, game_mode);
-        let keys: Vec<String> = conn.keys(&pattern).await
+        let keys: Vec<String> = conn
+            .keys(&pattern)
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis keys error: {}", e)))?;
 
         for key in keys {
-            conn.zrem::<_, _, ()>(&key, &user_id.to_string()).await
+            conn.zrem::<_, _, ()>(&key, &user_id.to_string())
+                .await
                 .map_err(|e| ApiError::internal_error(&format!("Redis zrem error: {}", e)))?;
         }
 
@@ -341,14 +377,14 @@ impl MatchmakerService {
     /// Calculate initial ELO range for a player
     fn calculate_initial_elo_range(&self, current_elo: i32) -> (i32, i32) {
         let range = self.config.elo_bucket_size;
-        (
-            (current_elo - range).max(0),
-            current_elo + range,
-        )
+        ((current_elo - range).max(0), current_elo + range)
     }
 
     /// Create match in database from candidate
-    async fn create_match_from_candidate(&self, candidate: &MatchCandidate) -> Result<Match, ApiError> {
+    async fn create_match_from_candidate(
+        &self,
+        candidate: &MatchCandidate,
+    ) -> Result<Match, ApiError> {
         let match_id = Uuid::new_v4();
         let now = Utc::now();
 
@@ -398,7 +434,10 @@ impl MatchmakerService {
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
-        Ok(rows.into_iter().filter_map(|r| r.try_get("game").ok()).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.try_get("game").ok())
+            .collect())
     }
 
     /// Get active game modes for a specific game
@@ -412,7 +451,10 @@ impl MatchmakerService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        Ok(rows.into_iter().filter_map(|r| r.try_get("game_mode").ok()).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.try_get("game_mode").ok())
+            .collect())
     }
 
     /// Check if user is in queue
@@ -422,17 +464,23 @@ impl MatchmakerService {
         game: &str,
         game_mode: &str,
     ) -> Result<Option<QueueEntry>, ApiError> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
 
         let key = format!("{}:{}:{}:{}", QUEUE_ENTRY_PREFIX, game, game_mode, user_id);
-        let entry_json: Option<String> = conn.get(&key).await
+        let entry_json: Option<String> = conn
+            .get(&key)
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis get error: {}", e)))?;
 
         match entry_json {
             Some(json) => {
-                let entry = serde_json::from_str(&json)
-                    .map_err(|e| ApiError::internal_error(&format!("JSON deserialization error: {}", e)))?;
+                let entry = serde_json::from_str(&json).map_err(|e| {
+                    ApiError::internal_error(&format!("JSON deserialization error: {}", e))
+                })?;
                 Ok(Some(entry))
             }
             None => Ok(None),
@@ -441,11 +489,16 @@ impl MatchmakerService {
 
     /// Get queue size for a specific game and mode
     pub async fn get_queue_size(&self, game: &str, game_mode: &str) -> Result<usize, ApiError> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis connection error: {}", e)))?;
 
         let pattern = format!("{}:{}:{}:*", QUEUE_ENTRY_PREFIX, game, game_mode);
-        let keys: Vec<String> = conn.keys(&pattern).await
+        let keys: Vec<String> = conn
+            .keys(&pattern)
+            .await
             .map_err(|e| ApiError::internal_error(&format!("Redis keys error: {}", e)))?;
 
         Ok(keys.len())
@@ -459,7 +512,7 @@ impl MatchmakerService {
         game_mode: &str,
     ) -> Result<i32, ApiError> {
         let queue_size = self.get_queue_size(game, game_mode).await?;
-        
+
         // Rough estimation: 2 minutes per person in queue ahead
         Ok((queue_size as i32) * 120)
     }
@@ -484,7 +537,8 @@ impl EloEngine {
         player2_id: Uuid,
     ) -> (i32, i32) {
         // Calculate expected scores
-        let expected_player1 = 1.0 / (1.0 + 10.0_f64.powf((player2_elo - player1_elo) as f64 / 400.0));
+        let expected_player1 =
+            1.0 / (1.0 + 10.0_f64.powf((player2_elo - player1_elo) as f64 / 400.0));
         let expected_player2 = 1.0 - expected_player1;
 
         // Determine actual scores
@@ -502,8 +556,10 @@ impl EloEngine {
         };
 
         // Calculate new ELO ratings
-        let new_player1_elo = player1_elo + (self.k_factor * (actual_player1 - expected_player1)) as i32;
-        let new_player2_elo = player2_elo + (self.k_factor * (actual_player2 - expected_player2)) as i32;
+        let new_player1_elo =
+            player1_elo + (self.k_factor * (actual_player1 - expected_player1)) as i32;
+        let new_player2_elo =
+            player2_elo + (self.k_factor * (actual_player2 - expected_player2)) as i32;
 
         (new_player1_elo, new_player2_elo)
     }

@@ -15,19 +15,14 @@ impl SeedingEngine {
 
     /// Seeds participants by Elo and generates the initial single-elimination bracket.
     /// Tournament must be in RegistrationClosed status with 4-64 participants.
-    pub async fn seed_and_generate_bracket(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<(), ApiError> {
+    pub async fn seed_and_generate_bracket(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Validate tournament status
-        let row = sqlx::query(
-            "SELECT status, game, bracket_type FROM tournaments WHERE id = $1",
-        )
-        .bind(tournament_id)
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+        let row = sqlx::query("SELECT status, game, bracket_type FROM tournaments WHERE id = $1")
+            .bind(tournament_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
 
         let status: String = row.try_get("status").map_err(ApiError::database_error)?;
         if status != "registration_closed" && status != "in_progress" {
@@ -37,8 +32,12 @@ impl SeedingEngine {
         }
 
         // Only single elimination is supported
-        let bracket_type: String = row.try_get("bracket_type").map_err(ApiError::database_error)?;
-        if bracket_type.to_lowercase() != "singleelimination" && bracket_type.to_lowercase() != "single_elimination" {
+        let bracket_type: String = row
+            .try_get("bracket_type")
+            .map_err(ApiError::database_error)?;
+        if bracket_type.to_lowercase() != "singleelimination"
+            && bracket_type.to_lowercase() != "single_elimination"
+        {
             return Err(ApiError::bad_request(
                 "Only SingleElimination bracket type is currently supported for automated seeding",
             ));
@@ -71,9 +70,7 @@ impl SeedingEngine {
             ));
         }
         if n > 64 {
-            return Err(ApiError::bad_request(
-                "Maximum 64 participants allowed",
-            ));
+            return Err(ApiError::bad_request("Maximum 64 participants allowed"));
         }
 
         // Assign seed numbers (1 = highest Elo)
@@ -96,7 +93,11 @@ impl SeedingEngine {
         let seeding_order = generate_bracket_order(bracket_size);
 
         // Create round 1
-        let round_type = if bracket_size == 2 { "final" } else { "elimination" };
+        let round_type = if bracket_size == 2 {
+            "final"
+        } else {
+            "elimination"
+        };
         let round_row = sqlx::query(
             r#"
             INSERT INTO tournament_rounds (
@@ -118,7 +119,7 @@ impl SeedingEngine {
         let num_matches = bracket_size / 2;
 
         for match_idx in 0..num_matches {
-            let seed_a = seeding_order[match_idx * 2];     // 1-indexed seed
+            let seed_a = seeding_order[match_idx * 2]; // 1-indexed seed
             let seed_b = seeding_order[match_idx * 2 + 1]; // 1-indexed seed
 
             // Seeds beyond participant count are byes
@@ -144,14 +145,12 @@ impl SeedingEngine {
             let match_number = (match_idx + 1) as i32;
 
             // For byes, ensure the real player is player1
-            let (p1, p2): (Uuid, Option<Uuid>) =
-                if player_a_id.is_some() && player_b_id.is_some() {
-                    (player_a_id.unwrap(), player_b_id)
-                } else if player_a_id.is_some() {
-                    (player_a_id.unwrap(), None)
-                } else {
-                    (player_b_id.unwrap(), None)
-                };
+            let (p1, p2): (Uuid, Option<Uuid>) = match (player_a_id, player_b_id) {
+                (Some(a), Some(b)) => (a, Some(b)),
+                (Some(a), None) => (a, None),
+                (None, Some(b)) => (b, None),
+                (None, None) => panic!("Both player_a_id and player_b_id are None"),
+            };
 
             sqlx::query(
                 r#"
@@ -176,14 +175,12 @@ impl SeedingEngine {
         }
 
         // Update tournament status to InProgress
-        sqlx::query(
-            "UPDATE tournaments SET status = 'in_progress', updated_at = $2 WHERE id = $1",
-        )
-        .bind(tournament_id)
-        .bind(Utc::now())
-        .execute(&self.db_pool)
-        .await
-        .map_err(ApiError::database_error)?;
+        sqlx::query("UPDATE tournaments SET status = 'in_progress', updated_at = $2 WHERE id = $1")
+            .bind(tournament_id)
+            .bind(Utc::now())
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
 
         Ok(())
     }

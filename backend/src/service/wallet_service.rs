@@ -4,7 +4,6 @@ use anyhow::Result;
 use chrono::Utc;
 // EventBus is used via crate::realtime::event_bus::EventBus
 use rust_decimal::Decimal;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -34,10 +33,7 @@ pub struct WalletService {
 
 impl WalletService {
     pub fn new(db_pool: DbPool, event_bus: Option<crate::realtime::event_bus::EventBus>) -> Self {
-        Self {
-            db_pool,
-            event_bus,
-        }
+        Self { db_pool, event_bus }
     }
 
     // ========================================================================

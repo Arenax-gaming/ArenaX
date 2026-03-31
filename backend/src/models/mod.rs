@@ -20,10 +20,9 @@ pub use match_models::{
     ReportScoreRequest, UserElo,
 };
 pub use matchmaker::{
-    GameModeStats, GameQueueStats, JoinQueueRequest,
-    JoinQueueResponse, LeaveQueueRequest, LeaveQueueResponse, MatchCandidate,
-    MatchHistoryResponse, MatchmakingConfig, MatchmakingQueueResponse,
-    MatchmakingStats, QueueEntry,
+    GameModeStats, GameQueueStats, JoinQueueRequest, JoinQueueResponse, LeaveQueueRequest,
+    LeaveQueueResponse, MatchCandidate, MatchHistoryResponse, MatchmakingConfig,
+    MatchmakingQueueResponse, MatchmakingStats, QueueEntry,
 };
 pub use reward_settlement::*;
 pub use stellar_account::{

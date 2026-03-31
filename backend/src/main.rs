@@ -12,9 +12,9 @@ mod db;
 mod http;
 mod middleware;
 mod models;
+mod orchestrator;
 mod realtime;
 mod service;
-mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
@@ -25,7 +25,8 @@ use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
-use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
+use crate::service::matchmaker::{EloEngine, MatchmakerService, MatchmakingConfig};
+use crate::service::ReaperService;
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -48,15 +49,13 @@ async fn main() -> io::Result<()> {
     // Create Redis client (placeholder)
     // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
     // Spawn tournament orchestrator polling worker
-    let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
-        db_pool.clone(),
-        60,
-    );
+    let _orchestrator_handle =
+        crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(db_pool.clone(), 60);
     tracing::info!("Tournament orchestrator polling worker started");
 
     // Create Redis connection manager
-    let redis_client = redis::Client::open(config.redis.url.clone())
-        .expect("Failed to create Redis client");
+    let redis_client =
+        redis::Client::open(config.redis.url.clone()).expect("Failed to create Redis client");
     let redis_conn = redis::aio::ConnectionManager::new(redis_client.clone())
         .await
         .expect("Failed to create Redis connection manager");
@@ -68,7 +67,7 @@ async fn main() -> io::Result<()> {
         redis_client.clone(),
         matchmaking_config,
     ));
-    
+
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
     tokio::spawn(async move {
@@ -197,6 +196,32 @@ async fn main() -> io::Result<()> {
                             .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
+=======
+                            .route(
+                                "/join",
+                                web::post().to(crate::http::matchmaking::join_queue),
+                            )
+                            .route(
+                                "/leave",
+                                web::post().to(crate::http::matchmaking::leave_queue),
+                            )
+                            .route(
+                                "/status/{game}/{game_mode}",
+                                web::get().to(crate::http::matchmaking::get_queue_status),
+                            )
+                            .route(
+                                "/stats",
+                                web::get().to(crate::http::matchmaking::get_matchmaking_stats),
+                            )
+                            .route(
+                                "/elo/{game}",
+                                web::get().to(crate::http::matchmaking::get_elo),
+                            )
+                            .route(
+                                "/elo/{game}/{page}/{limit}",
+                                web::get().to(crate::http::matchmaking::get_elo_history),
+                            ),
+>>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
                     ),
             )
             .configure(crate::realtime::user_ws::configure_ws_route)
