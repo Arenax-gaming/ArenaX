@@ -7,7 +7,9 @@ The ArenaX contracts workspace contains **Soroban smart contracts** for the Aren
 ## Current Implementation
 
 ### 📝 Example Contract
+
 A simple demonstration contract showing basic Soroban functionality:
+
 - Contract initialization with admin setup
 - Basic storage operations
 - Simple greeting function
@@ -22,6 +24,7 @@ A simple demonstration contract showing basic Soroban functionality:
 **Purpose**: Automated tournament prize pool management and distribution
 
 **Planned Functionality**:
+
 - Create and manage tournament prize pools
 - Escrow entry fees in XLM or ArenaX Tokens
 - Automatically distribute prizes to winners
@@ -29,6 +32,7 @@ A simple demonstration contract showing basic Soroban functionality:
 - Multi-signature security for large prize pools
 
 **Planned Functions**:
+
 ```rust
 // Create a new tournament prize pool
 pub fn create_prize_pool(tournament_id: u64, entry_fee: i128, max_participants: u32)
@@ -48,6 +52,7 @@ pub fn refund_entry_fees(tournament_id: u64)
 **Purpose**: Track player reputation and fairness on-chain
 
 **Planned Functionality**:
+
 - Issue Reputation Tokens to players
 - Update reputation based on match outcomes
 - Apply penalties for disputes and cheating
@@ -55,6 +60,7 @@ pub fn refund_entry_fees(tournament_id: u64)
 - Enable reputation-based tournament access
 
 **Planned Functions**:
+
 ```rust
 // Issue initial reputation to new player
 pub fn issue_reputation(player: Address, initial_amount: i128)
@@ -74,6 +80,7 @@ pub fn get_reputation(player: Address) -> i128
 **Purpose**: In-platform reward and payment token
 
 **Planned Functionality**:
+
 - Issue ArenaX Tokens for platform rewards
 - Enable token transfers and payments
 - Integrate with Stellar DEX for conversions
@@ -81,6 +88,7 @@ pub fn get_reputation(player: Address) -> i128
 - Support tournament entry fees
 
 **Planned Functions**:
+
 ```rust
 // Mint new ArenaX Tokens
 pub fn mint(to: Address, amount: i128)
@@ -100,6 +108,7 @@ pub fn approve(from: Address, spender: Address, amount: i128)
 **Purpose**: Tournament lifecycle and state management
 
 **Planned Functionality**:
+
 - Create and manage tournament instances
 - Handle tournament state transitions (upcoming → ongoing → completed)
 - Manage participant registration and validation
@@ -107,6 +116,7 @@ pub fn approve(from: Address, spender: Address, amount: i128)
 - Integrate with prize distribution and reputation contracts
 
 **Planned Functions**:
+
 ```rust
 // Create a new tournament
 pub fn create_tournament(admin: Address, config: TournamentConfig) -> u64
@@ -129,6 +139,7 @@ pub fn complete_tournament(tournament_id: u64, winners: Vec<Address>)
 **Purpose**: Common utilities and data types shared across contracts
 
 **Planned Functionality**:
+
 - Common data structures and enums
 - Utility functions for address validation
 - Shared error types and constants
@@ -136,6 +147,7 @@ pub fn complete_tournament(tournament_id: u64, winners: Vec<Address>)
 - Cross-contract communication utilities
 
 **Planned Functions**:
+
 ```rust
 // Validate Stellar address
 pub fn validate_address(address: Address) -> bool
@@ -198,6 +210,7 @@ contracts/
 ## Setup & Development
 
 ### Prerequisites
+
 - Rust toolchain
 - Stellar CLI
 - Soroban SDK
@@ -296,6 +309,7 @@ export ADMIN_PUBLIC_KEY=GXXX...
 ## Development Workflow
 
 ### Building Contracts
+
 ```bash
 # Build all contracts
 cargo build --target wasm32-unknown-unknown --release
@@ -305,6 +319,7 @@ cargo build --target wasm32-unknown-unknown --release --profile release
 ```
 
 ### Testing
+
 ```bash
 # Run unit tests
 cargo test
@@ -404,6 +419,7 @@ prize_client.call(
 ### Cross-Contract Communication
 
 The contracts are designed to work together:
+
 - **Tournament Manager** coordinates tournament lifecycle
 - **Prize Distribution** manages prize pools and payouts
 - **Reputation** tracks player fairness and skill
@@ -413,11 +429,13 @@ The contracts are designed to work together:
 ## Security Considerations
 
 ### Access Control
+
 - Admin-only functions for critical operations
 - Player-specific functions with proper authorization
 - Role-based access control for contract functions
 
 ### Audit Trail
+
 - All contract operations are logged on-chain
 - Immutable transaction history
 - Transparent operations
@@ -425,11 +443,13 @@ The contracts are designed to work together:
 ## Gas Optimization
 
 ### Efficient Storage
+
 - Optimize data structures for minimal storage costs
 - Use packed data types where possible
 - Implement efficient data access patterns
 
 ### Batch Operations
+
 - Group multiple operations in single transactions
 - Minimize contract calls for better performance
 - Optimize for Stellar network fees
@@ -437,6 +457,7 @@ The contracts are designed to work together:
 ## Contributing
 
 ### Development Guidelines
+
 1. Follow Rust best practices
 2. Write comprehensive tests
 3. Document all public functions
@@ -444,6 +465,7 @@ The contracts are designed to work together:
 5. Optimize for gas efficiency
 
 ### Adding New Contracts
+
 1. Create new module in `src/`
 2. Add module to `lib.rs`
 3. Write comprehensive tests
@@ -453,6 +475,7 @@ The contracts are designed to work together:
 ## Support
 
 For Stellar smart contract development:
+
 - Check Soroban documentation
 - Review Stellar developer resources
 - Contact the development team
