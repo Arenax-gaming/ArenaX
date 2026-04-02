@@ -196,32 +196,6 @@ async fn main() -> io::Result<()> {
                             .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
-=======
-                            .route(
-                                "/join",
-                                web::post().to(crate::http::matchmaking::join_queue),
-                            )
-                            .route(
-                                "/leave",
-                                web::post().to(crate::http::matchmaking::leave_queue),
-                            )
-                            .route(
-                                "/status/{game}/{game_mode}",
-                                web::get().to(crate::http::matchmaking::get_queue_status),
-                            )
-                            .route(
-                                "/stats",
-                                web::get().to(crate::http::matchmaking::get_matchmaking_stats),
-                            )
-                            .route(
-                                "/elo/{game}",
-                                web::get().to(crate::http::matchmaking::get_elo),
-                            )
-                            .route(
-                                "/elo/{game}/{page}/{limit}",
-                                web::get().to(crate::http::matchmaking::get_elo_history),
-                            ),
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
                     ),
             )
             .configure(crate::realtime::user_ws::configure_ws_route)

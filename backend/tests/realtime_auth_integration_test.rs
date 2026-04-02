@@ -54,7 +54,7 @@ async fn test_ws_connection_with_valid_token() {
     ).await;
 
     // Test with valid token
-    let uri = format="/ws?token={}", token;
+    let uri = format!("/ws?token={}", token);
     let req = test::TestRequest::with_uri(&uri).to_request();
     // ws::start would be called here, but in a test environment we'd need more setup for actual WS
     // For now, let's just assert it passes the upgrade check (which returns 101 Switching Protocols)
