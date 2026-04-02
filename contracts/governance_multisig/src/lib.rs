@@ -21,9 +21,8 @@
 //! - Cannot call itself directly (SelfCallNotAllowed)
 //! - Threshold invariants enforced at all times
 
-use soroban_sdk::{
-    contract, contractevent, contractimpl, Address, Bytes, BytesN, Env, Symbol, Vec,
-};
+use arenax_events::governance as events;
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 mod error;
 mod storage;
@@ -31,76 +30,6 @@ mod types;
 
 pub use error::GovernanceError;
 pub use types::{GovernanceConfig, Proposal, ProposalStatus, SignerInfo};
-
-// ============================================================================
-// Events
-// ============================================================================
-
-#[contractevent(topics = ["ArenaXGovernance", "INIT"])]
-pub struct GovernanceInitialized {
-    pub signers_count: u32,
-    pub threshold: u32,
-    pub timestamp: u64,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "PROPOSED"])]
-pub struct ProposalCreated {
-    pub proposal_id: BytesN<32>,
-    pub proposer: Address,
-    pub target: Address,
-    pub function: Symbol,
-    pub execute_after: Option<u64>,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "APPROVED"])]
-pub struct ProposalApproved {
-    pub proposal_id: BytesN<32>,
-    pub signer: Address,
-    pub approval_count: u32,
-    pub threshold: u32,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "REVOKED"])]
-pub struct ApprovalRevoked {
-    pub proposal_id: BytesN<32>,
-    pub signer: Address,
-    pub approval_count: u32,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "EXECUTED"])]
-pub struct ProposalExecuted {
-    pub proposal_id: BytesN<32>,
-    pub executor: Address,
-    pub target: Address,
-    pub function: Symbol,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "CANCELLED"])]
-pub struct ProposalCancelled {
-    pub proposal_id: BytesN<32>,
-    pub cancelled_by: Address,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "SIGNER_ADD"])]
-pub struct SignerAdded {
-    pub signer: Address,
-    pub proposal_id: BytesN<32>,
-    pub new_count: u32,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "SIGNER_REM"])]
-pub struct SignerRemoved {
-    pub signer: Address,
-    pub proposal_id: BytesN<32>,
-    pub new_count: u32,
-}
-
-#[contractevent(topics = ["ArenaXGovernance", "THRESH_UPD"])]
-pub struct ThresholdUpdated {
-    pub old: u32,
-    pub new: u32,
-    pub proposal_id: BytesN<32>,
-}
 
 // ============================================================================
 // Contract Implementation
@@ -180,12 +109,7 @@ impl GovernanceMultisig {
         storage::set_initialized(&env);
 
         // Emit event
-        GovernanceInitialized {
-            signers_count: signer_count,
-            threshold,
-            timestamp,
-        }
-        .publish(&env);
+        events::emit_governance_initialized(&env, signer_count, threshold, timestamp);
 
         Ok(())
     }
@@ -259,14 +183,14 @@ impl GovernanceMultisig {
         storage::set_proposal_approvals(&env, &proposal_id, &approvals);
 
         // Emit event
-        ProposalCreated {
-            proposal_id,
-            proposer,
-            target: target_contract,
+        events::emit_proposal_created(
+            &env,
+            &proposal_id,
+            &proposer,
+            &target_contract,
             function,
             execute_after,
-        }
-        .publish(&env);
+        );
 
         Ok(())
     }
@@ -350,13 +274,13 @@ impl GovernanceMultisig {
         storage::set_proposal(&env, &proposal);
 
         // Emit event
-        ProposalApproved {
-            proposal_id,
-            signer,
-            approval_count: proposal.approval_count,
-            threshold: config.threshold,
-        }
-        .publish(&env);
+        events::emit_proposal_approved(
+            &env,
+            &proposal_id,
+            &signer,
+            proposal.approval_count,
+            config.threshold,
+        );
 
         Ok(())
     }
@@ -433,12 +357,7 @@ impl GovernanceMultisig {
         storage::set_proposal(&env, &proposal);
 
         // Emit event
-        ApprovalRevoked {
-            proposal_id,
-            signer,
-            approval_count: proposal.approval_count,
-        }
-        .publish(&env);
+        events::emit_approval_revoked(&env, &proposal_id, &signer, proposal.approval_count);
 
         Ok(())
     }
@@ -533,13 +452,13 @@ impl GovernanceMultisig {
             env.invoke_contract(&proposal.target_contract, &proposal.function, empty_args);
 
         // Emit event
-        ProposalExecuted {
-            proposal_id,
-            executor,
-            target: proposal.target_contract,
-            function: proposal.function,
-        }
-        .publish(&env);
+        events::emit_proposal_executed(
+            &env,
+            &proposal_id,
+            &executor,
+            &proposal.target_contract,
+            proposal.function,
+        );
 
         Ok(())
     }
@@ -592,11 +511,7 @@ impl GovernanceMultisig {
         storage::set_proposal(&env, &proposal);
 
         // Emit event
-        ProposalCancelled {
-            proposal_id,
-            cancelled_by: caller,
-        }
-        .publish(&env);
+        events::emit_proposal_cancelled(&env, &proposal_id, &caller);
 
         Ok(())
     }
@@ -659,12 +574,7 @@ impl GovernanceMultisig {
         storage::set_signer_count(&env, new_count);
 
         // Emit event
-        SignerAdded {
-            signer: new_signer,
-            proposal_id,
-            new_count,
-        }
-        .publish(&env);
+        events::emit_signer_added(&env, &new_signer, &proposal_id, new_count);
 
         Ok(())
     }
@@ -721,12 +631,7 @@ impl GovernanceMultisig {
         storage::set_signer_count(&env, new_count);
 
         // Emit event
-        SignerRemoved {
-            signer,
-            proposal_id,
-            new_count,
-        }
-        .publish(&env);
+        events::emit_signer_removed(&env, &signer, &proposal_id, new_count);
 
         Ok(())
     }
@@ -763,12 +668,7 @@ impl GovernanceMultisig {
         storage::set_config(&env, &config);
 
         // Emit event
-        ThresholdUpdated {
-            old: old_threshold,
-            new: new_threshold,
-            proposal_id,
-        }
-        .publish(&env);
+        events::emit_threshold_updated(&env, old_threshold, new_threshold, &proposal_id);
 
         Ok(())
     }

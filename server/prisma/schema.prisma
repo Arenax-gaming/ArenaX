@@ -168,13 +168,79 @@ model BlockchainTransaction {
 }
 
 model BlockchainEvent {
-  id          String   @id @default(uuid())
-  eventType   String   // e.g., PAY_DONE
-  contractId  String
-  txHash      String
-  ledger      Int
-  data        Json
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid())
+  eventType     String // e.g., PAY_DONE
+  namespace     String
+  schemaVersion String
+  contractId    String
+  txHash        String
+  ledger        Int
+  data          Json
+  createdAt     DateTime @default(now())
+
+  @@index([namespace, schemaVersion, eventType])
+}
+
+enum WalletKeyAccessAction {
+  SIGN
+  EXPORT
+  RECOVERY_CHALLENGE_CREATED
+  RECOVERY_CHALLENGE_COMPLETED
+  ROTATION
+}
+
+enum WalletRecoveryChallengeStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+model WalletKeyAccessAudit {
+  id           String                @id @default(uuid())
+  walletId     String
+  actorUserId  String?
+  action       WalletKeyAccessAction
+  success      Boolean               @default(true)
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  reason       String?
+  keyVersion   Int?
+  metadata     Json?
+  previousHash String?
+  entryHash    String                @unique
+  createdAt    DateTime              @default(now())
+
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  actor  User?      @relation("WalletKeyAccessActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model WalletRecoveryChallenge {
+  id                 String                        @id @default(uuid())
+  userId             String
+  walletId           String
+  codeHash           String
+  expiresAt          DateTime
+  completedAt        DateTime?
+  status             WalletRecoveryChallengeStatus @default(PENDING)
+  attempts           Int                           @default(0)
+  maxAttempts        Int                           @default(5)
+  requestId          String?
+  requestedFromIp    String?
+  requestedUserAgent String?
+  lastAttemptAt      DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet UserWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, expiresAt])
+  @@index([walletId, status])
 }
 
 enum ProposalStatus {

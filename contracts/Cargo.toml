@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "arenax-events",
     "example",
     "dispute-resolution",
     "protocol-params",
