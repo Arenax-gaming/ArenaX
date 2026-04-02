@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use actix_web::{web, App, HttpServer};
 use std::io;
 use std::sync::Arc;
@@ -10,9 +12,9 @@ mod db;
 mod http;
 mod middleware;
 mod models;
+mod orchestrator;
 mod realtime;
 mod service;
-mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
@@ -23,7 +25,8 @@ use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
-use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
+use crate::service::matchmaker::{EloEngine, MatchmakerService, MatchmakingConfig};
+use crate::service::ReaperService;
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -46,15 +49,13 @@ async fn main() -> io::Result<()> {
     // Create Redis client (placeholder)
     // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
     // Spawn tournament orchestrator polling worker
-    let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
-        db_pool.clone(),
-        60,
-    );
+    let _orchestrator_handle =
+        crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(db_pool.clone(), 60);
     tracing::info!("Tournament orchestrator polling worker started");
 
     // Create Redis connection manager
-    let redis_client = redis::Client::open(config.redis.url.clone())
-        .expect("Failed to create Redis client");
+    let redis_client =
+        redis::Client::open(config.redis.url.clone()).expect("Failed to create Redis client");
     let redis_conn = redis::aio::ConnectionManager::new(redis_client.clone())
         .await
         .expect("Failed to create Redis connection manager");
@@ -66,7 +67,7 @@ async fn main() -> io::Result<()> {
         redis_client.clone(),
         matchmaking_config,
     ));
-    
+
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
     tokio::spawn(async move {

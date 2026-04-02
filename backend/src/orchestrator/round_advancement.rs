@@ -45,14 +45,12 @@ impl RoundAdvancementWorker {
         }
 
         // Step 2: Fetch the current round to get the round_number.
-        let round_row = sqlx::query(
-            "SELECT round_number FROM tournament_rounds WHERE id = $1",
-        )
-        .bind(round_id)
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("Round not found"))?;
+        let round_row = sqlx::query("SELECT round_number FROM tournament_rounds WHERE id = $1")
+            .bind(round_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Round not found"))?;
 
         let current_round_number: i32 = round_row
             .try_get("round_number")
@@ -110,10 +108,12 @@ impl RoundAdvancementWorker {
 
         for row in &match_rows {
             let status: String = row.try_get("status").map_err(ApiError::database_error)?;
-            let player1_id: Option<Uuid> =
-                row.try_get("player1_id").map_err(ApiError::database_error)?;
-            let player2_id: Option<Uuid> =
-                row.try_get("player2_id").map_err(ApiError::database_error)?;
+            let player1_id: Option<Uuid> = row
+                .try_get("player1_id")
+                .map_err(ApiError::database_error)?;
+            let player2_id: Option<Uuid> = row
+                .try_get("player2_id")
+                .map_err(ApiError::database_error)?;
             let winner_id: Option<Uuid> =
                 row.try_get("winner_id").map_err(ApiError::database_error)?;
 
@@ -200,7 +200,7 @@ impl RoundAdvancementWorker {
         // Pairing then proceeds from index 1 onwards: idx 1 vs 2, idx 3 vs 4, etc.
         let now = Utc::now();
         let num_players = advancing_players.len();
-        let has_bye = num_players % 2 != 0;
+        let has_bye = !num_players.is_multiple_of(2);
 
         // The bye player is always advancing_players[0] when the count is odd.
         // Paired players start at index 1 (odd count) or 0 (even count).

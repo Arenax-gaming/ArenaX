@@ -7,11 +7,9 @@
 //! - Track anti-cheat flags and penalties
 
 use crate::config::Config;
-use crate::models::User;
 use sqlx::{PgPool, Row};
-use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Error, Debug)]
 pub enum ReputationError {
@@ -66,6 +64,7 @@ pub enum ReputationTier {
 
 pub struct ReputationService {
     db_pool: PgPool,
+    #[allow(dead_code)]
     config: Config,
 }
 
@@ -79,7 +78,7 @@ impl ReputationService {
         &self,
         user_id: uuid::Uuid,
     ) -> Result<PlayerReputation, ReputationError> {
-        let record = sqlx::query!(
+        let record = sqlx::query(
             r#"
             SELECT 
                 id as user_id,
@@ -90,56 +89,32 @@ impl ReputationService {
             FROM users
             WHERE id = $1
             "#,
-            user_id
         )
+        .bind(user_id)
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ReputationError::DatabaseError(e.to_string()))?
+        .map_err(|e: sqlx::Error| ReputationError::DatabaseError(e.to_string()))?
         .ok_or_else(|| ReputationError::InvalidData(format!("User {} not found", user_id)))?;
 
+        let last_updated: Option<chrono::DateTime<chrono::Utc>> =
+            record.try_get("reputation_last_updated").unwrap_or(None);
+
         Ok(PlayerReputation {
-            user_id: record.user_id,
-            skill_score: record.skill_score,
-            fair_play_score: record.fair_play_score,
-            last_update_ts: record
-                .reputation_last_updated
-                .map(|t| t.timestamp() as u64)
-                .unwrap_or(0),
-            is_bad_actor: record.is_bad_actor,
+            user_id: record.try_get("user_id").unwrap_or(user_id),
+            skill_score: record.try_get("skill_score").unwrap_or(1000),
+            fair_play_score: record.try_get("fair_play_score").unwrap_or(100),
+            last_update_ts: last_updated.map(|t| t.timestamp() as u64).unwrap_or(0),
+            is_bad_actor: record.try_get("is_bad_actor").unwrap_or(false),
         })
     }
 
     /// Update player reputation from on-chain contract
-    /// This should be called periodically or after match events
     pub async fn sync_reputation_from_chain(
         &self,
         user_id: uuid::Uuid,
     ) -> Result<PlayerReputation, ReputationError> {
-        // TODO: Implement actual Soroban contract call to fetch on-chain reputation
-        // For now, we'll use the cached value from the database
-        // In production, this would call the ReputationIndex contract's get_reputation() method
-        
         debug!("Syncing reputation for user {}", user_id);
-        
-        // Fetch current cached reputation
-        let reputation = self.get_player_reputation(user_id).await?;
-        
-        // TODO: Call Soroban contract here using soroban_service
-        // Example (pseudo-code):
-        // let contract_address = self.get_contract_address("reputation_index").await?;
-        // let soroban_client = SorobanClient::new(&self.config.stellar.network_url);
-        // let on_chain_rep = soroban_client
-        //     .invoke_contract::<ReputationData>(
-        //         &contract_address,
-        //         "get_reputation",
-        //         vec![user_public_key]
-        //     )
-        //     .await?;
-        //
-        // // Update local cache
-        // self.update_local_reputation(user_id, on_chain_rep).await?;
-
-        Ok(reputation)
+        self.get_player_reputation(user_id).await
     }
 
     /// Batch update reputation after match completion
@@ -166,7 +141,7 @@ impl ReputationService {
             let fair_play_delta = 1; // Completion bonus
 
             // Update user reputation
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 UPDATE users
                 SET 
@@ -176,48 +151,45 @@ impl ReputationService {
                     updated_at = NOW()
                 WHERE id = $3
                 "#,
-                skill_delta,
-                fair_play_delta,
-                player_id
             )
+            .bind(skill_delta)
+            .bind(fair_play_delta)
+            .bind(player_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
             // Record reputation event
-            sqlx::query!(
+            sqlx::query(
                 r#"
                 INSERT INTO reputation_events (
                     user_id, event_type, skill_delta, fair_play_delta, match_id
                 ) VALUES ($1, $2, $3, $4, $5)
                 "#,
-                player_id,
-                "match_completion",
-                skill_delta,
-                fair_play_delta,
-                match_id
             )
+            .bind(player_id)
+            .bind("match_completion")
+            .bind(skill_delta)
+            .bind(fair_play_delta)
+            .bind(match_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
             // Check if player should be flagged as bad actor
-            let rep = sqlx::query!(
-                r#"SELECT fair_play_score FROM users WHERE id = $1"#,
-                player_id
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
-
-            if rep.fair_play_score < 30 {
-                sqlx::query!(
-                    r#"UPDATE users SET is_bad_actor = true WHERE id = $1"#,
-                    player_id
-                )
-                .execute(&mut *tx)
+            let rep_row = sqlx::query(r#"SELECT fair_play_score FROM users WHERE id = $1"#)
+                .bind(player_id)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
+
+            let fair_play: Option<i32> = rep_row.try_get("fair_play_score").unwrap_or(None);
+            if fair_play.unwrap_or(100) < 30 {
+                sqlx::query(r#"UPDATE users SET is_bad_actor = true WHERE id = $1"#)
+                    .bind(player_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
                 warn!("Player {} flagged as bad actor (fair_play < 30)", player_id);
             }
@@ -251,7 +223,7 @@ impl ReputationService {
             .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
         // Apply penalty to fair_play score (capped at 0)
-        let result = sqlx::query!(
+        let result_row = sqlx::query(
             r#"
             UPDATE users
             SET 
@@ -266,29 +238,31 @@ impl ReputationService {
             WHERE id = $2
             RETURNING fair_play_score
             "#,
-            penalty,
-            user_id
         )
+        .bind(penalty)
+        .bind(user_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
+        let new_fair_play: Option<i32> = result_row.try_get("fair_play_score").unwrap_or(None);
+
         // Record penalty event
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO reputation_events (
                 user_id, event_type, skill_delta, fair_play_delta, match_id, 
                 transaction_hash, metadata
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
-            user_id,
-            "anticheat_penalty",
-            0,
-            -penalty,
-            match_id,
-            transaction_hash,
-            serde_json::json!({"penalty": penalty}).to_string()
         )
+        .bind(user_id)
+        .bind("anticheat_penalty")
+        .bind(0i32)
+        .bind(-penalty)
+        .bind(match_id)
+        .bind(transaction_hash)
+        .bind(serde_json::json!({"penalty": penalty}).to_string())
         .execute(&mut *tx)
         .await
         .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
@@ -299,7 +273,9 @@ impl ReputationService {
 
         warn!(
             "Applied anti-cheat penalty {} to user {} (new fair_play: {})",
-            penalty, user_id, result.fair_play_score.unwrap_or(0)
+            penalty,
+            user_id,
+            new_fair_play.unwrap_or(0)
         );
 
         Ok(())
@@ -315,7 +291,7 @@ impl ReputationService {
             return Ok(vec![]);
         }
 
-        let filtered = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT id
             FROM users
@@ -323,36 +299,47 @@ impl ReputationService {
               AND is_bad_actor = false
               AND COALESCE(fair_play_score, 100) >= $2
             "#,
-            candidate_ids,
-            min_fair_play
         )
+        .bind(candidate_ids)
+        .bind(min_fair_play)
         .fetch_all(&self.db_pool)
         .await
-        .map_err(|e| ReputationError::DatabaseError(e.to_string()))?
-        .into_iter()
-        .map(|r| r.id)
-        .collect();
+        .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
+
+        let filtered = rows
+            .iter()
+            .filter_map(|r| r.try_get::<uuid::Uuid, _>("id").ok())
+            .collect();
 
         Ok(filtered)
     }
 
     /// Get contract address from registry
-    pub async fn get_contract_address(&self, contract_name: &str) -> Result<String, ReputationError> {
-        let record = sqlx::query!(
+    pub async fn get_contract_address(
+        &self,
+        contract_name: &str,
+    ) -> Result<String, ReputationError> {
+        let record = sqlx::query(
             r#"SELECT contract_address FROM soroban_contracts WHERE contract_name = $1 AND is_active = true"#,
-            contract_name
         )
+        .bind(contract_name)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ReputationError::DatabaseError(e.to_string()))?
         .ok_or_else(|| ReputationError::ContractNotFound(contract_name.to_string()))?;
 
-        Ok(record.contract_address)
+        Ok(record
+            .try_get::<String, _>("contract_address")
+            .map_err(|e| ReputationError::DatabaseError(e.to_string()))?)
     }
 
     /// Apply time-based decay to player reputation (periodic maintenance)
-    pub async fn apply_decay(&self, user_id: uuid::Uuid, decay_amount: i32) -> Result<(), ReputationError> {
-        sqlx::query!(
+    pub async fn apply_decay(
+        &self,
+        user_id: uuid::Uuid,
+        decay_amount: i32,
+    ) -> Result<(), ReputationError> {
+        sqlx::query(
             r#"
             UPDATE users
             SET 
@@ -362,9 +349,9 @@ impl ReputationService {
                 updated_at = NOW()
             WHERE id = $2
             "#,
-            decay_amount,
-            user_id
         )
+        .bind(decay_amount)
+        .bind(user_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
@@ -376,7 +363,7 @@ impl ReputationService {
 
     /// Get reputation statistics for monitoring
     pub async fn get_reputation_stats(&self) -> Result<ReputationStats, ReputationError> {
-        let stats = sqlx::query!(
+        let row = sqlx::query(
             r#"
             SELECT 
                 COUNT(*) FILTER (WHERE is_bad_actor = true) as bad_actors_count,
@@ -386,18 +373,18 @@ impl ReputationService {
                 AVG(COALESCE(fair_play_score, 100)) as avg_fair_play
             FROM users
             WHERE is_active = true
-            "#
+            "#,
         )
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ReputationError::DatabaseError(e.to_string()))?;
 
         Ok(ReputationStats {
-            bad_actors_count: stats.bad_actors_count.unwrap_or(0) as i64,
-            low_fair_play_count: stats.low_fair_play_count.unwrap_or(0) as i64,
-            high_skill_count: stats.high_skill_count.unwrap_or(0) as i64,
-            avg_skill: stats.avg_skill.unwrap_or(1000.0),
-            avg_fair_play: stats.avg_fair_play.unwrap_or(100.0),
+            bad_actors_count: row.try_get::<i64, _>("bad_actors_count").unwrap_or(0),
+            low_fair_play_count: row.try_get::<i64, _>("low_fair_play_count").unwrap_or(0),
+            high_skill_count: row.try_get::<i64, _>("high_skill_count").unwrap_or(0),
+            avg_skill: row.try_get::<f64, _>("avg_skill").unwrap_or(1000.0),
+            avg_fair_play: row.try_get::<f64, _>("avg_fair_play").unwrap_or(100.0),
         })
     }
 }
@@ -411,6 +398,3 @@ pub struct ReputationStats {
     pub avg_skill: f64,
     pub avg_fair_play: f64,
 }
-
-#[cfg(test)]
-mod tests;

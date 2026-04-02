@@ -10,6 +10,12 @@ pub struct SessionRegistry {
     session_to_channels: RwLock<HashMap<Uuid, HashSet<String>>>,
 }
 
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionRegistry {
     pub fn new() -> Self {
         Self {
@@ -82,7 +88,7 @@ impl SessionRegistry {
     pub fn get_sessions(&self, user_id: &Uuid) -> Vec<Uuid> {
         let map = self.user_to_sessions.read().unwrap();
         map.get(user_id)
-            .map(|s| s.iter().copied().collect())
+            .map(|s: &HashSet<Uuid>| s.iter().copied().collect::<Vec<Uuid>>())
             .unwrap_or_default()
     }
 

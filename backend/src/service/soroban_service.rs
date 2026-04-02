@@ -140,6 +140,7 @@ struct RpcRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct RpcResponse {
     jsonrpc: String,
     id: u64,
@@ -155,6 +156,7 @@ enum RpcResult {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct RpcError {
     code: i32,
     message: String,
@@ -163,6 +165,7 @@ struct RpcError {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SimulateResponse {
     #[serde(rename = "transactionData")]
     transaction_data: String,
@@ -179,6 +182,7 @@ struct SimulateResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SendTransactionResponse {
     #[serde(rename = "hash")]
     hash: String,
@@ -191,6 +195,7 @@ struct SendTransactionResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GetTransactionResponse {
     #[serde(rename = "status")]
     status: String,
@@ -408,7 +413,7 @@ impl SorobanService {
                             });
                         }
                         "FAILED" => {
-                            let error_msg = format!("Transaction failed on network");
+                            let error_msg = "Transaction failed on network".to_string();
                             error!(tx_hash = tx_hash, "Transaction failed");
                             return Ok(SorobanTxResult {
                                 hash: tx_hash.to_string(),
@@ -588,7 +593,7 @@ impl SorobanService {
     fn sign_transaction(
         &self,
         tx_data: &serde_json::Value,
-        secret: &str,
+        _secret: &str,
     ) -> Result<String, SorobanError> {
         // In production, use ed25519-dalek or stellar-sdk to properly sign
         // This is a simplified placeholder
@@ -651,7 +656,7 @@ mod tests {
         let network = NetworkConfig::testnet();
         let service = SorobanService::new(network);
         // Service should be created without errors
-        assert!(true);
+        assert!(!service.network.rpc_url.is_empty());
     }
 
     #[test]
@@ -783,7 +788,7 @@ mod tests {
 
         let service = SorobanService::with_retry_config(network, retry_config);
         // Service should be created without errors
-        assert!(true);
+        assert!(!service.network.rpc_url.is_empty());
     }
 
     #[test]

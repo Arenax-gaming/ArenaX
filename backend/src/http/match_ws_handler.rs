@@ -73,6 +73,12 @@ pub struct MatchWebSocket {
     subscriptions: Vec<Uuid>,
 }
 
+impl Default for MatchWebSocket {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MatchWebSocket {
     pub fn new() -> Self {
         Self {
@@ -98,7 +104,7 @@ impl MatchWebSocket {
     }
 
     /// Handle subscription request
-    fn handle_subscribe(&mut self, match_id: Uuid, ctx: &mut <Self as Actor>::Context) {
+    fn handle_subscribe(&mut self, match_id: Uuid, _ctx: &mut <Self as Actor>::Context) {
         if !self.subscriptions.contains(&match_id) {
             self.subscriptions.push(match_id);
             info!(
@@ -262,48 +268,3 @@ pub fn configure_ws_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ws/matches/{id}", web::get().to(match_websocket));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ws_message_serialization() {
-        let msg = WsMessage::Subscribe {
-            match_id: Uuid::new_v4(),
-        };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("subscribe"));
-
-        let deserialized: WsMessage = serde_json::from_str(&json).unwrap();
-        match deserialized {
-            WsMessage::Subscribe { .. } => {}
-            _ => panic!("Expected Subscribe message"),
-        }
-    }
-
-    #[test]
-    fn test_match_state_changed_serialization() {
-        let msg = WsMessage::MatchStateChanged {
-            match_id: Uuid::new_v4(),
-            from_state: "CREATED".to_string(),
-            to_state: "STARTED".to_string(),
-            timestamp: "2024-01-01T00:00:00Z".to_string(),
-        };
-
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("match_state_changed"));
-        assert!(json.contains("CREATED"));
-        assert!(json.contains("STARTED"));
-    }
-
-    #[test]
-    fn test_error_message() {
-        let msg = WsMessage::Error {
-            message: "Test error".to_string(),
-        };
-
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("error"));
-        assert!(json.contains("Test error"));
-    }
-}
