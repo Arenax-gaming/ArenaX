@@ -1,6 +1,7 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env};
+use arenax_events::ax_token as events;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
 #[derive(Clone)]
 #[contracttype]
@@ -8,25 +9,6 @@ pub enum DataKey {
     Admin,
     Balance(Address),
     TotalSupply,
-}
-
-#[contractevent]
-pub struct MintEvent {
-    pub to: Address,
-    pub amount: i128,
-}
-
-#[contractevent]
-pub struct BurnEvent {
-    pub from: Address,
-    pub amount: i128,
-}
-
-#[contractevent]
-pub struct TransferEvent {
-    pub from: Address,
-    pub to: Address,
-    pub amount: i128,
 }
 
 #[contract]
@@ -62,7 +44,7 @@ impl AxToken {
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
 
-        MintEvent { to, amount }.publish(env);
+        events::emit_mint(env, &to, amount);
     }
 
     pub fn burn(env: &Env, from: Address, amount: i128) {
@@ -88,7 +70,7 @@ impl AxToken {
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
 
-        BurnEvent { from, amount }.publish(env);
+        events::emit_burn(env, &from, amount);
     }
 
     pub fn transfer(env: &Env, from: Address, to: Address, amount: i128) {
@@ -118,7 +100,7 @@ impl AxToken {
             .instance()
             .set(&DataKey::Balance(to.clone()), &new_to_balance);
 
-        TransferEvent { from, to, amount }.publish(env);
+        events::emit_transfer(env, &from, &to, amount);
     }
 
     pub fn balance(env: &Env, addr: Address) -> i128 {

@@ -1,7 +1,6 @@
 #![no_std]
-use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec,
-};
+use arenax_events::tournament as events;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Vec};
 
 // Data Structures
 
@@ -52,12 +51,6 @@ mod match_contract {
         pub started_at: u64,
         pub ended_at: Option<u64>,
     }
-}
-
-#[contractevent]
-pub struct TournamentFinalized {
-    pub tournament_id: BytesN<32>,
-    pub finalized_at: u64,
 }
 
 #[contract]
@@ -130,11 +123,7 @@ impl TournamentFinalizer {
             .persistent()
             .set(&DataKey::Tournament(tournament_id.clone()), &snapshot);
 
-        TournamentFinalized {
-            tournament_id,
-            finalized_at: snapshot.finalized_at,
-        }
-        .publish(&env);
+        events::emit_tournament_finalized(&env, &tournament_id, snapshot.finalized_at);
     }
 
     /// Retrieve a tournament snapshot

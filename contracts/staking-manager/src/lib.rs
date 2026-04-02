@@ -1,8 +1,7 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, token, Address, BytesN, Env,
-};
+use arenax_events::staking as events;
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,67 +59,6 @@ pub struct UserStakeInfo {
     pub completed_tournaments: u32,
 }
 
-#[contractevent]
-pub struct Initialized {
-    pub admin: Address,
-    pub ax_token: Address,
-}
-
-#[contractevent]
-pub struct TokenSet {
-    pub token: Address,
-}
-
-#[contractevent]
-pub struct TournamentContractSet {
-    pub contract: Address,
-}
-
-#[contractevent]
-pub struct DisputeContractSet {
-    pub contract: Address,
-}
-
-#[contractevent]
-pub struct Staked {
-    pub user: Address,
-    pub tournament_id: BytesN<32>,
-    pub amount: i128,
-}
-
-#[contractevent]
-pub struct Withdrawn {
-    pub user: Address,
-    pub tournament_id: BytesN<32>,
-    pub amount: i128,
-}
-
-#[contractevent]
-pub struct Slashed {
-    pub user: Address,
-    pub tournament_id: BytesN<32>,
-    pub amount: i128,
-    pub slashed_by: Address,
-}
-
-#[contractevent]
-pub struct TournamentCreated {
-    pub tournament_id: BytesN<32>,
-    pub stake_requirement: i128,
-}
-
-#[contractevent]
-pub struct TournamentUpdated {
-    pub tournament_id: BytesN<32>,
-    pub state: u32,
-}
-
-#[contractevent]
-pub struct ContractPaused {
-    pub paused: bool,
-    pub paused_by: Address,
-}
-
 #[contract]
 pub struct StakingManager;
 
@@ -144,7 +82,7 @@ impl StakingManager {
         env.storage().instance().set(&DataKey::AxToken, &ax_token);
         env.storage().instance().set(&DataKey::Paused, &false);
 
-        Initialized { admin, ax_token }.publish(&env);
+        events::emit_initialized(&env, &admin, &ax_token);
     }
 
     /// Set the AX token address
@@ -158,7 +96,7 @@ impl StakingManager {
         Self::require_admin(&env);
         env.storage().instance().set(&DataKey::AxToken, &ax_token);
 
-        TokenSet { token: ax_token }.publish(&env);
+        events::emit_token_set(&env, &ax_token);
     }
 
     /// Set the tournament contract address
@@ -174,10 +112,7 @@ impl StakingManager {
             .instance()
             .set(&DataKey::TournamentContract, &tournament_contract);
 
-        TournamentContractSet {
-            contract: tournament_contract,
-        }
-        .publish(&env);
+        events::emit_tournament_contract_set(&env, &tournament_contract);
     }
 
     /// Set the dispute contract address
@@ -193,10 +128,7 @@ impl StakingManager {
             .instance()
             .set(&DataKey::DisputeContract, &dispute_contract);
 
-        DisputeContractSet {
-            contract: dispute_contract,
-        }
-        .publish(&env);
+        events::emit_dispute_contract_set(&env, &dispute_contract);
     }
 
     /// Create a new tournament
@@ -241,11 +173,7 @@ impl StakingManager {
             &tournament_info,
         );
 
-        TournamentCreated {
-            tournament_id,
-            stake_requirement,
-        }
-        .publish(&env);
+        events::emit_tournament_created(&env, &tournament_id, stake_requirement);
     }
 
     /// Update tournament state
@@ -284,11 +212,7 @@ impl StakingManager {
             &tournament_info,
         );
 
-        TournamentUpdated {
-            tournament_id,
-            state,
-        }
-        .publish(&env);
+        events::emit_tournament_updated(&env, &tournament_id, state);
     }
 
     /// Stake AX tokens for tournament participation
@@ -360,12 +284,7 @@ impl StakingManager {
         // Update user stake info
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
 
-        Staked {
-            user,
-            tournament_id,
-            amount,
-        }
-        .publish(&env);
+        events::emit_staked(&env, &user, &tournament_id, amount);
     }
 
     /// Withdraw staked tokens after tournament completion
@@ -405,12 +324,7 @@ impl StakingManager {
         // Update user stake info
         Self::update_user_stake_info(&env, &user, -stake_info.amount, 0, -1, 1);
 
-        Withdrawn {
-            user,
-            tournament_id,
-            amount: stake_info.amount,
-        }
-        .publish(&env);
+        events::emit_withdrawn(&env, &user, &tournament_id, stake_info.amount);
     }
 
     /// Slash user's stake based on dispute resolution
@@ -490,13 +404,7 @@ impl StakingManager {
         // Update user stake info
         Self::update_user_stake_info(&env, &user, 0, amount, 0, 0);
 
-        Slashed {
-            user,
-            tournament_id,
-            amount,
-            slashed_by,
-        }
-        .publish(&env);
+        events::emit_slashed(&env, &user, &tournament_id, amount, &slashed_by);
     }
 
     /// Get user's stake information for a tournament
@@ -597,11 +505,7 @@ impl StakingManager {
 
         env.storage().instance().set(&DataKey::Paused, &paused);
 
-        ContractPaused {
-            paused,
-            paused_by: admin,
-        }
-        .publish(&env);
+        events::emit_contract_paused(&env, paused, &admin);
     }
 
     /// Get the admin address
