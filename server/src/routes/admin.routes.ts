@@ -6,6 +6,11 @@ import {
     listAuditLogs,
     replayPayment
 } from '../controllers/admin.controller';
+import {
+    listKycReviews,
+    getKycReview,
+    processKycReview
+} from '../controllers/kyc.controller';
 import { 
     listRefundRequests, 
     updateRefundStatus, 
@@ -23,6 +28,11 @@ router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
 router.get('/audit-logs', listAuditLogs);
 router.post('/payments/:id/replay', replayPayment);
+
+// KYC Management
+router.get('/kyc', listKycReviews);
+router.get('/kyc/:id', getKycReview);
+router.post('/kyc/:id/process', processKycReview);
 
 // Refund Management
 router.get('/refunds', listRefundRequests);

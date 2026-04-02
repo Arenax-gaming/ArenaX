@@ -57,7 +57,6 @@ export class StellarWalletService {
                 publicKey,
                 encryptedSecretKey,
                 encryptionVersion: activeKeyVersion,
-                encryptedSecretKeyVersion: activeKeyVersion,
                 lastRotatedAt: new Date()
             }
         });
@@ -118,7 +117,6 @@ export class StellarWalletService {
                     data: {
                         encryptedSecretKey: rotation.encrypted,
                         encryptionVersion: rotation.keyVersion,
-                        encryptedSecretKeyVersion: rotation.keyVersion,
                         lastRotatedAt: new Date()
                     }
                 });
@@ -201,7 +199,6 @@ export class StellarWalletService {
             data: {
                 encryptedSecretKey: rotation.encrypted,
                 encryptionVersion: rotation.keyVersion,
-                encryptedSecretKeyVersion: rotation.keyVersion,
                 lastRotatedAt: new Date()
             }
         });
