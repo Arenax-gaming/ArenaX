@@ -16,6 +16,12 @@ pub struct WsAddressBook {
     inner: RwLock<HashMap<Uuid, Addr<UserWebSocket>>>,
 }
 
+impl Default for WsAddressBook {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WsAddressBook {
     pub fn new() -> Self {
         Self {

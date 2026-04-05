@@ -69,8 +69,7 @@ impl ReaperService {
         tokio::spawn(async move {
             info!(
                 interval_secs,
-                "Reaper service started — scanning for expired matches every {}s",
-                interval_secs
+                "Reaper service started — scanning for expired matches every {}s", interval_secs
             );
             let mut ticker = tokio::time::interval(Duration::from_secs(interval_secs));
             // The first tick fires immediately; skip it so we don't reap on
@@ -94,30 +93,39 @@ impl ReaperService {
     async fn reap(&self) -> Result<(), sqlx::Error> {
         // Efficient query: uses idx_matches_reaper (status, report_deadline).
         // We deliberately fetch only the columns the Reaper needs.
-        let expired = sqlx::query!(
+        let expired = sqlx::query(
             r#"
             SELECT id, player1_id, player2_id
             FROM   matches
             WHERE  status         = $1
               AND  report_deadline < NOW()
-            "#,
-            MatchStatus::InProgress as _
+            "#
         )
+        .bind(MatchStatus::InProgress)
         .fetch_all(&self.db_pool)
         .await?;
 
         if !expired.is_empty() {
-            info!(count = expired.len(), "Reaper found expired in-progress matches");
+            info!(
+                count = expired.len(),
+                "Reaper found expired in-progress matches"
+            );
         }
 
         for row in expired {
-            if let Err(e) = self
-                .process_expired_match(row.id, row.player1_id, row.player2_id)
-                .await
-            {
+            let id: Uuid = row.try_get("id").map_err(|e| sqlx::Error::ColumnDecode {
+                index: "id".to_string(),
+                source: Box::new(e),
+            })?;
+            let player1_id: Uuid = row.try_get("player1_id").map_err(|e| sqlx::Error::ColumnDecode {
+                index: "player1_id".to_string(),
+                source: Box::new(e),
+            })?;
+            let player2_id: Option<Uuid> = row.try_get("player2_id").ok();
+            if let Err(e) = self.process_expired_match(id, player1_id, player2_id).await {
                 // Log and continue — one bad match must not block the rest
                 error!(
-                    match_id = %row.id,
+                    match_id = %id,
                     error    = %e,
                     "Reaper failed to process expired match"
                 );
@@ -140,9 +148,7 @@ impl ReaperService {
             None => {
                 // Give the win to player 1 automatically
                 info!(match_id = %match_id, "Reaper: bye match expired — auto-completing for player 1");
-                return self
-                    .complete_with_winner(match_id, player1_id, None)
-                    .await;
+                return self.complete_with_winner(match_id, player1_id, None).await;
             }
             Some(id) => id,
         };
@@ -195,19 +201,13 @@ impl ReaperService {
     // HELPERS
     // ========================================================================
 
-    async fn player_has_reported(
-        &self,
-        match_id: Uuid,
-        player_id: Uuid,
-    ) -> Result<bool, ApiError> {
-        let row = sqlx::query!(
-            "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_id,
-            player_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+    async fn player_has_reported(&self, match_id: Uuid, player_id: Uuid) -> Result<bool, ApiError> {
+        let row = sqlx::query("SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2")
+            .bind(match_id)
+            .bind(player_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
 
         Ok(row.is_some())
     }
@@ -219,7 +219,7 @@ impl ReaperService {
         forfeited_player: Uuid,
         winner_id: Uuid,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status       = $1,
@@ -228,13 +228,13 @@ impl ReaperService {
                 completed_at = $4,
                 updated_at   = $4
             WHERE id = $5
-            "#,
-            MatchStatus::Completed as _,
-            winner_id,
-            forfeited_player,
-            Utc::now(),
-            match_id
+            "#
         )
+        .bind(MatchStatus::Completed)
+        .bind(winner_id)
+        .bind(forfeited_player)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -257,7 +257,7 @@ impl ReaperService {
         winner_id: Uuid,
         _forfeited_player: Option<Uuid>,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status       = $1,
@@ -265,12 +265,12 @@ impl ReaperService {
                 completed_at = $3,
                 updated_at   = $3
             WHERE id = $4
-            "#,
-            MatchStatus::Completed as _,
-            winner_id,
-            Utc::now(),
-            match_id
+            "#
         )
+        .bind(MatchStatus::Completed)
+        .bind(winner_id)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -280,17 +280,17 @@ impl ReaperService {
 
     /// Neither player reported in time — cancel without awarding a winner.
     async fn cancel_abandoned(&self, match_id: Uuid) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status     = $1,
                 updated_at = $2
             WHERE id = $3
-            "#,
-            MatchStatus::Cancelled as _,
-            Utc::now(),
-            match_id
+            "#
         )
+        .bind(MatchStatus::Cancelled)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

@@ -23,7 +23,10 @@ impl TournamentOrchestrator {
         }
     }
 
-    pub fn spawn_polling_worker(db_pool: DbPool, interval_secs: u64) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_polling_worker(
+        db_pool: DbPool,
+        interval_secs: u64,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let advancement = RoundAdvancementWorker::new(db_pool.clone());
             let payout = PayoutSettler::new(db_pool.clone());
@@ -62,9 +65,11 @@ impl TournamentOrchestrator {
                     tracing::error!("Polling: cleanup error: {}", e);
                 }
 
-                let _ = sqlx::query("SELECT pg_advisory_unlock(hashtext('tournament_orchestrator_poll'))")
-                    .execute(&db_pool)
-                    .await;
+                let _ = sqlx::query(
+                    "SELECT pg_advisory_unlock(hashtext('tournament_orchestrator_poll'))",
+                )
+                .execute(&db_pool)
+                .await;
             }
         })
     }

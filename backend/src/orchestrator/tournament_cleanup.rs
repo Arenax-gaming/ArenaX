@@ -49,8 +49,11 @@ impl TournamentCleanup {
         .bind(tournament_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))
-        .and_then(|row| row.try_get::<bool, _>("cleaned").map_err(|e| ApiError::database_error(e)))
+        .map_err(ApiError::database_error)
+        .and_then(|row| {
+            row.try_get::<bool, _>("cleaned")
+                .map_err(ApiError::database_error)
+        })
         .unwrap_or(false);
 
         if already_cleaned {
@@ -96,7 +99,11 @@ impl TournamentCleanup {
         if payout_count == 0 {
             let payout = crate::orchestrator::PayoutSettler::new(self.db_pool.clone());
             if let Err(e) = payout.finalize_tournament(tournament_id).await {
-                tracing::error!("Payout re-trigger failed for tournament {}: {}", tournament_id, e);
+                tracing::error!(
+                    "Payout re-trigger failed for tournament {}: {}",
+                    tournament_id,
+                    e
+                );
             }
         }
 
@@ -229,8 +236,7 @@ impl TournamentCleanup {
         }
 
         // Step 2: Count stale tournaments (in_progress longer than stale_tournament_days).
-        let stale_cutoff =
-            Utc::now() - chrono::Duration::days(self.config.stale_tournament_days);
+        let stale_cutoff = Utc::now() - chrono::Duration::days(self.config.stale_tournament_days);
 
         let stale_row = sqlx::query(
             r#"

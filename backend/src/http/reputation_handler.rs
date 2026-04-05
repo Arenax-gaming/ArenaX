@@ -6,11 +6,26 @@
 //! - Admin functions for managing bad actors
 
 use crate::api_error::ApiError;
-use crate::models::ApiResponse;
-use crate::service::reputation_service::{PlayerReputation, ReputationService};
+use crate::service::reputation_service::{PlayerReputation, ReputationTier};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use uuid::Uuid;
+
+#[derive(Debug, Serialize)]
+struct ApiResponse<T: Serialize> {
+    success: bool,
+    data: T,
+}
+
+impl<T: Serialize> ApiResponse<T> {
+    fn success(data: T) -> Self {
+        Self {
+            success: true,
+            data,
+        }
+    }
+}
 
 /// Player reputation response
 #[derive(Debug, Serialize)]
@@ -25,8 +40,6 @@ pub struct ReputationResponse {
 
 impl From<PlayerReputation> for ReputationResponse {
     fn from(rep: PlayerReputation) -> Self {
-        use crate::service::reputation_service::ReputationTier;
-        
         let tier_str = match rep.get_tier() {
             ReputationTier::Elite => "elite",
             ReputationTier::Good => "good",
@@ -58,47 +71,7 @@ pub struct ReputationEventResponse {
     pub created_at: String,
 }
 
-/// Get player reputation
-pub async fn get_player_reputation(
-    pool: web::Data<sqlx::PgPool>,
-    path: web::Path<Uuid>,
-) -> Result<HttpResponse, ApiError> {
-    let user_id = path.into_inner();
-    
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
-        r#"
-        SELECT 
-            id as user_id,
-            COALESCE(skill_score, 1000) as skill_score,
-            COALESCE(fair_play_score, 100) as fair_play_score,
-            reputation_last_updated,
-            COALESCE(is_bad_actor, false) as is_bad_actor
-        FROM users
-        WHERE id = $1
-        "#,
-        user_id
-    )
-    .fetch_optional(pool.get_ref())
-    .await
-    .map_err(|e| ApiError::database_error(e))?
-    .ok_or_else(|| ApiError::not_found("User not found"))?;
-
-    let rep = PlayerReputation {
-        user_id: reputation.user_id,
-        skill_score: reputation.skill_score,
-        fair_play_score: reputation.fair_play_score,
-        last_update_ts: reputation
-            .reputation_last_updated
-            .map(|t| t.timestamp() as u64)
-            .unwrap_or(0),
-        is_bad_actor: reputation.is_bad_actor,
-    };
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(reputation)))
-}
-
-#[derive(sqlx::FromRow)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 struct PlayerReputationData {
     user_id: Uuid,
     skill_score: i32,
@@ -107,15 +80,14 @@ struct PlayerReputationData {
     is_bad_actor: bool,
 }
 
-/// Get current user's reputation (authenticated endpoint)
-pub async fn get_my_reputation(
+/// Get player reputation
+pub async fn get_player_reputation(
     pool: web::Data<sqlx::PgPool>,
-    user_id: web::ReqData<Uuid>,
+    path: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
-    let uid = user_id.into_inner();
-    
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
+    let user_id = path.into_inner();
+
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(
         r#"
         SELECT 
             id as user_id,
@@ -126,13 +98,14 @@ pub async fn get_my_reputation(
         FROM users
         WHERE id = $1
         "#,
-        uid
     )
-    .fetch_one(pool.get_ref())
+    .bind(user_id)
+    .fetch_optional(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?
+    .ok_or_else(|| ApiError::not_found("User not found"))?;
 
-    let rep = PlayerReputation {
+    let response = ReputationResponse::from(PlayerReputation {
         user_id: reputation.user_id,
         skill_score: reputation.skill_score,
         fair_play_score: reputation.fair_play_score,
@@ -141,7 +114,45 @@ pub async fn get_my_reputation(
             .map(|t| t.timestamp() as u64)
             .unwrap_or(0),
         is_bad_actor: reputation.is_bad_actor,
-    };
+    });
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
+}
+
+/// Get current user's reputation (authenticated endpoint)
+pub async fn get_my_reputation(
+    pool: web::Data<sqlx::PgPool>,
+    user_id: web::ReqData<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let uid = user_id.into_inner();
+
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(
+        r#"
+        SELECT 
+            id as user_id,
+            COALESCE(skill_score, 1000) as skill_score,
+            COALESCE(fair_play_score, 100) as fair_play_score,
+            reputation_last_updated,
+            COALESCE(is_bad_actor, false) as is_bad_actor
+        FROM users
+        WHERE id = $1
+        "#,
+    )
+    .bind(uid)
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(ApiError::database_error)?;
+
+    let rep = ReputationResponse::from(PlayerReputation {
+        user_id: reputation.user_id,
+        skill_score: reputation.skill_score,
+        fair_play_score: reputation.fair_play_score,
+        last_update_ts: reputation
+            .reputation_last_updated
+            .map(|t| t.timestamp() as u64)
+            .unwrap_or(0),
+        is_bad_actor: reputation.is_bad_actor,
+    });
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(rep)))
 }
@@ -156,8 +167,7 @@ pub async fn get_reputation_history(
     let limit = query.limit.unwrap_or(20);
     let offset = query.offset.unwrap_or(0);
 
-    let history = sqlx::query_as!(
-        ReputationEventResponse,
+    let history = sqlx::query_as::<_, ReputationEventResponse>(
         r#"
         SELECT 
             id,
@@ -167,19 +177,19 @@ pub async fn get_reputation_history(
             fair_play_delta,
             match_id,
             transaction_hash,
-            created_at::text
+            created_at::text as created_at
         FROM reputation_events
         WHERE user_id = $1
         ORDER BY created_at DESC
         LIMIT $2 OFFSET $3
         "#,
-        user_id,
-        limit as i64,
-        offset as i64
     )
+    .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(history)))
 }
@@ -192,7 +202,7 @@ pub async fn get_bad_actors(
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
 
-    let bad_actors = sqlx::query!(
+    let rows = sqlx::query(
         r#"
         SELECT 
             id,
@@ -207,12 +217,26 @@ pub async fn get_bad_actors(
         ORDER BY fair_play_score ASC, created_at DESC
         LIMIT $1 OFFSET $2
         "#,
-        limit as i64,
-        offset as i64
     )
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
+
+    let bad_actors: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "username": row.try_get::<String, _>("username").unwrap_or_default(),
+                "email": row.try_get::<Option<String>, _>("email").unwrap_or(None),
+                "skill_score": row.try_get::<Option<i32>, _>("skill_score").unwrap_or(None),
+                "fair_play_score": row.try_get::<Option<i32>, _>("fair_play_score").unwrap_or(None),
+                "anticheat_flags_count": row.try_get::<Option<i32>, _>("anticheat_flags_count").unwrap_or(None),
+            })
+        })
+        .collect();
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(bad_actors)))
 }
@@ -224,29 +248,29 @@ pub async fn remove_bad_actor_flag(
 ) -> Result<HttpResponse, ApiError> {
     let user_id = path.into_inner();
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE users
         SET is_bad_actor = false, updated_at = NOW()
         WHERE id = $1
         "#,
-        user_id
     )
+    .bind(user_id)
     .execute(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
-        "message": "Bad actor flag removed",
-        "user_id": user_id
-    }))))
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
+            "message": "Bad actor flag removed",
+            "user_id": user_id
+        }))),
+    )
 }
 
 /// Get reputation statistics (admin only)
-pub async fn get_reputation_stats(
-    pool: web::Data<sqlx::PgPool>,
-) -> Result<HttpResponse, ApiError> {
-    let stats = sqlx::query!(
+pub async fn get_reputation_stats(pool: web::Data<sqlx::PgPool>) -> Result<HttpResponse, ApiError> {
+    let row = sqlx::query(
         r#"
         SELECT 
             COUNT(*) FILTER (WHERE is_bad_actor = true) as bad_actors_count,
@@ -256,18 +280,18 @@ pub async fn get_reputation_stats(
             AVG(COALESCE(fair_play_score, 100)) as avg_fair_play
         FROM users
         WHERE is_active = true
-        "#
+        "#,
     )
     .fetch_one(pool.get_ref())
     .await
-    .map_err(|e| ApiError::database_error(e))?;
+    .map_err(ApiError::database_error)?;
 
     let response = serde_json::json!({
-        "bad_actors_count": stats.bad_actors_count.unwrap_or(0),
-        "low_fair_play_count": stats.low_fair_play_count.unwrap_or(0),
-        "high_skill_count": stats.high_skill_count.unwrap_or(0),
-        "avg_skill": stats.avg_skill.unwrap_or(1000.0),
-        "avg_fair_play": stats.avg_fair_play.unwrap_or(100.0)
+        "bad_actors_count": row.try_get::<i64, _>("bad_actors_count").unwrap_or(0),
+        "low_fair_play_count": row.try_get::<i64, _>("low_fair_play_count").unwrap_or(0),
+        "high_skill_count": row.try_get::<i64, _>("high_skill_count").unwrap_or(0),
+        "avg_skill": row.try_get::<f64, _>("avg_skill").unwrap_or(1000.0),
+        "avg_fair_play": row.try_get::<f64, _>("avg_fair_play").unwrap_or(100.0)
     });
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
@@ -290,7 +314,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/history/{user_id}", web::get().to(get_reputation_history))
             // Admin endpoints (should be protected by admin middleware)
             .route("/bad-actors", web::get().to(get_bad_actors))
-            .route("/bad-actors/{user_id}/remove", web::post().to(remove_bad_actor_flag))
+            .route(
+                "/bad-actors/{user_id}/remove",
+                web::post().to(remove_bad_actor_flag),
+            )
             .route("/stats", web::get().to(get_reputation_stats)),
     );
 }
