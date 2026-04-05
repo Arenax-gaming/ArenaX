@@ -201,21 +201,6 @@ impl ReaperService {
     // HELPERS
     // ========================================================================
 
-<<<<<<< HEAD
-    async fn player_has_reported(
-        &self,
-        match_id: Uuid,
-        player_id: Uuid,
-    ) -> Result<bool, ApiError> {
-        let row = sqlx::query!(
-            "SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_id,
-            player_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-=======
     async fn player_has_reported(&self, match_id: Uuid, player_id: Uuid) -> Result<bool, ApiError> {
         let row = sqlx::query("SELECT id FROM match_scores WHERE match_id = $1 AND player_id = $2")
             .bind(match_id)
@@ -223,7 +208,6 @@ impl ReaperService {
             .fetch_optional(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
 
         Ok(row.is_some())
     }
@@ -235,7 +219,7 @@ impl ReaperService {
         forfeited_player: Uuid,
         winner_id: Uuid,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status       = $1,
@@ -244,16 +228,13 @@ impl ReaperService {
                 completed_at = $4,
                 updated_at   = $4
             WHERE id = $5
-            "#,
-<<<<<<< HEAD
-            MatchStatus::Completed as _,
-            winner_id,
-            forfeited_player,
-            Utc::now(),
-            match_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
+            "#
         )
+        .bind(MatchStatus::Completed)
+        .bind(winner_id)
+        .bind(forfeited_player)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -276,7 +257,7 @@ impl ReaperService {
         winner_id: Uuid,
         _forfeited_player: Option<Uuid>,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status       = $1,
@@ -284,15 +265,12 @@ impl ReaperService {
                 completed_at = $3,
                 updated_at   = $3
             WHERE id = $4
-            "#,
-<<<<<<< HEAD
-            MatchStatus::Completed as _,
-            winner_id,
-            Utc::now(),
-            match_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
+            "#
         )
+        .bind(MatchStatus::Completed)
+        .bind(winner_id)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -302,20 +280,17 @@ impl ReaperService {
 
     /// Neither player reported in time — cancel without awarding a winner.
     async fn cancel_abandoned(&self, match_id: Uuid) -> Result<(), ApiError> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE matches
             SET status     = $1,
                 updated_at = $2
             WHERE id = $3
-            "#,
-<<<<<<< HEAD
-            MatchStatus::Cancelled as _,
-            Utc::now(),
-            match_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
+            "#
         )
+        .bind(MatchStatus::Cancelled)
+        .bind(Utc::now())
+        .bind(match_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

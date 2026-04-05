@@ -1635,32 +1635,20 @@ impl MatchService {
             .player2_id
             .ok_or_else(|| ApiError::bad_request("Match has no second player"))?;
 
-<<<<<<< HEAD
-        let p1_report = sqlx::query_as!(
-            MatchScore,
-            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_id,
-            match_record.player1_id
-=======
         let p1_report = sqlx::query_as::<_, MatchScore>(
             "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
+    .bind(match_id)
+    .bind(match_record.player1_id)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-<<<<<<< HEAD
-        let p2_report = sqlx::query_as!(
-            MatchScore,
-            "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
-            match_id,
-            p2_id
-=======
         let p2_report = sqlx::query_as::<_, MatchScore>(
             "SELECT * FROM match_scores WHERE match_id = $1 AND player_id = $2",
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
+    .bind(match_id)
+    .bind(p2_id)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1682,13 +1670,10 @@ impl MatchService {
             SET status = $1, conflict_reason = $2, updated_at = $3
             WHERE id = $4
             "#,
-<<<<<<< HEAD
             MatchStatus::Conflict as _,
             conflict_reason,
             Utc::now(),
             match_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
         .execute(&self.db_pool)
         .await
@@ -1733,13 +1718,10 @@ impl MatchService {
                 (id, match_id, player_id, attempted_at, accepted)
             VALUES ($1, $2, $3, $4, FALSE)
             "#,
-<<<<<<< HEAD
             Uuid::new_v4(),
             match_id,
             player_id,
             Utc::now()
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
         .execute(&self.db_pool)
         .await
@@ -1752,11 +1734,8 @@ impl MatchService {
             FROM score_report_attempts
             WHERE match_id = $1 AND player_id = $2
             "#,
-<<<<<<< HEAD
             match_id,
             player_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
         .fetch_one(&self.db_pool)
         .await
@@ -1793,11 +1772,8 @@ impl MatchService {
                 LIMIT 1
             )
             "#,
-<<<<<<< HEAD
             match_id,
             player_id
-=======
->>>>>>> 6d0958e (fix: clippy and formatting issues for CI compliance)
         )
         .execute(&self.db_pool)
         .await
