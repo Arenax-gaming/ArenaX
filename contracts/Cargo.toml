@@ -19,6 +19,7 @@ members = [
     "ax-token",
     "anti-cheat-oracle",
     "staking-manager",
+    "upgrade-system",
 ]
 resolver = "2"
 
