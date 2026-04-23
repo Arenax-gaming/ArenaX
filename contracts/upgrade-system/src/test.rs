@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::*;
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String};
 
@@ -33,7 +31,7 @@ fn generate_wasm_hash(env: &Env, seed: u32) -> BytesN<32> {
 #[test]
 fn test_initialize_success() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
@@ -46,7 +44,7 @@ fn test_initialize_success() {
 #[test]
 fn test_propose_upgrade_success() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
@@ -73,7 +71,7 @@ fn test_propose_upgrade_success() {
 #[test]
 fn test_validate_upgrade_success() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
@@ -104,7 +102,7 @@ fn test_validate_upgrade_success() {
 #[test]
 fn test_emergency_pause_success() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
@@ -121,7 +119,7 @@ fn test_emergency_pause_success() {
 #[test]
 fn test_get_upgrade_history() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
@@ -135,7 +133,7 @@ fn test_get_upgrade_history() {
 #[test]
 fn test_approve_and_schedule() {
     let (env, governance, _, _) = create_test_env();
-    let contract_id = env.register_contract(None, UpgradeSystem);
+    let contract_id = env.register(UpgradeSystem, ());
     let client = UpgradeSystemClient::new(&env, &contract_id);
 
     client.initialize(&governance, &(24 * 60 * 60), &3, &2);
