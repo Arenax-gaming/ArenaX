@@ -19,6 +19,10 @@ export type DatabaseTransactionClient = Pick<
     | 'project'
     | 'payment'
     | 'kycReview'
+    | 'achievement'
+    | 'playerAchievement'
+    | 'achievementShare'
+    | 'achievementNotification'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
