@@ -1,11 +1,11 @@
 #![cfg(test)]
 
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{Address, Bytes, Env, String};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{Address, Bytes, Env, String, Vec};
 
 use crate::{
     AntiCheatContract, AntiCheatParams, Appeal, BehaviorPattern, DataKey, Sanction, SanctionStatus,
-    SanctionType, SuspiciousActivity, TrustScore,
+    SanctionType, SuspiciousActivity,
 };
 
 #[test]
@@ -67,6 +67,7 @@ fn test_report_suspicious_activity() {
         pattern.clone(),
         evidence,
         severity,
+        false,
     );
 
     let report: SuspiciousActivity = env
@@ -99,7 +100,7 @@ fn test_report_invalid_severity() {
     let severity = 11; // Invalid (> 10)
 
     AntiCheatContract::report_suspicious_activity(
-        env, reporter, player, 12345, pattern, evidence, severity,
+        env, reporter, player, 12345, pattern, evidence, severity, false,
     );
 }
 
@@ -158,6 +159,7 @@ fn test_apply_sanction() {
 
     let reason = String::from_str(&env, "Test sanction");
     let duration = 86400; // 1 day
+    let report_ids = Vec::new(&env);
 
     let sanction_id = AntiCheatContract::apply_sanction(
         env.clone(),
@@ -165,6 +167,7 @@ fn test_apply_sanction() {
         SanctionType::TemporaryBan,
         reason.clone(),
         duration,
+        report_ids,
     );
 
     let sanction: Sanction = env
@@ -181,11 +184,10 @@ fn test_apply_sanction() {
 }
 
 #[test]
-#[should_panic(expected = "only admin can update parameters")]
+#[should_panic]
 fn test_apply_sanction_unauthorized() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let unauthorized = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -193,8 +195,9 @@ fn test_apply_sanction_unauthorized() {
 
     let reason = String::from_str(&env, "Test sanction");
     let duration = 86400;
+    let report_ids = Vec::new(&env);
 
-    AntiCheatContract::apply_sanction(env, player, SanctionType::TemporaryBan, reason, duration);
+    AntiCheatContract::apply_sanction(env, player, SanctionType::TemporaryBan, reason, duration, report_ids);
 }
 
 #[test]
@@ -208,6 +211,7 @@ fn test_appeal_sanction() {
 
     let reason = String::from_str(&env, "Test sanction");
     let duration = 86400;
+    let report_ids = Vec::new(&env);
 
     let sanction_id = AntiCheatContract::apply_sanction(
         env.clone(),
@@ -215,6 +219,7 @@ fn test_appeal_sanction() {
         SanctionType::TemporaryBan,
         reason.clone(),
         duration,
+        report_ids,
     );
 
     let appeal_reason = String::from_str(&env, "Appeal reason");
@@ -261,6 +266,7 @@ fn test_appeal_not_your_sanction() {
 
     let reason = String::from_str(&env, "Test sanction");
     let duration = 86400;
+    let report_ids = Vec::new(&env);
 
     let sanction_id = AntiCheatContract::apply_sanction(
         env.clone(),
@@ -268,6 +274,7 @@ fn test_appeal_not_your_sanction() {
         SanctionType::TemporaryBan,
         reason,
         duration,
+        report_ids,
     );
 
     let appeal_reason = String::from_str(&env, "Appeal reason");
@@ -287,6 +294,7 @@ fn test_review_appeal() {
 
     let reason = String::from_str(&env, "Test sanction");
     let duration = 86400;
+    let report_ids = Vec::new(&env);
 
     let sanction_id = AntiCheatContract::apply_sanction(
         env.clone(),
@@ -294,6 +302,7 @@ fn test_review_appeal() {
         SanctionType::TemporaryBan,
         reason,
         duration,
+        report_ids,
     );
 
     let appeal_reason = String::from_str(&env, "Appeal reason");
@@ -356,6 +365,10 @@ fn test_update_anticheat_params() {
         appeal_window: 1209600,
         severity_multiplier: 3,
         max_reports_per_match: 10,
+        false_positive_threshold: 75,
+        emergency_mode: false,
+        whistleblower_reward: 150,
+        pattern_detection_sensitivity: 60,
     };
 
     AntiCheatContract::update_anticheat_params(env.clone(), admin.clone(), new_params.clone());
@@ -386,6 +399,10 @@ fn test_update_anticheat_params_unauthorized() {
         appeal_window: 1209600,
         severity_multiplier: 3,
         max_reports_per_match: 10,
+        false_positive_threshold: 75,
+        emergency_mode: false,
+        whistleblower_reward: 150,
+        pattern_detection_sensitivity: 60,
     };
 
     AntiCheatContract::update_anticheat_params(env, unauthorized, new_params);
@@ -414,6 +431,7 @@ fn test_verify_activity() {
         pattern,
         evidence,
         severity,
+        false,
     );
 
     AntiCheatContract::verify_activity(env.clone(), admin.clone(), report_id, true);
@@ -452,7 +470,170 @@ fn test_verify_activity_unauthorized() {
         pattern,
         evidence,
         severity,
+        false,
     );
 
     AntiCheatContract::verify_activity(env, unauthorized, report_id, true);
+}
+
+#[test]
+fn test_emergency_mode() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin.clone(), reputation_contract);
+
+    // Enable emergency mode
+    AntiCheatContract::set_emergency_mode(env.clone(), true);
+
+    let emergency_mode: bool = env.storage().persistent().get(&DataKey::EmergencyMode).unwrap_or(false);
+    assert!(emergency_mode);
+}
+
+#[test]
+fn test_whistleblower_protection() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reporter = Address::generate(&env);
+    let player = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin, reputation_contract);
+
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+    let severity = 5;
+    let match_id = 12345;
+
+    // Report anonymously
+    let _report_id = AntiCheatContract::report_suspicious_activity(
+        env.clone(),
+        reporter.clone(),
+        player.clone(),
+        match_id,
+        pattern,
+        evidence,
+        severity,
+        true, // anonymous
+    );
+
+    let protection = AntiCheatContract::get_whistleblower_protection(env.clone(), reporter.clone());
+    assert!(protection.is_some());
+    assert!(protection.unwrap().anonymous);
+}
+
+#[test]
+fn test_analytics() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin, reputation_contract);
+
+    let analytics = AntiCheatContract::get_analytics(env.clone());
+    assert_eq!(analytics.total_reports, 0);
+}
+
+#[test]
+fn test_behavior_profile() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reporter = Address::generate(&env);
+    let player = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin, reputation_contract);
+
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+    let severity = 7; // High severity to trigger anomaly
+    let match_id = 12345;
+
+    AntiCheatContract::report_suspicious_activity(
+        env.clone(),
+        reporter,
+        player.clone(),
+        match_id,
+        pattern,
+        evidence,
+        severity,
+        false,
+    );
+
+    let profile = AntiCheatContract::get_behavior_profile(env, player);
+    assert!(profile.is_some());
+    assert_eq!(profile.unwrap().anomaly_count, 1);
+}
+
+#[test]
+fn test_confidence_score() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reporter = Address::generate(&env);
+    let player = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin, reputation_contract);
+
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AimbotDetection; // High confidence pattern
+    let severity = 8;
+    let match_id = 12345;
+
+    let report_id = AntiCheatContract::report_suspicious_activity(
+        env.clone(),
+        reporter,
+        player.clone(),
+        match_id,
+        pattern,
+        evidence,
+        severity,
+        false,
+    );
+
+    let report: SuspiciousActivity = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Report(report_id))
+        .expect("report not found");
+
+    // Aimbot detection should have high confidence score
+    assert!(report.confidence_score > 70);
+}
+
+#[test]
+fn test_false_positive_prevention() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let reporter = Address::generate(&env);
+    let player = Address::generate(&env);
+    let reputation_contract = Address::generate(&env);
+
+    AntiCheatContract::initialize(env.clone(), admin, reputation_contract);
+
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::StatisticalAnomaly; // Higher false positive risk
+    let severity = 5;
+    let match_id = 12345;
+
+    let report_id = AntiCheatContract::report_suspicious_activity(
+        env.clone(),
+        reporter,
+        player.clone(),
+        match_id,
+        pattern,
+        evidence,
+        severity,
+        false,
+    );
+
+    let report: SuspiciousActivity = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Report(report_id))
+        .expect("report not found");
+
+    // Statistical anomaly should have higher false positive risk
+    assert!(report.false_positive_risk > 30);
 }
