@@ -82,6 +82,29 @@ export const authenticateJWT = (
     )(req, res, next);
 };
 
+/** Attaches `req.user` when a valid Bearer token is present; otherwise continues unauthenticated. */
+export const optionalAuthenticateJWT = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+): void => {
+    passport.authenticate(
+        'jwt',
+        { session: false },
+        (err: Error | null, user: Express.User | false) => {
+            if (err) {
+                return next(err);
+            }
+
+            if (user) {
+                req.user = user;
+            }
+
+            return next();
+        }
+    )(req, res, next);
+};
+
 export const restrictTo =
     (...roles: string[]) =>
     (req: Request, _res: Response, next: NextFunction): void => {
