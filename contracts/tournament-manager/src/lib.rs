@@ -453,9 +453,9 @@ impl TournamentManager {
 
         let player_count = players.len();
         let total_rounds = if player_count.is_power_of_two() {
-            (player_count as f32).log2() as u32
+            player_count.ilog2()
         } else {
-            ((player_count as f32).log2().ceil()) as u32
+            player_count.ilog2() + 1
         };
 
         // Simple pairing for first round
@@ -497,7 +497,7 @@ impl TournamentManager {
         let match_ids: Vec<BytesN<32>> = Vec::new(env);
 
         let player_count = players.len();
-        let total_rounds = ((player_count as f32).log2() * 2.0).ceil() as u32;
+        let total_rounds = player_count.ilog2() * 2;
 
         // Generate winners bracket matches
         let mut i = 0;
