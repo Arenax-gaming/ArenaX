@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, String, Vec};
+use soroban_sdk::{Address, Bytes, Env, String};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 
 use crate::{
@@ -143,7 +143,7 @@ fn test_cast_vote() {
     let vote: Vote = env
         .storage()
         .persistent()
-        .get(&DataKey::Vote(proposal_id, voter))
+        .get(&DataKey::Vote(proposal_id.clone(), voter.clone()))
         .expect("vote not found");
 
     assert_eq!(vote.voter, voter);
@@ -338,7 +338,7 @@ fn test_delegate_voting_power() {
     let delegation: Delegation = env
         .storage()
         .persistent()
-        .get(&DataKey::Delegation(delegator))
+        .get(&DataKey::Delegation(delegator.clone()))
         .expect("delegation not found");
 
     assert_eq!(delegation.delegator, delegator);
@@ -401,7 +401,7 @@ fn test_cancel_proposal_unauthorized() {
     let unauthorized = Address::generate(&env);
     let token_contract = Address::generate(&env);
 
-    GovernanceContract::initialize(env.clone(), admin, token_contract);
+    GovernanceContract::initialize(env.clone(), admin.clone(), token_contract);
 
     let title = String::from_str(&env, "Test Proposal");
     let description = String::from_str(&env, "Test Description");

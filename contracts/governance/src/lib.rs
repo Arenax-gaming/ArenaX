@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, String};
 
 mod test;
 
@@ -281,9 +281,9 @@ impl GovernanceContract {
     }
 
     // Calculate voting power for a voter
-    pub fn calculate_voting_power(env: &Env, voter: &Address, proposal_id: &BytesN<32>) -> u128 {
+    pub fn calculate_voting_power(env: &Env, voter: &Address, _proposal_id: &BytesN<32>) -> u128 {
         // Get token contract
-        let token_contract: Address = env
+        let _token_contract: Address = env
             .storage()
             .persistent()
             .get(&DataKey::TokenContract)
@@ -329,8 +329,7 @@ impl GovernanceContract {
         }
 
         // Check quorum
-        let quorum_threshold =
-            (proposal.total_voting_power as u128 * params.quorum_threshold as u128) / 100;
+        let quorum_threshold = (proposal.total_voting_power * params.quorum_threshold as u128) / 100;
         if proposal.total_voting_power < quorum_threshold {
             proposal.status = ProposalStatus::Rejected;
         } else {
