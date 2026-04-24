@@ -1717,6 +1717,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tournament-manager"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "tournament_finalizer"
 version = "0.1.0"
 dependencies = [
