@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, String, Vec};
 
 mod test;
 
@@ -51,7 +51,7 @@ pub struct Proposal {
     pub against_votes: u128,
     pub abstain_votes: u128,
     pub total_voting_power: u128,
-    pub execution_data: Vec<u8>,
+    pub execution_data: Bytes,
     pub created_at: u64,
 }
 
@@ -145,7 +145,7 @@ impl GovernanceContract {
         description: String,
         proposal_type: ProposalType,
         voting_period: u64,
-        execution_data: Vec<u8>,
+        execution_data: Bytes,
     ) -> BytesN<32> {
         let admin: Address = env
             .storage()
@@ -289,13 +289,9 @@ impl GovernanceContract {
             .get(&DataKey::TokenContract)
             .expect("token contract not found");
 
-        // For now, return a simple calculation based on address hash
+        // For now, return a simple calculation based on address
         // In production, this would query the token contract for actual balance
-        let hash = BytesN::<32>::from_array(env, &voter.to_contract().to_array());
-        let mut power: u128 = 0;
-        for byte in hash.to_array().iter() {
-            power += *byte as u128;
-        }
+        let mut power: u128 = 100; // Base voting power
 
         // Check for delegated power
         let delegation_key = DataKey::Delegation(voter.clone());
@@ -422,7 +418,7 @@ impl GovernanceContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Delegation(delegator), &delegation);
+            .set(&DataKey::Delegation(delegator.clone()), &delegation);
 
         // Emit event
         arenax_events::governance::voting_power_delegated(

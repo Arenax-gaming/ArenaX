@@ -1,7 +1,7 @@
 #![cfg(test)]
 
+use soroban_sdk::{Address, Bytes, BytesN, Env, String, Vec};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::{
     DataKey, Delegation, GovernanceContract, GovernanceParams, Proposal, ProposalStatus,
@@ -56,7 +56,7 @@ fn test_create_proposal() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800; // 7 days
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -95,7 +95,7 @@ fn test_create_proposal_unauthorized() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     GovernanceContract::create_proposal(
         env,
@@ -121,7 +121,7 @@ fn test_cast_vote() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -172,7 +172,7 @@ fn test_cast_vote_twice() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -207,7 +207,7 @@ fn test_tally_votes() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -260,7 +260,7 @@ fn test_execute_proposal() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -308,7 +308,7 @@ fn test_execute_proposal_not_passed() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -370,7 +370,7 @@ fn test_cancel_proposal() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -407,7 +407,7 @@ fn test_cancel_proposal_unauthorized() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
@@ -485,7 +485,7 @@ fn test_get_proposal() {
     let description = String::from_str(&env, "Test Description");
     let proposal_type = ProposalType::ParameterUpdate;
     let voting_period = 604800;
-    let execution_data = Vec::new(&env);
+    let execution_data = Bytes::new(&env);
 
     let proposal_id = GovernanceContract::create_proposal(
         env.clone(),
