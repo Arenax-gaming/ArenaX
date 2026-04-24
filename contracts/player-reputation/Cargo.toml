@@ -1,0 +1,16 @@
+[package]
+name = "arenax-player-reputation"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+arenax-events = { path = "../arenax-events" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

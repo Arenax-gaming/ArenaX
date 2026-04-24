@@ -48,6 +48,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arenax-player-reputation"
+version = "0.0.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "arenax-registry"
 version = "0.0.0"
 dependencies = [

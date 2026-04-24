@@ -10,6 +10,7 @@ pub mod governance;
 pub mod identity;
 pub mod match_contract;
 pub mod match_lifecycle;
+pub mod player_reputation;
 pub mod registry;
 pub mod reputation;
 pub mod reputation_index;

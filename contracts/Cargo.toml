@@ -20,6 +20,7 @@ members = [
     "anti-cheat-oracle",
     "staking-manager",
     "upgrade-system",
+    "player-reputation",
 ]
 resolver = "2"
 
