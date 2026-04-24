@@ -82,7 +82,7 @@ pub struct Delegation {
 pub struct GovernanceParams {
     pub min_voting_period: u64,
     pub max_voting_period: u64,
-    pub quorum_threshold: u32, // Percentage (0-100)
+    pub quorum_threshold: u32,    // Percentage (0-100)
     pub execution_threshold: u32, // Percentage (0-100)
     pub proposal_deposit: u128,
     pub timelock_period: u64,
@@ -112,9 +112,7 @@ impl GovernanceContract {
             panic!("already initialized");
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Admin, &admin);
+        env.storage().persistent().set(&DataKey::Admin, &admin);
 
         env.storage()
             .persistent()
@@ -122,12 +120,12 @@ impl GovernanceContract {
 
         // Set default governance parameters
         let params = GovernanceParams {
-            min_voting_period: 604800, // 7 days
+            min_voting_period: 604800,  // 7 days
             max_voting_period: 2592000, // 30 days
-            quorum_threshold: 40, // 40% quorum
-            execution_threshold: 51, // 51% to pass
-            proposal_deposit: 1000, // 1000 tokens
-            timelock_period: 86400, // 1 day timelock
+            quorum_threshold: 40,       // 40% quorum
+            execution_threshold: 51,    // 51% to pass
+            proposal_deposit: 1000,     // 1000 tokens
+            timelock_period: 86400,     // 1 day timelock
         };
 
         env.storage()
@@ -221,12 +219,7 @@ impl GovernanceContract {
     }
 
     // Cast a vote on a proposal
-    pub fn cast_vote(
-        env: Env,
-        voter: Address,
-        proposal_id: BytesN<32>,
-        choice: VoteChoice,
-    ) {
+    pub fn cast_vote(env: Env, voter: Address, proposal_id: BytesN<32>, choice: VoteChoice) {
         let mut proposal: Proposal = env
             .storage()
             .persistent()
@@ -262,9 +255,7 @@ impl GovernanceContract {
             voted_at: current_time,
         };
 
-        env.storage()
-            .persistent()
-            .set(&vote_key, &vote);
+        env.storage().persistent().set(&vote_key, &vote);
 
         // Update proposal vote counts
         match choice {
@@ -342,7 +333,8 @@ impl GovernanceContract {
         }
 
         // Check quorum
-        let quorum_threshold = (proposal.total_voting_power as u128 * params.quorum_threshold as u128) / 100;
+        let quorum_threshold =
+            (proposal.total_voting_power as u128 * params.quorum_threshold as u128) / 100;
         if proposal.total_voting_power < quorum_threshold {
             proposal.status = ProposalStatus::Rejected;
         } else {
@@ -418,7 +410,8 @@ impl GovernanceContract {
             panic!("cannot delegate to self");
         }
 
-        let voting_power = Self::calculate_voting_power(&env, &delegator, &BytesN::from_array(&env, &[0u8; 32]));
+        let voting_power =
+            Self::calculate_voting_power(&env, &delegator, &BytesN::from_array(&env, &[0u8; 32]));
 
         let delegation = Delegation {
             delegator: delegator.clone(),

@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use soroban_sdk::{Address, BytesN, Env, String, Vec};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 use crate::{
     DataKey, Delegation, GovernanceContract, GovernanceParams, Proposal, ProposalStatus,
@@ -133,7 +133,12 @@ fn test_cast_vote() {
         execution_data,
     );
 
-    GovernanceContract::cast_vote(env.clone(), voter.clone(), proposal_id.clone(), VoteChoice::For);
+    GovernanceContract::cast_vote(
+        env.clone(),
+        voter.clone(),
+        proposal_id.clone(),
+        VoteChoice::For,
+    );
 
     let vote: Vote = env
         .storage()
@@ -179,7 +184,12 @@ fn test_cast_vote_twice() {
         execution_data,
     );
 
-    GovernanceContract::cast_vote(env.clone(), voter.clone(), proposal_id.clone(), VoteChoice::For);
+    GovernanceContract::cast_vote(
+        env.clone(),
+        voter.clone(),
+        proposal_id.clone(),
+        VoteChoice::For,
+    );
     GovernanceContract::cast_vote(env, voter, proposal_id, VoteChoice::Against);
 }
 
@@ -209,11 +219,22 @@ fn test_tally_votes() {
         execution_data,
     );
 
-    GovernanceContract::cast_vote(env.clone(), voter1.clone(), proposal_id.clone(), VoteChoice::For);
-    GovernanceContract::cast_vote(env.clone(), voter2.clone(), proposal_id.clone(), VoteChoice::For);
+    GovernanceContract::cast_vote(
+        env.clone(),
+        voter1.clone(),
+        proposal_id.clone(),
+        VoteChoice::For,
+    );
+    GovernanceContract::cast_vote(
+        env.clone(),
+        voter2.clone(),
+        proposal_id.clone(),
+        VoteChoice::For,
+    );
 
     // Advance time past voting period
-    env.ledger().set_timestamp(env.ledger().timestamp() + 604800 + 1);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 604800 + 1);
 
     GovernanceContract::tally_votes(env.clone(), proposal_id.clone());
 
@@ -251,10 +272,16 @@ fn test_execute_proposal() {
         execution_data,
     );
 
-    GovernanceContract::cast_vote(env.clone(), voter.clone(), proposal_id.clone(), VoteChoice::For);
+    GovernanceContract::cast_vote(
+        env.clone(),
+        voter.clone(),
+        proposal_id.clone(),
+        VoteChoice::For,
+    );
 
     // Advance time past voting period and timelock
-    env.ledger().set_timestamp(env.ledger().timestamp() + 604800 + 86400 + 1);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 604800 + 86400 + 1);
 
     GovernanceContract::tally_votes(env.clone(), proposal_id.clone());
     GovernanceContract::execute_proposal(env.clone(), proposal_id.clone());
