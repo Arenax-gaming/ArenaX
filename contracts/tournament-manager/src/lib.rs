@@ -583,7 +583,7 @@ impl TournamentManager {
         let match_ids: Vec<BytesN<32>> = Vec::new(env);
 
         let player_count = players.len();
-        let total_rounds = if player_count % 2 == 0 {
+        let total_rounds = if player_count.is_multiple_of(2) {
             player_count - 1
         } else {
             player_count

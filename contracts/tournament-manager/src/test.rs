@@ -54,12 +54,12 @@ fn test_create_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer, config);
+    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config.clone());
 
     let tournament: Tournament = env
         .storage()
         .persistent()
-        .get(&DataKey::Tournament(tournament_id))
+        .get(&DataKey::Tournament(tournament_id.clone()))
         .expect("tournament not found");
 
     assert_eq!(tournament.state, TournamentState::Created as u32);
@@ -115,7 +115,7 @@ fn test_open_registration() {
 
     env.ledger().set_timestamp(1500);
 
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
     let tournament: Tournament = env
         .storage()
@@ -151,9 +151,9 @@ fn test_register_player() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player.clone(), 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player.clone(), 1);
 
     let players: Vec<PlayerRegistration> = env
         .storage()
@@ -191,9 +191,9 @@ fn test_register_player_duplicate() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player.clone(), 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player.clone(), 1);
     TournamentManager::register_player(env.clone(), tournament_id, player, 1);
 }
 
@@ -227,12 +227,12 @@ fn test_register_player_full() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
-    TournamentManager::register_player(env.clone(), tournament_id, player3, 3);
-    TournamentManager::register_player(env.clone(), tournament_id, player4, 4);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player3, 3);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player4, 4);
     TournamentManager::register_player(env.clone(), tournament_id, player5, 5);
 }
 
@@ -262,12 +262,12 @@ fn test_close_registration() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let tournament: Tournament = env
         .storage()
@@ -304,9 +304,9 @@ fn test_close_registration_insufficient_players() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
 
     TournamentManager::close_registration(env, tournament_id);
 }
@@ -339,17 +339,17 @@ fn test_generate_bracket_single_elimination() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
-    TournamentManager::register_player(env.clone(), tournament_id, player3, 3);
-    TournamentManager::register_player(env.clone(), tournament_id, player4, 4);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player3, 3);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player4, 4);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
     let bracket: Bracket = env
         .storage()
@@ -391,17 +391,17 @@ fn test_generate_bracket_swiss_system() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
-    TournamentManager::register_player(env.clone(), tournament_id, player3, 3);
-    TournamentManager::register_player(env.clone(), tournament_id, player4, 4);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player3, 3);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player4, 4);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
     let bracket: Bracket = env
         .storage()
@@ -438,23 +438,23 @@ fn test_update_match_result() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1.clone(), 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2.clone(), 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1.clone(), 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2.clone(), 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     // Get the first match
     let bracket: Bracket = env
         .storage()
         .persistent()
-        .get(&DataKey::TournamentBracket(tournament_id))
+        .get(&DataKey::TournamentBracket(tournament_id.clone()))
         .expect("bracket not found");
 
     // For this test, we'll create a match manually
@@ -479,8 +479,8 @@ fn test_update_match_result() {
 
     TournamentManager::update_match_result(
         env.clone(),
-        tournament_id,
-        match_id,
+        tournament_id.clone(),
+        match_id.clone(),
         player1.clone(),
         3,
         1,
@@ -526,17 +526,17 @@ fn test_update_match_result_invalid_winner() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
     let match_data = Match {
@@ -586,17 +586,17 @@ fn test_start_tournament() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     let tournament: Tournament = env
         .storage()
@@ -633,17 +633,17 @@ fn test_pause_tournament() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     TournamentManager::pause_tournament(env.clone(), tournament_id);
 
@@ -682,17 +682,17 @@ fn test_resume_tournament() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
     TournamentManager::pause_tournament(env.clone(), tournament_id);
     TournamentManager::resume_tournament(env.clone(), tournament_id);
 
@@ -730,7 +730,7 @@ fn test_cancel_tournament() {
 
     TournamentManager::cancel_tournament(
         env.clone(),
-        tournament_id,
+        tournament_id.clone(),
         String::from_str(&env, "Emergency cancellation"),
     );
 
@@ -783,7 +783,7 @@ fn test_set_prize_allocations() {
         amount: 200,
     });
 
-    TournamentManager::set_prize_allocations(env.clone(), tournament_id, allocations);
+    TournamentManager::set_prize_allocations(env.clone(), tournament_id.clone(), allocations);
 
     let escrow: PrizeEscrow = env
         .storage()
@@ -825,23 +825,23 @@ fn test_distribute_prizes() {
         amount: 500,
     });
 
-    TournamentManager::set_prize_allocations(env.clone(), tournament_id, allocations);
+    TournamentManager::set_prize_allocations(env.clone(), tournament_id.clone(), allocations);
 
     // Mark tournament as completed
     let mut tournament: Tournament = env
         .storage()
         .persistent()
-        .get(&DataKey::Tournament(tournament_id))
+        .get(&DataKey::Tournament(tournament_id.clone()))
         .expect("tournament not found");
     tournament.state = TournamentState::Completed as u32;
     env.storage()
         .persistent()
-        .set(&DataKey::Tournament(tournament_id), &tournament);
+        .set(&DataKey::Tournament(tournament_id.clone()), &tournament);
 
     let mut winners: Map<Address, u32> = Map::new(&env);
     winners.set(winner.clone(), 1);
 
-    TournamentManager::distribute_prizes(env.clone(), tournament_id, winners);
+    TournamentManager::distribute_prizes(env.clone(), tournament_id.clone(), winners);
 
     let escrow: PrizeEscrow = env
         .storage()
@@ -879,24 +879,24 @@ fn test_raise_dispute() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
 
     TournamentManager::raise_dispute(
         env.clone(),
-        tournament_id,
-        match_id,
+        tournament_id.clone(),
+        match_id.clone(),
         reporter,
         String::from_str(&env, "Suspicious activity"),
     );
@@ -904,7 +904,7 @@ fn test_raise_dispute() {
     let dispute: Dispute = env
         .storage()
         .persistent()
-        .get(&DataKey::Dispute(tournament_id, match_id))
+        .get(&DataKey::Dispute(tournament_id.clone(), match_id.clone()))
         .expect("dispute not found");
 
     assert_eq!(dispute.resolved, false);
@@ -937,23 +937,23 @@ fn test_resolve_dispute() {
         TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
-    TournamentManager::open_registration(env.clone(), tournament_id);
+    TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id, player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id, player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
 
-    TournamentManager::close_registration(env.clone(), tournament_id);
+    TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
     let seed_data: Vec<u32> = Vec::new(&env);
-    TournamentManager::generate_bracket(env.clone(), tournament_id, seed_data);
+    TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
-    TournamentManager::start_tournament(env.clone(), tournament_id);
+    TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
 
     TournamentManager::raise_dispute(
         env.clone(),
-        tournament_id,
+        tournament_id.clone(),
         match_id.clone(),
         reporter,
         String::from_str(&env, "Suspicious activity"),
@@ -961,15 +961,15 @@ fn test_resolve_dispute() {
 
     TournamentManager::resolve_dispute(
         env.clone(),
-        tournament_id,
-        match_id,
+        tournament_id.clone(),
+        match_id.clone(),
         String::from_str(&env, "No evidence found"),
     );
 
     let dispute: Dispute = env
         .storage()
         .persistent()
-        .get(&DataKey::Dispute(tournament_id, match_id))
+        .get(&DataKey::Dispute(tournament_id.clone(), match_id.clone()))
         .expect("dispute not found");
 
     assert_eq!(dispute.resolved, true);
@@ -995,7 +995,7 @@ fn test_get_tournament_analytics() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer, config);
+    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     let analytics = TournamentManager::get_tournament_analytics(env, tournament_id);
 
