@@ -6,6 +6,7 @@ import profileRoutes from './profile.routes';
 import sorobanRoutes from './soroban.routes';
 import walletRoutes from './wallet.routes';
 import matchRoutes from './match.routes';
+import achievementRoutes from './achievement.routes';
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
@@ -22,5 +23,6 @@ router.use('/governance', governanceRoutes);
 router.use('/soroban', sorobanRoutes);
 router.use('/wallets', walletRoutes);
 router.use('/wallet', walletRoutes);
+router.use('/v1/achievements', achievementRoutes);
 
 export default router;

@@ -7,11 +7,13 @@ import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
 import routes from './routes/index';
+import { registerAchievementIntegration } from './services/achievement.service';
 import { logger } from './services/logger.service';
 import { initializeTelemetry } from './services/telemetry.service';
 
 dotenv.config();
 initializeTelemetry();
+registerAchievementIntegration();
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
