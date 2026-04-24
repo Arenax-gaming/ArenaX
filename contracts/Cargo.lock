@@ -719,6 +719,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "governance"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "governance_multisig"
 version = "0.1.0"
 dependencies = [
