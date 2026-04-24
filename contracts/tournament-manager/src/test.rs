@@ -520,8 +520,8 @@ fn test_update_match_result_invalid_winner() {
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id.clone());
 
-    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1, 1);
-    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2, 2);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player1.clone(), 1);
+    TournamentManager::register_player(env.clone(), tournament_id.clone(), player2.clone(), 2);
 
     TournamentManager::close_registration(env.clone(), tournament_id.clone());
 
@@ -686,7 +686,7 @@ fn test_resume_tournament() {
 
     TournamentManager::start_tournament(env.clone(), tournament_id.clone());
     TournamentManager::pause_tournament(env.clone(), tournament_id.clone());
-    TournamentManager::resume_tournament(env.clone(), tournament_id);
+    TournamentManager::resume_tournament(env.clone(), tournament_id.clone());
 
     let tournament: Tournament = env
         .storage()
