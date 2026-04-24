@@ -181,7 +181,11 @@ pub fn emit_prizes_distributed(
     .publish(env);
 }
 
-pub fn emit_tournament_cancelled(env: &Env, tournament_id: &BytesN<32>, reason: &soroban_sdk::String) {
+pub fn emit_tournament_cancelled(
+    env: &Env,
+    tournament_id: &BytesN<32>,
+    reason: &soroban_sdk::String,
+) {
     TournamentCancelled {
         tournament_id: tournament_id.clone(),
         reason: reason.clone(),

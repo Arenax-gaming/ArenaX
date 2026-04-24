@@ -1,8 +1,6 @@
 #![cfg(test)]
 
-use soroban_sdk::{
-    contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
-};
+use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec};
 
 use crate::{
     Bracket, DataKey, Dispute, Match, MatchStatus, PlayerRegistration, PrizeAllocation,
@@ -111,7 +109,8 @@ fn test_open_registration() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
 
@@ -147,7 +146,8 @@ fn test_register_player() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -186,7 +186,8 @@ fn test_register_player_duplicate() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -221,7 +222,8 @@ fn test_register_player_full() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -255,7 +257,8 @@ fn test_close_registration() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -296,7 +299,8 @@ fn test_close_registration_insufficient_players() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -330,7 +334,8 @@ fn test_generate_bracket_single_elimination() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -351,7 +356,10 @@ fn test_generate_bracket_single_elimination() {
         .get(&DataKey::TournamentBracket(tournament_id))
         .expect("bracket not found");
 
-    assert_eq!(bracket.bracket_type, TournamentType::SingleElimination as u32);
+    assert_eq!(
+        bracket.bracket_type,
+        TournamentType::SingleElimination as u32
+    );
 }
 
 #[test]
@@ -378,7 +386,8 @@ fn test_generate_bracket_swiss_system() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -424,7 +433,8 @@ fn test_update_match_result() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -461,9 +471,10 @@ fn test_update_match_result() {
         completed_at: None,
     };
 
-    env.storage()
-        .persistent()
-        .set(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()), &match_data);
+    env.storage().persistent().set(
+        &DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()),
+        &match_data,
+    );
 
     TournamentManager::update_match_result(
         env.clone(),
@@ -510,7 +521,8 @@ fn test_update_match_result_invalid_winner() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -539,9 +551,10 @@ fn test_update_match_result_invalid_winner() {
         completed_at: None,
     };
 
-    env.storage()
-        .persistent()
-        .set(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()), &match_data);
+    env.storage().persistent().set(
+        &DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()),
+        &match_data,
+    );
 
     TournamentManager::update_match_result(env, tournament_id, match_id, player3, 3, 1);
 }
@@ -568,7 +581,8 @@ fn test_start_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -614,7 +628,8 @@ fn test_pause_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -662,7 +677,8 @@ fn test_resume_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -708,7 +724,8 @@ fn test_cancel_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     TournamentManager::cancel_tournament(
         env.clone(),
@@ -745,7 +762,8 @@ fn test_set_prize_allocations() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     let mut allocations: Vec<PrizeAllocation> = Vec::new(&env);
     allocations.push_back(PrizeAllocation {
@@ -796,7 +814,8 @@ fn test_distribute_prizes() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     let mut allocations: Vec<PrizeAllocation> = Vec::new(&env);
     allocations.push_back(PrizeAllocation {
@@ -855,7 +874,8 @@ fn test_raise_dispute() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);
@@ -912,7 +932,8 @@ fn test_resolve_dispute() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     env.ledger().set_timestamp(1500);
     TournamentManager::open_registration(env.clone(), tournament_id);

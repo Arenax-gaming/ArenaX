@@ -1,8 +1,6 @@
 #![no_std]
 use arenax_events::tournament as events;
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, Map, String, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Map, String, Vec};
 
 // Data Structures
 
@@ -171,11 +169,7 @@ impl TournamentManager {
 
     // Tournament Creation
 
-    pub fn create_tournament(
-        env: Env,
-        organizer: Address,
-        config: TournamentConfig,
-    ) -> BytesN<32> {
+    pub fn create_tournament(env: Env, organizer: Address, config: TournamentConfig) -> BytesN<32> {
         organizer.require_auth();
 
         // Validate config
@@ -248,9 +242,10 @@ impl TournamentManager {
             distributed: 0,
             allocations: Vec::new(&env),
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentPrizeEscrow(tournament_id.clone()), &escrow);
+        env.storage().persistent().set(
+            &DataKey::TournamentPrizeEscrow(tournament_id.clone()),
+            &escrow,
+        );
 
         // Initialize analytics
         let analytics = TournamentAnalytics {
@@ -260,9 +255,10 @@ impl TournamentManager {
             average_match_duration: 0,
             total_prize_distributed: 0,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentAnalytics(tournament_id.clone()), &analytics);
+        env.storage().persistent().set(
+            &DataKey::TournamentAnalytics(tournament_id.clone()),
+            &analytics,
+        );
 
         events::emit_tournament_created(
             &env,
@@ -302,12 +298,7 @@ impl TournamentManager {
             .set(&DataKey::Tournament(tournament_id.clone()), &tournament);
     }
 
-    pub fn register_player(
-        env: Env,
-        tournament_id: BytesN<32>,
-        player: Address,
-        seed_value: u32,
-    ) {
+    pub fn register_player(env: Env, tournament_id: BytesN<32>, player: Address, seed_value: u32) {
         player.require_auth();
 
         let mut tournament: Tournament = env
@@ -421,9 +412,10 @@ impl TournamentManager {
 
         // Store matches
         let match_ids: Vec<BytesN<32>> = Vec::new(&env);
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentMatches(tournament_id.clone()), &match_ids);
+        env.storage().persistent().set(
+            &DataKey::TournamentMatches(tournament_id.clone()),
+            &match_ids,
+        );
 
         for match_data in matches.iter() {
             // Generate match ID from tournament_id, round, and player addresses
@@ -433,9 +425,10 @@ impl TournamentManager {
             let tid_bytes = tournament_id.to_array();
             match_bytes[8..16].copy_from_slice(&tid_bytes[0..8]);
             let match_id = BytesN::from_array(&env, &match_bytes);
-            env.storage()
-                .persistent()
-                .set(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()), &match_data);
+            env.storage().persistent().set(
+                &DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()),
+                &match_data,
+            );
         }
 
         tournament.state = TournamentState::BracketGenerated as u32;
@@ -649,7 +642,10 @@ impl TournamentManager {
         let mut match_data: Match = env
             .storage()
             .persistent()
-            .get(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()))
+            .get(&DataKey::TournamentMatch(
+                tournament_id.clone(),
+                match_id.clone(),
+            ))
             .expect("match not found");
 
         if match_data.status != MatchStatus::Scheduled as u32
@@ -668,9 +664,10 @@ impl TournamentManager {
         match_data.status = MatchStatus::Completed as u32;
         match_data.completed_at = Some(env.ledger().timestamp());
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()), &match_data);
+        env.storage().persistent().set(
+            &DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()),
+            &match_data,
+        );
 
         // Update analytics
         let mut analytics: TournamentAnalytics = env
@@ -681,12 +678,13 @@ impl TournamentManager {
         analytics.completed_matches += 1;
         if let (Some(started), Some(completed)) = (match_data.started_at, match_data.completed_at) {
             let duration = completed - started;
-            analytics.average_match_duration =
-                (analytics.average_match_duration + duration) / (analytics.completed_matches as u64);
+            analytics.average_match_duration = (analytics.average_match_duration + duration)
+                / (analytics.completed_matches as u64);
         }
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentAnalytics(tournament_id.clone()), &analytics);
+        env.storage().persistent().set(
+            &DataKey::TournamentAnalytics(tournament_id.clone()),
+            &analytics,
+        );
 
         events::emit_match_result_updated(&env, &tournament_id, &match_id, &winner);
     }
@@ -773,16 +771,13 @@ impl TournamentManager {
 
         escrow.allocations = allocations;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentPrizeEscrow(tournament_id.clone()), &escrow);
+        env.storage().persistent().set(
+            &DataKey::TournamentPrizeEscrow(tournament_id.clone()),
+            &escrow,
+        );
     }
 
-    pub fn distribute_prizes(
-        env: Env,
-        tournament_id: BytesN<32>,
-        winners: Map<Address, u32>,
-    ) {
+    pub fn distribute_prizes(env: Env, tournament_id: BytesN<32>, winners: Map<Address, u32>) {
         let tournament: Tournament = env
             .storage()
             .persistent()
@@ -817,9 +812,10 @@ impl TournamentManager {
 
         escrow.distributed = total_distributed;
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentPrizeEscrow(tournament_id.clone()), &escrow);
+        env.storage().persistent().set(
+            &DataKey::TournamentPrizeEscrow(tournament_id.clone()),
+            &escrow,
+        );
 
         // Update analytics
         let mut analytics: TournamentAnalytics = env
@@ -828,9 +824,10 @@ impl TournamentManager {
             .get(&DataKey::TournamentAnalytics(tournament_id.clone()))
             .expect("analytics not found");
         analytics.total_prize_distributed = total_distributed;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentAnalytics(tournament_id.clone()), &analytics);
+        env.storage().persistent().set(
+            &DataKey::TournamentAnalytics(tournament_id.clone()),
+            &analytics,
+        );
 
         events::emit_prizes_distributed(&env, &tournament_id, total_distributed, recipient_count);
     }
@@ -937,9 +934,10 @@ impl TournamentManager {
             resolution: None,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Dispute(tournament_id.clone(), match_id.clone()), &dispute);
+        env.storage().persistent().set(
+            &DataKey::Dispute(tournament_id.clone(), match_id.clone()),
+            &dispute,
+        );
 
         // Update analytics
         let mut analytics: TournamentAnalytics = env
@@ -948,9 +946,10 @@ impl TournamentManager {
             .get(&DataKey::TournamentAnalytics(tournament_id.clone()))
             .expect("analytics not found");
         analytics.disputed_matches += 1;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TournamentAnalytics(tournament_id.clone()), &analytics);
+        env.storage().persistent().set(
+            &DataKey::TournamentAnalytics(tournament_id.clone()),
+            &analytics,
+        );
 
         events::emit_dispute_raised(&env, &tournament_id, &match_id, &reporter);
     }
@@ -978,9 +977,10 @@ impl TournamentManager {
         dispute.resolved = true;
         dispute.resolution = Some(resolution.clone());
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Dispute(tournament_id.clone(), match_id.clone()), &dispute);
+        env.storage().persistent().set(
+            &DataKey::Dispute(tournament_id.clone(), match_id.clone()),
+            &dispute,
+        );
 
         events::emit_dispute_resolved(&env, &tournament_id, &match_id, &resolution);
     }
@@ -994,10 +994,7 @@ impl TournamentManager {
             .expect("tournament not found")
     }
 
-    pub fn get_tournament_players(
-        env: Env,
-        tournament_id: BytesN<32>,
-    ) -> Vec<PlayerRegistration> {
+    pub fn get_tournament_players(env: Env, tournament_id: BytesN<32>) -> Vec<PlayerRegistration> {
         env.storage()
             .persistent()
             .get(&DataKey::TournamentPlayers(tournament_id))
@@ -1011,11 +1008,7 @@ impl TournamentManager {
             .expect("bracket not found")
     }
 
-    pub fn get_match(
-        env: Env,
-        tournament_id: BytesN<32>,
-        match_id: BytesN<32>,
-    ) -> Match {
+    pub fn get_match(env: Env, tournament_id: BytesN<32>, match_id: BytesN<32>) -> Match {
         env.storage()
             .persistent()
             .get(&DataKey::TournamentMatch(tournament_id, match_id))
@@ -1036,11 +1029,7 @@ impl TournamentManager {
             .expect("analytics not found")
     }
 
-    pub fn get_dispute(
-        env: Env,
-        tournament_id: BytesN<32>,
-        match_id: BytesN<32>,
-    ) -> Dispute {
+    pub fn get_dispute(env: Env, tournament_id: BytesN<32>, match_id: BytesN<32>) -> Dispute {
         env.storage()
             .persistent()
             .get(&DataKey::Dispute(tournament_id, match_id))
