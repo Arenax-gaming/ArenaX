@@ -222,7 +222,9 @@ pub struct VotingPowerDelegated {
 }
 
 #[contractevent(topics = ["ArenaXGov_v1", "PARAMS_UPDATED"])]
-pub struct GovernanceParamsUpdated;
+pub struct GovernanceParamsUpdated {
+    pub timestamp: u64,
+}
 
 pub fn proposal_created(
     env: &Env,
@@ -305,5 +307,8 @@ pub fn voting_power_delegated(
 }
 
 pub fn governance_params_updated(env: &Env) {
-    GovernanceParamsUpdated.publish(env);
+    GovernanceParamsUpdated {
+        timestamp: env.ledger().timestamp(),
+    }
+    .publish(env);
 }
