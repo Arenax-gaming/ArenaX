@@ -457,10 +457,9 @@ impl PlayerReputationContract {
         // Sportsmanship bonus: score 0–100 mapped to 0–(weight) bonus points
         let sport_bonus = (profile.sportsmanship_score * config.sportsmanship_weight) / 100;
         // Achievement bonus: each achievement adds ACHIEVEMENT_BONUS, weighted
-        let ach_bonus = (profile.achievement_count as i128
-            * ACHIEVEMENT_BONUS
-            * config.achievement_weight)
-            / 100;
+        let ach_bonus =
+            (profile.achievement_count as i128 * ACHIEVEMENT_BONUS * config.achievement_weight)
+                / 100;
 
         profile.reputation_score + sport_bonus + ach_bonus
     }
