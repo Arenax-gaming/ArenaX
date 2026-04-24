@@ -1,0 +1,1306 @@
+openapi: 3.0.3
+info:
+  title: ArenaX API
+  description: |
+    The ArenaX platform API — competitive gaming with on-chain match authority,
+    ELO-based matchmaking, tournament orchestration, and real-time WebSocket events.
+
+    ## Base URL
+    ```
+    https://api.arenax.gg/v1
+    ```
+
+    ## Authentication
+    Most endpoints require a JWT Bearer token obtained via `/api/auth/login`.
+    Include it in every request:
+    ```
+    Authorization: Bearer <access_token>
+    ```
+    Access tokens expire after **15 minutes**. Use `/api/auth/refresh` with your
+    refresh token (valid 7 days) to obtain a new pair.
+
+    ## Idempotency
+    Mutating endpoints (payments, wallet ops, matchmaking join, tournament join)
+    accept an optional `Idempotency-Key` header. Replaying the same key within
+    24 hours returns the cached response without re-executing the operation.
+
+    ## Rate Limiting
+    Limits are configured per deployment via `RATE_LIMIT_REQUESTS` /
+    `RATE_LIMIT_WINDOW` env vars. When exceeded the API returns `429 Too Many Requests`.
+
+  version: "1.0.0"
+  contact:
+    name: ArenaX Engineering
+    email: engineering@arenax.gg
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.arenax.gg
+    description: Production
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Registration, login, token management, session control
+  - name: Matchmaking
+    description: ELO-based queue management and statistics
+  - name: Matches
+    description: Match lifecycle — create, start, complete, dispute, finalize
+  - name: Tournaments
+    description: Tournament creation and participation
+  - name: Notifications
+    description: In-app notification management
+  - name: Reputation
+    description: Player skill and fair-play scores
+  - name: Idempotency
+    description: Idempotency key management and configuration
+  - name: Health
+    description: Service health checks
+  - name: WebSocket
+    description: Real-time event streams over WebSocket
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from `/api/auth/login`
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: |
+        Client-generated UUID for idempotent requests. Replaying the same key
+        within 24 hours returns the original cached response.
+
+  schemas:
+    # ── Generic wrappers ──────────────────────────────────────────────────────
+    ApiResponse:
+      type: object
+      properties:
+        data:
+          description: Response payload (type varies by endpoint)
+      required: [data]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Bad request: invalid field"
+        code:
+          type: integer
+          example: 400
+        details:
+          type: string
+          nullable: true
+          example: "username must be at least 3 characters"
+      required: [error, code]
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    CreateUserRequest:
+      type: object
+      required: [username, phone_number, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          example: "player_one"
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: "player@example.com"
+        phone_number:
+          type: string
+          example: "+2348012345678"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "S3cur3P@ss!"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "player@example.com"
+        password:
+          type: string
+          format: password
+          example: "S3cur3P@ss!"
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token (15 min TTL)
+        refresh_token:
+          type: string
+          description: Refresh token (7 day TTL)
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Seconds until access token expires
+          example: 900
+        token_type:
+          type: string
+          example: "Bearer"
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          nullable: true
+        display_name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        is_verified:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        skill_score:
+          type: integer
+          nullable: true
+          description: ELO-based skill rating
+        fair_play_score:
+          type: integer
+          nullable: true
+          description: Behavioural fair-play score (0-100)
+        is_bad_actor:
+          type: boolean
+          nullable: true
+
+    SessionInfo:
+      type: object
+      properties:
+        session_id:
+          type: string
+        device_id:
+          type: string
+          nullable: true
+        created_at:
+          type: integer
+          description: Unix timestamp
+        last_activity:
+          type: integer
+          description: Unix timestamp
+
+    # ── Matchmaking ───────────────────────────────────────────────────────────
+    JoinQueueRequest:
+      type: object
+      required: [game, game_mode]
+      properties:
+        game:
+          type: string
+          example: "chess"
+        game_mode:
+          type: string
+          example: "ranked"
+
+    JoinQueueResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        queue_position:
+          type: integer
+          nullable: true
+        estimated_wait_time:
+          type: integer
+          nullable: true
+          description: Estimated wait in seconds
+        message:
+          type: string
+
+    QueueStatusResponse:
+      type: object
+      properties:
+        in_queue:
+          type: boolean
+        queue_entry:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/QueueEntry'
+        queue_size:
+          type: integer
+        estimated_wait_time:
+          type: integer
+          nullable: true
+        wait_time_so_far:
+          type: integer
+          nullable: true
+          description: Seconds already waited
+
+    QueueEntry:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        game:
+          type: string
+        game_mode:
+          type: string
+        current_elo:
+          type: integer
+        joined_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [waiting, matched, left, expired]
+
+    MatchmakingStatsResponse:
+      type: object
+      properties:
+        total_players_in_queue:
+          type: integer
+        games:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameQueueStats'
+        matches_created_last_hour:
+          type: integer
+        average_wait_time:
+          type: number
+          format: double
+
+    GameQueueStats:
+      type: object
+      properties:
+        game:
+          type: string
+        game_modes:
+          type: array
+          items:
+            type: object
+            properties:
+              game_mode:
+                type: string
+              players_in_queue:
+                type: integer
+              average_wait_time:
+                type: integer
+                nullable: true
+              matches_per_hour:
+                type: integer
+
+    # ── Match Authority ───────────────────────────────────────────────────────
+    CreateMatchRequest:
+      type: object
+      required: [player_a, player_b]
+      properties:
+        player_a:
+          type: string
+          minLength: 56
+          maxLength: 56
+          description: Stellar public key of player A
+          example: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
+        player_b:
+          type: string
+          minLength: 56
+          maxLength: 56
+          description: Stellar public key of player B
+          example: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGZXG5CPCJDGX4PNPOTGXL"
+        idempotency_key:
+          type: string
+          nullable: true
+
+    MatchAuthorityEntity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        on_chain_match_id:
+          type: string
+        player_a:
+          type: string
+        player_b:
+          type: string
+        winner:
+          type: string
+          nullable: true
+        state:
+          type: string
+          enum: [CREATED, STARTED, COMPLETED, DISPUTED, FINALIZED]
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_chain_tx:
+          type: string
+          nullable: true
+        idempotency_key:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+
+    CompleteMatchRequest:
+      type: object
+      required: [winner]
+      properties:
+        winner:
+          type: string
+          description: Stellar public key of the winning player
+
+    DisputeMatchRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          example: "info"
+        title:
+          type: string
+        message:
+          type: string
+        link:
+          type: string
+          nullable: true
+        linkLabel:
+          type: string
+          nullable: true
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateNotificationRequest:
+      type: object
+      required: [title]
+      properties:
+        type:
+          type: string
+          default: "info"
+          example: "match"
+        title:
+          type: string
+        message:
+          type: string
+          nullable: true
+        link:
+          type: string
+          nullable: true
+        linkLabel:
+          type: string
+          nullable: true
+
+    # ── Reputation ────────────────────────────────────────────────────────────
+    ReputationResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        skill_score:
+          type: integer
+          description: ELO-based skill rating
+        fair_play_score:
+          type: integer
+          description: Behavioural score 0-100
+        is_bad_actor:
+          type: boolean
+        tier:
+          type: string
+          enum: [elite, good, average, poor]
+        last_updated:
+          type: string
+          nullable: true
+
+    # ── Idempotency ───────────────────────────────────────────────────────────
+    IdempotencyKeyInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        response_status:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        used_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ── Tournament ────────────────────────────────────────────────────────────
+    Tournament:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        game:
+          type: string
+        max_participants:
+          type: integer
+        entry_fee:
+          type: integer
+          description: Entry fee in smallest currency unit (e.g. kobo)
+        entry_fee_currency:
+          type: string
+        prize_pool:
+          type: integer
+        prize_pool_currency:
+          type: string
+        status:
+          type: string
+          enum: [draft, upcoming, registration_open, registration_closed, in_progress, completed, cancelled]
+        bracket_type:
+          type: string
+          enum: [single_elimination, double_elimination, round_robin, swiss]
+        start_time:
+          type: string
+          format: date-time
+        registration_deadline:
+          type: string
+          format: date-time
+        rules:
+          type: string
+          nullable: true
+        min_skill_level:
+          type: integer
+          nullable: true
+        max_skill_level:
+          type: integer
+          nullable: true
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────────
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+
+  # ── Auth ────────────────────────────────────────────────────────────────────
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            example:
+              username: "player_one"
+              email: "player@example.com"
+              phone_number: "+2348012345678"
+              password: "S3cur3P@ss!"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Username or email already taken
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and obtain token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "401":
+          description: Invalid credentials
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        "401":
+          description: Refresh token expired or invalid
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (blacklist current token)
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        "401":
+          description: Not authenticated
+
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password (revokes all sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_password, new_password]
+              properties:
+                old_password:
+                  type: string
+                  format: password
+                new_password:
+                  type: string
+                  format: password
+                  minLength: 8
+      responses:
+        "200":
+          description: Password changed
+        "401":
+          description: Old password incorrect
+
+  /api/auth/revoke-sessions:
+    post:
+      tags: [Auth]
+      summary: Revoke all active sessions
+      responses:
+        "200":
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  count:
+                    type: integer
+
+  /api/auth/sessions:
+    get:
+      tags: [Auth]
+      summary: List active sessions
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SessionInfo'
+                  total:
+                    type: integer
+
+  /api/auth/analytics:
+    get:
+      tags: [Auth]
+      summary: Token analytics (admin only)
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_generated:
+                    type: integer
+                  total_validated:
+                    type: integer
+                  total_refreshed:
+                    type: integer
+                  total_blacklisted:
+                    type: integer
+                  active_sessions:
+                    type: integer
+        "403":
+          description: Admin access required
+
+  # ── Matchmaking ─────────────────────────────────────────────────────────────
+  /api/matchmaking/join:
+    post:
+      tags: [Matchmaking]
+      summary: Join matchmaking queue
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinQueueRequest'
+            example:
+              game: "chess"
+              game_mode: "ranked"
+      responses:
+        "200":
+          description: Joined queue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinQueueResponse'
+        "400":
+          description: Already in queue
+
+  /api/matchmaking/leave:
+    post:
+      tags: [Matchmaking]
+      summary: Leave matchmaking queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [game, game_mode]
+              properties:
+                game:
+                  type: string
+                game_mode:
+                  type: string
+      responses:
+        "200":
+          description: Left queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/matchmaking/status/{game}/{game_mode}:
+    get:
+      tags: [Matchmaking]
+      summary: Get queue status for a game/mode
+      parameters:
+        - name: game
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: game_mode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatusResponse'
+
+  /api/matchmaking/stats:
+    get:
+      tags: [Matchmaking]
+      summary: Global matchmaking statistics
+      security: []
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchmakingStatsResponse'
+
+  /api/matchmaking/elo/{game}:
+    get:
+      tags: [Matchmaking]
+      summary: Get current user ELO for a game
+      parameters:
+        - name: game
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ELO rating
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  game:
+                    type: string
+                  elo:
+                    type: integer
+                  rank:
+                    type: string
+
+  # ── Match Authority ──────────────────────────────────────────────────────────
+  /api/matches:
+    post:
+      tags: [Matches]
+      summary: Create a new match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMatchRequest'
+      responses:
+        "201":
+          description: Match created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+        "409":
+          description: Idempotency conflict
+
+  /api/matches/{id}:
+    get:
+      tags: [Matches]
+      summary: Get match details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Match details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+        "404":
+          description: Match not found
+
+  /api/matches/{id}/start:
+    post:
+      tags: [Matches]
+      summary: Start a match (CREATED → STARTED)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Match started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+        "400":
+          description: Invalid state transition
+        "404":
+          description: Match not found
+
+  /api/matches/{id}/complete:
+    post:
+      tags: [Matches]
+      summary: Complete a match with a winner (STARTED → COMPLETED)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteMatchRequest'
+      responses:
+        "200":
+          description: Match completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+
+  /api/matches/{id}/dispute:
+    post:
+      tags: [Matches]
+      summary: Raise a dispute (COMPLETED → DISPUTED)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisputeMatchRequest'
+      responses:
+        "200":
+          description: Dispute raised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+
+  /api/matches/{id}/finalize:
+    post:
+      tags: [Matches]
+      summary: Finalize match and settle on-chain (→ FINALIZED)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Match finalized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchAuthorityEntity'
+
+  /api/matches/{id}/reconcile:
+    post:
+      tags: [Matches]
+      summary: Reconcile off-chain state with blockchain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Reconciliation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_divergent:
+                    type: boolean
+                  off_chain_state:
+                    type: string
+                  on_chain_state:
+                    type: string
+                  resolution_action:
+                    type: string
+                    nullable: true
+
+  # ── Notifications ────────────────────────────────────────────────────────────
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications (newest first, max 100)
+      responses:
+        "200":
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+    post:
+      tags: [Notifications]
+      summary: Create a notification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNotificationRequest'
+      responses:
+        "201":
+          description: Notification created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Notification'
+
+  /api/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Marked as read
+        "404":
+          description: Notification not found
+
+  /api/notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: All marked as read
+
+  /api/notifications/{id}:
+    delete:
+      tags: [Notifications]
+      summary: Delete a notification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+        "404":
+          description: Notification not found
+
+  # ── Reputation ───────────────────────────────────────────────────────────────
+  /api/reputation/player/{user_id}:
+    get:
+      tags: [Reputation]
+      summary: Get player reputation
+      security: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Reputation data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReputationResponse'
+        "404":
+          description: User not found
+
+  /api/reputation/history/{user_id}:
+    get:
+      tags: [Reputation]
+      summary: Get reputation event history
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: History events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        event_type:
+                          type: string
+                        skill_delta:
+                          type: integer
+                        fair_play_delta:
+                          type: integer
+                        match_id:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        created_at:
+                          type: string
+
+  /api/reputation/bad-actors:
+    get:
+      tags: [Reputation]
+      summary: List bad actors (admin only)
+      responses:
+        "200":
+          description: Bad actor list
+        "403":
+          description: Admin access required
+
+  /api/reputation/bad-actors/{user_id}/remove:
+    post:
+      tags: [Reputation]
+      summary: Remove bad actor flag (admin only)
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Flag removed
+        "403":
+          description: Admin access required
+
+  # ── Idempotency ──────────────────────────────────────────────────────────────
+  /api/idempotency/generate-key:
+    post:
+      tags: [Idempotency]
+      summary: Generate a new idempotency key
+      responses:
+        "200":
+          description: Generated key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    format: uuid
+
+  /api/idempotency/stats:
+    get:
+      tags: [Idempotency]
+      summary: Idempotency framework statistics
+      responses:
+        "200":
+          description: Stats
+
+  /api/idempotency/user-keys:
+    get:
+      tags: [Idempotency]
+      summary: List current user's idempotency keys
+      responses:
+        "200":
+          description: Key list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IdempotencyKeyInfo'
+
+  /api/idempotency/invalidate/{key}:
+    delete:
+      tags: [Idempotency]
+      summary: Invalidate an idempotency key
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Key invalidated
+
+  /api/idempotency/info:
+    get:
+      tags: [Idempotency]
+      summary: Idempotency framework info and enabled routes
+      security: []
+      responses:
+        "200":
+          description: Framework info
+
+  # ── WebSocket ────────────────────────────────────────────────────────────────
+  /ws:
+    get:
+      tags: [WebSocket]
+      summary: Authenticated user WebSocket connection
+      description: |
+        Upgrade to WebSocket. Pass the JWT access token as a query parameter.
+
+        ```
+        wss://api.arenax.gg/ws?token=<access_token>
+        ```
+
+        After connecting, the server automatically subscribes you to your own
+        `user:{user_id}` channel. You can subscribe to additional channels
+        (e.g. `match:{match_id}`) by sending a `subscribe` message.
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JWT access token
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+        "401":
+          description: Invalid or missing token
+
+  /ws/matches/{id}:
+    get:
+      tags: [WebSocket]
+      summary: Match-specific WebSocket (legacy — prefer /ws)
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "101":
+          description: WebSocket upgrade successful
