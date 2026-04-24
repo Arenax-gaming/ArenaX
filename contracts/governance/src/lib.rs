@@ -329,7 +329,8 @@ impl GovernanceContract {
         }
 
         // Check quorum
-        let quorum_threshold = (proposal.total_voting_power * params.quorum_threshold as u128) / 100;
+        let quorum_threshold =
+            (proposal.total_voting_power * params.quorum_threshold as u128) / 100;
         if proposal.total_voting_power < quorum_threshold {
             proposal.status = ProposalStatus::Rejected;
         } else {

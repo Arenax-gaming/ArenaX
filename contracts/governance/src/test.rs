@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use soroban_sdk::{Address, Bytes, Env, String};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, Bytes, Env, String};
 
 use crate::{
     DataKey, Delegation, GovernanceContract, GovernanceParams, Proposal, ProposalStatus,
