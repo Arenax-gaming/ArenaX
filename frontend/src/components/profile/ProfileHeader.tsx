@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { PublicProfile } from '../../types/profile';
 import { Button } from '../ui/Button';
@@ -31,10 +32,12 @@ export function ProfileHeader({
           {/* Avatar with online indicator */}
           <div className="relative flex-shrink-0">
             {user.avatar ? (
-              <img
+              <Image
                 src={user.avatar}
                 alt={`${user.username}'s avatar`}
-                className="w-20 h-20 rounded-full object-cover"
+                width={80}
+                height={80}
+                className="rounded-full object-cover"
               />
             ) : (
               <div

@@ -5,9 +5,21 @@ import type { PublicProfile } from '@/types/profile';
 
 // Mock next/link to avoid router dependency in tests
 jest.mock('next/link', () => {
-  return ({ children, href }: { children: React.ReactNode; href: string }) => (
+  const MockLink = ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   );
+  MockLink.displayName = 'MockLink';
+  return MockLink;
+});
+
+// Mock next/image to avoid optimization pipeline in tests
+jest.mock('next/image', () => {
+  const MockImage = ({ src, alt, width, height, className }: { src: string; alt: string; width: number; height: number; className?: string }) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} width={width} height={height} className={className} />
+  );
+  MockImage.displayName = 'MockImage';
+  return MockImage;
 });
 
 const baseUser: PublicProfile = {
