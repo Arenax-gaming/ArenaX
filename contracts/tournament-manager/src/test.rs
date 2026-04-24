@@ -1,12 +1,11 @@
 #![cfg(test)]
 
-use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec};
+use soroban_sdk::{Address, BytesN, Env, Map, String, Vec};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 
 use crate::{
     Bracket, DataKey, Dispute, Match, MatchStatus, PlayerRegistration, PrizeAllocation,
-    PrizeEscrow, Tournament, TournamentAnalytics, TournamentConfig, TournamentManager,
-    TournamentState, TournamentType,
+    PrizeEscrow, Tournament, TournamentConfig, TournamentManager, TournamentState, TournamentType,
 };
 
 #[test]
@@ -450,13 +449,6 @@ fn test_update_match_result() {
 
     TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
-    // Get the first match
-    let bracket: Bracket = env
-        .storage()
-        .persistent()
-        .get(&DataKey::TournamentBracket(tournament_id.clone()))
-        .expect("bracket not found");
-
     // For this test, we'll create a match manually
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
     let match_data = Match {
@@ -541,8 +533,8 @@ fn test_update_match_result_invalid_winner() {
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
     let match_data = Match {
         match_id: match_id.clone(),
-        player_a: player1,
-        player_b: player2,
+        player_a: player1.clone(),
+        player_b: player2.clone(),
         round: 1,
         status: MatchStatus::Scheduled as u32,
         winner: None,
@@ -645,7 +637,7 @@ fn test_pause_tournament() {
 
     TournamentManager::start_tournament(env.clone(), tournament_id.clone());
 
-    TournamentManager::pause_tournament(env.clone(), tournament_id);
+    TournamentManager::pause_tournament(env.clone(), tournament_id.clone());
 
     let tournament: Tournament = env
         .storage()
@@ -693,7 +685,7 @@ fn test_resume_tournament() {
     TournamentManager::generate_bracket(env.clone(), tournament_id.clone(), seed_data);
 
     TournamentManager::start_tournament(env.clone(), tournament_id.clone());
-    TournamentManager::pause_tournament(env.clone(), tournament_id);
+    TournamentManager::pause_tournament(env.clone(), tournament_id.clone());
     TournamentManager::resume_tournament(env.clone(), tournament_id);
 
     let tournament: Tournament = env
@@ -995,7 +987,8 @@ fn test_get_tournament_analytics() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config);
 
     let analytics = TournamentManager::get_tournament_analytics(env, tournament_id);
 
