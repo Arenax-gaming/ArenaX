@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use soroban_sdk::{Address, BytesN, Env, Map, String, Vec};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, BytesN, Env, Map, String, Vec};
 
 use crate::{
     Bracket, DataKey, Dispute, Match, MatchStatus, PlayerRegistration, PrizeAllocation,
@@ -53,7 +53,8 @@ fn test_create_tournament() {
         description: String::from_str(&env, "Test Tournament"),
     };
 
-    let tournament_id = TournamentManager::create_tournament(env.clone(), organizer.clone(), config.clone());
+    let tournament_id =
+        TournamentManager::create_tournament(env.clone(), organizer.clone(), config.clone());
 
     let tournament: Tournament = env
         .storage()
@@ -533,8 +534,8 @@ fn test_update_match_result_invalid_winner() {
     let match_id = BytesN::from_array(&env, &[1u8; 32]);
     let match_data = Match {
         match_id: match_id.clone(),
-        player_a: player1.clone(),
-        player_b: player2.clone(),
+        player_a: player1,
+        player_b: player2,
         round: 1,
         status: MatchStatus::Scheduled as u32,
         winner: None,
@@ -899,7 +900,7 @@ fn test_raise_dispute() {
         .get(&DataKey::Dispute(tournament_id.clone(), match_id.clone()))
         .expect("dispute not found");
 
-    assert_eq!(dispute.resolved, false);
+    assert!(!dispute.resolved);
 }
 
 #[test]
@@ -964,7 +965,7 @@ fn test_resolve_dispute() {
         .get(&DataKey::Dispute(tournament_id.clone(), match_id.clone()))
         .expect("dispute not found");
 
-    assert_eq!(dispute.resolved, true);
+    assert!(dispute.resolved);
 }
 
 #[test]
