@@ -1,0 +1,18 @@
+[package]
+name = "tournament-manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ArenaX Tournament Management Contract"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+arenax-events = { path = "../arenax-events" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

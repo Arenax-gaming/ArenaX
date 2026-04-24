@@ -21,6 +21,7 @@ members = [
     "staking-manager",
     "upgrade-system",
     "player-reputation",
+    "tournament-manager",
 ]
 resolver = "2"
 
