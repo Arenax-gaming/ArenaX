@@ -8,7 +8,7 @@ import {
   MoreVertical,
   Flag,
   Bookmark,
-  Image,
+  Image as ImageIcon,
   Video,
   Hash,
   TrendingUp,
@@ -125,7 +125,7 @@ export function CommunityFeed({
             </div>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" className="h-8">
-                <Image className="h-4 w-4 mr-1" />
+                <ImageIcon className="h-4 w-4 mr-1" />
                 Image
               </Button>
               <Button variant="ghost" size="sm" className="h-8">
