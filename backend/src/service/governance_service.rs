@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::soroban_service::{SorobanService, SorobanTxResult, TxStatus};
@@ -73,7 +73,7 @@ pub struct CreateProposalDto {
 }
 
 /// DTO for a proposal record
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ProposalRecord {
     pub id: Uuid,
     pub proposal_id: String,
@@ -90,7 +90,7 @@ pub struct ProposalRecord {
 }
 
 /// DTO for an approval record
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ApprovalRecord {
     pub id: Uuid,
     pub proposal_id: String,
@@ -489,8 +489,7 @@ impl GovernanceService {
         &self,
         proposal_id: &str,
     ) -> Result<Option<ProposalRecord>, GovernanceServiceError> {
-        let record = sqlx::query_as!(
-            ProposalRecord,
+        let record = sqlx::query_as::<_, ProposalRecord>(
             r#"
             SELECT
                 id,
@@ -499,7 +498,7 @@ impl GovernanceService {
                 function,
                 args,
                 description,
-                status as "status: _",
+                status,
                 proposer,
                 created_at,
                 execute_after,
@@ -508,8 +507,8 @@ impl GovernanceService {
             FROM governance_proposals
             WHERE proposal_id = $1
             "#,
-            proposal_id
         )
+        .bind(proposal_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -525,8 +524,7 @@ impl GovernanceService {
     ) -> Result<Vec<ProposalRecord>, GovernanceServiceError> {
         let records = match status {
             Some(s) => {
-                sqlx::query_as!(
-                    ProposalRecord,
+                sqlx::query_as::<_, ProposalRecord>(
                     r#"
                     SELECT
                         id,
@@ -535,7 +533,7 @@ impl GovernanceService {
                         function,
                         args,
                         description,
-                        status as "status: _",
+                        status,
                         proposer,
                         created_at,
                         execute_after,
@@ -546,16 +544,15 @@ impl GovernanceService {
                     ORDER BY created_at DESC
                     LIMIT $2 OFFSET $3
                     "#,
-                    s.to_string(),
-                    limit,
-                    offset
                 )
+                .bind(s.to_string())
+                .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.pool)
                 .await?
             }
             None => {
-                sqlx::query_as!(
-                    ProposalRecord,
+                sqlx::query_as::<_, ProposalRecord>(
                     r#"
                     SELECT
                         id,
@@ -564,7 +561,7 @@ impl GovernanceService {
                         function,
                         args,
                         description,
-                        status as "status: _",
+                        status,
                         proposer,
                         created_at,
                         execute_after,
@@ -574,9 +571,9 @@ impl GovernanceService {
                     ORDER BY created_at DESC
                     LIMIT $1 OFFSET $2
                     "#,
-                    limit,
-                    offset
                 )
+                .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.pool)
                 .await?
             }
@@ -590,16 +587,15 @@ impl GovernanceService {
         &self,
         proposal_id: &str,
     ) -> Result<Vec<ApprovalRecord>, GovernanceServiceError> {
-        let records = sqlx::query_as!(
-            ApprovalRecord,
+        let records = sqlx::query_as::<_, ApprovalRecord>(
             r#"
             SELECT id, proposal_id, signer, chain_tx, approved_at
             FROM governance_approvals
             WHERE proposal_id = $1
             ORDER BY approved_at ASC
             "#,
-            proposal_id
         )
+        .bind(proposal_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -608,7 +604,7 @@ impl GovernanceService {
 
     /// Get current signers from the contract
     pub async fn get_signers(&self) -> Result<Vec<String>, GovernanceServiceError> {
-        let args = serde_json::json!({});
+        let _args = serde_json::json!({});
 
         // Note: This is a read-only call, we don't need to submit a transaction
         // In production, this would use a read-only RPC method

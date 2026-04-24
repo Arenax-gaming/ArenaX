@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev, develop ]
+    branches: [main, dev, develop]
   pull_request:
-    branches: [ main, dev, develop ]
+    branches: [main, dev, develop]
 
 jobs:
   # Frontend CI
@@ -14,29 +14,29 @@ jobs:
     defaults:
       run:
         working-directory: ./frontend
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Lint code
-      run: npm run lint
-    
-    - name: Build
-      run: npm run build
-    
-    - name: Run tests
-      run: npm test
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
 
   # Server (TypeScript) CI
   server:
@@ -45,29 +45,29 @@ jobs:
     defaults:
       run:
         working-directory: ./server
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: server/package-lock.json
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Generate Prisma Client
-      run: npm run prisma:generate
-    
-    - name: Type check (Lint)
-      run: npm run lint
-    
-    - name: Build
-      run: npm run build
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Type check (Lint)
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
 
   # Contracts CI (Rust)
   contracts:
@@ -76,38 +76,82 @@ jobs:
     defaults:
       run:
         working-directory: ./contracts
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
-    
-    - name: Install wasm target
-      run: rustup target add wasm32-unknown-unknown
-    
-    - name: Cache cargo
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          contracts/target
-        key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock') }}
-    
-    - name: Check formatting
-      run: cargo fmt --all -- --check
-    
-    - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
-    
-    - name: Build contracts
-      run: cargo build --target wasm32-unknown-unknown --release
-    
-    - name: Run tests
-      run: cargo test
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run tests
+        run: cargo test
+
+  # Backend (Rust) CI
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-cargo-backend-${{ hashFiles('backend/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build
+        run: cargo build --all-targets
+        env:
+          SQLX_OFFLINE: "true"
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+        env:
+          SQLX_OFFLINE: "true"
+
+      - name: Run tests
+        run: cargo test
+        env:
+          SQLX_OFFLINE: "true"
 
   # Security scan

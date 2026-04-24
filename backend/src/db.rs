@@ -15,6 +15,6 @@ pub async fn health_check(pool: &DbPool) -> Result<(), ApiError> {
     sqlx::query("SELECT 1")
         .execute(pool)
         .await
-        .map_err(|e| ApiError::DatabaseError(e))?;
+        .map_err(ApiError::DatabaseError)?;
     Ok(())
 }

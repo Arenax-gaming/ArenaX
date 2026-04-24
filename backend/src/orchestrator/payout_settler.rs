@@ -17,14 +17,12 @@ impl PayoutSettler {
     /// Called when a tournament completes. Computes rankings and distributes prizes idempotently.
     pub async fn finalize_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Step 1: Verify tournament status is "completed" (case-insensitive).
-        let tournament_row = sqlx::query(
-            "SELECT status FROM tournaments WHERE id = $1",
-        )
-        .bind(tournament_id)
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+        let tournament_row = sqlx::query("SELECT status FROM tournaments WHERE id = $1")
+            .bind(tournament_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?
+            .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
 
         let status: String = tournament_row
             .try_get("status")
@@ -37,7 +35,11 @@ impl PayoutSettler {
         }
 
         // Step 2: Begin transaction and lock the tournament row to prevent concurrent payout races.
-        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
+        let mut tx = self
+            .db_pool
+            .begin()
+            .await
+            .map_err(ApiError::database_error)?;
 
         sqlx::query("SELECT id FROM tournaments WHERE id = $1 FOR UPDATE")
             .bind(tournament_id)
@@ -96,11 +98,15 @@ impl PayoutSettler {
             .map_err(ApiError::database_error)?;
 
         // Step 6: Parse distribution_percentages from JSON string (e.g., "[50, 30, 20]").
-        let percentages: Vec<f64> = serde_json::from_str(&distribution_percentages_str)
-            .map_err(|e| ApiError::bad_request(format!("Invalid distribution_percentages JSON: {}", e)))?;
+        let percentages: Vec<f64> =
+            serde_json::from_str(&distribution_percentages_str).map_err(|e| {
+                ApiError::bad_request(format!("Invalid distribution_percentages JSON: {}", e))
+            })?;
 
         if percentages.is_empty() {
-            return Err(ApiError::bad_request("distribution_percentages must not be empty"));
+            return Err(ApiError::bad_request(
+                "distribution_percentages must not be empty",
+            ));
         }
 
         // Step 7: Get ranked participants ordered by final_rank ASC.
@@ -124,7 +130,9 @@ impl PayoutSettler {
         for i in 0..num_recipients {
             let row = &participant_rows[i];
             let user_id: Uuid = row.try_get("user_id").map_err(ApiError::database_error)?;
-            let rank: i32 = row.try_get("final_rank").map_err(ApiError::database_error)?;
+            let rank: i32 = row
+                .try_get("final_rank")
+                .map_err(ApiError::database_error)?;
             let percentage = percentages[i];
 
             let total_dec = rust_decimal::Decimal::from(total_amount);
@@ -246,9 +254,12 @@ impl PayoutSettler {
                 let mut loser_id: Option<Uuid> = None;
 
                 for m in &match_rows {
-                    let w: Option<Uuid> = m.try_get("winner_id").map_err(ApiError::database_error)?;
-                    let p1: Option<Uuid> = m.try_get("player1_id").map_err(ApiError::database_error)?;
-                    let p2: Option<Uuid> = m.try_get("player2_id").map_err(ApiError::database_error)?;
+                    let w: Option<Uuid> =
+                        m.try_get("winner_id").map_err(ApiError::database_error)?;
+                    let p1: Option<Uuid> =
+                        m.try_get("player1_id").map_err(ApiError::database_error)?;
+                    let p2: Option<Uuid> =
+                        m.try_get("player2_id").map_err(ApiError::database_error)?;
 
                     if let Some(w_id) = w {
                         winner_id = Some(w_id);
@@ -289,9 +300,12 @@ impl PayoutSettler {
                 let mut loser_count = 0i32;
 
                 for m in &match_rows {
-                    let w: Option<Uuid> = m.try_get("winner_id").map_err(ApiError::database_error)?;
-                    let p1: Option<Uuid> = m.try_get("player1_id").map_err(ApiError::database_error)?;
-                    let p2: Option<Uuid> = m.try_get("player2_id").map_err(ApiError::database_error)?;
+                    let w: Option<Uuid> =
+                        m.try_get("winner_id").map_err(ApiError::database_error)?;
+                    let p1: Option<Uuid> =
+                        m.try_get("player1_id").map_err(ApiError::database_error)?;
+                    let p2: Option<Uuid> =
+                        m.try_get("player2_id").map_err(ApiError::database_error)?;
 
                     // Only real matches (both players present) produce a loser.
                     if p2.is_none() {

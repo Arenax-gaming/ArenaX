@@ -8,7 +8,7 @@ use sqlx::FromRow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Device information provided during registration
@@ -147,7 +147,7 @@ impl SecurityMonitor {
     ) -> Result<(), DeviceError> {
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -157,7 +157,7 @@ impl SecurityMonitor {
         redis::cmd("LPUSH")
             .arg(&key)
             .arg(value)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -166,7 +166,7 @@ impl SecurityMonitor {
             .arg(&key)
             .arg(0)
             .arg(99)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -174,7 +174,7 @@ impl SecurityMonitor {
         redis::cmd("EXPIRE")
             .arg(&key)
             .arg(2592000)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -188,13 +188,13 @@ impl SecurityMonitor {
     ) -> Result<u32, DeviceError> {
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
         let key = format!("device:login:{}", device_id);
         let now = chrono::Utc::now().timestamp() as u64;
-        let cutoff = now - (window_minutes * 60);
+        let _cutoff = now - (window_minutes * 60);
 
         let attempts: Vec<String> = redis::cmd("LRANGE")
             .arg(&key)
@@ -267,7 +267,7 @@ impl DeviceService {
         redis_client: Arc<RedisClient>,
         config: Option<DeviceConfig>,
     ) -> Self {
-        let config = config.unwrap_or_else(|| DeviceConfig::default());
+        let config = config.unwrap_or_default();
         let security_monitor = SecurityMonitor::new(redis_client.clone());
 
         Self {
@@ -374,13 +374,8 @@ impl DeviceService {
         // Create new device
         let device_id = Uuid::new_v4();
         let now = Utc::now();
-        let device_name = device_name.unwrap_or_else(|| {
-            format!(
-                "{} {}",
-                device_info.platform,
-                device_info.device_type.to_string()
-            )
-        });
+        let device_name = device_name
+            .unwrap_or_else(|| format!("{} {}", device_info.platform, device_info.device_type));
 
         let metadata = serde_json::json!({
             "screen_resolution": device_info.screen_resolution,
@@ -487,14 +482,14 @@ impl DeviceService {
         // Clean up Redis cache
         let mut conn = self
             .redis_client
-            .get_async_connection()
+            .get_multiplexed_async_connection()
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
         let key = format!("device:login:{}", device_id);
         redis::cmd("DEL")
             .arg(&key)
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
             .map_err(|e| DeviceError::RedisError(e.to_string()))?;
 
@@ -707,7 +702,7 @@ impl DeviceService {
         &self,
         user_id: Option<Uuid>,
     ) -> Result<DeviceAnalytics, DeviceError> {
-        let query = if let Some(uid) = user_id {
+        let query = if let Some(_uid) = user_id {
             "SELECT * FROM devices WHERE user_id = $1"
         } else {
             "SELECT * FROM devices"
@@ -753,7 +748,7 @@ impl DeviceService {
             devices_by_type,
             devices_by_platform,
             recent_logins,
-            failed_logins: failed_logins as i64,
+            failed_logins,
         })
     }
 
@@ -784,7 +779,7 @@ impl DeviceService {
 
         // Note: This assumes a device_security_alerts table exists
         // For now, we'll return alerts from memory or create a simplified version
-        let alerts: Vec<(
+        type AlertRow = (
             Uuid,
             Uuid,
             String,
@@ -792,7 +787,8 @@ impl DeviceService {
             String,
             Option<serde_json::Value>,
             DateTime<Utc>,
-        )> = sqlx::query_as(
+        );
+        let alerts: Vec<AlertRow> = sqlx::query_as(
             "SELECT device_id, user_id, alert_type, severity, message, details, created_at
                  FROM device_security_alerts
                  WHERE device_id = $1
@@ -877,13 +873,13 @@ impl DeviceService {
     }
 }
 
-impl ToString for DeviceType {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for DeviceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeviceType::Desktop => "Desktop".to_string(),
-            DeviceType::Mobile => "Mobile".to_string(),
-            DeviceType::Tablet => "Tablet".to_string(),
-            DeviceType::Unknown => "Unknown".to_string(),
+            DeviceType::Desktop => write!(f, "Desktop"),
+            DeviceType::Mobile => write!(f, "Mobile"),
+            DeviceType::Tablet => write!(f, "Tablet"),
+            DeviceType::Unknown => write!(f, "Unknown"),
         }
     }
 }

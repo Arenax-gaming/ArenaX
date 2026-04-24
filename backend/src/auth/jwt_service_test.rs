@@ -47,9 +47,7 @@ mod integration_tests {
         let user_id = Uuid::new_v4();
         let roles = vec!["user".to_string()];
 
-        let token = service
-            .generate_refresh_token(user_id, roles, None)
-            .await;
+        let token = service.generate_refresh_token(user_id, roles, None).await;
 
         assert!(token.is_ok());
     }
@@ -60,9 +58,7 @@ mod integration_tests {
         let user_id = Uuid::new_v4();
         let roles = vec!["user".to_string()];
 
-        let result = service
-            .generate_token_pair(user_id, roles, None)
-            .await;
+        let result = service.generate_token_pair(user_id, roles, None).await;
 
         assert!(result.is_ok());
 
@@ -199,11 +195,7 @@ mod integration_tests {
         // Create multiple sessions
         for i in 0..3 {
             service
-                .generate_access_token(
-                    user_id,
-                    roles.clone(),
-                    Some(format!("device-{}", i)),
-                )
+                .generate_access_token(user_id, roles.clone(), Some(format!("device-{}", i)))
                 .await
                 .unwrap();
         }
@@ -292,7 +284,7 @@ mod integration_tests {
         for device in &devices {
             assert!(sessions
                 .iter()
-                .any(|s| s.device_id.as_ref().map(|d| d.as_str()) == Some(*device)));
+                .any(|s| s.device_id.as_deref() == Some(*device)));
         }
     }
 
@@ -318,7 +310,11 @@ mod integration_tests {
     async fn test_claims_roles() {
         let service = create_test_service().await;
         let user_id = Uuid::new_v4();
-        let roles = vec!["user".to_string(), "admin".to_string(), "premium".to_string()];
+        let roles = vec![
+            "user".to_string(),
+            "admin".to_string(),
+            "premium".to_string(),
+        ];
 
         let token = service
             .generate_access_token(user_id, roles.clone(), None)
