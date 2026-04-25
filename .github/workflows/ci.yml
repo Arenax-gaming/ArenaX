@@ -18,6 +18,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Required for Chromatic
     
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -29,14 +31,34 @@ jobs:
     - name: Install dependencies
       run: npm ci
     
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+    
     - name: Lint code
       run: npm run lint
     
     - name: Build
       run: npm run build
     
-    - name: Run tests
-      run: npm test
+    - name: Run Unit & Component Tests
+      run: npm test -- --coverage
+    
+    - name: Check Coverage Thresholds
+      run: |
+        # Jest will exit with non-zero if thresholds are not met
+        npm test -- --coverage --coverageThreshold='{"global":{"branches":85,"functions":85,"lines":85,"statements":85}}'
+    
+    - name: Run E2E Tests
+      run: npx playwright test
+    
+    - name: Run Lighthouse CI
+      run: npx lhci autoreview
+      env:
+        LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+    
+    - name: Run Chromatic
+      run: npx chromatic --project-token=${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
   # Server (TypeScript) CI
   server:
