@@ -28,7 +28,8 @@ export const performanceMiddleware = (
   // Override end to capture response time
   const originalEnd = res.end;
   
-  res.end = function(...args: any[]) {
+  // @ts-ignore - Overriding Express Response method
+  res.end = function(this: any, ...args: any[]): any {
     const duration = Date.now() - start;
     
     // Update metrics
@@ -61,7 +62,8 @@ export const performanceMiddleware = (
     // Add response time header
     res.setHeader('X-Response-Time', `${duration}ms`);
 
-    originalEnd.apply(res, args);
+    // @ts-ignore - Calling original Express method
+    return originalEnd.apply(res, args);
   };
 
   next();
