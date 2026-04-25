@@ -23,6 +23,14 @@ export type DatabaseTransactionClient = Pick<
     | 'playerAchievement'
     | 'achievementShare'
     | 'achievementNotification'
+    | 'tournament'
+    | 'tournamentParticipant'
+    | 'tournamentMatch'
+    | 'tournamentRegistration'
+    | 'gameSession'
+    | 'gameSessionPlayer'
+    | 'gameSessionAction'
+    | 'gameSessionEvent'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

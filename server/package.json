@@ -10,6 +10,9 @@
         "test": "npm run build && node --test test/**/*.test.js",
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
+        "prisma:migrate:deploy": "prisma migrate deploy",
+        "prisma:seed": "ts-node prisma/seed.ts",
+        "prisma:studio": "prisma studio",
         "lint": "tsc --noEmit"
     },
     "dependencies": {
@@ -40,6 +43,7 @@
         "@types/passport-jwt": "^4.0.1",
         "@types/uuid": "^9.0.8",
         "prisma": "^5.10.2",
+        "ts-node": "^10.9.2",
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.3.3"
     },
