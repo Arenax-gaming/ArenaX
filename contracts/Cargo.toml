@@ -18,6 +18,7 @@ members = [
     "auth-gateway",
     "ax-token",
     "anti-cheat-oracle",
+    "anti-cheat",
     "staking-manager",
     "upgrade-system",
     "player-reputation",

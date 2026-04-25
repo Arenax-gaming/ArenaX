@@ -24,6 +24,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "anti-cheat"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
