@@ -37,9 +37,11 @@ model User {
   playerAchievements       PlayerAchievement[]
   achievementShares        AchievementShare[]
   achievementNotifications AchievementNotification[]
-  gameSessionParticipants  GameSessionParticipant[]
-  tournamentParticipants   TournamentParticipant[]
-  leaderboardEntries       LeaderboardEntry[]
+  hostedSessions           GameSession[]
+  gameSessionParticipations GameSessionPlayer[]
+  tournamentParticipations TournamentParticipant[]
+  tournamentRegistrations  TournamentRegistration[]
+  organizedTournaments     Tournament[]
 
 }
 
@@ -376,7 +378,6 @@ enum MatchStatus {
   COMPLETED
   DISPUTED
   FINALIZED
-  CANCELLED
 }
 
 model Match {
@@ -393,13 +394,8 @@ model Match {
   endedAt        DateTime?
   updatedAt      DateTime    @updatedAt
   disputes       Dispute[]
-  gameSession    GameSession?
 
   @@index([status])
-  @@index([playerAId])
-  @@index([playerBId])
-  @@index([winnerId])
-  @@index([createdAt])
 }
 
 model Dispute {
@@ -487,7 +483,7 @@ model KycReview {
   @@index([status])
 }
 
-// Tournament System Models
+// Tournament and Game Session Models
 enum TournamentFormat {
   SINGLE_ELIMINATION
   DOUBLE_ELIMINATION
@@ -523,6 +519,23 @@ enum MatchResultType {
   DISQUALIFIED
 }
 
+enum GameSessionStatus {
+  CREATED
+  WAITING_FOR_PLAYERS
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELLED
+  TIMEOUT
+}
+
+enum GameSessionType {
+  CASUAL
+  RANKED
+  TOURNAMENT
+  CUSTOM
+}
+
 model Tournament {
   id                String            @id @default(uuid())
   name              String
@@ -535,12 +548,12 @@ model Tournament {
   minPlayers        Int               @default(2)
   entryFee          Decimal?          @db.Decimal(20, 7)
   prizePool         Decimal           @default(0) @db.Decimal(20, 7)
-  prizeDistribution Json              @default("{}") // {1st: 0.6, 2nd: 0.3, 3rd: 0.1}
+  prizeDistribution Json              @default("{}")
   registrationStart DateTime
   registrationEnd   DateTime
   startDate         DateTime
   endDate           DateTime?
-  checkInWindow     Int               @default(15) // minutes before start
+  checkInWindow     Int               @default(15)
   organizerId       String
   organizer         User              @relation(fields: [organizerId], references: [id])
   currentRound      Int               @default(0)
@@ -568,7 +581,7 @@ model TournamentParticipant {
   seed              Int?
   checkedIn         Boolean    @default(false)
   checkedInAt       DateTime?
-  status            String     @default("REGISTERED") // REGISTERED, CHECKED_IN, ELIMINATED, DISQUALIFIED, WINNER
+  status            String     @default("REGISTERED")
   eliminatedAt      DateTime?
   eliminatedRound   Int?
   wins              Int        @default(0)
@@ -578,147 +591,9 @@ model TournamentParticipant {
   prizeAmount       Decimal?  @db.Decimal(20, 7)
   metadata          Json       @default("{}")
   registeredAt      DateTime   @default(now())
-// Game Mode Configuration
-enum GameModeType {
-  ONE_V_ONE
-  TWO_V_TWO
-  THREE_V_THREE
-  FIVE_V_FIVE
-  FREE_FOR_ALL
-  TOURNAMENT
-}
-
-model GameMode {
-  id          String        @id @default(uuid())
-  name        String        @unique
-  displayName String
-  type        GameModeType
-  description String?
-  maxPlayers  Int           @default(2)
-  minPlayers  Int           @default(2)
-  rules       Json          @default("{}")
-  settings    Json          @default("{}")
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  gameSessions GameSession[]
-  tournaments  Tournament[]
-
-  @@index([isActive])
-}
-
-// Game Session (Match Data)
-enum GameSessionStatus {
-  WAITING
-  IN_PROGRESS
-  COMPLETED
-  ABANDONED
-  DISPUTED
-}
-
-model GameSession {
-  id          String              @id @default(uuid())
-  matchId     String?             @unique
-  match       Match?              @relation(fields: [matchId], references: [id], onDelete: SetNull)
-  gameModeId  String
-  gameMode    GameMode            @relation(fields: [gameModeId], references: [id])
-  status      GameSessionStatus   @default(WAITING)
-  metadata    Json                @default("{}")
-  gameData    Json                @default("{}")
-  startedAt   DateTime?
-  endedAt     DateTime?
-  duration    Int?                // Duration in seconds
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  participants GameSessionParticipant[]
-  matchHistory MatchHistory[]
-
-  @@index([status])
-  @@index([gameModeId])
-  @@index([createdAt])
-  @@index([startedAt])
-}
-
-model GameSessionParticipant {
-  id             String       @id @default(uuid())
-  gameSessionId  String
-  gameSession    GameSession  @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team           String?      // Team identifier
-  score          Int          @default(0)
-  kills          Int          @default(0)
-  deaths         Int          @default(0)
-  assists        Int          @default(0)
-  position       Int?         // Final position/ranking
-  metadata       Json         @default("{}")
-  joinedAt       DateTime     @default(now())
-  leftAt         DateTime?
-
-  @@unique([gameSessionId, userId])
-  @@index([gameSessionId])
-  @@index([userId])
-}
-
-// Tournament System
-enum TournamentStatus {
-  DRAFT
-  REGISTRATION
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-  POSTPONED
-}
-
-enum TournamentFormat {
-  SINGLE_ELIMINATION
-  DOUBLE_ELIMINATION
-  ROUND_ROBIN
-  SWISS
-  GROUP_STAGE
-}
-
-model Tournament {
-  id              String            @id @default(uuid())
-  name            String
-  description     String?
-  gameModeId      String
-  gameMode        GameMode          @relation(fields: [gameModeId], references: [id])
-  status          TournamentStatus  @default(DRAFT)
-  format          TournamentFormat
-  maxParticipants Int
-  entryFee        Decimal           @default(0) @db.Decimal(20, 7)
-  prizePool       Decimal           @default(0) @db.Decimal(20, 7)
-  currency        String            @default("USDC")
-  startsAt        DateTime?
-  endsAt          DateTime?
-  registrationStartsAt DateTime?
-  registrationEndsAt   DateTime?
-  rules           Json              @default("{}")
-  metadata        Json              @default("{}")
-  createdBy       String
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  participants    TournamentParticipant[]
-  brackets        TournamentBracket[]
-
-  @@index([status])
-  @@index([gameModeId])
-  @@index([startsAt])
-  @@index([createdBy])
-}
-
-model TournamentParticipant {
-  id           String     @id @default(uuid())
-  tournamentId String
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  registeredAt DateTime   @default(now())
-  seed         Int?       // Tournament seed for bracket generation
-  metadata     Json       @default("{}")
-  eliminatedAt DateTime?
+  matchesAsPlayerA  TournamentMatch[] @relation("MatchPlayerA")
+  matchesAsPlayerB  TournamentMatch[] @relation("MatchPlayerB")
+  matchesAsWinner   TournamentMatch[] @relation("MatchWinner")
 
   @@unique([tournamentId, userId])
   @@index([tournamentId])
@@ -742,11 +617,11 @@ model TournamentMatch {
   playerAScore      Int        @default(0)
   playerBScore      Int        @default(0)
   resultType        MatchResultType?
-  status            String     @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, BYE
+  status            String     @default("PENDING")
   scheduledAt       DateTime?
   startedAt         DateTime?
   completedAt       DateTime?
-  matchId           String?    // Link to actual Match model if applicable
+  matchId           String?
   metadata          Json       @default("{}")
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
@@ -764,9 +639,9 @@ model TournamentRegistration {
   tournament        Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   userId            String
   user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status            String     @default("PENDING") // PENDING, CONFIRMED, WAITLIST, CANCELLED
+  status            String     @default("PENDING")
   waitlistPosition  Int?
-  paymentStatus     String     @default("PENDING") // PENDING, PAID, REFUNDED
+  paymentStatus     String     @default("PENDING")
   paymentTxHash     String?
   metadata          Json       @default("{}")
   registeredAt      DateTime   @default(now())
@@ -776,24 +651,6 @@ model TournamentRegistration {
   @@index([tournamentId])
   @@index([userId])
   @@index([status])
-}
-
-// Game Session Management Models
-enum GameSessionStatus {
-  CREATED
-  WAITING_FOR_PLAYERS
-  IN_PROGRESS
-  PAUSED
-  COMPLETED
-  CANCELLED
-  TIMEOUT
-}
-
-enum GameSessionType {
-  CASUAL
-  RANKED
-  TOURNAMENT
-  CUSTOM
 }
 
 model GameSession {
@@ -806,14 +663,14 @@ model GameSession {
   host              User              @relation(fields: [hostId], references: [id])
   maxPlayers        Int               @default(2)
   minPlayers        Int               @default(2)
-  currentState      Json              @default("{}") // Current game state
-  initialState      Json              @default("{}") // Initial state for replay
-  settings          Json              @default("{}") // Game settings
-  replayData        Json?             // Replay recording
+  currentState      Json              @default("{}")
+  initialState      Json              @default("{}")
+  settings          Json              @default("{}")
+  replayData        Json?
   metadata          Json              @default("{}")
   startedAt         DateTime?
   endedAt           DateTime?
-  duration          Int?              // Duration in seconds
+  duration          Int?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   players           GameSessionPlayer[]
@@ -838,12 +695,13 @@ model GameSessionPlayer {
   rank              Int?
   rating            Decimal?       @db.Decimal(20, 7)
   ratingChange      Decimal?       @db.Decimal(20, 7)
-  status            String         @default("ACTIVE") // ACTIVE, DISCONNECTED, ELIMINATED, SPECTATOR
+  status            String         @default("ACTIVE")
   disconnectedAt    DateTime?
   reconnectedAt     DateTime?
   joinedAt          DateTime       @default(now())
   leftAt            DateTime?
   metadata          Json           @default("{}")
+  actions           GameSessionAction[]
 
   @@unique([sessionId, userId])
   @@index([sessionId])
@@ -857,7 +715,7 @@ model GameSessionAction {
   session           GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   playerId          String
   player            GameSessionPlayer @relation(fields: [playerId], references: [id])
-  actionType        String      // MOVE, ATTACK, USE_ITEM, CHAT, EMOTE, etc.
+  actionType        String
   data              Json        @default("{}")
   timestamp         DateTime    @default(now())
   validated         Boolean     @default(false)
@@ -872,7 +730,7 @@ model GameSessionEvent {
   id                String      @id @default(uuid())
   sessionId         String
   session           GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  eventType         String      // PLAYER_JOIN, PLAYER_LEAVE, GAME_START, GAME_END, STATE_CHANGE, etc.
+  eventType         String
   data              Json        @default("{}")
   timestamp         DateTime    @default(now())
   metadata          Json        @default("{}")
@@ -880,96 +738,4 @@ model GameSessionEvent {
   @@index([sessionId])
   @@index([eventType])
   @@index([timestamp])
-}
-
-model TournamentBracket {
-  id           String     @id @default(uuid())
-  tournamentId String
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  round        Int
-  matchId      String?    // Reference to Match model
-  playerAId    String?
-  playerBId    String?
-  winnerId     String?
-  nextMatchId  String?    // Reference to next match in bracket
-  position     Json       @default("{}") // Bracket position data
-  metadata     Json       @default("{}")
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-
-  @@index([tournamentId])
-  @@index([round])
-  @@index([matchId])
-}
-
-// Leaderboard System
-enum LeaderboardType {
-  GLOBAL
-  GAME_MODE
-  TOURNAMENT
-  SEASONAL
-}
-
-model Leaderboard {
-  id          String          @id @default(uuid())
-  name        String          @unique
-  type        LeaderboardType
-  gameModeId  String?
-  tournamentId String?
-  season      Int?
-  isActive    Boolean         @default(true)
-  startDate   DateTime?
-  endDate     DateTime?
-  metadata    Json            @default("{}")
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  entries     LeaderboardEntry[]
-
-  @@index([type])
-  @@index([isActive])
-  @@index([season])
-}
-
-model LeaderboardEntry {
-  id           String     @id @default(uuid())
-  leaderboardId String
-  leaderboard   Leaderboard @relation(fields: [leaderboardId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  rank         Int
-  score        Int        @default(0)
-  wins         Int        @default(0)
-  losses       Int        @default(0)
-  draws        Int        @default(0)
-  winRate      Decimal    @default(0) @db.Decimal(5, 2)
-  metadata     Json       @default("{}")
-  updatedAt    DateTime   @updatedAt
-
-  @@unique([leaderboardId, userId])
-  @@index([leaderboardId])
-  @@index([userId])
-  @@index([rank])
-}
-
-// Match History (Detailed Game Records)
-model MatchHistory {
-  id             String      @id @default(uuid())
-  gameSessionId  String
-  gameSession    GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
-  playerAId      String
-  playerBId      String
-  winnerId       String?
-  scoreA         Int         @default(0)
-  scoreB         Int         @default(0)
-  duration       Int?        // Duration in seconds
-  replayData     Json?       // Replay data for match analysis
-  analytics      Json        @default("{}")
-  metadata       Json        @default("{}")
-  createdAt      DateTime    @default(now())
-
-  @@index([gameSessionId])
-  @@index([playerAId])
-  @@index([playerBId])
-  @@index([winnerId])
-  @@index([createdAt])
 }
