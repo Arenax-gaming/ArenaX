@@ -197,7 +197,15 @@ fn test_apply_sanction_unauthorized() {
     let duration = 86400;
     let report_ids = Vec::new(&env);
 
-    AntiCheatContract::apply_sanction(env, player, SanctionType::TemporaryBan, reason, duration, report_ids);
+    // This will panic because apply_sanction requires admin authorization
+    AntiCheatContract::apply_sanction(
+        env,
+        player,
+        SanctionType::TemporaryBan,
+        reason,
+        duration,
+        report_ids,
+    );
 }
 
 #[test]
@@ -487,7 +495,11 @@ fn test_emergency_mode() {
     // Enable emergency mode
     AntiCheatContract::set_emergency_mode(env.clone(), true);
 
-    let emergency_mode: bool = env.storage().persistent().get(&DataKey::EmergencyMode).unwrap_or(false);
+    let emergency_mode: bool = env
+        .storage()
+        .persistent()
+        .get(&DataKey::EmergencyMode)
+        .unwrap_or(false);
     assert!(emergency_mode);
 }
 
