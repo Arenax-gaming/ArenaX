@@ -743,7 +743,7 @@ export class TournamentService {
         const standing = standings.find((s) => s.rank === rank);
         
         if (standing) {
-          const prizeAmount = tournament.prizePool * percentage;
+          const prizeAmount = Number(tournament.prizePool) * (percentage as number);
           await prisma.tournamentParticipant.update({
             where: { id: standing.participantId },
             data: {
