@@ -52,6 +52,14 @@ export interface TournamentFilters {
   gameType?: string;
   status?: TournamentStatus;
   visibility?: TournamentVisibility;
+  tournamentType?: TournamentType;
+  minEntryFee?: number;
+  maxEntryFee?: number;
+  minPrizePool?: number;
+  maxPrizePool?: number;
+  search?: string;
+  sortBy?: 'date' | 'prize_pool' | 'participants';
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   limit?: number;
 }

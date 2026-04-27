@@ -16,6 +16,18 @@ export interface User {
   createdAt: string;
 }
 
+export interface UserProfileUpdate {
+  username?: string;
+  bio?: string;
+  avatar?: string;
+  socialLinks?: {
+    twitter?: string;
+    discord?: string;
+    twitch?: string;
+    github?: string;
+  };
+}
+
 export interface EloPoint {
   date: string;
   elo: number;

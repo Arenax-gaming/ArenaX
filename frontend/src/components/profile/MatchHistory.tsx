@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface MatchHistoryFilters {
@@ -146,50 +147,56 @@ export function MatchHistory({
                 : new Date(match.createdAt);
 
               return (
-                <div
+                <Link
                   key={match.id}
-                  className="flex items-center justify-between p-4 bg-muted/40 rounded-lg border hover:bg-muted/60 transition-colors"
+                  href={`/matches/${match.id}`}
+                  className="block"
                 >
-                  <div className="block items-center gap-4">
-                    <div
-                      className={cn(
-                        "flex items-center justify-center h-10 w-10 rounded-full font-bold text-xs uppercase transition-all",
-                        isWinner
-                          ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border border-green-200 dark:border-green-800"
-                          : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-200 dark:border-red-800"
-                      )}
-                    >
-                      {isWinner ? "Win" : "Loss"}
-                    </div>
-                    <div>
-                      <div className="block items-center gap-2">
-                        <span className="font-semibold text-foreground">vs {opponentName}</span>
-                        {match.tournamentName && (
-                          <span className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
-                            <Trophy className="h-3 w-3" />
-                            {match.tournamentName}
-                          </span>
+                  <div className="flex items-center justify-between p-4 bg-muted/40 rounded-lg border hover:bg-muted/60 transition-colors cursor-pointer group">
+                    <div className="block items-center gap-4">
+                      <div
+                        className={cn(
+                          "flex items-center justify-center h-10 w-10 rounded-full font-bold text-xs uppercase transition-all",
+                          isWinner
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border border-green-200 dark:border-green-800"
+                            : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-200 dark:border-red-800"
                         )}
+                      >
+                        {isWinner ? "Win" : "Loss"}
                       </div>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Calendar className="h-3 w-3" />
-                        {date.toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </p>
+                      <div>
+                        <div className="block items-center gap-2">
+                          <span className="font-semibold text-foreground">vs {opponentName}</span>
+                          {match.tournamentName && (
+                            <span className="text-xs text-muted-foreground hidden md:inline-flex items-center gap-1">
+                              <Trophy className="h-3 w-3" />
+                              {match.tournamentName}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <Calendar className="h-3 w-3" />
+                          {date.toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <span className="text-lg font-bold tabular-nums">
+                          {myScore} - {opponentScore}
+                        </span>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                          {match.gameType}
+                        </p>
+                      </div>
+                      <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-lg font-bold tabular-nums">
-                      {myScore} - {opponentScore}
-                    </span>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                      {match.gameType}
-                    </p>
-                  </div>
-                </div>
+                </Link>
               );
             })
           )}
