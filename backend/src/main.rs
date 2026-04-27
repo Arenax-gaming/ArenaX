@@ -19,6 +19,7 @@ use crate::config::Config;
 use crate::db::create_pool;
 use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
@@ -114,6 +115,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
@@ -159,6 +161,24 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/reputation/stats",
                         web::get().to(crate::http::reputation_handler::get_reputation_stats),
+                    )
+                    // Staking endpoints
+                    .service(
+                        web::scope("/staking")
+                            .route("/stake", web::post().to(crate::http::staking_handler::stake_for_rewards))
+                            .route("/claim", web::post().to(crate::http::staking_handler::claim_rewards))
+                            .route("/unstake/{user_id}", web::delete().to(crate::http::staking_handler::unstake))
+                            .route("/position/{user_id}", web::get().to(crate::http::staking_handler::get_position))
+                            .route("/stats", web::get().to(crate::http::staking_handler::get_staking_stats))
+                    )
+                    // Analytics endpoints
+                    .service(
+                        web::scope("/analytics")
+                            .route("/match", web::post().to(crate::http::analytics_handler::record_match))
+                            .route("/behaviour", web::post().to(crate::http::analytics_handler::record_player_behaviour))
+                            .route("/game/{game_id}", web::get().to(crate::http::analytics_handler::get_game_metrics))
+                            .route("/platform", web::get().to(crate::http::analytics_handler::get_platform_metrics))
+                            .route("/player/{user_id}", web::get().to(crate::http::analytics_handler::get_player_insights))
                     )
                     // Matchmaking endpoints
                     .service(
