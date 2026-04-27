@@ -55,7 +55,7 @@ pub struct SuspiciousActivity {
     pub severity: u32, // 1-10
     pub timestamp: u64,
     pub verified: bool,
-    pub confidence_score: u32, // AI confidence in detection
+    pub confidence_score: u32,    // AI confidence in detection
     pub false_positive_risk: u32, // Risk of false positive
 }
 
@@ -73,7 +73,7 @@ pub struct Sanction {
     pub end_time: u64,
     pub appeal_deadline: u64,
     pub report_ids: Vec<u64>, // Reports that led to this sanction
-    pub severity_score: u32, // Calculated severity
+    pub severity_score: u32,  // Calculated severity
 }
 
 // Appeal record
@@ -109,11 +109,11 @@ pub struct TrustScore {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct WeightedFactors {
-    pub report_history_weight: u32, // Weight of report history
-    pub confirmed_cheat_weight: u32, // Weight of confirmed cheats
+    pub report_history_weight: u32,    // Weight of report history
+    pub confirmed_cheat_weight: u32,   // Weight of confirmed cheats
     pub successful_report_weight: u32, // Weight of successful reports
-    pub time_decay_factor: u32, // Time-based decay factor
-    pub volatility_score: u32, // Score volatility
+    pub time_decay_factor: u32,        // Time-based decay factor
+    pub volatility_score: u32,         // Score volatility
 }
 
 // Player behavior profile for pattern detection
@@ -121,11 +121,11 @@ pub struct WeightedFactors {
 #[derive(Clone, Debug)]
 pub struct BehaviorProfile {
     pub player: Address,
-    pub reaction_time_avg: u32, // Average reaction time
-    pub movement_patterns: Bytes, // Encoded movement patterns
+    pub reaction_time_avg: u32,          // Average reaction time
+    pub movement_patterns: Bytes,        // Encoded movement patterns
     pub action_frequency: Map<u32, u32>, // Action type frequencies
-    pub statistical_baseline: Bytes, // Statistical baseline
-    pub anomaly_count: u32, // Number of anomalies detected
+    pub statistical_baseline: Bytes,     // Statistical baseline
+    pub anomaly_count: u32,              // Number of anomalies detected
     pub last_analyzed: u64,
 }
 
@@ -136,8 +136,8 @@ pub struct AnalyticsData {
     pub total_reports: u64,
     pub total_sanctions: u64,
     pub total_appeals: u64,
-    pub false_positive_rate: u32, // Percentage
-    pub detection_accuracy: u32, // Percentage
+    pub false_positive_rate: u32,   // Percentage
+    pub detection_accuracy: u32,    // Percentage
     pub average_response_time: u64, // Time to detect
     pub most_common_pattern: BehaviorPattern,
     pub last_updated: u64,
@@ -148,9 +148,9 @@ pub struct AnalyticsData {
 #[derive(Clone, Debug)]
 pub struct WhistleblowerProtection {
     pub reporter: Address,
-    pub anonymous: bool, // Whether reporter is anonymous
-    pub protection_level: u32, // Level of protection
-    pub reward_earned: u32, // Total rewards earned
+    pub anonymous: bool,         // Whether reporter is anonymous
+    pub protection_level: u32,   // Level of protection
+    pub reward_earned: u32,      // Total rewards earned
     pub false_report_count: u32, // Number of false reports
     pub last_activity: u64,
 }
@@ -165,8 +165,8 @@ pub struct AntiCheatParams {
     pub severity_multiplier: u32, // Multiplier for repeated offenses
     pub max_reports_per_match: u32,
     pub false_positive_threshold: u32, // Threshold for false positive detection
-    pub emergency_mode: bool,      // Emergency mode flag
-    pub whistleblower_reward: u32, // Reward for valid reports
+    pub emergency_mode: bool,          // Emergency mode flag
+    pub whistleblower_reward: u32,     // Reward for valid reports
     pub pattern_detection_sensitivity: u32, // Sensitivity for pattern detection
 }
 
@@ -188,8 +188,8 @@ pub enum DataKey {
     AnalyticsData,
     EmergencyMode,
     WhistleblowerProtection(Address), // Reporter protection status
-    BehaviorProfile(Address), // Player behavior profile
-    PatternDatabase(u32), // Pattern detection database
+    BehaviorProfile(Address),         // Player behavior profile
+    PatternDatabase(u32),             // Pattern detection database
 }
 
 // Anti-cheat contract
@@ -219,7 +219,7 @@ impl AntiCheatContract {
             max_reports_per_match: 5,
             false_positive_threshold: 70, // 70% confidence threshold
             emergency_mode: false,
-            whistleblower_reward: 100, // Reward points
+            whistleblower_reward: 100,         // Reward points
             pattern_detection_sensitivity: 50, // Medium sensitivity
         };
 
@@ -255,7 +255,9 @@ impl AntiCheatContract {
             .set(&DataKey::AnalyticsData, &analytics);
 
         // Initialize emergency mode as false
-        env.storage().persistent().set(&DataKey::EmergencyMode, &false);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyMode, &false);
     }
 
     // Report suspicious activity
@@ -305,11 +307,17 @@ impl AntiCheatContract {
         let current_time = env.ledger().timestamp();
 
         // Calculate confidence score and false positive risk
-        let confidence_score = Self::calculate_confidence_score(&env, &pattern, &evidence, severity);
-        let false_positive_risk = Self::calculate_false_positive_risk(&env, &player, &pattern, confidence_score);
+        let confidence_score =
+            Self::calculate_confidence_score(&env, &pattern, &evidence, severity);
+        let false_positive_risk =
+            Self::calculate_false_positive_risk(&env, &player, &pattern, confidence_score);
 
         // In emergency mode, lower threshold for action
-        let emergency_mode: bool = env.storage().persistent().get(&DataKey::EmergencyMode).unwrap_or(false);
+        let emergency_mode: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyMode)
+            .unwrap_or(false);
 
         let activity = SuspiciousActivity {
             report_id,
@@ -426,10 +434,15 @@ impl AntiCheatContract {
         };
 
         // Analyze behavior data with pattern detection
-        let behavior_factor = Self::analyze_behavior(&env, &behavior_data, params.pattern_detection_sensitivity);
+        let behavior_factor =
+            Self::analyze_behavior(&env, &behavior_data, params.pattern_detection_sensitivity);
 
         // Check behavior profile for anomalies
-        let profile_factor = if let Some(profile) = env.storage().persistent().get::<DataKey, BehaviorProfile>(&DataKey::BehaviorProfile(player.clone())) {
+        let profile_factor = if let Some(profile) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BehaviorProfile>(&DataKey::BehaviorProfile(player.clone()))
+        {
             profile.anomaly_count * 5
         } else {
             0
@@ -513,7 +526,11 @@ impl AntiCheatContract {
 
         // Reward whistleblowers for successful reports
         for report_id in report_ids.iter() {
-            if let Some(report) = env.storage().persistent().get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id)) {
+            if let Some(report) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id))
+            {
                 Self::reward_whistleblower(&env, &report.reporter, params.whistleblower_reward);
             }
         }
@@ -648,7 +665,11 @@ impl AntiCheatContract {
             Self::restore_trust_score(&env, &sanction.player);
             // Penalize false reporters
             for report_id in sanction.report_ids.iter() {
-                if let Some(report) = env.storage().persistent().get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id)) {
+                if let Some(report) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id))
+                {
                     Self::penalize_false_reporter(&env, &report.reporter);
                 }
             }
@@ -779,7 +800,9 @@ impl AntiCheatContract {
 
         admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::EmergencyMode, &enabled);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyMode, &enabled);
 
         // Update params
         let mut params: AntiCheatParams = env
@@ -809,7 +832,10 @@ impl AntiCheatContract {
     }
 
     // Get whistleblower protection status
-    pub fn get_whistleblower_protection(env: Env, reporter: Address) -> Option<WhistleblowerProtection> {
+    pub fn get_whistleblower_protection(
+        env: Env,
+        reporter: Address,
+    ) -> Option<WhistleblowerProtection> {
         env.storage()
             .persistent()
             .get(&DataKey::WhistleblowerProtection(reporter))
@@ -831,7 +857,13 @@ impl AntiCheatContract {
     }
 
     // Helper: Update trust score with weighted factors
-    fn update_trust_score(env: &Env, player: &Address, severity: u32, is_confirmed_cheat: bool, confidence_score: u32) {
+    fn update_trust_score(
+        env: &Env,
+        player: &Address,
+        severity: u32,
+        is_confirmed_cheat: bool,
+        confidence_score: u32,
+    ) {
         let mut trust_score: TrustScore = env
             .storage()
             .persistent()
@@ -860,7 +892,8 @@ impl AntiCheatContract {
             // Significant penalty for confirmed cheats, weighted by confidence
             let penalty = ((severity * 5) * confidence_score / 100).min(50);
             trust_score.score = trust_score.score.saturating_sub(penalty);
-            trust_score.weighted_factors.volatility_score = (trust_score.weighted_factors.volatility_score + 5).min(100);
+            trust_score.weighted_factors.volatility_score =
+                (trust_score.weighted_factors.volatility_score + 5).min(100);
         } else {
             // Smaller penalty for unverified reports
             let penalty = (severity * confidence_score / 100).min(10);
@@ -887,7 +920,10 @@ impl AntiCheatContract {
 
         // Restore score (partial restoration)
         trust_score.score = (trust_score.score + 30).min(100);
-        trust_score.weighted_factors.volatility_score = trust_score.weighted_factors.volatility_score.saturating_sub(10);
+        trust_score.weighted_factors.volatility_score = trust_score
+            .weighted_factors
+            .volatility_score
+            .saturating_sub(10);
         trust_score.last_updated = env.ledger().timestamp();
 
         env.storage()
@@ -906,7 +942,12 @@ impl AntiCheatContract {
     }
 
     // Helper: Perform deep validation with pattern matching
-    fn perform_deep_validation(env: &Env, player: &Address, action: &Bytes, game_state: &Bytes) -> bool {
+    fn perform_deep_validation(
+        env: &Env,
+        player: &Address,
+        action: &Bytes,
+        game_state: &Bytes,
+    ) -> bool {
         // Deep validation checks:
         // - Action consistency with game state
         // - Physics validation
@@ -914,7 +955,11 @@ impl AntiCheatContract {
         // - Pattern matching against known cheat signatures
 
         // Check behavior profile for anomalies
-        if let Some(profile) = env.storage().persistent().get::<DataKey, BehaviorProfile>(&DataKey::BehaviorProfile(player.clone())) {
+        if let Some(profile) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BehaviorProfile>(&DataKey::BehaviorProfile(player.clone()))
+        {
             // If player has high anomaly count, be more strict
             if profile.anomaly_count > 5 {
                 return false;
@@ -944,7 +989,12 @@ impl AntiCheatContract {
     }
 
     // Helper: Calculate confidence score for detection
-    fn calculate_confidence_score(_env: &Env, pattern: &BehaviorPattern, evidence: &Bytes, severity: u32) -> u32 {
+    fn calculate_confidence_score(
+        _env: &Env,
+        pattern: &BehaviorPattern,
+        evidence: &Bytes,
+        severity: u32,
+    ) -> u32 {
         // Confidence score based on:
         // - Pattern type (some patterns are more reliable indicators)
         // - Evidence quality (length and content)
@@ -979,13 +1029,21 @@ impl AntiCheatContract {
     }
 
     // Helper: Calculate false positive risk
-    fn calculate_false_positive_risk(env: &Env, player: &Address, pattern: &BehaviorPattern, confidence_score: u32) -> u32 {
+    fn calculate_false_positive_risk(
+        env: &Env,
+        player: &Address,
+        pattern: &BehaviorPattern,
+        confidence_score: u32,
+    ) -> u32 {
         // False positive risk based on:
         // - Player's trust score (higher trust = lower risk)
         // - Pattern reliability
         // - Confidence score (inverse relationship)
 
-        let trust_score: Option<TrustScore> = env.storage().persistent().get(&DataKey::TrustScore(player.clone()));
+        let trust_score: Option<TrustScore> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TrustScore(player.clone()));
 
         let trust_factor = if let Some(score) = trust_score {
             // Higher trust score = lower false positive risk
@@ -1034,9 +1092,10 @@ impl AntiCheatContract {
         protection.protection_level = if anonymous { 3 } else { 1 };
         protection.last_activity = env.ledger().timestamp();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::WhistleblowerProtection(reporter.clone()), &protection);
+        env.storage().persistent().set(
+            &DataKey::WhistleblowerProtection(reporter.clone()),
+            &protection,
+        );
     }
 
     // Helper: Reward whistleblower
@@ -1057,9 +1116,10 @@ impl AntiCheatContract {
         protection.reward_earned += reward;
         protection.last_activity = env.ledger().timestamp();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::WhistleblowerProtection(reporter.clone()), &protection);
+        env.storage().persistent().set(
+            &DataKey::WhistleblowerProtection(reporter.clone()),
+            &protection,
+        );
     }
 
     // Helper: Penalize false reporter
@@ -1081,9 +1141,10 @@ impl AntiCheatContract {
         protection.protection_level = protection.protection_level.saturating_sub(1);
         protection.last_activity = env.ledger().timestamp();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::WhistleblowerProtection(reporter.clone()), &protection);
+        env.storage().persistent().set(
+            &DataKey::WhistleblowerProtection(reporter.clone()),
+            &protection,
+        );
     }
 
     // Helper: Update analytics
@@ -1109,7 +1170,12 @@ impl AntiCheatContract {
     }
 
     // Helper: Update behavior profile
-    fn update_behavior_profile(env: &Env, player: &Address, _pattern: &BehaviorPattern, severity: u32) {
+    fn update_behavior_profile(
+        env: &Env,
+        player: &Address,
+        _pattern: &BehaviorPattern,
+        severity: u32,
+    ) {
         let mut profile: BehaviorProfile = env
             .storage()
             .persistent()
@@ -1142,7 +1208,11 @@ impl AntiCheatContract {
         let mut count = 0u32;
 
         for report_id in report_ids.iter() {
-            if let Some(report) = env.storage().persistent().get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id)) {
+            if let Some(report) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, SuspiciousActivity>(&DataKey::Report(report_id))
+            {
                 total_severity += report.severity;
                 count += 1;
             }
