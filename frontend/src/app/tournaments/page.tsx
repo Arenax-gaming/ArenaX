@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
+import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
+import { EmptyState } from "@/components/common/EmptyState";
 import { TournamentStatus, Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
-import { Search, Filter, SortAsc, Trophy, Users } from "lucide-react";
+import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 
 type TabType = "joined" | "available";
 type SortOption = "name" | "startTime" | "entryFee" | "prizePool" | "participants";
@@ -15,6 +17,7 @@ type EntryFeeFilter = "all" | "free" | "paid";
 
 export default function TournamentsPage() {
   const { user } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>("available");
   const [searchValue, setSearchValue] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<TournamentStatus | null>(null);
@@ -22,11 +25,20 @@ export default function TournamentsPage() {
   const [sortBy, setSortBy] = useState<SortOption>("startTime");
   const [sortAsc, setSortAsc] = useState(true);
   const [entryFeeFilter, setEntryFeeFilter] = useState<EntryFeeFilter>("all");
-  
+
   // Track joined tournaments (simulated - in real app this would come from API)
   const [joinedTournamentIds, setJoinedTournamentIds] = useState<Set<string>>(
     new Set(["2"]) // Mock: user has joined tournament ID 2
   );
+
+  // Simulate data fetching
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Get available game types from tournaments
   const availableGameTypes = useMemo(() => {
@@ -39,7 +51,7 @@ export default function TournamentsPage() {
     // First, filter based on joined/available tabs
     let tournaments = mockTournaments.filter((tournament) => {
       const isJoined = joinedTournamentIds.has(tournament.id);
-      
+
       if (activeTab === "joined") {
         return isJoined;
       } else {
@@ -86,7 +98,7 @@ export default function TournamentsPage() {
     // Apply sorting
     tournaments = [...tournaments].sort((a, b) => {
       let comparison = 0;
-      
+
       switch (sortBy) {
         case "name":
           comparison = a.name.localeCompare(b.name);
@@ -104,7 +116,7 @@ export default function TournamentsPage() {
           comparison = a.currentParticipants - b.currentParticipants;
           break;
       }
-      
+
       return sortAsc ? comparison : -comparison;
     });
 
@@ -158,11 +170,10 @@ export default function TournamentsPage() {
         <div className="inline-flex rounded-lg border bg-muted p-1">
           <button
             onClick={() => setActiveTab("available")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
-              activeTab === "available"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${activeTab === "available"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
           >
             <Trophy className="h-4 w-4" />
             Available
@@ -172,11 +183,10 @@ export default function TournamentsPage() {
           </button>
           <button
             onClick={() => setActiveTab("joined")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
-              activeTab === "joined"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${activeTab === "joined"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
           >
             <Users className="h-4 w-4" />
             Joined
@@ -193,7 +203,7 @@ export default function TournamentsPage() {
           <Filter className="h-5 w-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold text-foreground">Filters & Sort</h2>
         </div>
-        
+
         {/* Search */}
         <div className="mb-4">
           <div className="relative">
@@ -304,7 +314,13 @@ export default function TournamentsPage() {
       </div>
 
       {/* Tournament Grid or Empty State */}
-      {filteredTournaments.length > 0 ? (
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <TournamentCardSkeleton key={index} />
+          ))}
+        </div>
+      ) : filteredTournaments.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTournaments.map((tournament) => (
             <TournamentCardWithQuickJoin
@@ -316,39 +332,33 @@ export default function TournamentsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Trophy className="h-16 w-16 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold text-foreground mb-2">
-            No tournaments found
-          </h3>
-          <p className="text-muted-foreground mb-4">
-            {activeTab === "joined"
+        <EmptyState
+          icon={Trophy}
+          title="No tournaments found"
+          description={
+            activeTab === "joined"
               ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
               : searchValue || selectedStatus || selectedGameType || entryFeeFilter !== "all"
                 ? "Try adjusting your search or filters"
-                : "No tournaments are currently available"}
-          </p>
-          {(searchValue || selectedStatus || selectedGameType || entryFeeFilter !== "all") && (
-            <Button
-              onClick={handleReset}
-              variant="ghost"
-              size="sm"
-              className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium text-sm"
-            >
-              Reset filters
-            </Button>
-          )}
-          {activeTab === "joined" && (
-            <Button
-              onClick={() => setActiveTab("available")}
-              variant="outline"
-              size="sm"
-              className="mt-4"
-            >
-              Browse Available Tournaments
-            </Button>
-          )}
-        </div>
+                : "No tournaments are currently available"
+          }
+          action={
+            searchValue || selectedStatus || selectedGameType || entryFeeFilter !== "all"
+              ? {
+                label: "Reset filters",
+                onClick: handleReset,
+                variant: "ghost",
+              }
+              : activeTab === "joined"
+                ? {
+                  label: "Browse Available Tournaments",
+                  onClick: () => setActiveTab("available"),
+                  variant: "outline",
+                }
+                : undefined
+          }
+          size="lg"
+        />
       )}
     </div>
   );

@@ -1,8 +1,10 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { TournamentCard } from "@/components/tournaments/TournamentCard";
+import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { Button } from "@/components/ui/Button";
 import { mockTournaments } from "@/data/mockTournaments";
 import { ArrowRight } from "lucide-react";
@@ -13,6 +15,17 @@ const activeTournaments = mockTournaments
   .slice(0, 3);
 
 export function ActiveTournamentsSection() {
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Simulate data fetching delay
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <section className="container py-8 md:py-12 lg:py-16">
       <motion.div
@@ -31,17 +44,23 @@ export function ActiveTournamentsSection() {
       </motion.div>
 
       <div className="mx-auto grid justify-center gap-6 sm:grid-cols-2 md:max-w-[64rem] md:grid-cols-3 mt-8">
-        {activeTournaments.map((tournament, index) => (
-          <motion.div
-            key={tournament.id}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.5, delay: index * 0.1 }}
-          >
-            <TournamentCard tournament={tournament} />
-          </motion.div>
-        ))}
+        {isLoading ? (
+          Array.from({ length: 3 }).map((_, index) => (
+            <TournamentCardSkeleton key={index} />
+          ))
+        ) : (
+          activeTournaments.map((tournament, index) => (
+            <motion.div
+              key={tournament.id}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: index * 0.1 }}
+            >
+              <TournamentCard tournament={tournament} />
+            </motion.div>
+          ))
+        )}
       </div>
 
       <motion.div
