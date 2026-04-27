@@ -1,0 +1,16 @@
+[package]
+name = "cross-game-assets"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+arenax-events = { path = "../arenax-events" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

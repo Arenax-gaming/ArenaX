@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "arenax-events",
+    "analytics",
+    "cross-game-assets",
     "example",
     "dispute-resolution",
     "protocol-params",
