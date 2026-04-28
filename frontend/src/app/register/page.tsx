@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { FormField } from "@/components/ui/FormField";
+import { PasswordStrengthIndicator } from "@/components/ui/PasswordStrengthIndicator";
 import {
   Card,
   CardContent,
@@ -14,21 +15,53 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { ValidationSummary } from "@/components/ui/ValidationSummary";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { registerSchema, type RegisterFormData } from "@/lib/validations/auth";
+import { useDebouncedValidation } from "@/hooks/useDebouncedValidation";
 
 export default function RegisterPage() {
   const router = useRouter();
   const { register: registerUser, loading, error, clearError, user } = useAuth();
   const { addToast } = useNotifications();
-  const [formData, setFormData] = useState({
-    username: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+
+  const {
+    values,
+    errors,
+    isValid,
+    setFieldValue,
+    setFieldTouched,
+    validate,
+    getFieldError,
+    getFieldSuccess,
+  } = useDebouncedValidation<RegisterFormData>({
+    schema: registerSchema,
+    debounceMs: 300,
   });
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof RegisterFormData, string>>>({});
+
+  const handleFieldChange = useCallback(
+    (field: keyof RegisterFormData) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      setFieldValue(field, e.target.value);
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+      }
+    },
+    [setFieldValue, setFieldTouched, touchedFields]
+  );
+
+  const handleBlur = useCallback(
+    (field: keyof RegisterFormData) => () => {
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+        validate();
+      }
+    },
+    [touchedFields, setFieldTouched, validate]
+  );
 
   useEffect(() => {
     if (error) {
@@ -54,32 +87,32 @@ export default function RegisterPage() {
     }
   }, [user, router, addToast]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({ ...prev, [e.target.id]: e.target.value }));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFieldErrors({});
 
-    const result = registerSchema.safeParse(formData);
-    if (!result.success) {
-      const errors: Partial<Record<keyof RegisterFormData, string>> = {};
-      result.error.issues.forEach((issue) => {
-        const path = issue.path[0] as keyof RegisterFormData;
-        if (path && !errors[path]) errors[path] = issue.message;
-      });
-      setFieldErrors(errors);
+    // Mark all fields as touched on submit
+    const allFields = ["username", "email", "password", "confirmPassword"] as const;
+    allFields.forEach((field) => {
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+      }
+    });
+
+    const isValidForm = validate();
+    if (!isValidForm) {
       return;
     }
 
     await registerUser({
-      username: result.data.username,
-      email: result.data.email,
-      password: result.data.password,
-      confirmPassword: result.data.confirmPassword,
+      username: values.username || "",
+      email: values.email || "",
+      password: values.password || "",
+      confirmPassword: values.confirmPassword || "",
     });
   };
+
+  const errorList = Object.values(errors).filter(Boolean) as string[];
 
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] p-4 sm:p-6">
@@ -93,101 +126,74 @@ export default function RegisterPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <ValidationSummary errors={errorList} />
+
+            <FormField
+              id="username"
+              label="Username"
+              type="text"
+              value={values.username || ""}
+              onChange={handleFieldChange("username")}
+              onBlur={handleBlur("username")}
+              placeholder="ArenaMaster"
+              error={getFieldError("username")}
+              success={getFieldSuccess("username")}
+              disabled={loading}
+              autoComplete="username"
+            />
+
+            <FormField
+              id="email"
+              label="Email"
+              type="email"
+              value={values.email || ""}
+              onChange={handleFieldChange("email")}
+              onBlur={handleBlur("email")}
+              placeholder="m@example.com"
+              error={getFieldError("email")}
+              success={getFieldSuccess("email")}
+              disabled={loading}
+              autoComplete="email"
+            />
+
             <div className="space-y-2">
-              <label
-                htmlFor="username"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Username
-              </label>
-              <Input
-                id="username"
-                type="text"
-                placeholder="ArenaMaster"
-                value={formData.username}
-                onChange={handleChange}
-                disabled={loading}
-                error={!!fieldErrors.username}
-                autoComplete="username"
-                aria-invalid={!!fieldErrors.username}
-              />
-              {fieldErrors.username && (
-                <p className="text-sm text-destructive">{fieldErrors.username}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="email"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Email
-              </label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="m@example.com"
-                value={formData.email}
-                onChange={handleChange}
-                disabled={loading}
-                error={!!fieldErrors.email}
-                autoComplete="email"
-                aria-invalid={!!fieldErrors.email}
-              />
-              {fieldErrors.email && (
-                <p className="text-sm text-destructive">{fieldErrors.email}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="password"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Password
-              </label>
-              <Input
+              <FormField
                 id="password"
+                label="Password"
                 type="password"
-                value={formData.password}
-                onChange={handleChange}
+                value={values.password || ""}
+                onChange={handleFieldChange("password")}
+                onBlur={handleBlur("password")}
+                error={getFieldError("password")}
+                success={getFieldSuccess("password")}
                 disabled={loading}
-                error={!!fieldErrors.password}
                 autoComplete="new-password"
-                aria-invalid={!!fieldErrors.password}
               />
-              {fieldErrors.password && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
-              )}
+              <PasswordStrengthIndicator password={values.password || ""} />
             </div>
-            <div className="space-y-2">
-              <label
-                htmlFor="confirmPassword"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Confirm Password
-              </label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                disabled={loading}
-                error={!!fieldErrors.confirmPassword}
-                autoComplete="new-password"
-                aria-invalid={!!fieldErrors.confirmPassword}
-              />
-              {fieldErrors.confirmPassword && (
-                <p className="text-sm text-destructive">
-                  {fieldErrors.confirmPassword}
-                </p>
-              )}
-            </div>
+
+            <FormField
+              id="confirmPassword"
+              label="Confirm Password"
+              type="password"
+              value={values.confirmPassword || ""}
+              onChange={handleFieldChange("confirmPassword")}
+              onBlur={handleBlur("confirmPassword")}
+              error={getFieldError("confirmPassword")}
+              success={getFieldSuccess("confirmPassword")}
+              disabled={loading}
+              autoComplete="new-password"
+            />
+
             <FormError message={error ?? ""} />
+
             <Button
               className="w-full"
               type="submit"
               disabled={loading}
               loading={loading}
+              aria-describedby={errorList.length > 0 ? "validation-summary" : undefined}
             >
               Create account
             </Button>

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { FormField } from "@/components/ui/FormField";
 import {
   Card,
   CardContent,
@@ -14,19 +14,55 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { ValidationSummary } from "@/components/ui/ValidationSummary";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
-import { cn } from "@/lib/utils";
+import { useDebouncedValidation } from "@/hooks/useDebouncedValidation";
 
 export default function LoginPage() {
   const router = useRouter();
   const { login, loading, error, clearError, user } = useAuth();
   const { addToast } = useNotifications();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof LoginFormData, string>>>({});
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+
+  const {
+    values,
+    errors,
+    isValid,
+    setFieldValue,
+    setFieldTouched,
+    validate,
+    getFieldError,
+    getFieldSuccess,
+  } = useDebouncedValidation<LoginFormData>({
+    schema: loginSchema,
+    debounceMs: 300,
+  });
+
+  const handleFieldChange = useCallback(
+    (field: keyof LoginFormData) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = field === "rememberMe" ? e.target.checked : e.target.value;
+      setFieldValue(field, value);
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+      }
+    },
+    [setFieldValue, setFieldTouched, touchedFields]
+  );
+
+  const handleBlur = useCallback(
+    (field: keyof LoginFormData) => () => {
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+        validate();
+      }
+    },
+    [touchedFields, setFieldTouched, validate]
+  );
 
   // Error toast when auth error is set
   useEffect(() => {
@@ -58,25 +94,29 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFieldErrors({});
 
-    const result = loginSchema.safeParse({ email, password, rememberMe });
-    if (!result.success) {
-      const errors: Partial<Record<keyof LoginFormData, string>> = {};
-      result.error.issues.forEach((issue) => {
-        const path = issue.path[0] as keyof LoginFormData;
-        if (path && !errors[path]) errors[path] = issue.message;
-      });
-      setFieldErrors(errors);
+    // Mark all fields as touched on submit
+    const allFields = ["email", "password"] as const;
+    allFields.forEach((field) => {
+      if (!touchedFields.has(field)) {
+        setTouchedFields((prev) => new Set([...prev, field]));
+        setFieldTouched(field);
+      }
+    });
+
+    const isValidForm = validate();
+    if (!isValidForm) {
       return;
     }
 
     await login({
-      email: result.data.email,
-      password: result.data.password,
-      rememberMe: result.data.rememberMe,
+      email: values.email || "",
+      password: values.password || "",
+      rememberMe: values.rememberMe || false,
     });
   };
+
+  const errorList = Object.values(errors).filter(Boolean) as string[];
 
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] p-4 sm:p-6">
@@ -90,29 +130,23 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label
-                htmlFor="email"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Email
-              </label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="m@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={loading}
-                error={!!fieldErrors.email}
-                autoComplete="email"
-                aria-invalid={!!fieldErrors.email}
-              />
-              {fieldErrors.email && (
-                <p className="text-sm text-destructive">{fieldErrors.email}</p>
-              )}
-            </div>
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <ValidationSummary errors={errorList} />
+
+            <FormField
+              id="email"
+              label="Email"
+              type="email"
+              value={values.email || ""}
+              onChange={handleFieldChange("email")}
+              onBlur={handleBlur("email")}
+              placeholder="m@example.com"
+              error={getFieldError("email")}
+              success={getFieldSuccess("email")}
+              disabled={loading}
+              autoComplete="email"
+            />
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label
@@ -128,32 +162,28 @@ export default function LoginPage() {
                   Forgot password?
                 </Link>
               </div>
-              <Input
+              <FormField
                 id="password"
+                label=""
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={values.password || ""}
+                onChange={handleFieldChange("password")}
+                onBlur={handleBlur("password")}
+                error={getFieldError("password")}
+                success={getFieldSuccess("password")}
                 disabled={loading}
-                error={!!fieldErrors.password}
                 autoComplete="current-password"
-                aria-invalid={!!fieldErrors.password}
               />
-              {fieldErrors.password && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
-              )}
             </div>
+
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
                 id="rememberMe"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
+                checked={values.rememberMe || false}
+                onChange={(e) => setFieldValue("rememberMe", e.target.checked)}
                 disabled={loading}
-                className={cn(
-                  "h-4 w-4 rounded border-input bg-background text-primary",
-                  "focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                  "disabled:cursor-not-allowed disabled:opacity-50"
-                )}
+                className="h-4 w-4 rounded border-input bg-background text-primary focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-describedby="rememberMe-description"
               />
               <label
@@ -164,12 +194,15 @@ export default function LoginPage() {
                 Remember me
               </label>
             </div>
+
             <FormError message={error ?? ""} />
+
             <Button
               className="w-full"
               type="submit"
               disabled={loading}
               loading={loading}
+              aria-describedby={errorList.length > 0 ? "validation-summary" : undefined}
             >
               Sign in
             </Button>
