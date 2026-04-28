@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import React from "react";
 import {
   Hash,
   TrendingUp,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/Button";
 import { useSocial } from "@/hooks/useSocial";
 import { CommunityFeed } from "@/components/social";
 import { currentUser } from "@/data/user";
+import { CommunityPost } from "@/types/social";
 
 export default function CommunityPage() {
   const {
@@ -25,17 +27,17 @@ export default function CommunityPage() {
     createPost,
   } = useSocial();
 
-  const [activeFilter, setActiveFilter] = useState<"all" | "trending" | "recent">("all");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [activeFilter, setActiveFilter] = React.useState<"all" | "trending" | "recent">("all");
+  const [viewMode, setViewMode] = React.useState<"grid" | "list">("list");
 
   const filteredPosts = posts
-    .sort((a, b) => {
+    .sort((a: CommunityPost, b: CommunityPost) => {
       if (activeFilter === "trending") {
         return b.likes + b.comments * 2 - (a.likes + a.comments * 2);
       }
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     })
-    .sort((a, b) => {
+    .sort((a: CommunityPost, b: CommunityPost) => {
       // Pinned posts always first
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
@@ -134,7 +136,7 @@ export default function CommunityPage() {
             currentUser={{
               id: currentUser.id,
               username: currentUser.username,
-              avatar: currentUser.avatar,
+              avatar: currentUser.avatar || "",
             }}
             onLikePost={likePost}
             onAddComment={addComment}
@@ -265,12 +267,15 @@ export default function CommunityPage() {
                   <span className="text-xs font-bold text-muted-foreground w-5 text-center">
                     {index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}
                   </span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={user.avatar}
-                    alt={user.username}
-                    className="h-8 w-8 rounded-full"
-                  />
+                  <div className="relative h-8 w-8">
+                    <Image
+                      src={user.avatar}
+                      alt={user.username}
+                      fill
+                      className="rounded-full object-cover"
+                      sizes="32px"
+                    />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">
                       {user.username}

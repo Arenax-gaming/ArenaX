@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Image from "next/image";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -58,7 +59,7 @@ export default function DisputeDashboard() {
             </CardContent>
           </Card>
         ) : (
-          disputes.map((dispute) => (
+          disputes.map((dispute: any) => (
             <Card key={dispute.id} className="overflow-hidden border-2 border-indigo-100 dark:border-indigo-900 shadow-lg hover:shadow-xl transition-shadow duration-300">
               <CardHeader className="bg-indigo-50/50 dark:bg-indigo-950/20">
                 <div className="flex items-center justify-between">
@@ -88,9 +89,14 @@ export default function DisputeDashboard() {
                       <h4 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-2">Evidence</h4>
                       <div className="grid grid-cols-3 gap-2">
                         {dispute.evidenceUrls.map((url: string, index: number) => (
-                          <div key={index} className="aspect-square bg-gray-200 rounded-md overflow-hidden border">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt={`Evidence ${index + 1}`} className="w-full h-full object-cover" />
+                          <div key={index} className="relative aspect-square bg-gray-200 rounded-md overflow-hidden border">
+                            <Image
+                              src={url}
+                              alt={`Evidence ${index + 1}`}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 768px) 33vw, 10vw"
+                            />
                           </div>
                         ))}
                       </div>

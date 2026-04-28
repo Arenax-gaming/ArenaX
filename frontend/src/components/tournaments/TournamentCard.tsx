@@ -45,7 +45,7 @@ const statusConfig: Record<
   },
 };
 
-export function TournamentCard({ tournament }: TournamentCardProps) {
+export const TournamentCard = React.memo(({ tournament }: TournamentCardProps) => {
   const status = statusConfig[tournament.status];
   const participantPercentage = Math.round(
     (tournament.currentParticipants / tournament.maxParticipants) * 100,
@@ -169,4 +169,6 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
       </div>
     </Card>
   );
-}
+});
+
+TournamentCard.displayName = "TournamentCard";
