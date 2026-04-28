@@ -128,7 +128,8 @@ export class AdminService {
       throw new Error('maxPlayersPerMatch must be at least 2')
     }
 
-    if (config.minPlayersToStart && config.minPlayersToStart > config.maxPlayersPerMatch) {
+    const maxPlayers = config.maxPlayersPerMatch ?? this.gameConfig.maxPlayersPerMatch
+    if (config.minPlayersToStart && config.minPlayersToStart > maxPlayers) {
       throw new Error('minPlayersToStart cannot exceed maxPlayersPerMatch')
     }
 

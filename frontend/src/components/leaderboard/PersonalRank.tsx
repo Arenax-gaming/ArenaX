@@ -51,6 +51,10 @@ export const PersonalRank: React.FC<PersonalRankProps> = ({ category, season }) 
     )
   }
 
+  if (!personalRank) {
+    return null
+  }
+
   const rankChange = personalRank.prevRank
     ? personalRank.prevRank - personalRank.rank
     : 0
