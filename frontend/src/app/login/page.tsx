@@ -14,10 +14,12 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { ValidationMessage } from "@/components/ui/ValidationMessage";
+import { FormValidationSummary } from "@/components/ui/FormValidationSummary";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
-import { cn } from "@/lib/utils";
+import { useFormFieldValidation } from "@/hooks/useFormFieldValidation";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,6 +29,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof LoginFormData, string>>>({});
+  const [showValidationSummary, setShowValidationSummary] = useState(false);
+
+  // Real-time field validation
+  const emailValidation = useFormFieldValidation<LoginFormData>({
+    value: email,
+    schema: loginSchema,
+    fieldName: "email",
+    delay: 400,
+  });
+
+  const passwordValidation = useFormFieldValidation<LoginFormData>({
+    value: password,
+    schema: loginSchema,
+    fieldName: "password",
+    delay: 400,
+  });
 
   // Error toast when auth error is set
   useEffect(() => {
@@ -59,6 +77,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErrors({});
+    setShowValidationSummary(true);
 
     const result = loginSchema.safeParse({ email, password, rememberMe });
     if (!result.success) {
@@ -90,7 +109,14 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            {/* Validation Summary */}
+            <FormValidationSummary
+              errors={fieldErrors as Record<string, string>}
+              isValid={Object.keys(fieldErrors).length === 0}
+              isVisible={showValidationSummary}
+            />
+
             <div className="space-y-2">
               <label
                 htmlFor="email"
@@ -105,13 +131,23 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
-                error={!!fieldErrors.email}
+                error={emailValidation.isValid === false || !!fieldErrors.email}
+                success={emailValidation.isValid === true}
                 autoComplete="email"
-                aria-invalid={!!fieldErrors.email}
+                aria-invalid={emailValidation.isValid === false || !!fieldErrors.email}
+                aria-describedby={emailValidation.error ? "email-error" : emailValidation.isValid ? "email-success" : undefined}
               />
-              {fieldErrors.email && (
-                <p className="text-sm text-destructive">{fieldErrors.email}</p>
-              )}
+              <ValidationMessage
+                id="email-error"
+                message={fieldErrors.email || emailValidation.error}
+                state={
+                  fieldErrors.email || emailValidation.isValid === false
+                    ? "error"
+                    : emailValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -134,13 +170,23 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
-                error={!!fieldErrors.password}
+                error={passwordValidation.isValid === false || !!fieldErrors.password}
+                success={passwordValidation.isValid === true}
                 autoComplete="current-password"
-                aria-invalid={!!fieldErrors.password}
+                aria-invalid={passwordValidation.isValid === false || !!fieldErrors.password}
+                aria-describedby={passwordValidation.error ? "password-error" : passwordValidation.isValid ? "password-success" : undefined}
               />
-              {fieldErrors.password && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
-              )}
+              <ValidationMessage
+                id="password-error"
+                message={fieldErrors.password || passwordValidation.error}
+                state={
+                  fieldErrors.password || passwordValidation.isValid === false
+                    ? "error"
+                    : passwordValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -149,11 +195,9 @@ export default function LoginPage() {
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
                 disabled={loading}
-                className={cn(
-                  "h-4 w-4 rounded border-input bg-background text-primary",
-                  "focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                  "disabled:cursor-not-allowed disabled:opacity-50"
-                )}
+                className={
+                  "h-4 w-4 rounded border-input bg-background text-primary focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                }
                 aria-describedby="rememberMe-description"
               />
               <label
