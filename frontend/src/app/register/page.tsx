@@ -14,9 +14,13 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { FormError } from "@/components/ui/FormError";
+import { ValidationMessage } from "@/components/ui/ValidationMessage";
+import { FormValidationSummary } from "@/components/ui/FormValidationSummary";
+import { PasswordStrengthIndicator } from "@/components/ui/PasswordStrengthIndicator";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { registerSchema, type RegisterFormData } from "@/lib/validations/auth";
+import { useFormFieldValidation } from "@/hooks/useFormFieldValidation";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -29,6 +33,36 @@ export default function RegisterPage() {
     confirmPassword: "",
   });
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof RegisterFormData, string>>>({});
+  const [showValidationSummary, setShowValidationSummary] = useState(false);
+
+  // Real-time field validation
+  const usernameValidation = useFormFieldValidation<RegisterFormData>({
+    value: formData.username,
+    schema: registerSchema,
+    fieldName: "username",
+    delay: 400,
+  });
+
+  const emailValidation = useFormFieldValidation<RegisterFormData>({
+    value: formData.email,
+    schema: registerSchema,
+    fieldName: "email",
+    delay: 400,
+  });
+
+  const passwordValidation = useFormFieldValidation<RegisterFormData>({
+    value: formData.password,
+    schema: registerSchema,
+    fieldName: "password",
+    delay: 400,
+  });
+
+  const confirmPasswordValidation = useFormFieldValidation<RegisterFormData>({
+    value: formData.confirmPassword,
+    schema: registerSchema,
+    fieldName: "confirmPassword",
+    delay: 400,
+  });
 
   useEffect(() => {
     if (error) {
@@ -61,6 +95,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErrors({});
+    setShowValidationSummary(true);
 
     const result = registerSchema.safeParse(formData);
     if (!result.success) {
@@ -93,7 +128,14 @@ export default function RegisterPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            {/* Validation Summary */}
+            <FormValidationSummary
+              errors={fieldErrors as Record<string, string>}
+              isValid={Object.keys(fieldErrors).length === 0}
+              isVisible={showValidationSummary}
+            />
+
             <div className="space-y-2">
               <label
                 htmlFor="username"
@@ -108,13 +150,23 @@ export default function RegisterPage() {
                 value={formData.username}
                 onChange={handleChange}
                 disabled={loading}
-                error={!!fieldErrors.username}
+                error={usernameValidation.isValid === false || !!fieldErrors.username}
+                success={usernameValidation.isValid === true}
                 autoComplete="username"
-                aria-invalid={!!fieldErrors.username}
+                aria-invalid={usernameValidation.isValid === false || !!fieldErrors.username}
+                aria-describedby={usernameValidation.error ? "username-error" : usernameValidation.isValid ? "username-success" : undefined}
               />
-              {fieldErrors.username && (
-                <p className="text-sm text-destructive">{fieldErrors.username}</p>
-              )}
+              <ValidationMessage
+                id="username-error"
+                message={fieldErrors.username || usernameValidation.error}
+                state={
+                  fieldErrors.username || usernameValidation.isValid === false
+                    ? "error"
+                    : usernameValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
             </div>
             <div className="space-y-2">
               <label
@@ -130,13 +182,23 @@ export default function RegisterPage() {
                 value={formData.email}
                 onChange={handleChange}
                 disabled={loading}
-                error={!!fieldErrors.email}
+                error={emailValidation.isValid === false || !!fieldErrors.email}
+                success={emailValidation.isValid === true}
                 autoComplete="email"
-                aria-invalid={!!fieldErrors.email}
+                aria-invalid={emailValidation.isValid === false || !!fieldErrors.email}
+                aria-describedby={emailValidation.error ? "email-error" : emailValidation.isValid ? "email-success" : undefined}
               />
-              {fieldErrors.email && (
-                <p className="text-sm text-destructive">{fieldErrors.email}</p>
-              )}
+              <ValidationMessage
+                id="email-error"
+                message={fieldErrors.email || emailValidation.error}
+                state={
+                  fieldErrors.email || emailValidation.isValid === false
+                    ? "error"
+                    : emailValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
             </div>
             <div className="space-y-2">
               <label
@@ -151,12 +213,26 @@ export default function RegisterPage() {
                 value={formData.password}
                 onChange={handleChange}
                 disabled={loading}
-                error={!!fieldErrors.password}
+                error={passwordValidation.isValid === false || !!fieldErrors.password}
+                success={passwordValidation.isValid === true}
                 autoComplete="new-password"
-                aria-invalid={!!fieldErrors.password}
+                aria-invalid={passwordValidation.isValid === false || !!fieldErrors.password}
+                aria-describedby={passwordValidation.error ? "password-error" : passwordValidation.isValid ? "password-success" : undefined}
               />
-              {fieldErrors.password && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
+              <ValidationMessage
+                id="password-error"
+                message={fieldErrors.password || passwordValidation.error}
+                state={
+                  fieldErrors.password || passwordValidation.isValid === false
+                    ? "error"
+                    : passwordValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
+              {/* Password Strength Indicator */}
+              {formData.password && (
+                <PasswordStrengthIndicator password={formData.password} />
               )}
             </div>
             <div className="space-y-2">
@@ -172,15 +248,23 @@ export default function RegisterPage() {
                 value={formData.confirmPassword}
                 onChange={handleChange}
                 disabled={loading}
-                error={!!fieldErrors.confirmPassword}
+                error={confirmPasswordValidation.isValid === false || !!fieldErrors.confirmPassword}
+                success={confirmPasswordValidation.isValid === true}
                 autoComplete="new-password"
-                aria-invalid={!!fieldErrors.confirmPassword}
+                aria-invalid={confirmPasswordValidation.isValid === false || !!fieldErrors.confirmPassword}
+                aria-describedby={confirmPasswordValidation.error ? "confirmPassword-error" : confirmPasswordValidation.isValid ? "confirmPassword-success" : undefined}
               />
-              {fieldErrors.confirmPassword && (
-                <p className="text-sm text-destructive">
-                  {fieldErrors.confirmPassword}
-                </p>
-              )}
+              <ValidationMessage
+                id="confirmPassword-error"
+                message={fieldErrors.confirmPassword || confirmPasswordValidation.error}
+                state={
+                  fieldErrors.confirmPassword || confirmPasswordValidation.isValid === false
+                    ? "error"
+                    : confirmPasswordValidation.isValid === true
+                    ? "success"
+                    : "idle"
+                }
+              />
             </div>
             <FormError message={error ?? ""} />
             <Button
