@@ -3,11 +3,15 @@
 PULL_REQUEST.md
 # dependencies
 /node_modules
+/.tools
 /.pnp
 .pnp.js
 
 # testing
 /coverage
+/playwright-report
+/test-results
+/.lighthouseci
 
 # next.js
 /.next/
