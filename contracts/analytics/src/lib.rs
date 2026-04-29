@@ -196,7 +196,11 @@ impl AnalyticsContract {
         // Emit privacy-safe event (no player addresses)
         #[allow(deprecated)]
         env.events().publish(
-            (soroban_sdk::symbol_short!("MATCH_REC"), game_id, match_id.clone()),
+            (
+                soroban_sdk::symbol_short!("MATCH_REC"),
+                game_id,
+                match_id.clone(),
+            ),
             MatchRecorded {
                 game_id,
                 match_id,
@@ -262,7 +266,10 @@ impl AnalyticsContract {
         // Emit only the hash, never the raw address
         #[allow(deprecated)]
         env.events().publish(
-            (soroban_sdk::symbol_short!("PLR_BEH"), player_hash.clone()),
+            (
+                soroban_sdk::symbol_short!("PLR_BEH"),
+                player_hash.clone(),
+            ),
             PlayerBehaviour {
                 player_hash,
                 game_id,
