@@ -8,7 +8,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/Card";
+import { EmptyState } from "@/components/common/EmptyState";
 import { TxHistoryItem } from "@/lib/wallet/types";
+import { Receipt } from "lucide-react";
 
 interface TransactionHistoryProps {
   items: TxHistoryItem[];
@@ -45,7 +47,12 @@ export function TransactionHistory({ items, onClear }: TransactionHistoryProps) 
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No transactions yet.</p>
+          <EmptyState
+            icon={Receipt}
+            title="No transactions yet"
+            description="Your transaction history will appear here after you make deposits or withdrawals."
+            size="md"
+          />
         ) : (
           <div className="space-y-3">
             {items.map((item) => (

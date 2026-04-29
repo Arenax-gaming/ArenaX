@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS security_audit_log;
+DROP TABLE IF EXISTS analytics_player_behaviour;
+DROP TABLE IF EXISTS analytics_platform;
+DROP TABLE IF EXISTS analytics_game_metrics;
+DROP TABLE IF EXISTS asset_transfers;
+DROP TABLE IF EXISTS asset_balances;
+DROP TABLE IF EXISTS asset_definitions;
+DROP TABLE IF EXISTS staking_events;
+DROP TABLE IF EXISTS staking_positions;

@@ -1,4 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Trophy } from "lucide-react";
 
 export default function LeaderboardPage() {
   return (
@@ -10,11 +12,13 @@ export default function LeaderboardPage() {
         </p>
       </div>
       <Card>
-        <CardHeader>
-          <CardTitle>Standings update soon</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Leaderboard data will populate after the next tournament cycle.
+        <CardContent className="p-0">
+          <EmptyState
+            icon={Trophy}
+            title="Leaderboard coming soon"
+            description="Standings will be available after the next tournament cycle. Compete in tournaments to climb the ranks!"
+            size="lg"
+          />
         </CardContent>
       </Card>
     </div>

@@ -2,13 +2,21 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
+import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
 import { TournamentStatus, Tournament, TournamentFilters } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
 import { Trophy, Users } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { TournamentStatus, Tournament } from "@/types/tournament";
+import { Button } from "@/components/ui/Button";
+import { mockTournaments } from "@/data/mockTournaments";
+import { useAuth } from "@/hooks/useAuth";
+import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 
 type TabType = "joined" | "available";
 
@@ -34,6 +42,15 @@ export default function TournamentsPage() {
   const [joinedTournamentIds, setJoinedTournamentIds] = useState<Set<string>>(
     new Set(["2"]) // Mock: user has joined tournament ID 2
   );
+
+  // Simulate data fetching
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Get available game types from tournaments
   const availableGameTypes = useMemo(() => {
@@ -213,7 +230,13 @@ export default function TournamentsPage() {
       </div>
 
       {/* Tournament Grid or Empty State */}
-      {filteredTournaments.length > 0 ? (
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <TournamentCardSkeleton key={index} />
+          ))}
+        </div>
+      ) : filteredTournaments.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTournaments.map((tournament) => (
             <TournamentCardWithQuickJoin
@@ -225,13 +248,11 @@ export default function TournamentsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Trophy className="h-16 w-16 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold text-foreground mb-2">
-            No tournaments found
-          </h3>
-          <p className="text-muted-foreground mb-4">
-            {activeTab === "joined"
+        <EmptyState
+          icon={Trophy}
+          title="No tournaments found"
+          description={
+            activeTab === "joined"
               ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
               : filters.search || filters.status || filters.gameType || filters.tournamentType || filters.minEntryFee || filters.maxEntryFee || filters.minPrizePool || filters.maxPrizePool
                 ? "Try adjusting your search or filters"
