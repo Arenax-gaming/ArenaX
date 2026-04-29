@@ -7,7 +7,7 @@
 //! - Raw addresses are never emitted in events; only hashed identifiers are used.
 //! - Aggregated platform metrics are public.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,26 @@ pub struct PlayerBehaviourSnapshot {
     pub losses: u64,
     pub avg_session_secs: u64,
     pub last_seen_bucket: u64, // Unix timestamp rounded to nearest day
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatchRecorded {
+    pub game_id: u32,
+    pub match_id: BytesN<32>,
+    pub duration_secs: u64,
+    pub wager_amount: i128,
+    pub reward_amount: i128,
+    pub player_count: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayerBehaviour {
+    pub player_hash: BytesN<32>,
+    pub game_id: u32,
+    pub won: bool,
+    pub session_secs: u64,
 }
 
 #[contracttype]
@@ -121,6 +141,7 @@ impl AnalyticsContract {
     // ── Recording ─────────────────────────────────────────────────────────────
 
     /// Record a completed match. Called by authorised match/game contracts.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_match(
         env: Env,
         reporter: Address,
@@ -174,7 +195,14 @@ impl AnalyticsContract {
         // Emit privacy-safe event (no player addresses)
         env.events().publish(
             (soroban_sdk::symbol_short!("MATCH_REC"), game_id, match_id),
-            (duration_secs, wager_amount, reward_amount, player_count),
+            MatchRecorded {
+                game_id,
+                match_id,
+                duration_secs,
+                wager_amount,
+                reward_amount,
+                player_count,
+            },
         );
     }
 
@@ -231,8 +259,13 @@ impl AnalyticsContract {
 
         // Emit only the hash, never the raw address
         env.events().publish(
-            (soroban_sdk::symbol_short!("PLR_BEH"), player_hash),
-            (game_id, won, session_secs),
+            (soroban_sdk::symbol_short!("PLR_BEH"), player_hash.clone()),
+            PlayerBehaviour {
+                player_hash,
+                game_id,
+                won,
+                session_secs,
+            },
         );
     }
 
@@ -298,8 +331,7 @@ impl AnalyticsContract {
         // Soroban doesn't expose SHA-256 directly; we use the crypto module
         let mut input = soroban_sdk::Bytes::new(env);
         input.append(&salt.into());
-        // Encode address as bytes via its string representation length as a proxy
-        // In production use env.crypto().sha256() with serialised address bytes
+        input.append(&player.to_xdr(env));
         env.crypto().sha256(&input).into()
     }
 
