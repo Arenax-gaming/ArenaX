@@ -7,6 +7,7 @@
 //! - Raw addresses are never emitted in events; only hashed identifiers are used.
 //! - Aggregated platform metrics are public.
 
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ pub struct PlayerBehaviourSnapshot {
 }
 
 #[contractevent]
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MatchRecorded {
     pub game_id: u32,
@@ -60,6 +62,7 @@ pub struct MatchRecorded {
 }
 
 #[contractevent]
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlayerBehaviour {
     pub player_hash: BytesN<32>,
