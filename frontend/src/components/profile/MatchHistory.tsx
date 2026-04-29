@@ -3,7 +3,8 @@
 import React from "react";
 import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight, Gamepad2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface MatchHistoryFilters {
@@ -129,7 +130,25 @@ export function MatchHistory({
         {/* Match list */}
         <div className="space-y-4">
           {filteredMatches.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">No matches found</p>
+            <EmptyState
+              icon={Gamepad2}
+              title="No matches found"
+              description={
+                filters.gameType || filters.result || filters.opponentSearch
+                  ? "Try adjusting your filters to see more matches"
+                  : "You haven't played any matches yet. Start competing to build your history!"
+              }
+              action={
+                filters.gameType || filters.result || filters.opponentSearch
+                  ? {
+                    label: "Clear filters",
+                    onClick: () => onFilterChange?.({}),
+                    variant: "outline",
+                  }
+                  : undefined
+              }
+              size="md"
+            />
           ) : (
             filteredMatches.map((match) => {
               const isWinner = match.winnerId === currentUserId;
