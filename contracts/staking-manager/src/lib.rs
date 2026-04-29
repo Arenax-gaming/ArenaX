@@ -442,9 +442,16 @@ impl StakingManager {
     }
 
     pub fn get_user_stake_info(env: Env, user: Address) -> UserStakeInfo {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&DataKey::UserStakeInfo(user.clone()))
-            .unwrap_or(UserStakeInfo { user, total_staked: 0, total_slashed: 0, active_tournaments: 0, completed_tournaments: 0 })
+            .unwrap_or(UserStakeInfo {
+                user,
+                total_staked: 0,
+                total_slashed: 0,
+                active_tournaments: 0,
+                completed_tournaments: 0,
+            })
     }
 
     pub fn can_withdraw(env: Env, user: Address, tournament_id: BytesN<32>) -> bool {
@@ -517,11 +524,19 @@ impl StakingManager {
     fn update_user_stake_info(env: &Env, user: &Address, staked: i128, slashed: i128, active_d: i32, completed_d: i32) {
         let mut info: UserStakeInfo = env.storage().instance()
             .get(&DataKey::UserStakeInfo(user.clone()))
-            .unwrap_or(UserStakeInfo { user: user.clone(), total_staked: 0, total_slashed: 0, active_tournaments: 0, completed_tournaments: 0 });
+            .unwrap_or(UserStakeInfo {
+                user: user.clone(),
+                total_staked: 0,
+                total_slashed: 0,
+                active_tournaments: 0,
+                completed_tournaments: 0,
+            });
         info.total_staked += staked;
         info.total_slashed += slashed;
         info.active_tournaments = (info.active_tournaments as i32 + active_d) as u32;
         info.completed_tournaments = (info.completed_tournaments as i32 + completed_d) as u32;
-        env.storage().instance().set(&DataKey::UserStakeInfo(user.clone()), &info);
+        env.storage()
+            .instance()
+            .set(&DataKey::UserStakeInfo(user.clone()), &info);
     }
 }

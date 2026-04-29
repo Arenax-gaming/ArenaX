@@ -92,23 +92,30 @@ impl AnalyticsContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Salt, &salt);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::Platform, &PlatformMetrics {
-            total_matches_all_time: 0,
-            active_players_30d: 0,
-            total_staked: 0,
-            total_volume: 0,
-            last_updated: env.ledger().timestamp(),
-        });
+        env.storage().instance().set(
+            &DataKey::Platform,
+            &PlatformMetrics {
+                total_matches_all_time: 0,
+                active_players_30d: 0,
+                total_staked: 0,
+                total_volume: 0,
+                last_updated: env.ledger().timestamp(),
+            },
+        );
     }
 
     pub fn add_reporter(env: Env, reporter: Address) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::AuthReporter(reporter), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthReporter(reporter), &true);
     }
 
     pub fn remove_reporter(env: Env, reporter: Address) {
         Self::require_admin(&env);
-        env.storage().instance().remove(&DataKey::AuthReporter(reporter));
+        env.storage()
+            .instance()
+            .remove(&DataKey::AuthReporter(reporter));
     }
 
     // ── Recording ─────────────────────────────────────────────────────────────
