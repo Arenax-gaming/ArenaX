@@ -38,6 +38,16 @@ jobs:
     - name: Run tests
       run: npm test
 
+    - name: Check bundle size
+      run: |
+        SIZE=$(du -sb frontend/.next/static | cut -f1)
+        LIMIT=1048576 # 1MB limit for initial load chunks
+        echo "Total static bundle size: $SIZE bytes"
+        if [ $SIZE -gt $LIMIT ]; then
+          echo "Bundle size exceeds limit of $LIMIT bytes!"
+          exit 1
+        fi
+
   # Server (TypeScript) CI
   server:
     name: Server

@@ -1,10 +1,27 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { HeroSection } from "@/components/landing/HeroSection";
-import { FeatureSection } from "@/components/landing/FeatureSection";
-import { HowItWorksSection } from "@/components/landing/HowItWorksSection";
-import { CTASection } from "@/components/landing/CTASection";
-import { ActiveTournamentsSection } from "@/components/landing/ActiveTournamentsSection";
+
+const ActiveTournamentsSection = dynamic(() => import("@/components/landing/ActiveTournamentsSection").then(mod => mod.ActiveTournamentsSection), {
+  loading: () => <div className="h-96 animate-pulse bg-muted rounded-xl" />,
+  ssr: true,
+});
+
+const FeatureSection = dynamic(() => import("@/components/landing/FeatureSection").then(mod => mod.FeatureSection), {
+  loading: () => <div className="h-96 animate-pulse bg-muted rounded-xl" />,
+  ssr: true,
+});
+
+const HowItWorksSection = dynamic(() => import("@/components/landing/HowItWorksSection").then(mod => mod.HowItWorksSection), {
+  loading: () => <div className="h-96 animate-pulse bg-muted rounded-xl" />,
+  ssr: true,
+});
+
+const CTASection = dynamic(() => import("@/components/landing/CTASection").then(mod => mod.CTASection), {
+  loading: () => <div className="h-64 animate-pulse bg-muted rounded-xl" />,
+  ssr: true,
+});
 
 export default function Home() {
   return (

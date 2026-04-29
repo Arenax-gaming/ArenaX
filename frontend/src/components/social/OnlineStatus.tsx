@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+import React, { memo } from "react";
 import { cn } from "@/lib/utils";
 import type { UserStatus } from "@/types/social";
 
@@ -30,12 +32,12 @@ interface OnlineStatusProps {
   className?: string;
 }
 
-export function OnlineStatus({
+export const OnlineStatus = memo(({
   status,
   size = "md",
   showLabel = false,
   className,
-}: OnlineStatusProps) {
+}: OnlineStatusProps) => {
   const config = statusConfig[status];
 
   return (
@@ -54,7 +56,9 @@ export function OnlineStatus({
       )}
     </div>
   );
-}
+});
+
+OnlineStatus.displayName = "OnlineStatus";
 
 // Status selector component for changing user status
 interface StatusSelectorProps {
@@ -110,7 +114,7 @@ interface AvatarWithStatusProps {
   onClick?: () => void;
 }
 
-export function AvatarWithStatus({
+export const AvatarWithStatus = memo(({
   avatar,
   username,
   status,
@@ -118,7 +122,7 @@ export function AvatarWithStatus({
   showStatus = true,
   className,
   onClick,
-}: AvatarWithStatusProps) {
+}: AvatarWithStatusProps) => {
   const statusDotSize = size === "sm" ? "sm" : "sm";
 
   return (
@@ -134,10 +138,11 @@ export function AvatarWithStatus({
         )}
       >
         {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={avatar}
             alt={username}
+            width={size === "lg" ? 56 : size === "md" ? 40 : 32}
+            height={size === "lg" ? 56 : size === "md" ? 40 : 32}
             className="h-full w-full object-cover"
           />
         ) : (
@@ -155,4 +160,6 @@ export function AvatarWithStatus({
       )}
     </div>
   );
-}
+});
+
+AvatarWithStatus.displayName = "AvatarWithStatus";

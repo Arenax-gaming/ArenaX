@@ -1,7 +1,9 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
+import Image from 'next/image'
 import { ChevronUp, ChevronDown } from 'lucide-react'
+import { TableVirtuoso } from 'react-virtuoso'
 
 export interface LeaderboardEntry {
   rank: number
@@ -21,6 +23,54 @@ interface LeaderboardTableProps {
   sortBy?: 'points' | 'wins' | 'winRate'
   onSortChange?: (sortBy: string) => void
 }
+
+const LeaderboardRow = React.memo(({ entry, index }: { entry: LeaderboardEntry; index: number }) => (
+  <>
+    <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+      #{entry.rank}
+    </td>
+    <td className="px-4 py-3 text-sm">
+      <div className="flex items-center gap-3">
+        {entry.avatar && (
+          <div className="relative w-8 h-8">
+            <Image
+              src={entry.avatar}
+              alt={entry.username}
+              fill
+              className="rounded-full object-cover"
+              sizes="32px"
+            />
+          </div>
+        )}
+        <span className="font-medium text-gray-900 dark:text-gray-100">
+          {entry.username}
+        </span>
+      </div>
+    </td>
+    <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+      {entry.points.toLocaleString()}
+    </td>
+    <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+      {entry.wins}
+    </td>
+    <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+      {(entry.winRate * 100).toFixed(1)}%
+    </td>
+    <td className="px-4 py-3 text-center">
+      {entry.trend === 'up' && (
+        <ChevronUp className="w-5 h-5 text-green-500 mx-auto" />
+      )}
+      {entry.trend === 'down' && (
+        <ChevronDown className="w-5 h-5 text-red-500 mx-auto" />
+      )}
+      {entry.trend === 'stable' && (
+        <div className="w-5 h-5 mx-auto text-gray-400">—</div>
+      )}
+    </td>
+  </>
+))
+
+LeaderboardRow.displayName = 'LeaderboardRow'
 
 export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   entries,
@@ -83,11 +133,13 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-      <table className="w-full">
-        <thead>
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden bg-white dark:bg-gray-950">
+      <TableVirtuoso
+        style={{ height: '600px' }}
+        data={sortedEntries}
+        fixedHeaderContent={() => (
           <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300 w-20">
               Rank
             </th>
             <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -124,56 +176,25 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
               Trend
             </th>
           </tr>
-        </thead>
-        <tbody>
-          {sortedEntries.map((entry, index) => (
-            <tr
-              key={entry.userId}
-              className={`border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 ${
-                index % 2 === 0 ? 'bg-white dark:bg-gray-950' : 'bg-gray-50 dark:bg-gray-900/20'
-              }`}
-            >
-              <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                #{entry.rank}
-              </td>
-              <td className="px-4 py-3 text-sm">
-                <div className="flex items-center gap-3">
-                  {entry.avatar && (
-                    <img
-                      src={entry.avatar}
-                      alt={entry.username}
-                      className="w-8 h-8 rounded-full"
-                    />
-                  )}
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    {entry.username}
-                  </span>
-                </div>
-              </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                {entry.points.toLocaleString()}
-              </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                {entry.wins}
-              </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                {(entry.winRate * 100).toFixed(1)}%
-              </td>
-              <td className="px-4 py-3 text-center">
-                {entry.trend === 'up' && (
-                  <ChevronUp className="w-5 h-5 text-green-500 mx-auto" />
-                )}
-                {entry.trend === 'down' && (
-                  <ChevronDown className="w-5 h-5 text-red-500 mx-auto" />
-                )}
-                {entry.trend === 'stable' && (
-                  <div className="w-5 h-5 mx-auto text-gray-400">—</div>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        )}
+        itemContent={(index, entry) => (
+          <LeaderboardRow entry={entry} index={index} />
+        )}
+        components={{
+          Table: (props) => <table {...props} className="w-full border-collapse" />,
+          TableRow: (props) => {
+            const index = props['data-index'];
+            return (
+              <tr
+                {...props}
+                className={`border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 ${
+                  index % 2 === 0 ? 'bg-white dark:bg-gray-950' : 'bg-gray-50 dark:bg-gray-900/20'
+                }`}
+              />
+            );
+          },
+        }}
+      />
 
       {sortedEntries.length === 0 && !isLoading && (
         <div className="py-8 text-center text-gray-500 dark:text-gray-400">

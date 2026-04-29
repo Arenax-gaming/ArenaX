@@ -1,4 +1,6 @@
+import React from "react";
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "../styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -8,10 +10,15 @@ import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 
+const inter = Inter({ subsets: ["latin"] });
+
 export const metadata: Metadata = {
   title: "ArenaX",
   description: "Competitive Gaming Platform",
 };
+
+import { PerformanceMonitor } from "@/components/common/PerformanceMonitor";
+import { ServiceWorkerRegistration } from "@/components/common/ServiceWorkerRegistration";
 
 export default function RootLayout({
   children,
@@ -20,7 +27,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased">
+      <body className={`${inter.className} antialiased`}>
+        <PerformanceMonitor />
+        <ServiceWorkerRegistration />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

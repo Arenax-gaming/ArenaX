@@ -336,13 +336,11 @@ impl GovernanceContract {
         } else {
             // Check if proposal passed
             let total_votes = proposal.for_votes + proposal.against_votes;
-            if total_votes > 0 {
-                let for_percentage = (proposal.for_votes * 100) / total_votes;
-                if for_percentage >= params.execution_threshold as u128 {
-                    proposal.status = ProposalStatus::Passed;
-                } else {
-                    proposal.status = ProposalStatus::Rejected;
-                }
+            let for_percentage = (proposal.for_votes * 100)
+                .checked_div(total_votes)
+                .unwrap_or(0);
+            if for_percentage >= params.execution_threshold as u128 {
+                proposal.status = ProposalStatus::Passed;
             } else {
                 proposal.status = ProposalStatus::Rejected;
             }
