@@ -138,7 +138,9 @@ impl AnalyticsContract {
         let now = env.ledger().timestamp();
 
         // Update game metrics
-        let mut gm: GameMetrics = env.storage().persistent()
+        let mut gm: GameMetrics = env
+            .storage()
+            .persistent()
             .get(&DataKey::GameMetrics(game_id))
             .unwrap_or(GameMetrics {
                 game_id,
@@ -158,11 +160,12 @@ impl AnalyticsContract {
         gm.total_rewards_paid += reward_amount;
         gm.avg_match_duration_secs = (prev_total_dur + duration_secs) / gm.total_matches;
         gm.last_updated = now;
-        env.storage().persistent().set(&DataKey::GameMetrics(game_id), &gm);
+        env.storage()
+            .persistent()
+            .set(&DataKey::GameMetrics(game_id), &gm);
 
         // Update platform metrics
-        let mut pm: PlatformMetrics = env.storage().instance()
-            .get(&DataKey::Platform).unwrap();
+        let mut pm: PlatformMetrics = env.storage().instance().get(&DataKey::Platform).unwrap();
         pm.total_matches_all_time += 1;
         pm.total_volume += wager_amount;
         pm.last_updated = now;
@@ -194,21 +197,27 @@ impl AnalyticsContract {
         let day_bucket = now / 86_400 * 86_400;
 
         let key = DataKey::PlayerBehaviour(player_hash.clone());
-        let mut snap: PlayerBehaviourSnapshot = env.storage().persistent()
-            .get(&key)
-            .unwrap_or(PlayerBehaviourSnapshot {
-                player_hash: player_hash.clone(),
-                game_id,
-                matches_played: 0,
-                wins: 0,
-                losses: 0,
-                avg_session_secs: 0,
-                last_seen_bucket: day_bucket,
-            });
+        let mut snap: PlayerBehaviourSnapshot =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(PlayerBehaviourSnapshot {
+                    player_hash: player_hash.clone(),
+                    game_id,
+                    matches_played: 0,
+                    wins: 0,
+                    losses: 0,
+                    avg_session_secs: 0,
+                    last_seen_bucket: day_bucket,
+                });
 
         let prev_total = snap.avg_session_secs * snap.matches_played;
         snap.matches_played += 1;
-        if won { snap.wins += 1; } else { snap.losses += 1; }
+        if won {
+            snap.wins += 1;
+        } else {
+            snap.losses += 1;
+        }
         snap.avg_session_secs = (prev_total + session_secs) / snap.matches_played;
         snap.last_seen_bucket = day_bucket;
         env.storage().persistent().set(&key, &snap);
@@ -241,7 +250,9 @@ impl AnalyticsContract {
     // ── Views ─────────────────────────────────────────────────────────────────
 
     pub fn get_game_metrics(env: Env, game_id: u32) -> Option<GameMetrics> {
-        env.storage().persistent().get(&DataKey::GameMetrics(game_id))
+        env.storage()
+            .persistent()
+            .get(&DataKey::GameMetrics(game_id))
     }
 
     pub fn get_platform_metrics(env: Env) -> PlatformMetrics {
@@ -261,11 +272,16 @@ impl AnalyticsContract {
             panic!("not authorised");
         }
         let hash = Self::hash_player(&env, &player);
-        env.storage().persistent().get(&DataKey::PlayerBehaviour(hash))
+        env.storage()
+            .persistent()
+            .get(&DataKey::PlayerBehaviour(hash))
     }
 
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     pub fn set_paused(env: Env, paused: bool) {
@@ -288,20 +304,33 @@ impl AnalyticsContract {
     }
 
     fn require_admin(env: &Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
     }
 
     fn require_not_paused(env: &Env) {
-        if env.storage().instance().get::<DataKey, bool>(&DataKey::Paused).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
             panic!("contract is paused");
         }
     }
 
     fn require_reporter(env: &Env, reporter: &Address) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if reporter == &admin { return; }
-        if env.storage().instance()
+        if reporter == &admin {
+            return;
+        }
+        if env
+            .storage()
+            .instance()
             .get::<DataKey, bool>(&DataKey::AuthReporter(reporter.clone()))
             .unwrap_or(false)
         {

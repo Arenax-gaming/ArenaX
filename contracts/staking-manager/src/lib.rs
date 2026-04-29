@@ -30,9 +30,9 @@ pub enum DataKey {
 #[repr(u32)]
 pub enum TournamentState {
     NotStarted = 0,
-    Active     = 1,
-    Completed  = 2,
-    Cancelled  = 3,
+    Active = 1,
+    Completed = 2,
+    Cancelled = 3,
 }
 
 /// Tier unlocked by staking amount (used for premium features & governance weight)
@@ -40,10 +40,10 @@ pub enum TournamentState {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum StakeTier {
-    None     = 0,
-    Bronze   = 1, // ≥ 1 000 AX
-    Silver   = 2, // ≥ 5 000 AX
-    Gold     = 3, // ≥ 25 000 AX
+    None = 0,
+    Bronze = 1,   // ≥ 1 000 AX
+    Silver = 2,   // ≥ 5 000 AX
+    Gold = 3,     // ≥ 25 000 AX
     Platinum = 4, // ≥ 100 000 AX
 }
 
@@ -125,13 +125,18 @@ impl StakingManager {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::AxToken, &ax_token);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage().instance().set(&DataKey::TotalRewardStaked, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRewardStaked, &0i128);
         env.storage().instance().set(&DataKey::RewardPool, &0i128);
-        env.storage().instance().set(&DataKey::RewardConfig, &RewardConfig {
-            annual_rate_bps: 1200,   // 12 % APY default
-            min_stake: 1_000,
-            secs_per_year: 31_536_000,
-        });
+        env.storage().instance().set(
+            &DataKey::RewardConfig,
+            &RewardConfig {
+                annual_rate_bps: 1200, // 12 % APY default
+                min_stake: 1_000,
+                secs_per_year: 31_536_000,
+            },
+        );
         events::emit_initialized(&env, &admin, &ax_token);
     }
 
@@ -145,20 +150,30 @@ impl StakingManager {
 
     pub fn set_tournament_contract(env: Env, tournament_contract: Address) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::TournamentContract, &tournament_contract);
+        env.storage()
+            .instance()
+            .set(&DataKey::TournamentContract, &tournament_contract);
         events::emit_tournament_contract_set(&env, &tournament_contract);
     }
 
     pub fn set_dispute_contract(env: Env, dispute_contract: Address) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::DisputeContract, &dispute_contract);
+        env.storage()
+            .instance()
+            .set(&DataKey::DisputeContract, &dispute_contract);
         events::emit_dispute_contract_set(&env, &dispute_contract);
     }
 
     pub fn set_reward_config(env: Env, annual_rate_bps: u32, min_stake: i128) {
         Self::require_admin(&env);
-        if annual_rate_bps > 10_000 { panic!("rate exceeds 100%"); }
-        let cfg = RewardConfig { annual_rate_bps, min_stake, secs_per_year: 31_536_000 };
+        if annual_rate_bps > 10_000 {
+            panic!("rate exceeds 100%");
+        }
+        let cfg = RewardConfig {
+            annual_rate_bps,
+            min_stake,
+            secs_per_year: 31_536_000,
+        };
         env.storage().instance().set(&DataKey::RewardConfig, &cfg);
     }
 
@@ -166,12 +181,20 @@ impl StakingManager {
     pub fn fund_reward_pool(env: Env, funder: Address, amount: i128) {
         Self::require_not_paused(&env);
         funder.require_auth();
-        if amount <= 0 { panic!("amount must be positive"); }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
         let ax_token = Self::get_ax_token(env.clone());
         let contract_addr = env.current_contract_address();
         token::Client::new(&env, &ax_token).transfer(&funder, &contract_addr, &amount);
-        let pool: i128 = env.storage().instance().get(&DataKey::RewardPool).unwrap_or(0);
-        env.storage().instance().set(&DataKey::RewardPool, &(pool + amount));
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardPool, &(pool + amount));
     }
 
     // ── Reward Staking ───────────────────────────────────────────────────────
@@ -180,17 +203,27 @@ impl StakingManager {
     pub fn stake_for_rewards(env: Env, user: Address, amount: i128) {
         Self::require_not_paused(&env);
         user.require_auth();
-        if amount <= 0 { panic!("amount must be positive"); }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
 
-        let cfg: RewardConfig = env.storage().instance().get(&DataKey::RewardConfig).unwrap();
-        if amount < cfg.min_stake { panic!("below minimum stake"); }
+        let cfg: RewardConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardConfig)
+            .unwrap();
+        if amount < cfg.min_stake {
+            panic!("below minimum stake");
+        }
 
         let ax_token = Self::get_ax_token(env.clone());
         let contract_addr = env.current_contract_address();
         token::Client::new(&env, &ax_token).transfer(&user, &contract_addr, &amount);
 
         let now = env.ledger().timestamp();
-        let existing: Option<RewardStakePosition> = env.storage().persistent()
+        let existing: Option<RewardStakePosition> = env
+            .storage()
+            .persistent()
             .get(&DataKey::RewardStake(user.clone()));
 
         let position = if let Some(mut pos) = existing {
@@ -214,9 +247,17 @@ impl StakingManager {
             }
         };
 
-        env.storage().persistent().set(&DataKey::RewardStake(user.clone()), &position);
-        let total: i128 = env.storage().instance().get(&DataKey::TotalRewardStaked).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalRewardStaked, &(total + amount));
+        env.storage()
+            .persistent()
+            .set(&DataKey::RewardStake(user.clone()), &position);
+        let total: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRewardStaked)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRewardStaked, &(total + amount));
 
         events::emit_staked(&env, &user, &BytesN::from_array(&env, &[0u8; 32]), amount);
     }
@@ -226,23 +267,41 @@ impl StakingManager {
         Self::require_not_paused(&env);
         user.require_auth();
 
-        let cfg: RewardConfig = env.storage().instance().get(&DataKey::RewardConfig).unwrap();
+        let cfg: RewardConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardConfig)
+            .unwrap();
         let now = env.ledger().timestamp();
-        let mut pos: RewardStakePosition = env.storage().persistent()
+        let mut pos: RewardStakePosition = env
+            .storage()
+            .persistent()
             .get(&DataKey::RewardStake(user.clone()))
             .expect("no stake found");
 
         let accrued = Self::calc_pending(&pos, &cfg, now) + pos.pending_rewards;
-        if accrued <= 0 { panic!("no rewards to claim"); }
+        if accrued <= 0 {
+            panic!("no rewards to claim");
+        }
 
-        let pool: i128 = env.storage().instance().get(&DataKey::RewardPool).unwrap_or(0);
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0);
         let payout = accrued.min(pool);
-        if payout == 0 { panic!("reward pool empty"); }
+        if payout == 0 {
+            panic!("reward pool empty");
+        }
 
         pos.pending_rewards = 0;
         pos.last_reward_ts = now;
-        env.storage().persistent().set(&DataKey::RewardStake(user.clone()), &pos);
-        env.storage().instance().set(&DataKey::RewardPool, &(pool - payout));
+        env.storage()
+            .persistent()
+            .set(&DataKey::RewardStake(user.clone()), &pos);
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardPool, &(pool - payout));
 
         let ax_token = Self::get_ax_token(env.clone());
         let contract_addr = env.current_contract_address();
@@ -257,14 +316,24 @@ impl StakingManager {
         Self::require_not_paused(&env);
         user.require_auth();
 
-        let cfg: RewardConfig = env.storage().instance().get(&DataKey::RewardConfig).unwrap();
+        let cfg: RewardConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardConfig)
+            .unwrap();
         let now = env.ledger().timestamp();
-        let pos: RewardStakePosition = env.storage().persistent()
+        let pos: RewardStakePosition = env
+            .storage()
+            .persistent()
             .get(&DataKey::RewardStake(user.clone()))
             .expect("no stake found");
 
         let accrued = Self::calc_pending(&pos, &cfg, now) + pos.pending_rewards;
-        let pool: i128 = env.storage().instance().get(&DataKey::RewardPool).unwrap_or(0);
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0);
         let reward_payout = accrued.min(pool);
 
         let ax_token = Self::get_ax_token(env.clone());
@@ -276,21 +345,42 @@ impl StakingManager {
         // Pay rewards if any
         if reward_payout > 0 {
             client.transfer(&contract_addr, &user, &reward_payout);
-            env.storage().instance().set(&DataKey::RewardPool, &(pool - reward_payout));
+            env.storage()
+                .instance()
+                .set(&DataKey::RewardPool, &(pool - reward_payout));
         }
 
-        let total: i128 = env.storage().instance().get(&DataKey::TotalRewardStaked).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalRewardStaked, &(total - pos.amount).max(0));
-        env.storage().persistent().remove(&DataKey::RewardStake(user.clone()));
+        let total: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRewardStaked)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRewardStaked, &(total - pos.amount).max(0));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RewardStake(user.clone()));
 
-        events::emit_withdrawn(&env, &user, &BytesN::from_array(&env, &[0u8; 32]), pos.amount);
+        events::emit_withdrawn(
+            &env,
+            &user,
+            &BytesN::from_array(&env, &[0u8; 32]),
+            pos.amount,
+        );
     }
 
     /// View pending rewards without claiming.
     pub fn pending_rewards(env: Env, user: Address) -> i128 {
-        let cfg: RewardConfig = env.storage().instance().get(&DataKey::RewardConfig).unwrap();
+        let cfg: RewardConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardConfig)
+            .unwrap();
         let now = env.ledger().timestamp();
-        if let Some(pos) = env.storage().persistent()
+        if let Some(pos) = env
+            .storage()
+            .persistent()
             .get::<DataKey, RewardStakePosition>(&DataKey::RewardStake(user))
         {
             Self::calc_pending(&pos, &cfg, now) + pos.pending_rewards
@@ -304,25 +394,33 @@ impl StakingManager {
     }
 
     pub fn get_governance_weight(env: Env, user: Address) -> i128 {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get::<DataKey, RewardStakePosition>(&DataKey::RewardStake(user))
             .map(|p| p.governance_weight)
             .unwrap_or(0)
     }
 
     pub fn get_stake_tier(env: Env, user: Address) -> u32 {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get::<DataKey, RewardStakePosition>(&DataKey::RewardStake(user))
             .map(|p| p.tier)
             .unwrap_or(0)
     }
 
     pub fn total_reward_staked(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalRewardStaked).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalRewardStaked)
+            .unwrap_or(0)
     }
 
     pub fn reward_pool_balance(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::RewardPool).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0)
     }
 
     // ── Tournament Staking (unchanged API, kept for compatibility) ────────────
@@ -330,8 +428,14 @@ impl StakingManager {
     pub fn create_tournament(env: Env, tournament_id: BytesN<32>, stake_requirement: i128) {
         Self::require_not_paused(&env);
         Self::require_admin(&env);
-        if stake_requirement <= 0 { panic!("stake requirement must be positive"); }
-        if env.storage().persistent().has(&DataKey::TournamentInfo(tournament_id.clone())) {
+        if stake_requirement <= 0 {
+            panic!("stake requirement must be positive");
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::TournamentInfo(tournament_id.clone()))
+        {
             panic!("tournament already exists");
         }
         let info = TournamentInfo {
@@ -343,48 +447,77 @@ impl StakingManager {
             created_at: env.ledger().timestamp(),
             completed_at: None,
         };
-        env.storage().persistent().set(&DataKey::TournamentInfo(tournament_id.clone()), &info);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TournamentInfo(tournament_id.clone()), &info);
         events::emit_tournament_created(&env, &tournament_id, stake_requirement);
     }
 
     pub fn update_tournament_state(env: Env, tournament_id: BytesN<32>, state: u32) {
         Self::require_not_paused(&env);
         Self::require_admin(&env);
-        let mut info: TournamentInfo = env.storage().persistent()
+        let mut info: TournamentInfo = env
+            .storage()
+            .persistent()
             .get(&DataKey::TournamentInfo(tournament_id.clone()))
             .expect("tournament not found");
         info.state = state;
-        if state == TournamentState::Completed as u32 || state == TournamentState::Cancelled as u32 {
+        if state == TournamentState::Completed as u32 || state == TournamentState::Cancelled as u32
+        {
             info.completed_at = Some(env.ledger().timestamp());
         }
-        env.storage().persistent().set(&DataKey::TournamentInfo(tournament_id.clone()), &info);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TournamentInfo(tournament_id.clone()), &info);
         events::emit_tournament_updated(&env, &tournament_id, state);
     }
 
     pub fn stake(env: Env, user: Address, tournament_id: BytesN<32>, amount: i128) {
         Self::require_not_paused(&env);
         user.require_auth();
-        if amount <= 0 { panic!("amount must be positive"); }
-        let info: TournamentInfo = env.storage().persistent()
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let info: TournamentInfo = env
+            .storage()
+            .persistent()
             .get(&DataKey::TournamentInfo(tournament_id.clone()))
             .expect("tournament not found");
-        if info.state != TournamentState::Active as u32 { panic!("tournament not active"); }
-        if amount < info.stake_requirement { panic!("below stake requirement"); }
+        if info.state != TournamentState::Active as u32 {
+            panic!("tournament not active");
+        }
+        if amount < info.stake_requirement {
+            panic!("below stake requirement");
+        }
         let stake_key = DataKey::Stake(tournament_id.clone(), user.clone());
-        if env.storage().persistent().has(&stake_key) { panic!("already staked"); }
+        if env.storage().persistent().has(&stake_key) {
+            panic!("already staked");
+        }
 
         let ax_token = Self::get_ax_token(env.clone());
-        token::Client::new(&env, &ax_token)
-            .transfer(&user, &env.current_contract_address(), &amount);
+        token::Client::new(&env, &ax_token).transfer(
+            &user,
+            &env.current_contract_address(),
+            &amount,
+        );
 
-        env.storage().persistent().set(&stake_key, &StakeInfo {
-            user: user.clone(), tournament_id: tournament_id.clone(),
-            amount, staked_at: env.ledger().timestamp(), is_locked: true, can_withdraw: false,
-        });
+        env.storage().persistent().set(
+            &stake_key,
+            &StakeInfo {
+                user: user.clone(),
+                tournament_id: tournament_id.clone(),
+                amount,
+                staked_at: env.ledger().timestamp(),
+                is_locked: true,
+                can_withdraw: false,
+            },
+        );
         let mut updated = info;
         updated.total_staked += amount;
         updated.participant_count += 1;
-        env.storage().persistent().set(&DataKey::TournamentInfo(tournament_id.clone()), &updated);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TournamentInfo(tournament_id.clone()), &updated);
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
         events::emit_staked(&env, &user, &tournament_id, amount);
     }
@@ -393,36 +526,69 @@ impl StakingManager {
         Self::require_not_paused(&env);
         user.require_auth();
         let stake_key = DataKey::Stake(tournament_id.clone(), user.clone());
-        let info: StakeInfo = env.storage().persistent().get(&stake_key).expect("no stake");
-        if !info.can_withdraw { panic!("stake not withdrawable"); }
-        token::Client::new(&env, &Self::get_ax_token(env.clone()))
-            .transfer(&env.current_contract_address(), &user, &info.amount);
+        let info: StakeInfo = env
+            .storage()
+            .persistent()
+            .get(&stake_key)
+            .expect("no stake");
+        if !info.can_withdraw {
+            panic!("stake not withdrawable");
+        }
+        token::Client::new(&env, &Self::get_ax_token(env.clone())).transfer(
+            &env.current_contract_address(),
+            &user,
+            &info.amount,
+        );
         env.storage().persistent().remove(&stake_key);
         Self::update_user_stake_info(&env, &user, -info.amount, 0, -1, 1);
         events::emit_withdrawn(&env, &user, &tournament_id, info.amount);
     }
 
-    pub fn slash(env: Env, user: Address, tournament_id: BytesN<32>, amount: i128, slashed_by: Address) {
+    pub fn slash(
+        env: Env,
+        user: Address,
+        tournament_id: BytesN<32>,
+        amount: i128,
+        slashed_by: Address,
+    ) {
         Self::require_not_paused(&env);
         Self::require_dispute_contract_or_admin(&env, &slashed_by);
-        if amount <= 0 { panic!("amount must be positive"); }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
         let stake_key = DataKey::Stake(tournament_id.clone(), user.clone());
-        let mut info: StakeInfo = env.storage().persistent().get(&stake_key).expect("no stake");
-        if amount > info.amount { panic!("slash exceeds stake"); }
+        let mut info: StakeInfo = env
+            .storage()
+            .persistent()
+            .get(&stake_key)
+            .expect("no stake");
+        if amount > info.amount {
+            panic!("slash exceeds stake");
+        }
         let treasury: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        token::Client::new(&env, &Self::get_ax_token(env.clone()))
-            .transfer(&env.current_contract_address(), &treasury, &amount);
+        token::Client::new(&env, &Self::get_ax_token(env.clone())).transfer(
+            &env.current_contract_address(),
+            &treasury,
+            &amount,
+        );
         info.amount -= amount;
         if info.amount == 0 {
             env.storage().persistent().remove(&stake_key);
         } else {
             env.storage().persistent().set(&stake_key, &info);
         }
-        let mut t: TournamentInfo = env.storage().persistent()
-            .get(&DataKey::TournamentInfo(tournament_id.clone())).unwrap();
+        let mut t: TournamentInfo = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TournamentInfo(tournament_id.clone()))
+            .unwrap();
         t.total_staked -= amount;
-        if info.amount == 0 { t.participant_count -= 1; }
-        env.storage().persistent().set(&DataKey::TournamentInfo(tournament_id.clone()), &t);
+        if info.amount == 0 {
+            t.participant_count -= 1;
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::TournamentInfo(tournament_id.clone()), &t);
         Self::update_user_stake_info(&env, &user, 0, amount, 0, 0);
         events::emit_slashed(&env, &user, &tournament_id, amount, &slashed_by);
     }
@@ -430,13 +596,15 @@ impl StakingManager {
     // ── Views ────────────────────────────────────────────────────────────────
 
     pub fn get_stake(env: Env, user: Address, tournament_id: BytesN<32>) -> StakeInfo {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get(&DataKey::Stake(tournament_id, user))
             .expect("stake not found")
     }
 
     pub fn get_tournament_info(env: Env, tournament_id: BytesN<32>) -> TournamentInfo {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get(&DataKey::TournamentInfo(tournament_id))
             .expect("tournament not found")
     }
@@ -455,22 +623,32 @@ impl StakingManager {
     }
 
     pub fn can_withdraw(env: Env, user: Address, tournament_id: BytesN<32>) -> bool {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get::<DataKey, StakeInfo>(&DataKey::Stake(tournament_id, user))
             .map(|s| s.can_withdraw)
             .unwrap_or(false)
     }
 
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     pub fn get_ax_token(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::AxToken).expect("AX token not set")
+        env.storage()
+            .instance()
+            .get(&DataKey::AxToken)
+            .expect("AX token not set")
     }
 
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn set_paused(env: Env, paused: bool) {
@@ -484,16 +662,21 @@ impl StakingManager {
     /// Pro-rata reward: principal * rate * elapsed / (secs_per_year * 10_000)
     fn calc_pending(pos: &RewardStakePosition, cfg: &RewardConfig, now: u64) -> i128 {
         let elapsed = now.saturating_sub(pos.last_reward_ts) as i128;
-        pos.amount * cfg.annual_rate_bps as i128 * elapsed
-            / (cfg.secs_per_year as i128 * 10_000)
+        pos.amount * cfg.annual_rate_bps as i128 * elapsed / (cfg.secs_per_year as i128 * 10_000)
     }
 
     fn tier_for_amount(amount: i128) -> StakeTier {
-        if amount >= 100_000 { StakeTier::Platinum }
-        else if amount >= 25_000 { StakeTier::Gold }
-        else if amount >= 5_000  { StakeTier::Silver }
-        else if amount >= 1_000  { StakeTier::Bronze }
-        else                     { StakeTier::None }
+        if amount >= 100_000 {
+            StakeTier::Platinum
+        } else if amount >= 25_000 {
+            StakeTier::Gold
+        } else if amount >= 5_000 {
+            StakeTier::Silver
+        } else if amount >= 1_000 {
+            StakeTier::Bronze
+        } else {
+            StakeTier::None
+        }
     }
 
     /// Governance weight = amount * (1 + tier * 0.25), scaled ×100
@@ -502,27 +685,53 @@ impl StakingManager {
     }
 
     fn require_admin(env: &Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
     }
 
     fn require_not_paused(env: &Env) {
-        if env.storage().instance().get::<DataKey, bool>(&DataKey::Paused).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
             panic!("contract is paused");
         }
     }
 
     fn require_dispute_contract_or_admin(env: &Env, caller: &Address) {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if caller == &admin { return; }
-        if let Some(dc) = env.storage().instance().get::<DataKey, Address>(&DataKey::DisputeContract) {
-            if caller == &dc { return; }
+        if caller == &admin {
+            return;
+        }
+        if let Some(dc) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::DisputeContract)
+        {
+            if caller == &dc {
+                return;
+            }
         }
         panic!("caller not authorized");
     }
 
-    fn update_user_stake_info(env: &Env, user: &Address, staked: i128, slashed: i128, active_d: i32, completed_d: i32) {
-        let mut info: UserStakeInfo = env.storage().instance()
+    fn update_user_stake_info(
+        env: &Env,
+        user: &Address,
+        staked: i128,
+        slashed: i128,
+        active_d: i32,
+        completed_d: i32,
+    ) {
+        let mut info: UserStakeInfo = env
+            .storage()
+            .instance()
             .get(&DataKey::UserStakeInfo(user.clone()))
             .unwrap_or(UserStakeInfo {
                 user: user.clone(),
