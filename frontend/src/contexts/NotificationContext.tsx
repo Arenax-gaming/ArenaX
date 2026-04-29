@@ -13,6 +13,8 @@ import {
   ToastNotification,
   NotificationType,
   NotificationPreferences,
+  ToastPosition,
+  ToastAction,
 } from "@/types/notification";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,6 +47,7 @@ interface NotificationContextType {
     toast: Omit<ToastNotification, "id" | "createdAt"> & { id?: string }
   ) => void;
   removeToast: (id: string) => void;
+  clearToasts: () => void;
 
   // Convenience: add both persistent (when API available) and show toast
   notify: (params: {
@@ -56,6 +59,9 @@ interface NotificationContextType {
     persistent?: boolean;
     toast?: boolean;
     toastDuration?: number;
+    toastPosition?: ToastPosition;
+    toastAction?: ToastAction;
+    showProgress?: boolean;
   }) => void;
 
   // User preferences
@@ -170,7 +176,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           n.id === id ? { ...n, read: true } : n
         );
         if (user?.id) {
-          api.markNotificationRead(id).catch(() => {});
+          api.markNotificationRead(id).catch(() => { });
         }
         saveLocalNotifications(updated);
         return updated;
@@ -183,7 +189,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setPersistentNotifications((prev) => {
       const updated = prev.map((n) => ({ ...n, read: true }));
       if (user?.id) {
-        api.markAllNotificationsRead().catch(() => {});
+        api.markAllNotificationsRead().catch(() => { });
       }
       saveLocalNotifications(updated);
       return updated;
@@ -195,7 +201,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setPersistentNotifications((prev) => {
         const updated = prev.filter((n) => n.id !== id);
         if (user?.id) {
-          api.deleteNotification(id).catch(() => {});
+          api.deleteNotification(id).catch(() => { });
         }
         saveLocalNotifications(updated);
         return updated;
@@ -238,6 +244,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const clearToasts = useCallback(() => {
+    toastTimeouts.current.forEach((timeout) => clearTimeout(timeout));
+    toastTimeouts.current.clear();
+    setToasts([]);
+  }, []);
+
   const notify = useCallback(
     (params: {
       type?: NotificationType;
@@ -248,6 +260,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       persistent?: boolean;
       toast?: boolean;
       toastDuration?: number;
+      toastPosition?: ToastPosition;
+      toastAction?: ToastAction;
+      showProgress?: boolean;
     }) => {
       const {
         type = "info",
@@ -258,12 +273,23 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         persistent = false,
         toast: showToast = true,
         toastDuration = 5000,
+        toastPosition,
+        toastAction,
+        showProgress,
       } = params;
 
       if (!preferencesRef.current[type]) return;
 
       if (showToast) {
-        addToast({ type, title, message, duration: toastDuration });
+        addToast({
+          type,
+          title,
+          message,
+          duration: toastDuration,
+          position: toastPosition,
+          action: toastAction,
+          showProgress,
+        });
       }
 
       if (persistent) {
@@ -286,7 +312,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               message: message ?? "",
               link,
               linkLabel,
-            }).catch(() => {});
+            }).catch(() => { });
           }
           saveLocalNotifications(updated);
           return updated;
@@ -450,6 +476,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     toasts,
     addToast,
     removeToast,
+    clearToasts,
     notify,
     preferences,
     updatePreference,
