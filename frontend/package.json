@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@albedo-link/intent": "^0.13.0",
-    "@next/swc-win32-x64-msvc": "^16.2.4",
     "@radix-ui/react-slot": "^1.0.2",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.5.0",
