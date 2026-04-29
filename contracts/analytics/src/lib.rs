@@ -50,7 +50,6 @@ pub struct PlayerBehaviourSnapshot {
 }
 
 #[contractevent]
-#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MatchRecorded {
     pub game_id: u32,
@@ -62,7 +61,6 @@ pub struct MatchRecorded {
 }
 
 #[contractevent]
-#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlayerBehaviour {
     pub player_hash: BytesN<32>,
@@ -196,8 +194,9 @@ impl AnalyticsContract {
         env.storage().instance().set(&DataKey::Platform, &pm);
 
         // Emit privacy-safe event (no player addresses)
+        #[allow(deprecated)]
         env.events().publish(
-            (soroban_sdk::symbol_short!("MATCH_REC"), game_id, match_id),
+            (soroban_sdk::symbol_short!("MATCH_REC"), game_id, match_id.clone()),
             MatchRecorded {
                 game_id,
                 match_id,
@@ -261,6 +260,7 @@ impl AnalyticsContract {
         env.storage().instance().set(&DataKey::Platform, &pm);
 
         // Emit only the hash, never the raw address
+        #[allow(deprecated)]
         env.events().publish(
             (soroban_sdk::symbol_short!("PLR_BEH"), player_hash.clone()),
             PlayerBehaviour {
