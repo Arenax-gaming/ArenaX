@@ -47,6 +47,8 @@ export interface NotificationPreference {
   friendRequest: boolean;
   partyInvite: boolean;
   tournamentReminder: boolean;
+  tournamentUpdate: boolean;
+  prizeWinnings: boolean;
   systemAnnouncement: boolean;
   marketing: boolean;
   channels: NotificationChannel[];
