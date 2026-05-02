@@ -739,3 +739,47 @@ model GameSessionEvent {
   @@index([eventType])
   @@index([timestamp])
 }
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  eventType String
+  data      Json
+  sessionId String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
+
+model PlayerMetrics {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  totalGames      Int      @default(0)
+  wins            Int      @default(0)
+  losses          Int      @default(0)
+  totalPlaytime   Int      @default(0)
+  avgSessionTime  Float    @default(0)
+  lastActive      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@map("player_metrics")
+}
+
+model GameMetrics {
+  id              String   @id @default(cuid())
+  period          String
+  totalGames      Int      @default(0)
+  activePlayers   Int      @default(0)
+  avgGameDuration Float    @default(0)
+  revenue         Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([period])
+  @@map("game_metrics")
+}
