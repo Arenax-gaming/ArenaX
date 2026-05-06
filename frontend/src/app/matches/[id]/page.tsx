@@ -11,6 +11,8 @@ import {
   useMatchWebSocket,
 } from "@/hooks/useMatchWebSocket";
 import { matchHubDetails } from "@/data/matchHub";
+import { mockMatchDetails } from "@/data/matches";
+import { MatchDetailView } from "@/components/match/MatchDetailView";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -33,15 +35,18 @@ export default function MatchHubPage() {
   const currentUserId = user?.id ?? "user-123";
 
   const [match, setMatch] = useState(matchHubDetails[matchId] ?? null);
+  const [matchDetail, setMatchDetail] = useState(mockMatchDetails[matchId] ?? null);
   const [player1Score, setPlayer1Score] = useState("");
   const [player2Score, setPlayer2Score] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [liveFeed, setLiveFeed] = useState(match?.feed ?? []);
 
   useEffect(() => {
-    const details = matchHubDetails[matchId] ?? null;
-    setMatch(details);
-    setLiveFeed(details?.feed ?? []);
+    const hubDetails = matchHubDetails[matchId] ?? null;
+    const detailData = mockMatchDetails[matchId] ?? null;
+    setMatch(hubDetails);
+    setMatchDetail(detailData);
+    setLiveFeed(hubDetails?.feed ?? []);
   }, [matchId]);
 
   useEffect(() => {
@@ -96,12 +101,12 @@ export default function MatchHubPage() {
     setMatch((previous) =>
       previous
         ? {
-            ...previous,
-            status: lastUpdate.status ?? previous.status,
-            scorePlayer1: lastUpdate.scorePlayer1 ?? previous.scorePlayer1,
-            scorePlayer2: lastUpdate.scorePlayer2 ?? previous.scorePlayer2,
-            winnerId: lastUpdate.winnerId ?? previous.winnerId,
-          }
+          ...previous,
+          status: lastUpdate.status ?? previous.status,
+          scorePlayer1: lastUpdate.scorePlayer1 ?? previous.scorePlayer1,
+          scorePlayer2: lastUpdate.scorePlayer2 ?? previous.scorePlayer2,
+          winnerId: lastUpdate.winnerId ?? previous.winnerId,
+        }
         : previous,
     );
 
@@ -125,15 +130,44 @@ export default function MatchHubPage() {
     }
   }, [lastUpdate]);
 
-  if (!match) {
+  if (!match && !matchDetail) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
           <p className="mb-6 text-muted-foreground">
-            The match hub you&apos;re looking for doesn&apos;t exist.
+            The match you&apos;re looking for doesn&apos;t exist.
           </p>
           <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show detailed view for completed matches with detailed data
+  if (matchDetail && matchDetail.status === "completed") {
+    return (
+      <div className="min-h-screen bg-background px-4 py-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.back()}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          </div>
+          <MatchDetailView
+            match={matchDetail}
+            currentUserId={currentUserId}
+            onReportIssue={() => {
+              // Handle report issue - could open a modal or navigate to dispute form
+              router.push(`/matches/${matchId}/dispute`);
+            }}
+          />
         </div>
       </div>
     );
@@ -447,9 +481,8 @@ function ConnectionPill({
 
   return (
     <div
-      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm ${
-        isConnected ? "bg-emerald-400/15 text-emerald-200" : "bg-rose-400/15 text-rose-100"
-      }`}
+      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm ${isConnected ? "bg-emerald-400/15 text-emerald-200" : "bg-rose-400/15 text-rose-100"
+        }`}
     >
       {isConnected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
       {isConnected ? "Live relay connected" : "Relay reconnecting"}
@@ -487,9 +520,8 @@ function CompetitorCard({
 }) {
   return (
     <div
-      className={`rounded-[28px] border p-5 ${
-        isWinner ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
-      }`}
+      className={`rounded-[28px] border p-5 ${isWinner ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
+        }`}
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">

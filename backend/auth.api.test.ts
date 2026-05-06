@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { app } from '@/app'; // Assuming Actix-web/Express app is exported
-import { testEnv } from '../../infrastructure/TestEnvironment';
+import { testEnv } from './TestEnvironment';
 
 describe('Authentication API Integration', () => {
   beforeAll(async () => {

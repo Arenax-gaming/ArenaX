@@ -11,7 +11,7 @@ export class TestEnvironment {
 
   async start() {
     // Start PostgreSQL
-    this.pgContainer = await new PostgreSqlContainer('postgres:15-alphine')
+    this.pgContainer = await new PostgreSqlContainer('postgres:15-alpine')
       .withDatabase('arenax_test')
       .withUsername('test_user')
       .withPassword('test_pass')
@@ -20,7 +20,7 @@ export class TestEnvironment {
     // Start Redis
     this.redisContainer = await new RedisContainer('redis:7-alpine').start();
 
-    process.env.DATABASE_URL = this.pgContainer.getConnectionString();
+    process.env.DATABASE_URL = this.pgContainer.getConnectionUri();
     process.env.REDIS_URL = `redis://${this.redisContainer.getHost()}:${this.redisContainer.getMappedPort(6379)}`;
   }
 
@@ -30,7 +30,7 @@ export class TestEnvironment {
   }
 
   getPgConnection() {
-    return this.pgContainer?.getConnectionString();
+    return this.pgContainer?.getConnectionUri();
   }
 
   getRedisUrl() {

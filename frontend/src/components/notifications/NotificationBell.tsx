@@ -2,10 +2,11 @@
 
 import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Trash2, Loader2, RefreshCw, Settings } from "lucide-react";
+import { Bell, CheckCheck, Trash2, Loader2, RefreshCw, Settings, BellOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/common/EmptyState";
 import { PersistentNotification } from "@/types/notification";
 
 function formatTime(iso: string) {
@@ -183,9 +184,12 @@ export function NotificationBell({ className, onClose }: NotificationBellProps) 
 
           <div className="max-h-80 overflow-y-auto">
             {persistentNotifications.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">
-                No notifications yet
-              </div>
+              <EmptyState
+                icon={BellOff}
+                title="No notifications yet"
+                description="You're all caught up! We'll notify you when there's something new."
+                size="sm"
+              />
             ) : (
               <ul className="divide-y divide-border/50">
                 {persistentNotifications.map((n) => (
