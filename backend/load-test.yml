@@ -1,0 +1,48 @@
+config:
+  target: 'http://localhost:8080'
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: Warm up
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 50
+      name: Ramp up load
+    - duration: 60
+      arrivalRate: 50
+      name: Sustained load
+  defaults:
+    headers:
+      Content-Type: 'application/json'
+
+scenarios:
+  - name: 'Health check'
+    weight: 30
+    requests:
+      - get:
+          url: '/api/v1/health'
+
+  - name: 'User registration'
+    weight: 20
+    requests:
+      - post:
+          url: '/api/v1/auth/register'
+          json:
+            username: 'loadtestuser{{ $randomInt }}'
+            email: 'loadtest{{ $randomInt }}@example.com'
+            password: 'SecurePass123!'
+
+  - name: 'Get tournaments'
+    weight: 25
+    requests:
+      - get:
+          url: '/api/v1/tournaments'
+
+  - name: 'User login'
+    weight: 25
+    requests:
+      - post:
+          url: '/api/v1/auth/login'
+          json:
+            email: 'test@example.com'
+            password: 'password'
