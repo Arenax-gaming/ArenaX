@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { api } from "@/lib/api";
 
 interface RegistrationFormProps {
   tournament: Tournament;
@@ -30,6 +31,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
   });
   const [errors, setErrors] = useState<Partial<FormState & { submit: string }>>({});
   const [status, setStatus] = useState<"idle" | "submitting" | "success">("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const validate = (): boolean => {
     const next: typeof errors = {};
@@ -43,25 +45,35 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validate()) return;
 
     setStatus("submitting");
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1500));
-    setStatus("success");
 
-    notify({
-      type: "match",
-      title: "Registration Confirmed",
-      message: `You're registered for ${tournament.name}. Check your email for details.`,
-      link: `/tournaments/${tournament.id}`,
-      linkLabel: "View Tournament",
-      persistent: true,
-      toast: true,
-      toastDuration: 6000,
-    });
+    try {
+      await api.joinTournament(tournament.id);
+      setStatus("success");
 
-    onSuccess?.();
+      notify({
+        type: "match",
+        title: "Registration Confirmed",
+        message: `You're registered for ${tournament.name}. Check your email for details.`,
+        link: `/tournaments/${tournament.id}`,
+        linkLabel: "View Tournament",
+        persistent: true,
+        toast: true,
+        toastDuration: 6000,
+      });
+
+      onSuccess?.();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to complete registration. Please try again.";
+      setSubmitError(message);
+      setStatus("idle");
+    }
   };
 
   if (status === "success") {
@@ -160,6 +172,13 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
           />
         </div>
       </div>
+
+      {submitError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/20 dark:text-red-100">
+          <p className="font-semibold">Registration failed</p>
+          <p className="mt-1">{submitError}</p>
+        </div>
+      ) : null}
 
       {/* Rules agreement */}
       <label className="flex cursor-pointer items-start gap-3">

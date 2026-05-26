@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { TournamentHeader } from "@/components/tournaments/TournamentHeader";
 import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
-import { mockTournaments } from "@/data/mockTournaments";
 import { generateMockBracket } from "@/data/mockBracket";
 import { ArrowLeft, RadioTower, ShieldAlert, Swords, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
+import { api } from "@/lib/api";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -21,11 +21,41 @@ export default function TournamentDetailsPage() {
   const { user } = useAuth();
   const tournamentId = params.id as string;
   const currentUserId = user?.id ?? "user-123";
+  const [tournament, setTournament] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const tournament = useMemo(
-    () => mockTournaments.find((candidate) => candidate.id === tournamentId),
-    [tournamentId],
-  );
+  useEffect(() => {
+    let active = true;
+
+    const loadTournament = async () => {
+      setIsLoading(true);
+      setFetchError(null);
+
+      try {
+        const data = await api.getTournament(tournamentId);
+        if (active) {
+          setTournament(data);
+        }
+      } catch (error) {
+        if (active) {
+          setFetchError(
+            error instanceof Error ? error.message : "Unable to load tournament.",
+          );
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadTournament();
+
+    return () => {
+      active = false;
+    };
+  }, [tournamentId]);
 
   const bracketData = useMemo(() => {
     if (!tournament) {
@@ -38,6 +68,28 @@ export default function TournamentDetailsPage() {
 
     return null;
   }, [currentUserId, tournament]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <p className="text-lg font-medium text-foreground">Loading tournament details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Unable to load tournament</h1>
+          <p className="mb-6 text-muted-foreground">{fetchError}</p>
+          <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!tournament) {
     return (
