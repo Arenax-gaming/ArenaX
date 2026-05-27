@@ -26,7 +26,7 @@ import {
     updateRefundStatus, 
     createRefundRequest 
 } from '../controllers/refund.controller';
-import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
+import { authenticateJWT, restrictTo, restrictToScope } from '../middleware/auth.middleware';
 import { adminRateLimiter } from '../middleware/rate-limit.middleware';
 
 const router = Router();
@@ -36,16 +36,16 @@ router.use(adminRateLimiter, authenticateJWT, restrictTo('ADMIN'));
 router.get('/status', getAdminStatus);
 // User management
 router.get('/users', listUsers);
-router.post('/users/bulk', bulkUserOperation);
-router.post('/users/:id/ban', banUnbanUser);
+router.post('/users/bulk', restrictToScope('USERS:WRITE'), bulkUserOperation);
+router.post('/users/:id/ban', restrictToScope('USERS:WRITE'), banUnbanUser);
 
 // Game configuration
 router.get('/games/config', getGameConfig);
-router.put('/games/config', updateGameConfig);
+router.put('/games/config', restrictToScope('GAMES:WRITE'), updateGameConfig);
 
 // Moderation
 router.get('/moderation/queue', getModerationQueue);
-router.post('/moderation/review', reviewContent);
+router.post('/moderation/review', restrictToScope('MODERATION:REVIEW'), reviewContent);
 
 // System
 router.get('/system/health', getSystemHealth);

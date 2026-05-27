@@ -118,3 +118,26 @@ export const restrictTo =
 
         return next();
     };
+
+// Simple role -> scopes mapping for finer-grained admin permissions
+const roleScopes: Record<string, string[]> = {
+    ADMIN: ['USERS:WRITE', 'GAMES:WRITE', 'MODERATION:REVIEW', 'SYSTEM:READ'],
+    MODERATOR: ['MODERATION:REVIEW'],
+    SUPPORT: ['USERS:READ']
+};
+
+export const restrictToScope = (requiredScope: string) => (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) {
+        return next(new HttpError(401, 'Unauthorized'));
+    }
+
+    // Admin role gets full access
+    if (req.user.role === 'ADMIN') return next();
+
+    const scopes = roleScopes[req.user.role] || [];
+    if (!scopes.includes(requiredScope)) {
+        return next(new HttpError(403, 'Forbidden'));
+    }
+
+    return next();
+};

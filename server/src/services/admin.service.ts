@@ -114,12 +114,30 @@ export class AdminService {
       throw new Error('userId and reason are required')
     }
 
+    // Basic validation: reason must be substantive
+    if (reason.trim().length < 5) {
+      throw new Error('reason must be at least 5 characters')
+    }
+
+    // Limit temporary ban duration to max 30 days
+    if (duration && duration > 24 * 30) {
+      throw new Error('duration cannot exceed 30 days')
+    }
+
+    const prisma = getDatabaseClient()
+    const target = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } })
+    if (!target) throw new Error('user not found')
+
+    // Prevent banning admins or moderators with higher privileges
+    if (target.role === 'ADMIN' || target.role === 'MODERATOR') {
+      throw new Error('cannot ban a user with elevated privileges')
+    }
+
     let unbannedAt: Date | undefined
     if (duration) {
       unbannedAt = new Date(Date.now() + duration * 60 * 60 * 1000)
     }
 
-    const prisma = getDatabaseClient()
     await prisma.ban.create({
       data: {
         userId,
@@ -130,6 +148,10 @@ export class AdminService {
 
     // keep in-memory copy as well
     this.bannedUsers.set(userId, { reason, unbannedAt })
+
+    // Audit and notify
+    await this.auditLog('system', 'ban_user', userId, { reason, durationHours: duration ?? null }).catch(() => null)
+    NotificationService.notifyWebhook({ type: 'USER_BANNED', payload: { userId, reason, unbannedAt } }).catch(() => null)
 
     console.log('[Admin] User banned (db):', { userId, reason, unbannedAt })
     return true
@@ -148,6 +170,10 @@ export class AdminService {
 
     await prisma.ban.update({ where: { id: activeBan.id }, data: { unbannedAt: new Date() } })
     this.bannedUsers.delete(userId)
+
+    // Audit and notify
+    await this.auditLog('system', 'unban_user', userId, {}).catch(() => null)
+    NotificationService.notifyWebhook({ type: 'USER_UNBANNED', payload: { userId } }).catch(() => null)
 
     console.log('[Admin] User unbanned (db):', { userId })
 
