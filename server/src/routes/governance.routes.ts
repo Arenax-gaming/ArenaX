@@ -11,7 +11,8 @@ import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
 
 const router = Router();
 
-router.use(authenticateJWT);
+// Governance endpoints require authenticated admin by default
+router.use(authenticateJWT, restrictTo('ADMIN'));
 
 // View proposals (logged in users)
 router.get('/', listProposals);
