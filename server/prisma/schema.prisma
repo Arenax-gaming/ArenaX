@@ -263,6 +263,8 @@ model ModerationItem {
   content        String
   reportedAt     DateTime         @default(now())
   status         ModerationStatus @default(PENDING)
+  flagged        Boolean          @default(false)
+  flagReason     String?
   reviewerId     String?
   reviewedAt     DateTime?
   actionTaken    String?

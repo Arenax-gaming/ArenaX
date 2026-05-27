@@ -41,6 +41,7 @@ export interface SystemHealth {
 }
 
 import { getDatabaseClient } from './database.service'
+import ModerationService from './moderation.service'
 
 export class AdminService {
   private inMemoryGameConfig: GameConfig = {
@@ -260,7 +261,8 @@ export class AdminService {
     content: string
   ): Promise<ModerationItem> {
     const prisma = getDatabaseClient()
-    const created = await prisma.moderationItem.create({ data: { type, reportedUserId: userId, content } })
+    const detection = ModerationService.detectProfanity(content)
+    const created = await prisma.moderationItem.create({ data: { type, reportedUserId: userId, content, flagged: detection.flagged, flagReason: detection.reason ?? null } })
     const item: ModerationItem = {
       id: created.id,
       type: type,
