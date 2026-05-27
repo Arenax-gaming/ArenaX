@@ -1608,6 +1608,62 @@ impl TournamentService {
 
         Ok(user.username)
     }
+
+    /// Get tournament leaderboard (Issue #286)
+    pub async fn get_tournament_leaderboard(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Vec<TournamentLeaderboardEntry>, ApiError> {
+        // Query participants, sorted by final_rank (if completed) or by registered_at
+        let participants = sqlx::query!(
+            r#"
+            SELECT tp.user_id, u.username, tp.final_rank, tp.prize_amount
+            FROM tournament_participants tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.tournament_id = $1
+            ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
+            "#,
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let mut leaderboard = Vec::new();
+
+        for p in participants {
+            // Calculate a score/points (e.g. based on wins)
+            let wins = sqlx::query!(
+                "SELECT COUNT(*) as count FROM tournament_matches WHERE tournament_id = $1 AND winner_id = $2",
+                tournament_id,
+                p.user_id
+            )
+            .fetch_one(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .count
+            .unwrap_or(0);
+
+            leaderboard.push(TournamentLeaderboardEntry {
+                user_id: p.user_id,
+                username: p.username,
+                final_rank: p.final_rank,
+                prize_amount: p.prize_amount,
+                points: (wins * 10) as i32, // Example point system
+            });
+        }
+
+        Ok(leaderboard)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentLeaderboardEntry {
+    pub user_id: Uuid,
+    pub username: String,
+    pub final_rank: Option<i32>,
+    pub prize_amount: Option<i64>,
+    pub points: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
