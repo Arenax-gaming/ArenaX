@@ -4,6 +4,7 @@ import { AuditService } from '../services/audit.service';
 import paymentMonitorWorker from '../services/payment-monitor.worker';
 import prisma from '../services/database.service';
 import { createAdminService, AdminService } from '../services/admin.service';
+import { confirmationService } from '../services/confirmation.service';
 
 const matchService = new MatchService();
 const adminService: AdminService = createAdminService();
@@ -178,6 +179,24 @@ export const bulkUserOperation = async (req: Request, res: Response): Promise<vo
         if (!Array.isArray(userIds) || userIds.length === 0) {
             res.status(400).json({ error: 'userIds must be a non-empty array' });
             return;
+        }
+
+        // Safety: cap max bulk size and require explicit confirm for large operations
+        const MAX_BULK = 200
+        if (userIds.length > MAX_BULK) {
+            res.status(400).json({ error: `bulk operations limited to ${MAX_BULK} users` })
+            return
+        }
+
+        // For batches over a smaller threshold require a confirmation token
+        const CONFIRM_THRESHOLD = 25
+        if (userIds.length >= CONFIRM_THRESHOLD) {
+            const confirmToken = req.headers['x-confirm-token'] as string || req.body.confirmToken
+            const valid = confirmToken && confirmationService.validate(req.user!.id, confirmToken, `bulk:${action}`, { userIds, reason, duration })
+            if (!valid) {
+                res.status(400).json({ error: 'confirmation required for large bulk operations. Request a token first via POST /api/admin/confirmations' })
+                return
+            }
         }
 
         const results: Record<string, boolean | string> = {};

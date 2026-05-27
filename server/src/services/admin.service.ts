@@ -312,16 +312,36 @@ export class AdminService {
   }
 
   async getSystemHealth(): Promise<SystemHealth> {
-    // In production, collect actual system metrics
+    const prisma = getDatabaseClient()
+    
+    // Measure DB latency
+    const dbStart = Date.now()
+    await prisma.user.findFirst({ select: { id: true } })
+    const dbLatency = Date.now() - dbStart
+
+    // Get real metrics from database
+    const [userCount, activeMatches] = await Promise.all([
+      prisma.user.count(),
+      prisma.match.count({ where: { status: 'STARTED' } })
+    ])
+
+    // Get system metrics
+    const memoryUsage = process.memoryUsage()
+    const memoryUsagePercent = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100
+
+    // Determine overall status
+    const isHealthy = dbLatency < 200 && memoryUsagePercent < 90
+    const status: 'healthy' | 'degraded' | 'down' = isHealthy ? 'healthy' : 'degraded'
+
     return {
-      status: 'healthy',
-      uptime: Date.now(),
-      activeUsers: Math.floor(Math.random() * 1000),
-      activeMatches: Math.floor(Math.random() * 100),
-      dbLatency: Math.floor(Math.random() * 50),
-      serverLatency: Math.floor(Math.random() * 100),
-      memoryUsage: Math.floor(Math.random() * 80),
-      diskUsage: Math.floor(Math.random() * 60),
+      status,
+      uptime: Math.floor(process.uptime()),
+      activeUsers: userCount,
+      activeMatches,
+      dbLatency,
+      serverLatency: 0, // Can be measured with request timing middleware
+      memoryUsage: Math.floor(memoryUsagePercent),
+      diskUsage: 0, // Requires filesystem access, placeholder for now
     }
   }
 
