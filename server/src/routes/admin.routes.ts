@@ -7,6 +7,16 @@ import {
     replayPayment
 } from '../controllers/admin.controller';
 import {
+    listUsers,
+    banUnbanUser,
+    bulkUserOperation,
+    getGameConfig,
+    updateGameConfig,
+    getModerationQueue,
+    reviewContent,
+    getSystemHealth
+} from '../controllers/admin.controller';
+import {
     listKycReviews,
     getKycReview,
     processKycReview
@@ -24,6 +34,21 @@ const router = Router();
 router.use(adminRateLimiter, authenticateJWT, restrictTo('ADMIN'));
 
 router.get('/status', getAdminStatus);
+// User management
+router.get('/users', listUsers);
+router.post('/users/bulk', bulkUserOperation);
+router.post('/users/:id/ban', banUnbanUser);
+
+// Game configuration
+router.get('/games/config', getGameConfig);
+router.put('/games/config', updateGameConfig);
+
+// Moderation
+router.get('/moderation/queue', getModerationQueue);
+router.post('/moderation/review', reviewContent);
+
+// System
+router.get('/system/health', getSystemHealth);
 router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
 router.get('/audit-logs', listAuditLogs);
