@@ -16,7 +16,7 @@ const router = Router();
 
 router.use(publicRateLimiter);
 router.use(auditMiddleware);
-router.use('/auth', authRoutes);
+router.use('/api/v1/auth', authRoutes);
 router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes);
 router.use('/api/v1/admin', adminRoutes);
