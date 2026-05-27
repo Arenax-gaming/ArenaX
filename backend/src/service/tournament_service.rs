@@ -1608,6 +1608,54 @@ impl TournamentService {
 
         Ok(user.username)
     }
+
+    /// Get tournament analytics dashboard data (Issue #291)
+    pub async fn get_tournament_analytics(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentAnalyticsResponse, ApiError> {
+        let total_participants = self.get_participant_count(tournament_id).await?;
+        
+        let matches_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(*) as total_matches,
+                SUM(CASE WHEN status = $2 THEN 1 ELSE 0 END) as matches_completed
+            FROM tournament_matches
+            WHERE tournament_id = $1
+            "#,
+            tournament_id,
+            MatchStatus::Completed as _
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let prize_pool = sqlx::query!(
+            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
+            tournament_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .map(|p| p.total_amount)
+        .unwrap_or(0);
+
+        Ok(TournamentAnalyticsResponse {
+            total_participants,
+            total_matches: matches_stats.total_matches.unwrap_or(0) as i32,
+            matches_completed: matches_stats.matches_completed.unwrap_or(0) as i32,
+            current_prize_pool: prize_pool,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub total_participants: i32,
+    pub total_matches: i32,
+    pub matches_completed: i32,
+    pub current_prize_pool: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
