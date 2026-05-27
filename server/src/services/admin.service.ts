@@ -42,6 +42,7 @@ export interface SystemHealth {
 
 import { getDatabaseClient } from './database.service'
 import ModerationService from './moderation.service'
+import { NotificationService } from './notification.service'
 
 export class AdminService {
   private inMemoryGameConfig: GameConfig = {
@@ -251,6 +252,9 @@ export class AdminService {
       console.log('[Admin] Content removed via moderation:', { contentId, content: existing.content })
     }
 
+    // Notify admin webhook about review action
+    NotificationService.notifyWebhook({ type: 'MODERATION_REVIEW', payload: { moderationId: contentId, action } }).catch(() => null)
+
     console.log('[Admin] Content reviewed (db):', { contentId, action })
     return true
   }
@@ -273,6 +277,11 @@ export class AdminService {
     }
 
     console.log('[Admin] Content reported (db):', item)
+    // Notify admin webhook for flagged content
+    if (detection.flagged) {
+      NotificationService.notifyWebhook({ type: 'MODERATION_FLAGGED', payload: { moderationId: created.id, reason: detection.reason, matches: detection.matches } }).catch(() => null)
+    }
+
     return item
   }
 
