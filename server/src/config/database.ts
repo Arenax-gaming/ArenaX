@@ -17,6 +17,9 @@ const poolConfig = {
 };
 
 // Create Prisma client with connection pooling
+// Note: Prisma uses pg-pool internally for PostgreSQL
+// Connection pooling is configured via the DATABASE_URL connection string parameters
+// Example: postgresql://user:password@host:port/database?pool_min=2&pool_max=10
 const prisma = new PrismaClient({
   datasources: {
     db: {
