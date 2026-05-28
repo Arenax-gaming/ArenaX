@@ -180,6 +180,11 @@ async fn main() -> io::Result<()> {
                             .route("/platform", web::get().to(crate::http::analytics_handler::get_platform_metrics))
                             .route("/player/{user_id}", web::get().to(crate::http::analytics_handler::get_player_insights))
                     )
+                    // Tournament endpoints
+                    .service(
+                        web::scope("/tournaments")
+                            .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
+                    )
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
