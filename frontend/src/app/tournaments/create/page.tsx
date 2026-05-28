@@ -733,7 +733,7 @@ export default function CreateTournamentPage() {
                     Tournament Created!
                   </h2>
                   <p className="text-muted-foreground mb-8">
-                    Your tournament "{formData.name}" is now live and ready for participants.
+                    Your tournament &quot;{formData.name}&quot; is now live and ready for participants.
                   </p>
 
                   <div className="space-y-4 max-w-md mx-auto">

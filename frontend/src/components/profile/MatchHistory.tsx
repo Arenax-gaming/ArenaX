@@ -4,7 +4,8 @@ import React from "react";
 import Link from "next/link";
 import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Trophy, Swords, Calendar, ChevronLeft, ChevronRight, ExternalLink, Gamepad2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface MatchHistoryFilters {

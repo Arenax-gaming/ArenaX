@@ -203,7 +203,7 @@ export function useMobileAnalytics() {
     return () => {
       analytics.endSession();
     };
-  }, []);
+  }, [connectionSpeed, device.deviceType, isOnline]);
 
   // Track screen view
   const trackScreen = useCallback((screenName: string, screenPath: string) => {
@@ -256,7 +256,7 @@ export function useMobileAnalytics() {
   // Track performance
   const trackPerformance = useCallback(
     (metric: string, value: number) => {
-      analytics.trackTiming("performance", metric, value);
+      analytics.trackMobileEvent("performance", metric, value);
     },
     []
   );
