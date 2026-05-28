@@ -1,6 +1,6 @@
 import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import { Strategy as DiscordStrategy } from 'passport-discord';
+import { Strategy as GoogleStrategy, Profile as GoogleProfile } from 'passport-google-oauth20';
+import { Strategy as DiscordStrategy, Profile as DiscordProfile } from 'passport-discord';
 import { Strategy as TwitchStrategy } from 'passport-twitch-new';
 import { getDatabaseClient } from '../services/database.service';
 import { HttpError } from '../utils/http-error';
@@ -16,7 +16,7 @@ export const configureOAuthStrategies = (): void => {
                     callbackURL: `${process.env.BACKEND_URL}/api/v1/auth/google/callback`,
                     scope: ['profile', 'email']
                 },
-                async (accessToken, refreshToken, profile, done) => {
+                async (accessToken: string, refreshToken: string, profile: GoogleProfile, done: any) => {
                     try {
                         const prisma = getDatabaseClient();
                         
@@ -77,7 +77,7 @@ export const configureOAuthStrategies = (): void => {
                     callbackURL: `${process.env.BACKEND_URL}/api/v1/auth/discord/callback`,
                     scope: ['identify', 'email']
                 },
-                async (accessToken, refreshToken, profile, done) => {
+                async (accessToken: string, refreshToken: string, profile: DiscordProfile, done: any) => {
                     try {
                         const prisma = getDatabaseClient();
                         
@@ -138,7 +138,7 @@ export const configureOAuthStrategies = (): void => {
                     callbackURL: `${process.env.BACKEND_URL}/api/v1/auth/twitch/callback`,
                     scope: ['user:read:email']
                 },
-                async (accessToken, refreshToken, profile, done) => {
+                async (accessToken: string, refreshToken: string, profile: any, done: any) => {
                     try {
                         const prisma = getDatabaseClient();
                         
