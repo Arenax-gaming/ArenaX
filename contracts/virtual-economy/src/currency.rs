@@ -1,7 +1,7 @@
 // Currency management utilities
-use soroban_sdk::{Env, Address};
-use crate::storage::*;
 use crate::error::VirtualEconomyError;
+use crate::storage::*;
+use soroban_sdk::{Address, Env};
 
 pub struct CurrencyManager;
 
@@ -15,11 +15,12 @@ impl CurrencyManager {
         // Simple inflation calculation: (supply * rate * time) / (365 * 24 * 3600 * 10000)
         // Assumes time_elapsed is in seconds and rate is in basis points
         let annual_seconds = 365 * 24 * 3600u64;
-        let inflation_amount = (current_supply * config.inflation_rate as i128 * time_elapsed as i128) 
-            / (annual_seconds as i128 * 10000);
+        let inflation_amount =
+            (current_supply * config.inflation_rate as i128 * time_elapsed as i128)
+                / (annual_seconds as i128 * 10000);
         inflation_amount
     }
-    
+
     /// Check if minting would exceed supply limits
     pub fn validate_mint_amount(
         config: &CurrencyConfig,
@@ -31,7 +32,7 @@ impl CurrencyManager {
         }
         Ok(())
     }
-    
+
     /// Calculate transaction fees for currency operations
     pub fn calculate_transaction_fee(
         amount: i128,
@@ -39,7 +40,7 @@ impl CurrencyManager {
     ) -> i128 {
         (amount * fee_rate as i128) / 10000
     }
-    
+
     /// Implement deflationary burning based on economic conditions
     pub fn calculate_deflationary_burn(
         config: &CurrencyConfig,

@@ -236,7 +236,13 @@ impl GovernanceContract {
         Self::cast_vote_internal(env, voter, proposal_id, choice, Some(vote_weight));
     }
 
-    fn cast_vote_internal(env: Env, voter: Address, proposal_id: BytesN<32>, choice: VoteChoice, vote_weight: Option<u128>) {
+    fn cast_vote_internal(
+        env: Env,
+        voter: Address,
+        proposal_id: BytesN<32>,
+        choice: VoteChoice,
+        vote_weight: Option<u128>,
+    ) {
         let mut proposal: Proposal = env
             .storage()
             .persistent()
@@ -314,7 +320,8 @@ impl GovernanceContract {
         // In production, this would query the token contract for actual balance
         let mut power: u128 = 100; // Base voting power
 
-        power += env.storage()
+        power += env
+            .storage()
             .persistent()
             .get::<DataKey, u128>(&DataKey::DelegatedPower(voter.clone()))
             .unwrap_or(0);
@@ -439,13 +446,15 @@ impl GovernanceContract {
         env.storage()
             .persistent()
             .set(&DataKey::Delegation(delegator.clone()), &delegation);
-        let current: u128 = env.storage()
+        let current: u128 = env
+            .storage()
             .persistent()
             .get(&DataKey::DelegatedPower(delegatee.clone()))
             .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&DataKey::DelegatedPower(delegatee.clone()), &(current + voting_power));
+        env.storage().persistent().set(
+            &DataKey::DelegatedPower(delegatee.clone()),
+            &(current + voting_power),
+        );
 
         // Emit event
         arenax_events::governance::voting_power_delegated(
