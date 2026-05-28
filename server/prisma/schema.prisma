@@ -34,6 +34,10 @@ model User {
   reviewedKycs  KycReview[]     @relation("ReviewerKyc")
   walletKeyAccessAudits    WalletKeyAccessAudit[]    @relation("WalletKeyAccessActor")
   walletRecoveryChallenges WalletRecoveryChallenge[]
+  bans                     Ban[] @relation("UserBans")
+  adminBans                Ban[] @relation("AdminBans")
+  reportedModerations      ModerationItem[] @relation("ReportedModerations")
+  reviewedModerations      ModerationItem[] @relation("ReviewedModerations")
   playerAchievements       PlayerAchievement[]
   achievementShares        AchievementShare[]
   achievementNotifications AchievementNotification[]
@@ -217,6 +221,59 @@ model Ledger {
   axEscrowed    Decimal  @default(0) @db.Decimal(20, 7)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// Admin related models
+model Ban {
+  id         String   @id @default(uuid())
+  userId     String
+  adminId    String?
+  reason     String
+  bannedAt   DateTime @default(now())
+  unbannedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  user User @relation("UserBans", fields: [userId], references: [id], onDelete: Cascade)
+  admin User? @relation("AdminBans", fields: [adminId], references: [id])
+
+  @@index([userId])
+  @@index([adminId])
+}
+
+model GameConfig {
+  id                 String   @id @default(uuid())
+  maintenanceMode    Boolean  @default(false)
+  maxPlayersPerMatch Int      @default(8)
+  minPlayersToStart  Int      @default(2)
+  matchTimeout       Int      @default(3600)
+  dailyMatchLimit    Int      @default(100)
+  updatedAt          DateTime @updatedAt
+}
+
+enum ModerationStatus {
+  PENDING
+  REVIEWED
+  ACTIONED
+}
+
+model ModerationItem {
+  id             String           @id @default(uuid())
+  type           String
+  reportedUserId String
+  content        String
+  reportedAt     DateTime         @default(now())
+  status         ModerationStatus @default(PENDING)
+  flagged        Boolean          @default(false)
+  flagReason     String?
+  reviewerId     String?
+  reviewedAt     DateTime?
+  actionTaken    String?
+
+  reportedUser User @relation("ReportedModerations", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  reviewer     User? @relation("ReviewedModerations", fields: [reviewerId], references: [id])
+
+  @@index([reportedUserId])
+  @@index([status])
 }
 
 // Immutable transaction history with idempotency key

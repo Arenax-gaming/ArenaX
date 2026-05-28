@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/gellu/Desktop/projects/ArenaX/server/logs/.62b93c471de1180984d617eeec8be293153da2fb-audit.json",
+    "files": [
+        {
+            "date": 1779915425291,
+            "name": "/home/gellu/Desktop/projects/ArenaX/server/logs/error-2026-05-27.log",
+            "hash": "fec4c0ad76952105b52a80c56b7675bae610ea57e8e92a8344caa03a02d16b90"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
+import Image from 'next/image'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 
 export interface LeaderboardEntry {
@@ -139,9 +140,11 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
               <td className="px-4 py-3 text-sm">
                 <div className="flex items-center gap-3">
                   {entry.avatar && (
-                    <img
+                    <Image
                       src={entry.avatar}
                       alt={entry.username}
+                      width={32}
+                      height={32}
                       className="w-8 h-8 rounded-full"
                     />
                   )}

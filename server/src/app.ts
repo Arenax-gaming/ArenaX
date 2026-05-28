@@ -10,6 +10,7 @@ import routes from './routes/index';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { logger } from './services/logger.service';
 import { initializeTelemetry } from './services/telemetry.service';
+import { startHealthMonitor } from './services/health.service';
 
 dotenv.config();
 initializeTelemetry();
@@ -102,6 +103,8 @@ if (process.env.NODE_ENV !== 'test') {
     app.listen(port, () => {
         logger.info('Server started', { url: `http://localhost:${port}` });
     });
+    // Start background health monitor that posts alerts to admin webhook
+    startHealthMonitor({ intervalMs: Number(process.env.HEALTH_CHECK_INTERVAL_MS) || 60_000 });
 }
 
 export default app;
