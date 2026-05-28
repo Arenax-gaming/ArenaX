@@ -134,6 +134,8 @@ const roleScopes: Record<string, string[]> = {
     ],
     MODERATOR: ['MODERATION:REVIEW', 'USERS:READ'],
     SUPPORT: ['USERS:READ', 'DISPUTES:READ']
+    MODERATOR: ['MODERATION:REVIEW'],
+    SUPPORT: ['USERS:READ']
 };
 
 export const restrictToScope = (requiredScope: string) => (req: Request, _res: Response, next: NextFunction): void => {

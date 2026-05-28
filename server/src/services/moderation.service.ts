@@ -29,6 +29,17 @@ export class ModerationService {
   ]
 
   static detectProfanity(text: string): ModerationResult {
+export class ModerationService {
+  private static PROFANE = [
+    'shit',
+    'fuck',
+    'bitch',
+    'ass',
+    'damn',
+    'hell'
+  ]
+
+  static detectProfanity(text: string) {
     if (!text) return { flagged: false, matches: [] }
 
     const lower = text.toLowerCase()
