@@ -17,3 +17,4 @@ pub mod reputation_index;
 pub mod slashing;
 pub mod staking;
 pub mod tournament;
+pub mod virtual_economy;

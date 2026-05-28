@@ -39,7 +39,6 @@ export function MatchDetailView({
 
   return (
     <div className="space-y-6">
-      {/* Match Header */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -62,7 +61,7 @@ export function MatchDetailView({
                 </Button>
               )}
               {match.canDispute && (
-                <Button variant="destructive" size="sm" onClick={onReportIssue}>
+                <Button variant="outline" size="sm" onClick={onReportIssue}>
                   <Flag className="h-4 w-4 mr-2" />
                   Report Issue
                 </Button>
@@ -105,7 +104,6 @@ export function MatchDetailView({
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Round-by-Round Breakdown */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -127,7 +125,6 @@ export function MatchDetailView({
           </CardContent>
         </Card>
 
-        {/* Score Progression Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -141,7 +138,6 @@ export function MatchDetailView({
         </Card>
       </div>
 
-      {/* Player Statistics */}
       <div className="grid gap-6 lg:grid-cols-2">
         {match.player1Stats && (
           <PlayerStatsCard stats={match.player1Stats} isWinner={player1Won} />
@@ -151,9 +147,7 @@ export function MatchDetailView({
         )}
       </div>
 
-      {/* Match Information */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Rules and Format */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -190,7 +184,6 @@ export function MatchDetailView({
           </CardContent>
         </Card>
 
-        {/* Prize Distribution */}
         {match.prizeDistribution && (
           <Card>
             <CardHeader>
@@ -225,7 +218,6 @@ export function MatchDetailView({
         )}
       </div>
 
-      {/* Tournament Bracket Link */}
       {match.tournamentBracketId && (
         <Card>
           <CardContent className="pt-6">
@@ -332,7 +324,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
   return (
     <div className="relative">
       <svg width="100%" height={chartHeight} className="overflow-visible">
-        {/* Grid lines */}
         {[0, 1, 2, 3, 4].map((i) => (
           <line
             key={i}
@@ -346,7 +337,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
           />
         ))}
 
-        {/* Player 1 line */}
         <polyline
           fill="none"
           stroke="rgb(34 197 94)"
@@ -363,7 +353,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
             .join(" ")}
         />
 
-        {/* Player 2 line */}
         <polyline
           fill="none"
           stroke="rgb(59 130 246)"
@@ -380,7 +369,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
             .join(" ")}
         />
 
-        {/* Data points for player 1 */}
         {match.scoreProgression.map((p, i) => {
           const x = (i / (match.scoreProgression!.length - 1)) * 100;
           const y =
@@ -399,7 +387,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
           );
         })}
 
-        {/* Data points for player 2 */}
         {match.scoreProgression.map((p, i) => {
           const x = (i / (match.scoreProgression!.length - 1)) * 100;
           const y =
@@ -419,7 +406,6 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
         })}
       </svg>
 
-      {/* Legend */}
       <div className="flex items-center justify-center gap-6 mt-4">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-green-500" />

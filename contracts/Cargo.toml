@@ -27,6 +27,7 @@ members = [
     "upgrade-system",
     "player-reputation",
     "tournament-manager",
+    "virtual-economy",
     "governance",
 ]
 resolver = "2"

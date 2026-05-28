@@ -1609,6 +1609,22 @@ impl TournamentService {
         Ok(user.username)
     }
 
+    /// Get tournament analytics dashboard data (Issue #291)
+    /// Get tournament leaderboard (Issue #286)
+    pub async fn get_tournament_leaderboard(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Vec<TournamentLeaderboardEntry>, ApiError> {
+        // Query participants, sorted by final_rank (if completed) or by registered_at
+        let participants = sqlx::query!(
+            r#"
+            SELECT tp.user_id, u.username, tp.final_rank, tp.prize_amount
+            FROM tournament_participants tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.tournament_id = $1
+            ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
+            "#,
+            tournament_id
     /// Get comprehensive tournament statistics
     pub async fn get_tournament_statistics(
         &self,
@@ -1810,6 +1826,27 @@ impl TournamentService {
             .count
             .unwrap_or(0);
 
+            leaderboard.push(TournamentLeaderboardEntry {
+                user_id: p.user_id,
+                username: p.username,
+                final_rank: p.final_rank,
+                prize_amount: p.prize_amount,
+                points: (wins * 10) as i32, // Example point system
+            });
+        }
+
+        Ok(leaderboard)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentLeaderboardEntry {
+    pub user_id: Uuid,
+    pub username: String,
+    pub final_rank: Option<i32>,
+    pub prize_amount: Option<i64>,
+    pub points: i32,
+}
         // Convert to response format
         let mut leaderboard_entries = Vec::new();
         for row in participants {
@@ -1879,6 +1916,25 @@ impl TournamentService {
         &self,
         tournament_id: Uuid,
     ) -> Result<TournamentAnalyticsResponse, ApiError> {
+        let total_participants = self.get_participant_count(tournament_id).await?;
+        
+        let matches_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(*) as total_matches,
+                SUM(CASE WHEN status = $2 THEN 1 ELSE 0 END) as matches_completed
+            FROM tournament_matches
+            WHERE tournament_id = $1
+            "#,
+            tournament_id,
+            MatchStatus::Completed as _
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let prize_pool = sqlx::query!(
+            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
         // Get basic tournament info
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
@@ -1921,6 +1977,25 @@ impl TournamentService {
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
+        .map(|p| p.total_amount)
+        .unwrap_or(0);
+
+        Ok(TournamentAnalyticsResponse {
+            total_participants,
+            total_matches: matches_stats.total_matches.unwrap_or(0) as i32,
+            matches_completed: matches_stats.matches_completed.unwrap_or(0) as i32,
+            current_prize_pool: prize_pool,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub total_participants: i32,
+    pub total_matches: i32,
+    pub matches_completed: i32,
+    pub current_prize_pool: i64,
+}
         .unwrap_or_else(|| {
             sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
                 .fetch_one(&self.db_pool)
