@@ -1,5 +1,12 @@
+"use client";
+
+import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { WalletDashboard } from "@/components/wallet/WalletDashboard";
 
 export default function WalletPage() {
-  return <WalletDashboard />;
+  return (
+    <ProtectedPage>
+      <WalletDashboard />
+    </ProtectedPage>
+  );
 }

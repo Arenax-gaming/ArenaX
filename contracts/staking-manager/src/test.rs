@@ -636,3 +636,101 @@ fn test_edge_cases() {
 
     assert!(!client.can_withdraw(&user1, &tournament_id));
 }
+
+#[test]
+#[should_panic(expected = "already staked")]
+fn test_double_staking_prevented() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let tournament_id = generate_tournament_id(&env, 1);
+
+    env.mock_all_auths();
+    client.create_tournament(&tournament_id, &1000);
+    client.update_tournament_state(&tournament_id, &(TournamentState::Active as u32));
+
+    let ax_token = client.get_ax_token();
+    mint_ax_tokens(&env, &ax_token, &admin, &user1, 2000);
+
+    // First stake succeeds
+    client.stake(&user1, &tournament_id, &1000);
+
+    // Second stake attempt should fail
+    client.stake(&user1, &tournament_id, &1000);
+}
+
+#[test]
+fn test_slashing_authorization() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let tournament_id = generate_tournament_id(&env, 1);
+    let stake_amount = 1000i128;
+    let slash_amount = 300i128;
+
+    env.mock_all_auths();
+    client.create_tournament(&tournament_id, &1000);
+    client.update_tournament_state(&tournament_id, &(TournamentState::Active as u32));
+
+    let ax_token = client.get_ax_token();
+    mint_ax_tokens(&env, &ax_token, &admin, &user1, stake_amount);
+
+    client.stake(&user1, &tournament_id, &stake_amount);
+
+    let dispute_contract = Address::generate(&env);
+    client.set_dispute_contract(&dispute_contract);
+
+    // Slash by authorized dispute contract succeeds
+    client.slash(&user1, &tournament_id, &slash_amount, &dispute_contract);
+
+    let user_info = client.get_user_stake_info(&user1);
+    assert_eq!(user_info.total_slashed, slash_amount);
+}
+
+#[test]
+#[should_panic(expected = "no stake")]
+fn test_slash_non_existent_stake_fails() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let tournament_id = generate_tournament_id(&env, 1);
+
+    env.mock_all_auths();
+    client.create_tournament(&tournament_id, &1000);
+
+    let dispute_contract = Address::generate(&env);
+    client.set_dispute_contract(&dispute_contract);
+
+    // Try to slash a user who hasn't staked
+    client.slash(&user1, &tournament_id, &100, &dispute_contract);
+}
+
+#[test]
+fn test_tournament_cancelled_unlocks_funds() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let tournament_id = generate_tournament_id(&env, 1);
+
+    env.mock_all_auths();
+    client.create_tournament(&tournament_id, &1000);
+    client.update_tournament_state(&tournament_id, &(TournamentState::Active as u32));
+
+    let ax_token = client.get_ax_token();
+    mint_ax_tokens(&env, &ax_token, &admin, &user1, 1000);
+
+    client.stake(&user1, &tournament_id, &1000);
+
+    // Cancel tournament
+    client.update_tournament_state(&tournament_id, &(TournamentState::Cancelled as u32));
+
+    // Should allow withdrawal on cancelled tournament
+    client.withdraw(&user1, &tournament_id);
+
+    let user_info = client.get_user_stake_info(&user1);
+    assert_eq!(user_info.active_tournaments, 0);
+}

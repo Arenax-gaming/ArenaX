@@ -5,6 +5,7 @@ import Image from "next/image";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
+import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { currentUser as initialUser, mockEloHistory } from "@/data/user";
 import { mockMatchHistory } from "@/data/matches";
 import { User } from "@/types/user";
@@ -17,7 +18,8 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="py-4 max-w-[100vw] overflow-hidden mx-auto space-y-8 animate-in fade-in duration-500">
+    <ProtectedPage>
+      <div className="py-4 max-w-[100vw] overflow-hidden mx-auto space-y-8 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row gap-8 items-start md:items-center bg-card border rounded-xl p-8 shadow-sm">
         <div className="relative group">
@@ -70,6 +72,7 @@ export default function ProfilePage() {
            <MatchHistory matches={mockMatchHistory} currentUserId={user.id} />
         </div>
       </div>
-    </div>
+      </div>
+    </ProtectedPage>
   );
 }
