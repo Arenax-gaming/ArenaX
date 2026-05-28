@@ -110,6 +110,22 @@ pub fn emit_reputation_decayed(env: &Env, player: &Address, amount_decayed: i128
     .publish(env);
 }
 
+#[contractevent(topics = ["ArenaXPlayerRep_v1", "REPUTATION_DISPUTED"])]
+pub struct ReputationDisputed {
+    pub player: Address,
+    pub dispute_id: soroban_sdk::BytesN<32>,
+    pub timestamp: u64,
+}
+
+pub fn emit_reputation_disputed(env: &Env, player: &Address, dispute_id: &soroban_sdk::BytesN<32>, timestamp: u64) {
+    ReputationDisputed {
+        player: player.clone(),
+        dispute_id: dispute_id.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
