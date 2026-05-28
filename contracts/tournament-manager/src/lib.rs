@@ -959,6 +959,293 @@ impl TournamentManager {
         tournament_id: BytesN<32>,
         match_id: BytesN<32>,
         resolution: String,
+        new_winner: Option<Address>,
+    ) {
+        let tournament: Tournament = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id.clone()))
+            .expect("tournament not found");
+
+        tournament.organizer.require_auth();
+
+        let mut dispute: Dispute = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Dispute(tournament_id.clone(), match_id.clone()))
+            .expect("dispute not found");
+
+        if dispute.resolved {
+            panic!("dispute already resolved");
+        }
+
+        dispute.resolved = true;
+        dispute.resolution = Some(resolution.clone());
+
+        env.storage().persistent().set(
+            &DataKey::Dispute(tournament_id.clone(), match_id.clone()),
+            &dispute,
+        );
+
+        // Update match result if new winner provided
+        if let Some(winner) = new_winner {
+            let mut match_data: Match = env
+                .storage()
+                .persistent()
+                .get(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()))
+                .expect("match not found");
+
+            match_data.winner = Some(winner.clone());
+            match_data.status = MatchStatus::Completed as u32;
+
+            env.storage().persistent().set(
+                &DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()),
+                &match_data,
+            );
+
+            events::emit_match_result_updated(&env, &tournament_id, &match_id, &winner);
+        }
+
+        events::emit_dispute_resolved(&env, &tournament_id, &match_id, &resolution);
+    }
+
+    // Advanced Tournament Features
+
+    pub fn get_tournament_leaderboard(
+        env: Env,
+        tournament_id: BytesN<32>,
+    ) -> Vec<(Address, u32, u32)> {
+        let tournament: Tournament = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id.clone()))
+            .expect("tournament not found");
+
+        let players: Vec<PlayerRegistration> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TournamentPlayers(tournament_id.clone()))
+            .expect("players not found");
+
+        let mut leaderboard: Vec<(Address, u32, u32)> = Vec::new(&env);
+
+        // Calculate wins and losses for each player
+        for player_reg in players.iter() {
+            let mut wins = 0u32;
+            let mut losses = 0u32;
+
+            // This is a simplified version - in practice, you'd iterate through all matches
+            // and count wins/losses for each player
+            leaderboard.push_back((player_reg.player.clone(), wins, losses));
+        }
+
+        leaderboard
+    }
+
+    pub fn get_tournament_statistics(
+        env: Env,
+        tournament_id: BytesN<32>,
+    ) -> TournamentAnalytics {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TournamentAnalytics(tournament_id))
+            .expect("analytics not found")
+    }
+
+    pub fn update_tournament_config(
+        env: Env,
+        tournament_id: BytesN<32>,
+        new_config: TournamentConfig,
+    ) {
+        let mut tournament: Tournament = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id.clone()))
+            .expect("tournament not found");
+
+        tournament.organizer.require_auth();
+
+        // Only allow config updates before tournament starts
+        if tournament.state != TournamentState::Created as u32
+            && tournament.state != TournamentState::RegistrationOpen as u32
+        {
+            panic!("cannot update config after registration closes");
+        }
+
+        tournament.config = new_config;
+        tournament.updated_at = env.ledger().timestamp();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Tournament(tournament_id.clone()), &tournament);
+
+        events::emit_tournament_config_updated(&env, &tournament_id);
+    }
+
+    // Batch Operations for Efficiency
+
+    pub fn batch_update_match_results(
+        env: Env,
+        tournament_id: BytesN<32>,
+        match_results: Vec<(BytesN<32>, Address, u32, u32)>,
+    ) {
+        let tournament: Tournament = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id.clone()))
+            .expect("tournament not found");
+
+        tournament.organizer.require_auth();
+
+        for (match_id, winner, score_a, score_b) in match_results.iter() {
+            Self::update_match_result(
+                env.clone(),
+                tournament_id.clone(),
+                match_id.clone(),
+                winner.clone(),
+                score_a,
+                score_b,
+            );
+        }
+
+        events::emit_batch_results_updated(&env, &tournament_id, match_results.len());
+    }
+
+    // Tournament Templates and Presets
+
+    pub fn create_tournament_from_template(
+        env: Env,
+        organizer: Address,
+        template_type: u32,
+        custom_params: Map<String, String>,
+    ) -> BytesN<32> {
+        organizer.require_auth();
+
+        let config = match template_type {
+            0 => Self::get_quick_match_template(&custom_params),
+            1 => Self::get_competitive_template(&custom_params),
+            2 => Self::get_casual_template(&custom_params),
+            3 => Self::get_championship_template(&custom_params),
+            _ => panic!("invalid template type"),
+        };
+
+        Self::create_tournament(env, organizer, config)
+    }
+
+    fn get_quick_match_template(params: &Map<String, String>) -> TournamentConfig {
+        TournamentConfig {
+            tournament_type: TournamentType::SingleElimination as u32,
+            max_players: 8,
+            min_players: 4,
+            entry_fee: 0,
+            prize_pool: 1000,
+            registration_start: 0, // Immediate
+            registration_end: 3600, // 1 hour
+            start_time: 7200, // 2 hours
+            description: "Quick Match Tournament".into(),
+        }
+    }
+
+    fn get_competitive_template(params: &Map<String, String>) -> TournamentConfig {
+        TournamentConfig {
+            tournament_type: TournamentType::DoubleElimination as u32,
+            max_players: 32,
+            min_players: 16,
+            entry_fee: 100,
+            prize_pool: 5000,
+            registration_start: 0,
+            registration_end: 86400, // 24 hours
+            start_time: 172800, // 48 hours
+            description: "Competitive Tournament".into(),
+        }
+    }
+
+    fn get_casual_template(params: &Map<String, String>) -> TournamentConfig {
+        TournamentConfig {
+            tournament_type: TournamentType::RoundRobin as u32,
+            max_players: 16,
+            min_players: 8,
+            entry_fee: 10,
+            prize_pool: 500,
+            registration_start: 0,
+            registration_end: 43200, // 12 hours
+            start_time: 86400, // 24 hours
+            description: "Casual Tournament".into(),
+        }
+    }
+
+    fn get_championship_template(params: &Map<String, String>) -> TournamentConfig {
+        TournamentConfig {
+            tournament_type: TournamentType::SwissSystem as u32,
+            max_players: 64,
+            min_players: 32,
+            entry_fee: 500,
+            prize_pool: 50000,
+            registration_start: 0,
+            registration_end: 604800, // 1 week
+            start_time: 1209600, // 2 weeks
+            description: "Championship Tournament".into(),
+        }
+    }
+
+    // Query Functions
+
+    pub fn get_tournament_details(env: Env, tournament_id: BytesN<32>) -> Tournament {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Tournament(tournament_id))
+            .expect("tournament not found")
+    }
+
+    pub fn get_tournament_players(env: Env, tournament_id: BytesN<32>) -> Vec<PlayerRegistration> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TournamentPlayers(tournament_id))
+            .expect("players not found")
+    }
+
+    pub fn get_tournament_bracket(env: Env, tournament_id: BytesN<32>) -> Bracket {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TournamentBracket(tournament_id))
+            .expect("bracket not found")
+    }
+
+    pub fn get_match_details(
+        env: Env,
+        tournament_id: BytesN<32>,
+        match_id: BytesN<32>,
+    ) -> Match {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TournamentMatch(tournament_id, match_id))
+            .expect("match not found")
+    }
+
+    pub fn is_player_registered(
+        env: Env,
+        tournament_id: BytesN<32>,
+        player: Address,
+    ) -> bool {
+        let players: Vec<PlayerRegistration> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TournamentPlayers(tournament_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for p in players.iter() {
+            if p.player == player {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn resolve_dispute(
+        env: Env,
+        tournament_id: BytesN<32>,
+        match_id: BytesN<32>,
+        resolution: String,
     ) {
         let tournament: Tournament = env
             .storage()
