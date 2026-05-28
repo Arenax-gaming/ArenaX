@@ -269,7 +269,10 @@ export function MobileNav() {
                     <div className="grid gap-2">
                       {authItems.map((item) => {
                         const isActive = isActiveRoute(pathname, item.href);
-                        const isRegister = item.label === "Register";
+                        // #326: match by route — the CTA copy may
+                        // change ("Register" → "Get Started") but the
+                        // primary affordance is the signup route.
+                        const isRegister = item.href === "/register";
 
                         return (
                           <Link

@@ -6,15 +6,40 @@ import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
+import { Button } from "@/components/ui/Button";
 import { currentUser as initialUser, mockEloHistory } from "@/data/user";
 import { mockMatchHistory } from "@/data/matches";
 import { User } from "@/types/user";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<User>(initialUser);
+  // #323: isEditing now actually drives a visible edit affordance —
+  // when true the username field flips to an input plus Save / Cancel
+  // controls; otherwise the page reads as a static profile header.
+  // ProfileBio already provides its own inline-edit affordance for the
+  // bio field, but the page-level button was a no-op before this PR.
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftUsername, setDraftUsername] = useState(user.username);
 
   const handleUpdateUser = (updatedFields: Partial<User>) => {
     setUser((prev) => ({ ...prev, ...updatedFields }));
+  };
+
+  const handleEnterEdit = () => {
+    setDraftUsername(user.username);
+    setIsEditing(true);
+  };
+
+  const handleSave = () => {
+    const trimmed = draftUsername.trim();
+    if (trimmed.length === 0) return;
+    handleUpdateUser({ username: trimmed });
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setDraftUsername(user.username);
+    setIsEditing(false);
   };
 
   return (
@@ -37,13 +62,24 @@ export default function ProfilePage() {
 
         <div className="flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{user.username}</h1>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={draftUsername}
+                    onChange={(e) => setDraftUsername(e.target.value)}
+                    aria-label="Username"
+                    data-testid="profile-username-input"
+                    className="text-4xl font-extrabold tracking-tight text-foreground bg-transparent border-b-2 border-primary/40 focus:border-primary focus:outline-none px-1"
+                  />
+                ) : (
+                  <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{user.username}</h1>
+                )}
                 <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider rounded-full border border-primary/20">
                     Pro Player
                 </span>
             </div>
             <p className="text-muted-foreground flex items-center gap-2">
-                {user.email} 
+                {user.email}
                 <span className="h-1 w-1 bg-muted-foreground rounded-full" />
                 Joined {new Date(user.createdAt).toLocaleDateString()}
             </p>
@@ -56,6 +92,37 @@ export default function ProfilePage() {
                     <p className="text-[10px] uppercase font-bold text-primary tracking-widest">Current Elo</p>
                     <p className="text-xl font-black text-primary">{user.elo}</p>
                 </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {isEditing ? (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={draftUsername.trim().length === 0}
+                    data-testid="profile-save"
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCancel}
+                    data-testid="profile-cancel"
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleEnterEdit}
+                  data-testid="profile-edit"
+                >
+                  Edit Profile
+                </Button>
+              )}
             </div>
         </div>
       </div>

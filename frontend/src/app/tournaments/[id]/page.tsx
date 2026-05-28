@@ -19,6 +19,9 @@ export default function TournamentDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
+  // #320: read the dynamic [id] route param and look up the tournament
+  // by id. Unknown ids fall through to the "Tournament Not Found"
+  // branch below rather than rendering a hardcoded fallback.
   const tournamentId = params.id as string;
   const currentUserId = user?.id ?? "user-123";
 
