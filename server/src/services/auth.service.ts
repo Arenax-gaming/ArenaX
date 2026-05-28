@@ -398,3 +398,196 @@ export const logoutUser = async (input: LogoutInput): Promise<void> => {
         });
     }
 };
+
+export interface SocialAuthInput {
+    provider: 'google' | 'discord' | 'twitch';
+    accessToken: string;
+}
+
+export const authenticateSocial = async (input: SocialAuthInput) => {
+    const prisma = getDatabaseClient();
+    
+    // Validate OAuth token with provider (simplified - in production, call provider APIs)
+    let userProfile: { email: string; username: string; providerId: string };
+    
+    switch (input.provider) {
+        case 'google':
+            // In production, validate with Google OAuth API
+            userProfile = {
+                email: `user${Date.now()}@google.com`, // Placeholder
+                username: `google_user${Date.now()}`,
+                providerId: `google_${Date.now()}`
+            };
+            break;
+        case 'discord':
+            // In production, validate with Discord OAuth API
+            userProfile = {
+                email: `user${Date.now()}@discord.com`, // Placeholder
+                username: `discord_user${Date.now()}`,
+                providerId: `discord_${Date.now()}`
+            };
+            break;
+        case 'twitch':
+            // In production, validate with Twitch OAuth API
+            userProfile = {
+                email: `user${Date.now()}@twitch.com`, // Placeholder
+                username: `twitch_user${Date.now()}`,
+                providerId: `twitch_${Date.now()}`
+            };
+            break;
+        default:
+            throw new HttpError(400, 'Unsupported provider');
+    }
+    
+    const normalizedEmail = normalizeEmail(userProfile.email);
+    
+    // Check if user exists by email
+    let user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    if (!user) {
+        // Create new user from social login
+        const usernameBase = buildUsernameBase(normalizedEmail, userProfile.username);
+        
+        for (let attempt = 0; attempt < MAX_USERNAME_ATTEMPTS; attempt += 1) {
+            const candidate = buildCandidateUsername(usernameBase, attempt);
+            try {
+                user = await prisma.$transaction(async (tx) => {
+                    const newUser = await tx.user.create({
+                        data: {
+                            email: normalizedEmail,
+                            username: candidate,
+                            passwordHash: '', // No password for social users
+                            isVerified: true // Social users are pre-verified
+                        }
+                    });
+                    
+                    await stellarWalletService.registerUserWallet(newUser.id, tx);
+                    return newUser;
+                });
+                break;
+            } catch (error) {
+                if (isUniqueConstraintError(error, 'email')) {
+                    throw new HttpError(409, 'Email already in use');
+                }
+                if (isUniqueConstraintError(error, 'username')) {
+                    continue;
+                }
+                throw error;
+            }
+        }
+    }
+    
+    if (!user) {
+        throw new HttpError(500, 'Unable to create user from social login');
+    }
+    
+    const tokens = await issueSessionTokens(user);
+    
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        }
+    };
+};
+
+export const createGuestSession = async () => {
+    const prisma = getDatabaseClient();
+    
+    const guestId = crypto.randomUUID();
+    const guestEmail = `guest_${guestId}@arenax.gg`;
+    const guestUsername = `guest_${guestId.slice(0, 8)}`;
+    
+    const user = await prisma.$transaction(async (tx) => {
+        const guestUser = await tx.user.create({
+            data: {
+                email: guestEmail,
+                username: guestUsername,
+                passwordHash: '', // No password for guests
+                isVerified: false,
+                role: 'GUEST'
+            }
+        });
+        
+        await stellarWalletService.registerUserWallet(guestUser.id, tx);
+        return guestUser;
+    });
+    
+    const tokens = await issueSessionTokens(user);
+    
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        },
+        isGuest: true
+    };
+};
+
+export interface VerifyEmailInput {
+    token: string;
+}
+
+export const verifyEmail = async (input: VerifyEmailInput) => {
+    const prisma = getDatabaseClient();
+    
+    // In production, validate the verification token from email link
+    // For now, we'll use a simple token-based approach
+    const tokenHash = toTokenHash(input.token);
+    
+    // Find user by verification token (would need to add verificationToken field to User model)
+    // For now, we'll skip this and mark user as verified if they exist
+    
+    throw new HttpError(501, 'Email verification not yet implemented');
+};
+
+export interface ForgotPasswordInput {
+    email: string;
+}
+
+export const forgotPassword = async (input: ForgotPasswordInput) => {
+    const prisma = getDatabaseClient();
+    const normalizedEmail = normalizeEmail(input.email);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    // Always return success to prevent email enumeration
+    if (!user) {
+        return { message: 'If the email exists, a reset link has been sent' };
+    }
+    
+    // Generate password reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = toTokenHash(resetToken);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    // In production, store reset token in database and send email
+    // For now, we'll just log it
+    console.log('[Auth] Password reset token for', normalizedEmail, ':', resetToken);
+    
+    return { message: 'If the email exists, a reset link has been sent' };
+};
+
+export interface ResetPasswordInput {
+    token: string;
+    newPassword: string;
+}
+
+export const resetPassword = async (input: ResetPasswordInput) => {
+    const prisma = getDatabaseClient();
+    
+    // Validate reset token (would need to add resetToken field to User model)
+    // For now, we'll skip this
+    
+    throw new HttpError(501, 'Password reset not yet implemented');
+};

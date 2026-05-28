@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
 import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
@@ -12,11 +11,6 @@ import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
 import { Trophy, Users } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
-import { TournamentStatus, Tournament } from "@/types/tournament";
-import { Button } from "@/components/ui/Button";
-import { mockTournaments } from "@/data/mockTournaments";
-import { useAuth } from "@/hooks/useAuth";
-import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 
 type TabType = "joined" | "available";
 
@@ -25,6 +19,7 @@ export default function TournamentsPage() {
   const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabType>("available");
+  const [isLoading, setIsLoading] = useState(true);
   const [filters, setFilters] = useState<TournamentFilters>({
     search: searchParams.get("search") || undefined,
     status: (searchParams.get("status") as TournamentStatus) || undefined,
@@ -256,19 +251,14 @@ export default function TournamentsPage() {
               ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
               : filters.search || filters.status || filters.gameType || filters.tournamentType || filters.minEntryFee || filters.maxEntryFee || filters.minPrizePool || filters.maxPrizePool
                 ? "Try adjusting your search or filters"
-                : "No tournaments are currently available"}
-          </p>
-          {activeTab === "joined" && (
-            <Button
-              onClick={() => setActiveTab("available")}
-              variant="outline"
-              size="sm"
-              className="mt-4"
-            >
-              Browse Available Tournaments
-            </Button>
-          )}
-        </div>
+                : "No tournaments are currently available"
+          }
+          action={activeTab === "joined" ? {
+            label: "Browse Available Tournaments",
+            onClick: () => setActiveTab("available"),
+            variant: "outline"
+          } : undefined}
+        />
       )}
     </div>
   );

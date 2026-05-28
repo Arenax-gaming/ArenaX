@@ -55,7 +55,7 @@ export function MatchDetailView({ match, currentUserId, onReportIssue }: MatchDe
                 </Button>
               )}
               {match.canDispute && (
-                <Button variant="destructive" size="sm" onClick={onReportIssue}>
+                <Button variant="outline" size="sm" onClick={onReportIssue}>
                   <Flag className="h-4 w-4 mr-2" />
                   Report Issue
                 </Button>
@@ -339,10 +339,13 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
 }
 
 function PlayerStatsCard({ stats, isWinner }: { stats: PlayerStats; isWinner: boolean }) {
+  const cardClassName = isWinner ? "border-green-200 dark:border-green-800" : "";
+  const titleClassName = cn("flex items-center gap-2", isWinner ? "text-green-600 dark:text-green-400" : "");
+
   return (
-    <Card className={isWinner ? "border-green-200 dark:border-green-800" : "")}>
+    <Card className={cardClassName}>
       <CardHeader>
-        <CardTitle className={cn("flex items-center gap-2", isWinner ? "text-green-600 dark:text-green-400" : "")}>
+        <CardTitle className={titleClassName}>
           {isWinner && <Trophy className="h-5 w-5" />}
           {stats.username}
           {isWinner && <span className="text-sm font-normal">(Winner)</span>}

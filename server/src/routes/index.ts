@@ -16,10 +16,10 @@ const router = Router();
 
 router.use(publicRateLimiter);
 router.use(auditMiddleware);
-router.use('/auth', authRoutes);
+router.use('/api/v1/auth', authRoutes);
 router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes);
-router.use('/admin', adminRoutes);
+router.use('/api/v1/admin', adminRoutes);
 router.use('/governance', governanceRoutes);
 router.use('/soroban', sorobanRoutes);
 router.use('/wallets', walletRoutes);
