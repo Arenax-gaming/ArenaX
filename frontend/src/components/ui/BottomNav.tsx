@@ -7,83 +7,34 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useDevice } from "@/hooks/useMobile";
+import { Gamepad2, Trophy, User, Home } from "lucide-react";
 
 // Navigation items with icons
 const NAV_ITEMS = [
   {
+    label: "Home",
+    href: "/",
+    icon: (active: boolean) => <Home className={cn("w-6 h-6", active && "fill-primary")} />,
+  },
+  {
     label: "Play",
     href: "/play",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
+    icon: (active: boolean) => <Gamepad2 className={cn("w-6 h-6", active && "fill-primary")} />,
   },
   {
     label: "Tournaments",
     href: "/tournaments",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
-  },
-  {
-    label: "Matches",
-    href: "/matches",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
+    icon: (active: boolean) => <Trophy className={cn("w-6 h-6", active && "fill-primary")} />,
   },
   {
     label: "Leaderboard",
     href: "/leaderboard",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
+    icon: (active: boolean) => <Trophy className={cn("w-6 h-6", active && "fill-primary")} />,
   },
   {
     label: "Profile",
     href: "/profile",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
+    icon: (active: boolean) => <User className={cn("w-6 h-6", active && "fill-primary")} />,
   },
 ];
 
@@ -130,7 +81,6 @@ export function BottomNav({ className }: BottomNavProps) {
             "fixed bottom-0 left-0 right-0 z-40",
             "bg-background/95 backdrop-blur-lg",
             "border-t border-border",
-            "safe-area-pb",
             className
           )}
           initial={{ y: "100%" }}

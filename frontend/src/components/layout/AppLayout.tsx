@@ -2,6 +2,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { MobileHeaderActions } from "@/components/layout/MobileHeaderActions";
 import { Logo } from "@/components/common/Logo";
 import { ToastContainer } from "@/components/notifications/Toast";
+import { BottomNav } from "@/components/ui/BottomNav";
 import Link from "next/link";
 
 interface AppLayoutProps {
@@ -18,8 +19,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           <MobileHeaderActions />
         </div>
       </header>
-      <main className="container py-6 md:py-10 flex-1">{children}</main>
+      <main className="container py-6 md:py-10 flex-1 pb-20 md:pb-10">{children}</main>
       <ToastContainer />
+      <BottomNav />
       <footer className="border-t py-6 md:py-8">
         <div className="container flex flex-col items-center justify-between gap-4 md:flex-row">
           <p className="text-sm text-muted-foreground">
