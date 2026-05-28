@@ -34,6 +34,34 @@ export class AuditService {
     }
 
     /**
+     * Log an authentication event.
+     */
+    static async logAuthEvent(data: {
+        userId: string;
+        action: 'LOGIN' | 'LOGOUT' | 'REGISTER' | 'SOCIAL_LOGIN' | 'PASSWORD_RESET' | 'EMAIL_VERIFIED' | 'GUEST_SESSION';
+        details?: any;
+        ipAddress?: string;
+        userAgent?: string;
+        provider?: string;
+    }) {
+        const prisma = getDatabaseClient();
+        return await prisma.auditLog.create({
+            data: {
+                adminId: data.userId,
+                action: `AUTH_${data.action}`,
+                targetType: 'USER',
+                targetId: data.userId,
+                details: {
+                    ...(data.details || {}),
+                    provider: data.provider,
+                },
+                ipAddress: data.ipAddress,
+                userAgent: data.userAgent,
+            },
+        });
+    }
+
+    /**
      * List audit logs with filters.
      */
     static async listLogs(filters: {

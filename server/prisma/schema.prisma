@@ -17,6 +17,12 @@ model User {
   bio           String?
   socials       Json?
   walletAddress String?   @unique
+  verificationToken        String?   @unique
+  verificationTokenExpires DateTime?
+  passwordResetToken      String?   @unique
+  passwordResetExpires   DateTime?
+  provider               String?   @default("EMAIL")
+  providerId             String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -50,6 +56,10 @@ model User {
   leaderboardEntries       LeaderboardEntry[]
 
   @@index([deletedAt])
+  @@index([provider])
+  @@index([providerId])
+  @@index([verificationToken])
+  @@index([passwordResetToken])
 }
 
 enum AchievementCategory {
