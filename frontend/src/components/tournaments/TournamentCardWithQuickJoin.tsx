@@ -194,7 +194,17 @@ export function TournamentCardWithQuickJoin({
               Quick Join
             </Button>
           ) : (
-            <Link href={`/tournaments/${tournament.id}`} className="block">
+            // #324: route completed tournaments to the dedicated
+            // results page so the View Results CTA actually lands the
+            // user on a results view rather than the live detail page.
+            <Link
+              href={
+                tournament.status === "completed"
+                  ? `/tournaments/${tournament.id}/results`
+                  : `/tournaments/${tournament.id}`
+              }
+              className="block"
+            >
               <Button
                 variant={isJoined ? "secondary" : "outline"}
                 size="md"

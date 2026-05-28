@@ -75,8 +75,11 @@ export function Navbar() {
         {user && <UserMenu />}
         {authItems.map((item) => {
           const isActive = isActiveRoute(pathname, item.href);
+          // #326: match by route rather than label so renaming the CTA
+          // copy ("Register" → "Get Started") doesn't accidentally drop
+          // the primary styling.
           const variant =
-            item.label === "Register" ? "primary" : "ghost";
+            item.href === "/register" ? "primary" : "ghost";
 
           return (
             <Link
