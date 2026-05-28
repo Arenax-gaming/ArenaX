@@ -9,6 +9,7 @@ pub mod notification_handler;
 pub mod reputation_handler;
 pub mod staking_handler;
 pub mod analytics_handler;
+pub mod tournament_handler;
 
 // TODO: Add more HTTP modules as implemented:
 // pub mod auth;
