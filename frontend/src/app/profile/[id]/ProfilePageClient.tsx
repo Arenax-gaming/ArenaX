@@ -154,7 +154,7 @@ export function ProfilePageClient({
       {viewerRelation !== 'owner' && (
         <div className="mt-8 text-center">
           <p className="text-sm text-muted-foreground">
-            Some sections may be hidden based on {profile.username}'s privacy settings.
+            Some sections may be hidden based on {profile.username}&apos;s privacy settings.
           </p>
         </div>
       )}
