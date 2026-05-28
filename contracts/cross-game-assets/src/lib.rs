@@ -79,6 +79,8 @@ pub enum DataKey {
     Admin,
     AssetDef(BytesN<32>),
     Balance(Address, BytesN<32>),
+    Inventory(Address),
+    Metadata(BytesN<32>, u32),
     /// Authorised game contracts that can mint/grant assets
     AuthorisedGame(u32),
     Paused,
@@ -150,6 +152,41 @@ impl CrossGameAssets {
         );
     }
 
+    /// Issue API: register an asset for a source game with compact metadata.
+    pub fn register_cross_game_asset(
+        env: Env,
+        game_id: u32,
+        asset_type: u32,
+        metadata: String,
+    ) -> BytesN<32> {
+        Self::require_admin(&env);
+        let asset_id = Self::asset_id_from_game(&env, game_id, asset_type);
+        if env.storage().persistent().has(&DataKey::AssetDef(asset_id.clone())) {
+            panic!("asset already registered");
+        }
+
+        let compatible_games = if game_id < 64 { 1u64 << game_id } else { u64::MAX };
+        let def = AssetDefinition {
+            asset_id: asset_id.clone(),
+            kind: asset_type,
+            rarity: AssetRarity::Common as u32,
+            name: metadata.clone(),
+            compatible_games,
+            max_supply: 0,
+            current_supply: 0,
+            is_transferable: true,
+            is_tradeable: true,
+            created_at: env.ledger().timestamp(),
+        };
+        env.storage().persistent().set(&DataKey::AssetDef(asset_id.clone()), &def);
+        env.storage().persistent().set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ASSET_REG"), asset_id.clone()),
+            (game_id, asset_type),
+        );
+        asset_id
+    }
+
     pub fn update_compatible_games(env: Env, asset_id: BytesN<32>, compatible_games: u64) {
         Self::require_admin(&env);
         let mut def: AssetDefinition = env.storage().persistent()
@@ -157,6 +194,18 @@ impl CrossGameAssets {
             .expect("asset not found");
         def.compatible_games = compatible_games;
         env.storage().persistent().set(&DataKey::AssetDef(asset_id), &def);
+    }
+
+    pub fn sync_asset_metadata(env: Env, asset_id: BytesN<32>, game_id: u32, metadata: String) {
+        Self::require_admin(&env);
+        if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
+            panic!("game not compatible");
+        }
+        env.storage().persistent().set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("META_SYNC"), asset_id),
+            game_id,
+        );
     }
 
     // ── Minting ───────────────────────────────────────────────────────────────
@@ -220,6 +269,7 @@ impl CrossGameAssets {
             }
         };
         env.storage().persistent().set(&bal_key, &balance);
+        Self::add_inventory_asset(&env, &to, &asset_id);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("MINTED"), asset_id, to),
@@ -283,10 +333,39 @@ impl CrossGameAssets {
             }
         };
         env.storage().persistent().set(&to_key, &to_bal);
+        Self::add_inventory_asset(&env, &to, &asset_id);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("XFER"), asset_id, from, to),
             (amount, from_game_id, to_game_id),
+        );
+    }
+
+    /// Move an owner's asset into another compatible game context.
+    pub fn transfer_asset_to_game(
+        env: Env,
+        owner: Address,
+        asset_id: BytesN<32>,
+        from_game: u32,
+        to_game: u32,
+    ) {
+        Self::require_not_paused(&env);
+        owner.require_auth();
+        if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), to_game) {
+            panic!("target game not compatible");
+        }
+        let bal_key = DataKey::Balance(owner.clone(), asset_id.clone());
+        let mut bal: AssetBalance = env.storage().persistent()
+            .get(&bal_key)
+            .expect("asset not owned");
+        if bal.source_game_id != from_game {
+            panic!("source game mismatch");
+        }
+        bal.source_game_id = to_game;
+        env.storage().persistent().set(&bal_key, &bal);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("GAME_XFER"), asset_id),
+            (owner, from_game, to_game),
         );
     }
 
@@ -318,6 +397,13 @@ impl CrossGameAssets {
         );
     }
 
+    pub fn burn_cross_game_asset(env: Env, asset_id: BytesN<32>, game_id: u32, owner: Address, amount: i128) {
+        if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
+            panic!("game not compatible");
+        }
+        Self::burn(env, owner, asset_id, amount);
+    }
+
     // ── Views ─────────────────────────────────────────────────────────────────
 
     pub fn get_balance(env: Env, owner: Address, asset_id: BytesN<32>) -> i128 {
@@ -342,6 +428,28 @@ impl CrossGameAssets {
             .get::<DataKey, AssetDefinition>(&DataKey::AssetDef(asset_id))
             .map(|d| game_id >= 64 || (d.compatible_games & (1u64 << game_id)) != 0)
             .unwrap_or(false)
+    }
+
+    pub fn validate_asset_compatibility(env: Env, asset_id: BytesN<32>, target_game: u32) -> bool {
+        Self::is_game_compatible(env, asset_id, target_game)
+    }
+
+    pub fn get_cross_game_inventory(env: Env, player: Address) -> Vec<AssetBalance> {
+        let ids: Vec<BytesN<32>> = env.storage().persistent()
+            .get(&DataKey::Inventory(player.clone()))
+            .unwrap_or(Vec::new(&env));
+        let mut inventory = Vec::new(&env);
+        let mut i = 0;
+        while i < ids.len() {
+            let asset_id = ids.get(i).expect("asset id");
+            if let Some(balance) = env.storage().persistent()
+                .get::<DataKey, AssetBalance>(&DataKey::Balance(player.clone(), asset_id))
+            {
+                inventory.push_back(balance);
+            }
+            i += 1;
+        }
+        inventory
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -375,5 +483,26 @@ impl CrossGameAssets {
             if caller == &gc { return; }
         }
         panic!("caller not authorised");
+    }
+
+    fn add_inventory_asset(env: &Env, owner: &Address, asset_id: &BytesN<32>) {
+        let key = DataKey::Inventory(owner.clone());
+        let mut ids: Vec<BytesN<32>> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut i = 0;
+        while i < ids.len() {
+            if ids.get(i).expect("asset id") == *asset_id {
+                return;
+            }
+            i += 1;
+        }
+        ids.push_back(asset_id.clone());
+        env.storage().persistent().set(&key, &ids);
+    }
+
+    fn asset_id_from_game(env: &Env, game_id: u32, asset_type: u32) -> BytesN<32> {
+        let mut bytes = [0u8; 32];
+        bytes[0..4].copy_from_slice(&game_id.to_be_bytes());
+        bytes[4..8].copy_from_slice(&asset_type.to_be_bytes());
+        BytesN::from_array(env, &bytes)
     }
 }
