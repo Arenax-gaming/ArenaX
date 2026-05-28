@@ -122,9 +122,9 @@ export const restrictTo =
 // Simple role -> scopes mapping for finer-grained admin permissions
 const roleScopes: Record<string, string[]> = {
     ADMIN: [
-        'USERS:WRITE', 
-        'GAMES:WRITE', 
-        'MODERATION:REVIEW', 
+        'USERS:WRITE',
+        'GAMES:WRITE',
+        'MODERATION:REVIEW',
         'SYSTEM:READ',
         'SYSTEM:WRITE',
         'PAYMENTS:WRITE',
@@ -134,8 +134,6 @@ const roleScopes: Record<string, string[]> = {
     ],
     MODERATOR: ['MODERATION:REVIEW', 'USERS:READ'],
     SUPPORT: ['USERS:READ', 'DISPUTES:READ']
-    MODERATOR: ['MODERATION:REVIEW'],
-    SUPPORT: ['USERS:READ']
 };
 
 export const restrictToScope = (requiredScope: string) => (req: Request, _res: Response, next: NextFunction): void => {

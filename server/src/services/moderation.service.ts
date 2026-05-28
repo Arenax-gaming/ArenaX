@@ -11,35 +11,24 @@ export class ModerationService {
     'bastard', 'crap', 'piss', 'dick', 'cock', 'pussy'
   ]
 
-  private static SLURS = [
-    // Add more comprehensive slur detection as needed
+  private static SLURS: string[] = [
+    // extend as needed
   ]
 
-  private static SPAM_PATTERNS = [
+  private static SPAM_PATTERNS: RegExp[] = [
     /\b(buy|sell|cheap|free|click|win|prize|money|cash)\b.{0,50}\$(\d+)/gi,
     /\b(bitcoin|crypto|investment|forex|trading)\b/gi,
     /(.)\1{4,}/g, // Repeated characters
     /\b\d{10,}\b/g // Long numbers (phone numbers, etc.)
   ]
 
-  private static PII_PATTERNS = [
+  private static PII_PATTERNS: RegExp[] = [
     /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, // Phone numbers
     /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, // Email addresses
     /\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g // Credit card numbers
   ]
 
   static detectProfanity(text: string): ModerationResult {
-export class ModerationService {
-  private static PROFANE = [
-    'shit',
-    'fuck',
-    'bitch',
-    'ass',
-    'damn',
-    'hell'
-  ]
-
-  static detectProfanity(text: string) {
     if (!text) return { flagged: false, matches: [] }
 
     const lower = text.toLowerCase()
@@ -50,9 +39,9 @@ export class ModerationService {
       if (re.test(lower)) matches.push(word)
     }
 
-    return { 
-      flagged: matches.length > 0, 
-      matches, 
+    return {
+      flagged: matches.length > 0,
+      matches,
       reason: matches.length > 0 ? 'profanity' : undefined,
       severity: matches.length > 3 ? 'high' : matches.length > 1 ? 'medium' : 'low'
     }
@@ -69,11 +58,11 @@ export class ModerationService {
       if (re.test(lower)) matches.push(word)
     }
 
-    return { 
-      flagged: matches.length > 0, 
-      matches, 
+    return {
+      flagged: matches.length > 0,
+      matches,
       reason: matches.length > 0 ? 'hate_speech' : undefined,
-      severity: 'high' // Slurs are always high severity
+      severity: 'high'
     }
   }
 
@@ -87,9 +76,9 @@ export class ModerationService {
       if (found) matches.push(...found)
     }
 
-    return { 
-      flagged: matches.length > 0, 
-      matches, 
+    return {
+      flagged: matches.length > 0,
+      matches,
       reason: matches.length > 0 ? 'spam' : undefined,
       severity: matches.length > 2 ? 'high' : 'medium'
     }
@@ -105,11 +94,11 @@ export class ModerationService {
       if (found) matches.push(...found)
     }
 
-    return { 
-      flagged: matches.length > 0, 
-      matches, 
+    return {
+      flagged: matches.length > 0,
+      matches,
       reason: matches.length > 0 ? 'pii' : undefined,
-      severity: 'high' // PII is always high severity
+      severity: 'high'
     }
   }
 
