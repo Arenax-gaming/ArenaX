@@ -1,0 +1,12 @@
+-- Rollback: 20260528000001_leaderboard_achievements_social
+
+DROP TABLE IF EXISTS social_notifications CASCADE;
+DROP TABLE IF EXISTS post_likes CASCADE;
+DROP TABLE IF EXISTS community_posts CASCADE;
+DROP TABLE IF EXISTS party_members CASCADE;
+DROP TABLE IF EXISTS parties CASCADE;
+DROP TABLE IF EXISTS messages CASCADE;
+DROP TABLE IF EXISTS friend_requests CASCADE;
+DROP TABLE IF EXISTS friends CASCADE;
+DROP TABLE IF EXISTS player_achievements CASCADE;
+DROP TABLE IF EXISTS achievements CASCADE;

@@ -1,9 +1,12 @@
 // Core models
+pub mod achievement;
 pub mod idempotency;
+pub mod leaderboard;
 pub mod match_authority;
 pub mod match_models;
 pub mod matchmaker;
 pub mod reward_settlement;
+pub mod social;
 pub mod stellar_account;
 pub mod stellar_transaction;
 pub mod tournament;
@@ -11,7 +14,9 @@ pub mod user;
 pub mod wallet;
 
 // Re-export commonly used types - explicit to avoid ambiguity
+pub use achievement::*;
 pub use idempotency::*;
+pub use leaderboard::*;
 pub use match_authority::*;
 pub use match_models::{
     CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory, EloResponse,
@@ -34,6 +39,7 @@ pub use stellar_transaction::{
     CreateStellarTransactionRequest, StellarTransaction, StellarTransactionResponse,
     StellarTransactionStatus, StellarTransactionType,
 };
+pub use social::*;
 pub use tournament::{
     BracketType, CreateTournamentRequest, JoinTournamentRequest, ParticipantStatus, PrizePool,
     RoundStatus, RoundType, Tournament, TournamentListResponse, TournamentMatch,
