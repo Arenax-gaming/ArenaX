@@ -1624,20 +1624,201 @@ impl TournamentService {
             ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
             "#,
             tournament_id
+    /// Get comprehensive tournament statistics
+    pub async fn get_tournament_statistics(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentStatisticsResponse, ApiError> {
+        // Get basic tournament info
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        // Get participant count
+        let participant_count = self.get_participant_count(tournament_id).await?;
+
+        // Get tournament rounds count
+        let round_count = sqlx::query!("SELECT COUNT(*) as count FROM tournament_rounds WHERE tournament_id = $1", tournament_id)
+            .fetch_one(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // Get current round (highest round number with matches)
+        let current_round = sqlx::query!("SELECT COALESCE(MAX(tr.round_number), 0) as current_round FROM tournament_rounds tr JOIN tournament_matches tm ON tr.id = tm.round_id WHERE tr.tournament_id = $1 AND tm.status IN ('in_progress', 'completed')", tournament_id)
+            .fetch_one(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .current_round
+            .unwrap_or(0);
+
+        // Get match statistics
+        let match_stats = sqlx::query!("SELECT 
+            COUNT(*) as total_matches,
+            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as completed_matches,
+            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
+            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
+            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches
+            FROM tournament_matches tm
+            WHERE tm.tournament_id = $1",
+            tournament_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Get prize pool information
+        let prize_pool = sqlx::query!("SELECT total_amount, currency FROM prize_pools WHERE tournament_id = $1", tournament_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .unwrap_or_else(|| {
+                sqlx::query!("SELECT 0 as total_amount, 'USD' as currency")
+                    .fetch_one(&self.db_pool)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))
+                    .ok()
+                    .unwrap_or(sqlx::query!("SELECT 0 as total_amount, 'USD' as currency").fetch_one(&self.db_pool).await.unwrap())
+            });
+
+        // Calculate registration completion rate
+        let registration_completion_rate = if tournament.max_participants > 0 {
+            ((participant_count as f32 / tournament.max_participants as f32) * 100.0) as i32
+        } else {
+            0
+        };
+
+        // Calculate tournament completion rate
+        let completion_rate = if match_stats.total_matches > 0 {
+            ((match_stats.completed_matches as f32 / match_stats.total_matches as f32) * 100.0) as i32
+        } else {
+            0
+        };
+
+        // Get tournament status details
+        let (prize_pool_amount, prize_pool_currency) = match prize_pool {
+            Some(p) => (p.total_amount, p.currency),
+            None => (0, "USD".to_string()),
+        };
+
+        Ok(TournamentStatisticsResponse {
+            tournament_id,
+            tournament_name: tournament.name,
+            game: tournament.game,
+            status: tournament.status,
+            participant_count,
+            total_matches: match_stats.total_matches,
+            completed_matches: match_stats.completed_matches,
+            pending_matches: match_stats.pending_matches,
+            in_progress_matches: match_stats.in_progress_matches,
+            disputed_matches: match_stats.disputed_matches,
+            prize_pool_amount,
+            prize_pool_currency,
+            round_count: round_count.count.unwrap_or(0),
+            current_round,
+            registration_completion_rate,
+            completion_rate,
+        })
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentStatisticsResponse {
+        pub tournament_id: Uuid,
+        pub tournament_name: String,
+        pub game: String,
+        pub status: TournamentStatus,
+        pub participant_count: i32,
+        pub total_matches: i64,
+        pub completed_matches: i64,
+        pub pending_matches: i64,
+        pub in_progress_matches: i64,
+        pub disputed_matches: i64,
+        pub prize_pool_amount: i64,
+        pub prize_pool_currency: String,
+        pub round_count: i64,
+        pub current_round: i32,
+        pub registration_completion_rate: i32,
+        pub completion_rate: i32,
+    }
+
+    /// Get tournament leaderboard with ELO ratings and performance metrics
+    pub async fn get_tournament_leaderboard(
+        &self,
+        tournament_id: Uuid,
+        page: i32,
+        per_page: i32,
+    ) -> Result<TournamentLeaderboardResponse, ApiError> {
+        let offset = (page - 1) * per_page;
+
+        // Get tournament participants with their ELO ratings
+        let participants = sqlx::query!("SELECT 
+            tp.id as participant_id,
+            tp.user_id,
+            tp.registered_at,
+            tp.entry_fee_paid,
+            tp.status as participant_status,
+            tp.final_rank,
+            tp.prize_amount,
+            tp.prize_currency,
+            u.username,
+            u.display_name,
+            ue.current_rating as elo_rating,
+            COALESCE(wins.wins, 0) as wins,
+            COALESCE(losses.losses, 0) as losses,
+            COALESCE(draws.draws, 0) as draws,
+            COALESCE(matches.total_matches, 0) as total_matches
+            FROM tournament_participants tp
+            JOIN users u ON tp.user_id = u.id
+            LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = (SELECT game FROM tournaments WHERE id = $1)
+            LEFT JOIN (
+                SELECT winner_id, COUNT(*) as wins 
+                FROM tournament_matches 
+                WHERE tournament_id = $1 AND winner_id IS NOT NULL 
+                GROUP BY winner_id
+            ) wins ON tp.user_id = wins.winner_id
+            LEFT JOIN (
+                SELECT player1_id as loser_id, COUNT(*) as losses 
+                FROM tournament_matches 
+                WHERE tournament_id = $1 AND winner_id = player2_id AND winner_id IS NOT NULL 
+                GROUP BY player1_id
+            ) losses ON tp.user_id = losses.loser_id
+            LEFT JOIN (
+                SELECT player2_id as loser_id, COUNT(*) as losses 
+                FROM tournament_matches 
+                WHERE tournament_id = $1 AND winner_id = player1_id AND winner_id IS NOT NULL 
+                GROUP BY player2_id
+            ) losses2 ON tp.user_id = losses2.loser_id
+            LEFT JOIN (
+                SELECT player1_id as draw_id, COUNT(*) as draws 
+                FROM tournament_matches 
+                WHERE tournament_id = $1 AND winner_id IS NULL 
+                GROUP BY player1_id
+            ) draws ON tp.user_id = draws.draw_id
+            LEFT JOIN (
+                SELECT player2_id as draw_id, COUNT(*) as draws 
+                FROM tournament_matches 
+                WHERE tournament_id = $1 AND winner_id IS NULL 
+                GROUP BY player2_id
+            ) draws2 ON tp.user_id = draws2.draw_id
+            LEFT JOIN (
+                SELECT user_id, COUNT(*) as total_matches 
+                FROM (
+                    SELECT player1_id as user_id FROM tournament_matches WHERE tournament_id = $1
+                    UNION ALL
+                    SELECT player2_id as user_id FROM tournament_matches WHERE tournament_id = $1 AND player2_id IS NOT NULL
+                ) all_players
+                GROUP BY user_id
+            ) matches ON tp.user_id = matches.user_id
+            WHERE tp.tournament_id = $1
+            ORDER BY tp.final_rank ASC, tp.registered_at ASC
+            LIMIT $2 OFFSET $3",
+            tournament_id,
+            per_page,
+            offset
         )
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        let mut leaderboard = Vec::new();
-
-        for p in participants {
-            // Calculate a score/points (e.g. based on wins)
-            let wins = sqlx::query!(
-                "SELECT COUNT(*) as count FROM tournament_matches WHERE tournament_id = $1 AND winner_id = $2",
-                tournament_id,
-                p.user_id
-            )
+        // Get total count for pagination
+        let total = sqlx::query!("SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1", tournament_id)
             .fetch_one(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?
@@ -1665,6 +1846,266 @@ pub struct TournamentLeaderboardEntry {
     pub prize_amount: Option<i64>,
     pub points: i32,
 }
+        // Convert to response format
+        let mut leaderboard_entries = Vec::new();
+        for row in participants {
+            let elo_rating = if row.elo_rating.is_some() { row.elo_rating.unwrap() } else { 1200 };
+            let win_rate = if row.total_matches > 0 {
+                ((row.wins as f32 / row.total_matches as f32) * 100.0).round() as i32
+            } else {
+                0
+            };
+
+            leaderboard_entries.push(TournamentLeaderboardEntry {
+                participant_id: row.participant_id,
+                user_id: row.user_id,
+                username: row.username,
+                display_name: row.display_name,
+                elo_rating,
+                final_rank: row.final_rank,
+                wins: row.wins,
+                losses: row.losses,
+                draws: row.draws,
+                total_matches: row.total_matches,
+                win_rate_pct: win_rate,
+                prize_amount: row.prize_amount,
+                prize_currency: row.prize_currency,
+                participant_status: row.participant_status.parse().unwrap_or(ParticipantStatus::Registered),
+            });
+        }
+
+        Ok(TournamentLeaderboardResponse {
+            tournament_id,
+            entries: leaderboard_entries,
+            total,
+            page,
+            per_page,
+        })
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentLeaderboardResponse {
+        pub tournament_id: Uuid,
+        pub entries: Vec<TournamentLeaderboardEntry>,
+        pub total: i64,
+        pub page: i32,
+        pub per_page: i32,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentLeaderboardEntry {
+        pub participant_id: Uuid,
+        pub user_id: Uuid,
+        pub username: String,
+        pub display_name: Option<String>,
+        pub elo_rating: i32,
+        pub final_rank: Option<i32>,
+        pub wins: i64,
+        pub losses: i64,
+        pub draws: i64,
+        pub total_matches: i64,
+        pub win_rate_pct: i32,
+        pub prize_amount: Option<i64>,
+        pub prize_currency: Option<String>,
+        pub participant_status: ParticipantStatus,
+    }
+
+    /// Get comprehensive tournament analytics for dashboard visualization
+    pub async fn get_tournament_analytics(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentAnalyticsResponse, ApiError> {
+        // Get basic tournament info
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        // Get participant count
+        let participant_count = self.get_participant_count(tournament_id).await?;
+
+        // Get match statistics by round
+        let round_stats = sqlx::query!("SELECT 
+            tr.round_number,
+            tr.round_type,
+            COUNT(tm.id) as total_matches,
+            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as completed_matches,
+            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
+            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
+            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches,
+            AVG(EXTRACT(EPOCH FROM (tm.completed_at - tm.started_at))) as avg_duration_secs
+            FROM tournament_rounds tr
+            LEFT JOIN tournament_matches tm ON tr.id = tm.round_id AND tr.tournament_id = $1
+            WHERE tr.tournament_id = $1
+            GROUP BY tr.round_number, tr.round_type
+            ORDER BY tr.round_number",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Get prize pool distribution
+        let prize_distribution = sqlx::query!("SELECT 
+            pp.total_amount as prize_pool_amount,
+            pp.currency as prize_pool_currency,
+            pp.distribution_percentages as distribution_percentages_json,
+            COALESCE(SUM(tp.prize_amount), 0) as distributed_amount
+            FROM prize_pools pp
+            LEFT JOIN tournament_participants tp ON pp.tournament_id = tp.tournament_id AND tp.prize_amount IS NOT NULL
+            WHERE pp.tournament_id = $1
+            GROUP BY pp.total_amount, pp.currency, pp.distribution_percentages",
+            tournament_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .unwrap_or_else(|| {
+            sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
+                .fetch_one(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))
+                .ok()
+                .unwrap_or(sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount").fetch_one(&self.db_pool).await.unwrap())
+        });
+
+        // Get registration timeline
+        let registration_timeline = sqlx::query!("SELECT 
+            COUNT(*) as total_registrations,
+            MIN(tp.registered_at) as first_registration,
+            MAX(tp.registered_at) as last_registration,
+            COUNT(CASE WHEN tp.entry_fee_paid THEN 1 END) as paid_registrations,
+            COUNT(CASE WHEN tp.status = 'active' THEN 1 END) as active_participants
+            FROM tournament_participants tp
+            WHERE tp.tournament_id = $1",
+            tournament_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Get participant skill level distribution
+        let skill_distribution = sqlx::query!("SELECT 
+            COUNT(*) as total_participants,
+            AVG(ue.current_rating) as avg_elo,
+            MIN(ue.current_rating) as min_elo,
+            MAX(ue.current_rating) as max_elo,
+            STDDEV(ue.current_rating) as elo_stddev
+            FROM tournament_participants tp
+            LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = $1
+            WHERE tp.tournament_id = $2",
+            tournament.game,
+            tournament_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .unwrap_or_else(|| {
+            sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev")
+                .fetch_one(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))
+                .ok()
+                .unwrap_or(sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev").fetch_one(&self.db_pool).await.unwrap())
+        });
+
+        // Convert JSON distribution percentages
+        let distribution_percentages: Vec<f64> = if let Some(ref json_str) = prize_distribution.distribution_percentages_json {
+            serde_json::from_str(json_str)
+                .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
+        } else {
+            vec![]
+        };
+
+        Ok(TournamentAnalyticsResponse {
+            tournament_id,
+            tournament_name: tournament.name,
+            game: tournament.game,
+            status: tournament.status,
+            participant_count,
+            registration_timeline: TournamentRegistrationTimeline {
+                total_registrations: registration_timeline.total_registrations.unwrap_or(0),
+                first_registration: registration_timeline.first_registration,
+                last_registration: registration_timeline.last_registration,
+                paid_registrations: registration_timeline.paid_registrations.unwrap_or(0),
+                active_participants: registration_timeline.active_participants.unwrap_or(0),
+            },
+            round_statistics: round_stats
+                .into_iter()
+                .map(|r| TournamentRoundStatistics {
+                    round_number: r.round_number.unwrap_or(0),
+                    round_type: r.round_type,
+                    total_matches: r.total_matches.unwrap_or(0),
+                    completed_matches: r.completed_matches.unwrap_or(0),
+                    pending_matches: r.pending_matches.unwrap_or(0),
+                    in_progress_matches: r.in_progress_matches.unwrap_or(0),
+                    disputed_matches: r.disputed_matches.unwrap_or(0),
+                    avg_duration_secs: r.avg_duration_secs.map(|d| d as f64).unwrap_or(0.0),
+                })
+                .collect(),
+            prize_pool: TournamentPrizePool {
+                total_amount: prize_distribution.prize_pool_amount.unwrap_or(0),
+                currency: prize_distribution.prize_pool_currency.unwrap_or("USD".to_string()),
+                distribution_percentages,
+                distributed_amount: prize_distribution.distributed_amount.unwrap_or(0),
+            },
+            skill_level_distribution: TournamentSkillDistribution {
+                total_participants: skill_distribution.total_participants.unwrap_or(0),
+                average_elo: skill_distribution.avg_elo.unwrap_or(0.0) as i32,
+                min_elo: skill_distribution.min_elo.unwrap_or(0.0) as i32,
+                max_elo: skill_distribution.max_elo.unwrap_or(0.0) as i32,
+                elo_stddev: skill_distribution.elo_stddev.unwrap_or(0.0) as i32,
+            },
+        })
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentAnalyticsResponse {
+        pub tournament_id: Uuid,
+        pub tournament_name: String,
+        pub game: String,
+        pub status: TournamentStatus,
+        pub participant_count: i32,
+        pub registration_timeline: TournamentRegistrationTimeline,
+        pub round_statistics: Vec<TournamentRoundStatistics>,
+        pub prize_pool: TournamentPrizePool,
+        pub skill_level_distribution: TournamentSkillDistribution,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentRegistrationTimeline {
+        pub total_registrations: i64,
+        pub first_registration: Option<DateTime<Utc>>,
+        pub last_registration: Option<DateTime<Utc>>,
+        pub paid_registrations: i64,
+        pub active_participants: i64,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentRoundStatistics {
+        pub round_number: i32,
+        pub round_type: String,
+        pub total_matches: i64,
+        pub completed_matches: i64,
+        pub pending_matches: i64,
+        pub in_progress_matches: i64,
+        pub disputed_matches: i64,
+        pub avg_duration_secs: f64,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentPrizePool {
+        pub total_amount: i64,
+        pub currency: String,
+        pub distribution_percentages: Vec<f64>,
+        pub distributed_amount: i64,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TournamentSkillDistribution {
+        pub total_participants: i64,
+        pub average_elo: i32,
+        pub min_elo: i32,
+        pub max_elo: i32,
+        pub elo_stddev: i32,
+    }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TournamentBracketResponse {
@@ -1691,4 +2132,141 @@ pub struct BracketMatch {
     pub player1_score: Option<i32>,
     pub player2_score: Option<i32>,
     pub status: MatchStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPlayerInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub final_rank: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BracketMatch {
+    pub match_id: Uuid,
+    pub match_number: i32,
+    pub player1: TournamentPlayerInfo,
+    pub player2: TournamentPlayerInfo,
+    pub winner_id: Option<Uuid>,
+    pub player1_score: Option<i32>,
+    pub player2_score: Option<i32>,
+    pub status: MatchStatus,
+    pub scheduled_time: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+    /// Get enhanced tournament bracket with detailed match information
+    pub async fn get_enhanced_tournament_bracket(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentBracketResponse, ApiError> {
+        // Get tournament rounds
+        let rounds = sqlx::query_as!(TournamentRound,
+            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Get matches for each round with additional participant information
+        let mut bracket_rounds = Vec::new();
+        for round in rounds {
+            let matches = sqlx::query!("SELECT 
+                tm.id as match_id,
+                tm.match_number,
+                tm.player1_id,
+                tm.player2_id,
+                tm.winner_id,
+                tm.player1_score,
+                tm.player2_score,
+                tm.status as match_status,
+                tm.scheduled_time,
+                tm.started_at,
+                tm.completed_at,
+                u1.username as player1_username,
+                u2.username as player2_username,
+                u1.display_name as player1_display_name,
+                u2.display_name as player2_display_name,
+                tp1.final_rank as player1_final_rank,
+                tp2.final_rank as player2_final_rank
+                FROM tournament_matches tm
+                LEFT JOIN users u1 ON tm.player1_id = u1.id
+                LEFT JOIN users u2 ON tm.player2_id = u2.id
+                LEFT JOIN tournament_participants tp1 ON tm.player1_id = tp1.user_id AND tm.tournament_id = tp1.tournament_id
+                LEFT JOIN tournament_participants tp2 ON tm.player2_id = tp2.user_id AND tm.tournament_id = tp2.tournament_id
+                WHERE tm.round_id = $1
+                ORDER BY tm.match_number",
+                round.id
+            )
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            let mut round_matches = Vec::new();
+            for match_row in matches {
+                // Get player names and display info
+                let player1_info = if let Some(username) = match_row.player1_username {
+                    TournamentPlayerInfo {
+                        user_id: match_row.player1_id,
+                        username,
+                        display_name: match_row.player1_display_name,
+                        final_rank: match_row.player1_final_rank,
+                    }
+                } else {
+                    TournamentPlayerInfo {
+                        user_id: match_row.player1_id,
+                        username: "Unknown".to_string(),
+                        display_name: None,
+                        final_rank: None,
+                    }
+                };
+
+                let player2_info = if let Some(username) = match_row.player2_username {
+                    TournamentPlayerInfo {
+                        user_id: match_row.player2_id.unwrap_or_default(),
+                        username,
+                        display_name: match_row.player2_display_name,
+                        final_rank: match_row.player2_final_rank,
+                    }
+                } else {
+                    TournamentPlayerInfo {
+                        user_id: match_row.player2_id.unwrap_or_default(),
+                        username: "Bye".to_string(),
+                        display_name: None,
+                        final_rank: None,
+                    }
+                };
+
+                round_matches.push(BracketMatch {
+                    match_id: match_row.match_id,
+                    match_number: match_row.match_number.unwrap_or(0),
+                    player1: player1_info,
+                    player2: player2_info,
+                    winner_id: match_row.winner_id,
+                    player1_score: match_row.player1_score,
+                    player2_score: match_row.player2_score,
+                    status: match_row.match_status.parse().unwrap_or(MatchStatus::Pending),
+                    scheduled_time: match_row.scheduled_time,
+                    started_at: match_row.started_at,
+                    completed_at: match_row.completed_at,
+                });
+            }
+
+            bracket_rounds.push(BracketRound {
+                round_id: round.id,
+                round_number: round.round_number,
+                round_type: round.round_type.parse().unwrap_or(RoundType::Elimination),
+                status: round.status.parse().unwrap_or(RoundStatus::Pending),
+                matches: round_matches,
+            });
+        }
+
+        Ok(TournamentBracketResponse {
+            tournament_id,
+            rounds: bracket_rounds,
+        })
+    }
 }

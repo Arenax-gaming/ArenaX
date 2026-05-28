@@ -2,6 +2,7 @@
 members = [
     "arenax-events",
     "analytics",
+    "game-state",
     "cross-game-assets",
     "example",
     "dispute-resolution",
@@ -22,6 +23,7 @@ members = [
     "anti-cheat-oracle",
     "anti-cheat",
     "staking-manager",
+    "staking-rewards",
     "upgrade-system",
     "player-reputation",
     "tournament-manager",
