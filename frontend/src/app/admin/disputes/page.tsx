@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
@@ -40,7 +41,8 @@ export default function DisputeDashboard() {
   if (loading) return <div className="p-8 text-center text-xl font-medium">Loading disputes...</div>;
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
+    <ProtectedPage requiredRole="admin">
+      <div className="container mx-auto p-6 space-y-8">
       <header className="flex flex-col gap-2">
         <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-gray-900 dark:text-gray-100">
           Dispute Resolution
@@ -133,6 +135,7 @@ export default function DisputeDashboard() {
           ))
         )}
       </div>
-    </div>
+      </div>
+    </ProtectedPage>
   );
 }

@@ -14,6 +14,7 @@ export interface User {
   };
   elo: number;
   createdAt: string;
+  role?: "user" | "admin" | "moderator";
 }
 
 export interface UserProfileUpdate {

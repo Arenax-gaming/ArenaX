@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import Image from "next/image";
 import { api } from "@/lib/api";
+import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -85,7 +86,8 @@ export default function KycDashboard() {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
+    <ProtectedPage requiredRole="admin">
+      <div className="container mx-auto p-6 space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-gray-900 dark:text-gray-100">
@@ -263,6 +265,7 @@ export default function KycDashboard() {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </ProtectedPage>
   );
 }
