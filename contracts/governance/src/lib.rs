@@ -95,6 +95,7 @@ pub enum DataKey {
     Proposal(BytesN<32>),
     Vote(BytesN<32>, Address),
     Delegation(Address),
+    DelegatedPower(Address),
     GovernanceParams,
     ProposalCounter,
     TokenContract,
@@ -220,6 +221,22 @@ impl GovernanceContract {
 
     // Cast a vote on a proposal
     pub fn cast_vote(env: Env, voter: Address, proposal_id: BytesN<32>, choice: VoteChoice) {
+        voter.require_auth();
+        Self::cast_vote_internal(env, voter, proposal_id, choice, None);
+    }
+
+    pub fn cast_weighted_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: BytesN<32>,
+        vote_weight: u128,
+        choice: VoteChoice,
+    ) {
+        voter.require_auth();
+        Self::cast_vote_internal(env, voter, proposal_id, choice, Some(vote_weight));
+    }
+
+    fn cast_vote_internal(env: Env, voter: Address, proposal_id: BytesN<32>, choice: VoteChoice, vote_weight: Option<u128>) {
         let mut proposal: Proposal = env
             .storage()
             .persistent()
@@ -244,7 +261,11 @@ impl GovernanceContract {
         }
 
         // Calculate voting power
-        let voting_power = Self::calculate_voting_power(&env, &voter, &proposal_id);
+        let available_power = Self::calculate_voting_power(&env, &voter, &proposal_id);
+        let voting_power = vote_weight.unwrap_or(available_power);
+        if voting_power == 0 || voting_power > available_power {
+            panic!("invalid vote weight");
+        }
 
         // Record the vote
         let vote = Vote {
@@ -293,18 +314,16 @@ impl GovernanceContract {
         // In production, this would query the token contract for actual balance
         let mut power: u128 = 100; // Base voting power
 
-        // Check for delegated power
-        let delegation_key = DataKey::Delegation(voter.clone());
-        if env.storage().persistent().has(&delegation_key) {
-            let delegation: Delegation = env
-                .storage()
-                .persistent()
-                .get(&delegation_key)
-                .expect("delegation not found");
-            power += delegation.voting_power;
-        }
+        power += env.storage()
+            .persistent()
+            .get::<DataKey, u128>(&DataKey::DelegatedPower(voter.clone()))
+            .unwrap_or(0);
 
         power
+    }
+
+    pub fn get_voting_power(env: Env, voter: Address, proposal_id: BytesN<32>) -> u128 {
+        Self::calculate_voting_power(&env, &voter, &proposal_id)
     }
 
     // Tally votes for a proposal
@@ -402,6 +421,7 @@ impl GovernanceContract {
 
     // Delegate voting power
     pub fn delegate_voting_power(env: Env, delegator: Address, delegatee: Address) {
+        delegator.require_auth();
         if delegator == delegatee {
             panic!("cannot delegate to self");
         }
@@ -419,6 +439,13 @@ impl GovernanceContract {
         env.storage()
             .persistent()
             .set(&DataKey::Delegation(delegator.clone()), &delegation);
+        let current: u128 = env.storage()
+            .persistent()
+            .get(&DataKey::DelegatedPower(delegatee.clone()))
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&DataKey::DelegatedPower(delegatee.clone()), &(current + voting_power));
 
         // Emit event
         arenax_events::governance::voting_power_delegated(
@@ -431,6 +458,7 @@ impl GovernanceContract {
 
     // Cancel a proposal
     pub fn cancel_proposal(env: Env, proposal_id: BytesN<32>, caller: Address) {
+        caller.require_auth();
         let admin: Address = env
             .storage()
             .persistent()
@@ -463,6 +491,7 @@ impl GovernanceContract {
 
     // Update governance parameters
     pub fn update_governance_params(env: Env, caller: Address, params: GovernanceParams) {
+        caller.require_auth();
         let admin: Address = env
             .storage()
             .persistent()
