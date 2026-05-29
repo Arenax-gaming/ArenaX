@@ -1,20 +1,11 @@
 import cors from 'cors';
-import dotenv from 'dotenv';
-import express, { Express, Request, Response } from 'express';
+import express, { Express } from 'express';
 import helmet from 'helmet';
 import passport from 'passport';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
 import routes from './routes/index';
-import { registerAchievementIntegration } from './services/achievement.service';
-import { logger } from './services/logger.service';
-import { initializeTelemetry } from './services/telemetry.service';
-import { startHealthMonitor } from './services/health.service';
-
-dotenv.config();
-initializeTelemetry();
-registerAchievementIntegration();
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -84,27 +75,10 @@ export const createApp = (): Express => {
     app.use(express.json());
     app.use(requestIdMiddleware);
     app.use(passport.initialize());
-
     app.use('/api', routes);
-
-    app.get('/health', (_req: Request, res: Response) => {
-        res.json({ status: 'ok', timestamp: new Date().toISOString() });
-    });
-
     app.use(errorHandler);
 
     return app;
 };
 
-const app = createApp();
-
-if (process.env.NODE_ENV !== 'test') {
-    const port = process.env.PORT || 3000;
-    app.listen(port, () => {
-        logger.info('Server started', { url: `http://localhost:${port}` });
-    });
-    // Start background health monitor that posts alerts to admin webhook
-    startHealthMonitor({ intervalMs: Number(process.env.HEALTH_CHECK_INTERVAL_MS) || 60_000 });
-}
-
-export default app;
+export default createApp();
