@@ -116,7 +116,7 @@ export function FriendsList({
 
         {filteredFriends.length === 0 && searchQuery ? (
           <div className="text-center text-muted-foreground py-4">
-            No friends found matching "{searchQuery}"
+            No friends found matching &quot;{searchQuery}&quot;
           </div>
         ) : filteredFriends.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-8 text-center">

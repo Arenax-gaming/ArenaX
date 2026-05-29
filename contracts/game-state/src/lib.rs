@@ -97,19 +97,36 @@ impl GameStateContract {
             panic!("max players required");
         }
 
-        env.storage().persistent().set(&DataKey::ModeConfig(game_mode.clone()), &config);
-        env.events().publish((soroban_sdk::symbol_short!("MODE_CFG"), game_mode), config.scoring_version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ModeConfig(game_mode.clone()), &config);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("MODE_CFG"), game_mode),
+            config.scoring_version,
+        );
     }
 
-    pub fn create_game(env: Env, players: Vec<Address>, game_mode: String, initial_state: BytesN<32>) -> BytesN<32> {
+    pub fn create_game(
+        env: Env,
+        players: Vec<Address>,
+        game_mode: String,
+        initial_state: BytesN<32>,
+    ) -> BytesN<32> {
         Self::require_not_paused(&env);
         if players.is_empty() {
             panic!("players required");
         }
 
-        let config: GameConfig = env.storage().persistent()
+        let config: GameConfig = env
+            .storage()
+            .persistent()
             .get(&DataKey::ModeConfig(game_mode.clone()))
-            .unwrap_or(GameConfig { max_players: 64, min_action_interval: 0, allow_spectators: true, scoring_version: 1 });
+            .unwrap_or(GameConfig {
+                max_players: 64,
+                min_action_interval: 0,
+                allow_spectators: true,
+                scoring_version: 1,
+            });
         if players.len() > config.max_players {
             panic!("too many players");
         }
@@ -117,7 +134,11 @@ impl GameStateContract {
         let creator = players.get(0).expect("players required");
         creator.require_auth();
 
-        let counter: u32 = env.storage().instance().get(&DataKey::GameCounter).unwrap_or(0);
+        let counter: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::GameCounter)
+            .unwrap_or(0);
         let next = counter + 1;
         env.storage().instance().set(&DataKey::GameCounter, &next);
         let game_id = Self::id_from_counter(&env, next);
@@ -145,17 +166,33 @@ impl GameStateContract {
             timestamp: now,
         });
 
-        env.storage().persistent().set(&DataKey::Game(game_id.clone()), &game);
-        env.storage().persistent().set(&DataKey::History(game_id.clone()), &history);
-        env.events().publish((soroban_sdk::symbol_short!("GAME_NEW"), game_id.clone()), game_mode);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Game(game_id.clone()), &game);
+        env.storage()
+            .persistent()
+            .set(&DataKey::History(game_id.clone()), &history);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("GAME_NEW"), game_id.clone()),
+            game_mode,
+        );
         game_id
     }
 
-    pub fn update_game_state(env: Env, game_id: BytesN<32>, new_state: BytesN<32>, signer: Address) {
+    pub fn update_game_state(
+        env: Env,
+        game_id: BytesN<32>,
+        new_state: BytesN<32>,
+        signer: Address,
+    ) {
         Self::require_not_paused(&env);
         signer.require_auth();
 
-        let mut game: Game = env.storage().persistent().get(&DataKey::Game(game_id.clone())).expect("game not found");
+        let mut game: Game = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Game(game_id.clone()))
+            .expect("game not found");
         if game.status != GameStatus::Active {
             panic!("game not active");
         }
@@ -166,43 +203,113 @@ impl GameStateContract {
         game.version += 1;
         game.state_hash = new_state.clone();
         game.updated_at = env.ledger().timestamp();
-        Self::append_history(&env, &game_id, &signer, &new_state, &new_state, game.version);
-        env.storage().persistent().set(&DataKey::Game(game_id.clone()), &game);
-        env.events().publish((soroban_sdk::symbol_short!("STATE_UPD"), game_id), (game.version, signer));
+        Self::append_history(
+            &env,
+            &game_id,
+            &signer,
+            &new_state,
+            &new_state,
+            game.version,
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Game(game_id.clone()), &game);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("STATE_UPD"), game_id),
+            (game.version, signer),
+        );
     }
 
-    pub fn submit_player_action(env: Env, game_id: BytesN<32>, player: Address, action: Bytes, signature: BytesN<32>) {
+    pub fn submit_player_action(
+        env: Env,
+        game_id: BytesN<32>,
+        player: Address,
+        action: Bytes,
+        signature: BytesN<32>,
+    ) {
         Self::require_not_paused(&env);
         player.require_auth();
-        if !Self::validate_game_rules(env.clone(), game_id.clone(), player.clone(), action.clone()) {
+        if !Self::validate_game_rules(env.clone(), game_id.clone(), player.clone(), action.clone())
+        {
             panic!("invalid action");
         }
 
-        let mut game: Game = env.storage().persistent().get(&DataKey::Game(game_id.clone())).expect("game not found");
+        let mut game: Game = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Game(game_id.clone()))
+            .expect("game not found");
         game.version += 1;
         game.updated_at = env.ledger().timestamp();
-        env.storage().persistent().set(&DataKey::Game(game_id.clone()), &game);
-        env.storage().persistent().set(&DataKey::LastAction(game_id.clone(), player.clone()), &env.ledger().timestamp());
-        Self::append_history(&env, &game_id, &player, &game.state_hash, &signature, game.version);
-        env.events().publish((soroban_sdk::symbol_short!("ACTION"), game_id), (player, game.version));
+        env.storage()
+            .persistent()
+            .set(&DataKey::Game(game_id.clone()), &game);
+        env.storage().persistent().set(
+            &DataKey::LastAction(game_id.clone(), player.clone()),
+            &env.ledger().timestamp(),
+        );
+        Self::append_history(
+            &env,
+            &game_id,
+            &player,
+            &game.state_hash,
+            &signature,
+            game.version,
+        );
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ACTION"), game_id),
+            (player, game.version),
+        );
     }
 
-    pub fn validate_game_rules(env: Env, game_id: BytesN<32>, player: Address, action: Bytes) -> bool {
-        let game: Game = env.storage().persistent().get(&DataKey::Game(game_id.clone())).expect("game not found");
-        if game.status != GameStatus::Active || action.is_empty() || !Self::is_player(&game.players, &player) {
+    pub fn validate_game_rules(
+        env: Env,
+        game_id: BytesN<32>,
+        player: Address,
+        action: Bytes,
+    ) -> bool {
+        let game: Game = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Game(game_id.clone()))
+            .expect("game not found");
+        if game.status != GameStatus::Active
+            || action.is_empty()
+            || !Self::is_player(&game.players, &player)
+        {
             return false;
         }
 
-        let config: GameConfig = env.storage().persistent()
+        let config: GameConfig = env
+            .storage()
+            .persistent()
             .get(&DataKey::ModeConfig(game.game_mode))
-            .unwrap_or(GameConfig { max_players: 64, min_action_interval: 0, allow_spectators: true, scoring_version: 1 });
-        let last: u64 = env.storage().persistent().get(&DataKey::LastAction(game_id, player)).unwrap_or(0);
+            .unwrap_or(GameConfig {
+                max_players: 64,
+                min_action_interval: 0,
+                allow_spectators: true,
+                scoring_version: 1,
+            });
+        let last: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LastAction(game_id, player))
+            .unwrap_or(0);
         last == 0 || env.ledger().timestamp().saturating_sub(last) >= config.min_action_interval
     }
 
-    pub fn complete_game(env: Env, game_id: BytesN<32>, results: Vec<GameResult>, scores: Vec<i128>) {
+    pub fn complete_game(
+        env: Env,
+        game_id: BytesN<32>,
+        results: Vec<GameResult>,
+        scores: Vec<i128>,
+    ) {
         Self::require_not_paused(&env);
-        let mut game: Game = env.storage().persistent().get(&DataKey::Game(game_id.clone())).expect("game not found");
+        let mut game: Game = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Game(game_id.clone()))
+            .expect("game not found");
         game.creator.require_auth();
         if game.status != GameStatus::Active {
             panic!("game not active");
@@ -214,21 +321,37 @@ impl GameStateContract {
         game.status = GameStatus::Completed;
         game.completed_at = Some(env.ledger().timestamp());
         game.updated_at = env.ledger().timestamp();
-        env.storage().persistent().set(&DataKey::Game(game_id.clone()), &game);
-        env.storage().persistent().set(&DataKey::Results(game_id.clone()), &results);
-        env.events().publish((soroban_sdk::symbol_short!("GAME_DONE"), game_id), scores.len());
+        env.storage()
+            .persistent()
+            .set(&DataKey::Game(game_id.clone()), &game);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Results(game_id.clone()), &results);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("GAME_DONE"), game_id),
+            scores.len(),
+        );
     }
 
     pub fn get_game_history(env: Env, game_id: BytesN<32>) -> Vec<GameHistoryEntry> {
-        env.storage().persistent().get(&DataKey::History(game_id)).unwrap_or(Vec::new(&env))
+        env.storage()
+            .persistent()
+            .get(&DataKey::History(game_id))
+            .unwrap_or(Vec::new(&env))
     }
 
     pub fn get_game(env: Env, game_id: BytesN<32>) -> Game {
-        env.storage().persistent().get(&DataKey::Game(game_id)).expect("game not found")
+        env.storage()
+            .persistent()
+            .get(&DataKey::Game(game_id))
+            .expect("game not found")
     }
 
     pub fn get_game_results(env: Env, game_id: BytesN<32>) -> Vec<GameResult> {
-        env.storage().persistent().get(&DataKey::Results(game_id)).unwrap_or(Vec::new(&env))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Results(game_id))
+            .unwrap_or(Vec::new(&env))
     }
 
     pub fn set_paused(env: Env, admin: Address, paused: bool) {
@@ -236,8 +359,17 @@ impl GameStateContract {
         env.storage().instance().set(&DataKey::Paused, &paused);
     }
 
-    fn append_history(env: &Env, game_id: &BytesN<32>, actor: &Address, state_hash: &BytesN<32>, action_hash: &BytesN<32>, version: u32) {
-        let mut history: Vec<GameHistoryEntry> = env.storage().persistent()
+    fn append_history(
+        env: &Env,
+        game_id: &BytesN<32>,
+        actor: &Address,
+        state_hash: &BytesN<32>,
+        action_hash: &BytesN<32>,
+        version: u32,
+    ) {
+        let mut history: Vec<GameHistoryEntry> = env
+            .storage()
+            .persistent()
             .get(&DataKey::History(game_id.clone()))
             .unwrap_or(Vec::new(env));
         history.push_back(GameHistoryEntry {
@@ -247,11 +379,17 @@ impl GameStateContract {
             action_hash: action_hash.clone(),
             timestamp: env.ledger().timestamp(),
         });
-        env.storage().persistent().set(&DataKey::History(game_id.clone()), &history);
+        env.storage()
+            .persistent()
+            .set(&DataKey::History(game_id.clone()), &history);
     }
 
     fn require_admin(env: &Env, admin: &Address) {
-        let stored: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let stored: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         if &stored != admin {
             panic!("admin required");
         }
@@ -259,7 +397,12 @@ impl GameStateContract {
     }
 
     fn require_not_paused(env: &Env) {
-        if env.storage().instance().get::<DataKey, bool>(&DataKey::Paused).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
             panic!("contract is paused");
         }
     }

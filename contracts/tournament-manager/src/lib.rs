@@ -992,7 +992,10 @@ impl TournamentManager {
             let mut match_data: Match = env
                 .storage()
                 .persistent()
-                .get(&DataKey::TournamentMatch(tournament_id.clone(), match_id.clone()))
+                .get(&DataKey::TournamentMatch(
+                    tournament_id.clone(),
+                    match_id.clone(),
+                ))
                 .expect("match not found");
 
             match_data.winner = Some(winner.clone());
@@ -1042,10 +1045,7 @@ impl TournamentManager {
         leaderboard
     }
 
-    pub fn get_tournament_statistics(
-        env: Env,
-        tournament_id: BytesN<32>,
-    ) -> TournamentAnalytics {
+    pub fn get_tournament_statistics(env: Env, tournament_id: BytesN<32>) -> TournamentAnalytics {
         env.storage()
             .persistent()
             .get(&DataKey::TournamentAnalytics(tournament_id))
@@ -1139,9 +1139,9 @@ impl TournamentManager {
             min_players: 4,
             entry_fee: 0,
             prize_pool: 1000,
-            registration_start: 0, // Immediate
+            registration_start: 0,  // Immediate
             registration_end: 3600, // 1 hour
-            start_time: 7200, // 2 hours
+            start_time: 7200,       // 2 hours
             description: "Quick Match Tournament".into(),
         }
     }
@@ -1155,7 +1155,7 @@ impl TournamentManager {
             prize_pool: 5000,
             registration_start: 0,
             registration_end: 86400, // 24 hours
-            start_time: 172800, // 48 hours
+            start_time: 172800,      // 48 hours
             description: "Competitive Tournament".into(),
         }
     }
@@ -1169,7 +1169,7 @@ impl TournamentManager {
             prize_pool: 500,
             registration_start: 0,
             registration_end: 43200, // 12 hours
-            start_time: 86400, // 24 hours
+            start_time: 86400,       // 24 hours
             description: "Casual Tournament".into(),
         }
     }
@@ -1183,7 +1183,7 @@ impl TournamentManager {
             prize_pool: 50000,
             registration_start: 0,
             registration_end: 604800, // 1 week
-            start_time: 1209600, // 2 weeks
+            start_time: 1209600,      // 2 weeks
             description: "Championship Tournament".into(),
         }
     }
@@ -1211,22 +1211,14 @@ impl TournamentManager {
             .expect("bracket not found")
     }
 
-    pub fn get_match_details(
-        env: Env,
-        tournament_id: BytesN<32>,
-        match_id: BytesN<32>,
-    ) -> Match {
+    pub fn get_match_details(env: Env, tournament_id: BytesN<32>, match_id: BytesN<32>) -> Match {
         env.storage()
             .persistent()
             .get(&DataKey::TournamentMatch(tournament_id, match_id))
             .expect("match not found")
     }
 
-    pub fn is_player_registered(
-        env: Env,
-        tournament_id: BytesN<32>,
-        player: Address,
-    ) -> bool {
+    pub fn is_player_registered(env: Env, tournament_id: BytesN<32>, player: Address) -> bool {
         let players: Vec<PlayerRegistration> = env
             .storage()
             .persistent()

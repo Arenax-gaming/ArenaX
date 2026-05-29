@@ -151,6 +151,7 @@ async function main() {
         losses: 15,
         draws: 2,
         winRate: 0.73,
+        gamesPlayed: 62,
       },
     }),
     prisma.leaderboardEntry.create({
@@ -163,6 +164,7 @@ async function main() {
         losses: 20,
         draws: 5,
         winRate: 0.60,
+        gamesPlayed: 63,
       },
     }),
     prisma.leaderboardEntry.create({
@@ -175,6 +177,7 @@ async function main() {
         losses: 8,
         draws: 1,
         winRate: 0.75,
+        gamesPlayed: 34,
       },
     }),
   ]);
@@ -237,23 +240,29 @@ async function main() {
     data: {
       name: 'ArenaX Championship 2024',
       description: 'The premier ArenaX tournament of the year',
+      gameId: 'game_001',
       gameModeId: gameModes[0].id,
-      status: 'REGISTRATION',
       format: 'SINGLE_ELIMINATION',
-      maxParticipants: 32,
+      status: 'REGISTRATION_OPEN',
+      maxPlayers: 32,
+      minPlayers: 2,
       entryFee: 10,
       prizePool: 1000,
-      currency: 'USDC',
-      startsAt: new Date('2024-03-15T18:00:00Z'),
-      endsAt: new Date('2024-03-17T22:00:00Z'),
-      registrationStartsAt: new Date('2024-02-01T00:00:00Z'),
-      registrationEndsAt: new Date('2024-03-10T23:59:59Z'),
-      rules: {
+      prizeDistribution: {
+        first: 600,
+        second: 300,
+        third: 100,
+      },
+      registrationStart: new Date('2024-02-01T00:00:00Z'),
+      registrationEnd: new Date('2024-03-10T23:59:59Z'),
+      startDate: new Date('2024-03-15T18:00:00Z'),
+      endDate: new Date('2024-03-17T22:00:00Z'),
+      organizerId: users[2].id,
+      settings: {
         doubleElimination: false,
         bestOf: 3,
         timeLimit: 600,
       },
-      createdBy: users[2].id,
     },
   });
 
@@ -261,18 +270,22 @@ async function main() {
 
   // Register users for tournament
   await Promise.all([
-    prisma.tournamentParticipant.create({
+    prisma.tournamentRegistration.create({
       data: {
         tournamentId: tournament.id,
         userId: users[0].id,
-        seed: 1,
+        status: 'CONFIRMED',
+        paymentStatus: 'PAID',
+        confirmedAt: new Date('2024-02-01T00:00:00Z'),
       },
     }),
-    prisma.tournamentParticipant.create({
+    prisma.tournamentRegistration.create({
       data: {
         tournamentId: tournament.id,
         userId: users[1].id,
-        seed: 2,
+        status: 'CONFIRMED',
+        paymentStatus: 'PAID',
+        confirmedAt: new Date('2024-02-01T00:00:00Z'),
       },
     }),
   ]);
@@ -282,17 +295,25 @@ async function main() {
   // Create sample game session
   const gameSession = await prisma.gameSession.create({
     data: {
+      gameId: 'game_001',
       gameModeId: gameModes[0].id,
+      sessionType: 'RANKED',
       status: 'COMPLETED',
+      hostId: users[0].id,
+      maxPlayers: 2,
+      minPlayers: 2,
+      currentState: {
+        phase: 'completed',
+      },
+      initialState: {
+        map: 'arena_classic',
+      },
+      settings: {
+        enablePowerups: true,
+      },
       metadata: {
         server: 'us-east-1',
         region: 'na',
-      },
-      gameData: {
-        map: 'arena_classic',
-        settings: {
-          enablePowerups: true,
-        },
       },
       startedAt: new Date('2024-02-01T10:00:00Z'),
       endedAt: new Date('2024-02-01T10:15:00Z'),
@@ -304,32 +325,44 @@ async function main() {
 
   // Add participants to game session
   await Promise.all([
-    prisma.gameSessionParticipant.create({
+    prisma.gameSessionPlayer.create({
       data: {
-        gameSessionId: gameSession.id,
+        sessionId: gameSession.id,
         userId: users[0].id,
+        playerNumber: 1,
         team: 'A',
         score: 5,
-        kills: 12,
-        deaths: 8,
-        assists: 3,
-        position: 1,
+        rank: 1,
+        rating: 1500,
+        ratingChange: 25,
+        status: 'COMPLETED',
         joinedAt: new Date('2024-02-01T10:00:00Z'),
         leftAt: new Date('2024-02-01T10:15:00Z'),
+        metadata: {
+          kills: 12,
+          deaths: 8,
+          assists: 3,
+        },
       },
     }),
-    prisma.gameSessionParticipant.create({
+    prisma.gameSessionPlayer.create({
       data: {
-        gameSessionId: gameSession.id,
+        sessionId: gameSession.id,
         userId: users[1].id,
+        playerNumber: 2,
         team: 'B',
         score: 3,
-        kills: 8,
-        deaths: 12,
-        assists: 2,
-        position: 2,
+        rank: 2,
+        rating: 1450,
+        ratingChange: -25,
+        status: 'COMPLETED',
         joinedAt: new Date('2024-02-01T10:00:00Z'),
         leftAt: new Date('2024-02-01T10:15:00Z'),
+        metadata: {
+          kills: 8,
+          deaths: 12,
+          assists: 2,
+        },
       },
     }),
   ]);

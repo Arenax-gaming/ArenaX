@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, BytesN, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
 pub const NAMESPACE: &str = "ArenaXVirtualEconomy";
 pub const VERSION: &str = "v1";
@@ -159,7 +159,12 @@ pub fn emit_nft_transferred(env: &Env, token_id: &BytesN<32>, from: &Address, to
     .publish(env);
 }
 
-pub fn emit_marketplace_order_created(env: &Env, order_id: &BytesN<32>, seller: &Address, price: i128) {
+pub fn emit_marketplace_order_created(
+    env: &Env,
+    order_id: &BytesN<32>,
+    seller: &Address,
+    price: i128,
+) {
     MarketplaceOrderCreated {
         order_id: order_id.clone(),
         seller: seller.clone(),
@@ -168,7 +173,13 @@ pub fn emit_marketplace_order_created(env: &Env, order_id: &BytesN<32>, seller: 
     .publish(env);
 }
 
-pub fn emit_marketplace_trade_executed(env: &Env, order_id: &BytesN<32>, buyer: &Address, seller: &Address, price: i128) {
+pub fn emit_marketplace_trade_executed(
+    env: &Env,
+    order_id: &BytesN<32>,
+    buyer: &Address,
+    seller: &Address,
+    price: i128,
+) {
     MarketplaceTradeExecuted {
         order_id: order_id.clone(),
         buyer: buyer.clone(),
@@ -196,17 +207,20 @@ pub fn emit_rewards_distributed(env: &Env, recipient_count: u32, reason: &String
 pub fn emit_inflation_controls_updated(env: &Env) {
     InflationControlsUpdated {
         timestamp: env.ledger().timestamp(),
-    }.publish(env);
+    }
+    .publish(env);
 }
 
 pub fn emit_emergency_paused(env: &Env) {
     EmergencyPaused {
         timestamp: env.ledger().timestamp(),
-    }.publish(env);
+    }
+    .publish(env);
 }
 
 pub fn emit_emergency_resumed(env: &Env) {
     EmergencyResumed {
         timestamp: env.ledger().timestamp(),
-    }.publish(env);
+    }
+    .publish(env);
 }

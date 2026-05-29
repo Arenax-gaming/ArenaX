@@ -8,26 +8,26 @@ pub enum DataKey {
     CurrencyConfig,
     MarketplaceConfig,
     EmergencyPaused,
-    
+
     // Authorization
     AuthorizedMinter(Address),
-    
+
     // Counters
     TokenCounter,
     OrderCounter,
-    
+
     // Currency
     CurrencyBalance(Address),
     TotalCurrencySupply,
-    
+
     // NFTs
     NFTOwner(BytesN<32>),
     NFTMetadata(BytesN<32>),
     OwnedNFTs(Address),
-    
+
     // Marketplace
     MarketplaceOrder(BytesN<32>),
-    
+
     // Analytics
     EconomyAnalytics,
 }
@@ -36,14 +36,14 @@ pub enum DataKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CurrencyConfig {
     pub max_supply: i128,
-    pub inflation_rate: u32,  // basis points (100 = 1%)
-    pub deflation_rate: u32,  // basis points
+    pub inflation_rate: u32, // basis points (100 = 1%)
+    pub deflation_rate: u32, // basis points
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MarketplaceConfig {
-    pub fee_percentage: u32,  // basis points (250 = 2.5%)
+    pub fee_percentage: u32, // basis points (250 = 2.5%)
     pub fee_collector: Address,
     pub min_price: i128,
     pub max_price: i128,
@@ -56,7 +56,7 @@ pub struct NFTMetadata {
     pub description: String,
     pub image_url: String,
     pub attributes: Vec<NFTAttribute>,
-    pub rarity: u32,  // 1-5 scale
+    pub rarity: u32, // 1-5 scale
     pub category: String,
 }
 

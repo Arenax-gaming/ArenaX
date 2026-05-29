@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Vec, BytesN, String};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 /// Storage keys for all contract data
 #[derive(Clone)]
@@ -10,7 +10,7 @@ pub enum DataKey {
     Achievement(Address, u32),             // (player, achievement_id)
     SportsmanshipReview(Address, Address), // (player, reviewer)
     PrivacySettings(Address),
-    ReputationDispute(BytesN<32>),         // dispute_id
+    ReputationDispute(BytesN<32>), // dispute_id
     Config,
 }
 

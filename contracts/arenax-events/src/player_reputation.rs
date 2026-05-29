@@ -117,7 +117,12 @@ pub struct ReputationDisputed {
     pub timestamp: u64,
 }
 
-pub fn emit_reputation_disputed(env: &Env, player: &Address, dispute_id: &soroban_sdk::BytesN<32>, timestamp: u64) {
+pub fn emit_reputation_disputed(
+    env: &Env,
+    player: &Address,
+    dispute_id: &soroban_sdk::BytesN<32>,
+    timestamp: u64,
+) {
     ReputationDisputed {
         player: player.clone(),
         dispute_id: dispute_id.clone(),

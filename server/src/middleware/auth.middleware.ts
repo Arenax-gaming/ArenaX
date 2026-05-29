@@ -121,9 +121,19 @@ export const restrictTo =
 
 // Simple role -> scopes mapping for finer-grained admin permissions
 const roleScopes: Record<string, string[]> = {
-    ADMIN: ['USERS:WRITE', 'GAMES:WRITE', 'MODERATION:REVIEW', 'SYSTEM:READ'],
-    MODERATOR: ['MODERATION:REVIEW'],
-    SUPPORT: ['USERS:READ']
+    ADMIN: [
+        'USERS:WRITE',
+        'GAMES:WRITE',
+        'MODERATION:REVIEW',
+        'SYSTEM:READ',
+        'SYSTEM:WRITE',
+        'PAYMENTS:WRITE',
+        'DISPUTES:WRITE',
+        'KYC:WRITE',
+        'REFUNDS:WRITE'
+    ],
+    MODERATOR: ['MODERATION:REVIEW', 'USERS:READ'],
+    SUPPORT: ['USERS:READ', 'DISPUTES:READ']
 };
 
 export const restrictToScope = (requiredScope: string) => (req: Request, _res: Response, next: NextFunction): void => {
@@ -137,6 +147,32 @@ export const restrictToScope = (requiredScope: string) => (req: Request, _res: R
     const scopes = roleScopes[req.user.role] || [];
     if (!scopes.includes(requiredScope)) {
         return next(new HttpError(403, 'Forbidden'));
+    }
+
+    return next();
+};
+
+// Enhanced permission checking for multiple scopes
+export const restrictToScopes = (requiredScopes: string[], requireAll = false) => (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) {
+        return next(new HttpError(401, 'Unauthorized'));
+    }
+
+    // Admin role gets full access
+    if (req.user.role === 'ADMIN') return next();
+
+    const scopes = roleScopes[req.user.role] || [];
+    
+    if (requireAll) {
+        const hasAll = requiredScopes.every(scope => scopes.includes(scope));
+        if (!hasAll) {
+            return next(new HttpError(403, 'Forbidden'));
+        }
+    } else {
+        const hasAny = requiredScopes.some(scope => scopes.includes(scope));
+        if (!hasAny) {
+            return next(new HttpError(403, 'Forbidden'));
+        }
     }
 
     return next();

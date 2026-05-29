@@ -169,11 +169,19 @@ impl CrossGameAssets {
     ) -> BytesN<32> {
         Self::require_admin(&env);
         let asset_id = Self::asset_id_from_game(&env, game_id, asset_type);
-        if env.storage().persistent().has(&DataKey::AssetDef(asset_id.clone())) {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::AssetDef(asset_id.clone()))
+        {
             panic!("asset already registered");
         }
 
-        let compatible_games = if game_id < 64 { 1u64 << game_id } else { u64::MAX };
+        let compatible_games = if game_id < 64 {
+            1u64 << game_id
+        } else {
+            u64::MAX
+        };
         let def = AssetDefinition {
             asset_id: asset_id.clone(),
             kind: asset_type,
@@ -186,8 +194,12 @@ impl CrossGameAssets {
             is_tradeable: true,
             created_at: env.ledger().timestamp(),
         };
-        env.storage().persistent().set(&DataKey::AssetDef(asset_id.clone()), &def);
-        env.storage().persistent().set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetDef(asset_id.clone()), &def);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
         env.events().publish(
             (soroban_sdk::symbol_short!("ASSET_REG"), asset_id.clone()),
             (game_id, asset_type),
@@ -213,11 +225,11 @@ impl CrossGameAssets {
         if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
             panic!("game not compatible");
         }
-        env.storage().persistent().set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
-        env.events().publish(
-            (soroban_sdk::symbol_short!("META_SYNC"), asset_id),
-            game_id,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Metadata(asset_id.clone(), game_id), &metadata);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("META_SYNC"), asset_id), game_id);
     }
 
     // ── Minting ───────────────────────────────────────────────────────────────
@@ -392,7 +404,9 @@ impl CrossGameAssets {
             panic!("target game not compatible");
         }
         let bal_key = DataKey::Balance(owner.clone(), asset_id.clone());
-        let mut bal: AssetBalance = env.storage().persistent()
+        let mut bal: AssetBalance = env
+            .storage()
+            .persistent()
             .get(&bal_key)
             .expect("asset not owned");
         if bal.source_game_id != from_game {
@@ -446,7 +460,13 @@ impl CrossGameAssets {
         );
     }
 
-    pub fn burn_cross_game_asset(env: Env, asset_id: BytesN<32>, game_id: u32, owner: Address, amount: i128) {
+    pub fn burn_cross_game_asset(
+        env: Env,
+        asset_id: BytesN<32>,
+        game_id: u32,
+        owner: Address,
+        amount: i128,
+    ) {
         if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
             panic!("game not compatible");
         }
@@ -493,14 +513,18 @@ impl CrossGameAssets {
     }
 
     pub fn get_cross_game_inventory(env: Env, player: Address) -> Vec<AssetBalance> {
-        let ids: Vec<BytesN<32>> = env.storage().persistent()
+        let ids: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
             .get(&DataKey::Inventory(player.clone()))
             .unwrap_or(Vec::new(&env));
         let mut inventory = Vec::new(&env);
         let mut i = 0;
         while i < ids.len() {
             let asset_id = ids.get(i).expect("asset id");
-            if let Some(balance) = env.storage().persistent()
+            if let Some(balance) = env
+                .storage()
+                .persistent()
                 .get::<DataKey, AssetBalance>(&DataKey::Balance(player.clone(), asset_id))
             {
                 inventory.push_back(balance);
@@ -563,7 +587,11 @@ impl CrossGameAssets {
 
     fn add_inventory_asset(env: &Env, owner: &Address, asset_id: &BytesN<32>) {
         let key = DataKey::Inventory(owner.clone());
-        let mut ids: Vec<BytesN<32>> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+        let mut ids: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
         let mut i = 0;
         while i < ids.len() {
             if ids.get(i).expect("asset id") == *asset_id {
