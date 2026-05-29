@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "../styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
@@ -27,17 +28,19 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <QueryProvider>
-            <AuthProvider>
-              <WalletProvider>
-                <TxStatusProvider>
-                  <NotificationProvider>
-                    <AppLayout>{children}</AppLayout>
-                  </NotificationProvider>
-                </TxStatusProvider>
-              </WalletProvider>
-            </AuthProvider>
-          </QueryProvider>
+          <AccessibilityProvider>
+            <QueryProvider>
+              <AuthProvider>
+                <WalletProvider>
+                  <TxStatusProvider>
+                    <NotificationProvider>
+                      <AppLayout>{children}</AppLayout>
+                    </NotificationProvider>
+                  </TxStatusProvider>
+                </WalletProvider>
+              </AuthProvider>
+            </QueryProvider>
+          </AccessibilityProvider>
         </ThemeProvider>
       </body>
     </html>
