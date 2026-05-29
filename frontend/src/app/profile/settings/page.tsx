@@ -333,7 +333,7 @@ export default function ProfileSettingsPage() {
             <div className="flex items-start gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 flex-shrink-0" />
               <p>
-                <strong>Friends Only:</strong> Only users you've added as friends can see this information.
+                <strong>Friends Only:</strong> Only users you&apos;ve added as friends can see this information.
               </p>
             </div>
             <div className="flex items-start gap-2">

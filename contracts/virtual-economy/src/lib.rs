@@ -1,13 +1,13 @@
 #![no_std]
 
-mod storage;
-mod error;
-mod marketplace;
+mod analytics;
 mod currency;
+mod error;
+mod governance;
+mod marketplace;
 mod nft;
 mod rewards;
-mod analytics;
-mod governance;
+mod storage;
 
 use arenax_events::virtual_economy as events;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -36,13 +36,17 @@ impl VirtualEconomyContract {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::CurrencyConfig, &currency_config);
-        env.storage().instance().set(&DataKey::MarketplaceConfig, &marketplace_config);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrencyConfig, &currency_config);
+        env.storage()
+            .instance()
+            .set(&DataKey::MarketplaceConfig, &marketplace_config);
+
         // Initialize counters
         env.storage().instance().set(&DataKey::TokenCounter, &0u64);
         env.storage().instance().set(&DataKey::OrderCounter, &0u64);
-        
+
         // Initialize economy analytics
         let analytics = EconomyAnalytics {
             total_currency_minted: 0,
@@ -54,7 +58,9 @@ impl VirtualEconomyContract {
             active_orders: 0,
             unique_traders: 0,
         };
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_economy_initialized(&env, &admin);
         Ok(())
@@ -63,7 +69,9 @@ impl VirtualEconomyContract {
     /// Add authorized minter (e.g., game contracts, reward systems)
     pub fn add_authorized_minter(env: Env, minter: Address) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::AuthorizedMinter(minter.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorizedMinter(minter.clone()), &true);
         events::emit_minter_authorized(&env, &minter);
         Ok(())
     }
@@ -71,7 +79,9 @@ impl VirtualEconomyContract {
     /// Remove authorized minter
     pub fn remove_authorized_minter(env: Env, minter: Address) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
-        env.storage().instance().remove(&DataKey::AuthorizedMinter(minter.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::AuthorizedMinter(minter.clone()));
         events::emit_minter_deauthorized(&env, &minter);
         Ok(())
     }
@@ -88,13 +98,13 @@ impl VirtualEconomyContract {
         reason: String,
     ) -> Result<(), VirtualEconomyError> {
         Self::require_authorized_minter(&env)?;
-        
+
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
         }
 
         let config = Self::get_currency_config(&env);
-        
+
         // Check minting limits
         let current_supply = Self::get_total_currency_supply(env.clone());
         if current_supply + amount > config.max_supply {
@@ -104,15 +114,21 @@ impl VirtualEconomyContract {
         // Update recipient balance
         let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
         let new_balance = current_balance + amount;
-        env.storage().persistent().set(&DataKey::CurrencyBalance(recipient.clone()), &new_balance);
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(recipient.clone()), &new_balance);
 
         // Update total supply
-        env.storage().persistent().set(&DataKey::TotalCurrencySupply, &(current_supply + amount));
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(current_supply + amount));
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_minted += amount;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_currency_minted(&env, &recipient, amount, &reason);
         Ok(())
@@ -126,7 +142,7 @@ impl VirtualEconomyContract {
         amount: i128,
     ) -> Result<(), VirtualEconomyError> {
         from.require_auth();
-        
+
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
         }
@@ -139,8 +155,14 @@ impl VirtualEconomyContract {
         let to_balance = Self::get_currency_balance(env.clone(), to.clone());
 
         // Update balances
-        env.storage().persistent().set(&DataKey::CurrencyBalance(from.clone()), &(from_balance - amount));
-        env.storage().persistent().set(&DataKey::CurrencyBalance(to.clone()), &(to_balance + amount));
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(from.clone()),
+            &(from_balance - amount),
+        );
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(to.clone()),
+            &(to_balance + amount),
+        );
 
         events::emit_currency_transferred(&env, &from, &to, amount);
         Ok(())
@@ -153,7 +175,7 @@ impl VirtualEconomyContract {
         amount: i128,
     ) -> Result<(), VirtualEconomyError> {
         owner.require_auth();
-        
+
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
         }
@@ -164,15 +186,22 @@ impl VirtualEconomyContract {
         }
 
         // Update balance and supply
-        env.storage().persistent().set(&DataKey::CurrencyBalance(owner.clone()), &(balance - amount));
-        
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(owner.clone()),
+            &(balance - amount),
+        );
+
         let current_supply = Self::get_total_currency_supply(env.clone());
-        env.storage().persistent().set(&DataKey::TotalCurrencySupply, &(current_supply - amount));
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(current_supply - amount));
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_burned += amount;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_currency_burned(&env, &owner, amount);
         Ok(())
@@ -180,12 +209,18 @@ impl VirtualEconomyContract {
 
     /// Get currency balance for an address
     pub fn get_currency_balance(env: Env, owner: Address) -> i128 {
-        env.storage().persistent().get(&DataKey::CurrencyBalance(owner)).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::CurrencyBalance(owner))
+            .unwrap_or(0)
     }
 
     /// Get total currency supply
     pub fn get_total_currency_supply(env: Env) -> i128 {
-        env.storage().persistent().get(&DataKey::TotalCurrencySupply).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalCurrencySupply)
+            .unwrap_or(0)
     }
 
     // -------------------------------------------------------------------------
@@ -203,37 +238,56 @@ impl VirtualEconomyContract {
 
         let final_token_id = if let Some(id) = token_id {
             // Check if token already exists
-            if env.storage().persistent().has(&DataKey::NFTOwner(id.clone())) {
+            if env
+                .storage()
+                .persistent()
+                .has(&DataKey::NFTOwner(id.clone()))
+            {
                 return Err(VirtualEconomyError::TokenAlreadyExists);
             }
             id
         } else {
             // Generate new token ID
-            let counter: u64 = env.storage().instance().get(&DataKey::TokenCounter).unwrap_or(0);
+            let counter: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TokenCounter)
+                .unwrap_or(0);
             let new_counter = counter + 1;
-            env.storage().instance().set(&DataKey::TokenCounter, &new_counter);
-            
+            env.storage()
+                .instance()
+                .set(&DataKey::TokenCounter, &new_counter);
+
             let mut id_bytes = [0u8; 32];
             id_bytes[0..8].copy_from_slice(&new_counter.to_be_bytes());
             BytesN::from_array(&env, &id_bytes)
         };
 
         // Store NFT data
-        env.storage().persistent().set(&DataKey::NFTOwner(final_token_id.clone()), &owner);
-        env.storage().persistent().set(&DataKey::NFTMetadata(final_token_id.clone()), &metadata);
+        env.storage()
+            .persistent()
+            .set(&DataKey::NFTOwner(final_token_id.clone()), &owner);
+        env.storage()
+            .persistent()
+            .set(&DataKey::NFTMetadata(final_token_id.clone()), &metadata);
 
         // Update owner's NFT list
-        let mut owned_nfts: Vec<BytesN<32>> = env.storage()
+        let mut owned_nfts: Vec<BytesN<32>> = env
+            .storage()
             .persistent()
             .get(&DataKey::OwnedNFTs(owner.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         owned_nfts.push_back(final_token_id.clone());
-        env.storage().persistent().set(&DataKey::OwnedNFTs(owner.clone()), &owned_nfts);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnedNFTs(owner.clone()), &owned_nfts);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_nfts_minted += 1;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_nft_minted(&env, &final_token_id, &owner, &metadata.name);
         Ok(final_token_id)
@@ -248,7 +302,8 @@ impl VirtualEconomyContract {
     ) -> Result<(), VirtualEconomyError> {
         from.require_auth();
 
-        let current_owner: Address = env.storage()
+        let current_owner: Address = env
+            .storage()
             .persistent()
             .get(&DataKey::NFTOwner(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
@@ -258,14 +313,17 @@ impl VirtualEconomyContract {
         }
 
         // Update ownership
-        env.storage().persistent().set(&DataKey::NFTOwner(token_id.clone()), &to);
+        env.storage()
+            .persistent()
+            .set(&DataKey::NFTOwner(token_id.clone()), &to);
 
         // Update from's NFT list
-        let mut from_nfts: Vec<BytesN<32>> = env.storage()
+        let mut from_nfts: Vec<BytesN<32>> = env
+            .storage()
             .persistent()
             .get(&DataKey::OwnedNFTs(from.clone()))
             .unwrap_or_else(|| Vec::new(&env));
-        
+
         // Remove token from from's list
         let mut new_from_nfts: Vec<BytesN<32>> = Vec::new(&env);
         for nft in from_nfts.iter() {
@@ -273,15 +331,20 @@ impl VirtualEconomyContract {
                 new_from_nfts.push_back(nft);
             }
         }
-        env.storage().persistent().set(&DataKey::OwnedNFTs(from.clone()), &new_from_nfts);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnedNFTs(from.clone()), &new_from_nfts);
 
         // Add to to's NFT list
-        let mut to_nfts: Vec<BytesN<32>> = env.storage()
+        let mut to_nfts: Vec<BytesN<32>> = env
+            .storage()
             .persistent()
             .get(&DataKey::OwnedNFTs(to.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         to_nfts.push_back(token_id.clone());
-        env.storage().persistent().set(&DataKey::OwnedNFTs(to.clone()), &to_nfts);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnedNFTs(to.clone()), &to_nfts);
 
         events::emit_nft_transferred(&env, &token_id, &from, &to);
         Ok(())
@@ -296,7 +359,10 @@ impl VirtualEconomyContract {
     }
 
     /// Get NFT metadata
-    pub fn get_nft_metadata(env: Env, token_id: BytesN<32>) -> Result<NFTMetadata, VirtualEconomyError> {
+    pub fn get_nft_metadata(
+        env: Env,
+        token_id: BytesN<32>,
+    ) -> Result<NFTMetadata, VirtualEconomyError> {
         env.storage()
             .persistent()
             .get(&DataKey::NFTMetadata(token_id))
@@ -346,10 +412,16 @@ impl VirtualEconomyContract {
         }
 
         // Generate order ID
-        let counter: u64 = env.storage().instance().get(&DataKey::OrderCounter).unwrap_or(0);
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OrderCounter)
+            .unwrap_or(0);
         let new_counter = counter + 1;
-        env.storage().instance().set(&DataKey::OrderCounter, &new_counter);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::OrderCounter, &new_counter);
+
         let mut order_bytes = [0u8; 32];
         order_bytes[0..8].copy_from_slice(&new_counter.to_be_bytes());
         let order_id = BytesN::from_array(&env, &order_bytes);
@@ -364,12 +436,16 @@ impl VirtualEconomyContract {
             status: OrderStatus::Active,
         };
 
-        env.storage().persistent().set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.active_orders += 1;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_marketplace_order_created(&env, &order_id, &seller, price);
         Ok(order_id)
@@ -383,7 +459,8 @@ impl VirtualEconomyContract {
     ) -> Result<(), VirtualEconomyError> {
         buyer.require_auth();
 
-        let mut order: MarketplaceOrder = env.storage()
+        let mut order: MarketplaceOrder = env
+            .storage()
             .persistent()
             .get(&DataKey::MarketplaceOrder(order_id.clone()))
             .ok_or(VirtualEconomyError::OrderNotFound)?;
@@ -412,26 +489,32 @@ impl VirtualEconomyContract {
         // Transfer payment
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(buyer.clone()),
-            &(buyer_balance - order.price)
+            &(buyer_balance - order.price),
         );
-        
+
         let seller_balance = Self::get_currency_balance(env.clone(), order.seller.clone());
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(order.seller.clone()),
-            &(seller_balance + seller_amount)
+            &(seller_balance + seller_amount),
         );
 
         // Collect fee
-        let fee_collector_balance = Self::get_currency_balance(env.clone(), config.fee_collector.clone());
+        let fee_collector_balance =
+            Self::get_currency_balance(env.clone(), config.fee_collector.clone());
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(config.fee_collector.clone()),
-            &(fee_collector_balance + fee)
+            &(fee_collector_balance + fee),
         );
 
         // Transfer asset
         match &order.asset {
             MarketplaceAsset::NFT(token_id) => {
-                Self::transfer_nft(env.clone(), order.seller.clone(), buyer.clone(), token_id.clone())?;
+                Self::transfer_nft(
+                    env.clone(),
+                    order.seller.clone(),
+                    buyer.clone(),
+                    token_id.clone(),
+                )?;
             }
             MarketplaceAsset::Currency(amount) => {
                 // For currency sales, the "asset" is already handled in payment transfer
@@ -441,7 +524,9 @@ impl VirtualEconomyContract {
 
         // Mark order as completed
         order.status = OrderStatus::Completed;
-        env.storage().persistent().set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -449,9 +534,17 @@ impl VirtualEconomyContract {
         analytics.total_trades_executed += 1;
         analytics.total_trade_volume += order.price;
         analytics.total_fees_collected += fee;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
-        events::emit_marketplace_trade_executed(&env, &order_id, &buyer, &order.seller, order.price);
+        events::emit_marketplace_trade_executed(
+            &env,
+            &order_id,
+            &buyer,
+            &order.seller,
+            order.price,
+        );
         Ok(())
     }
 
@@ -460,7 +553,8 @@ impl VirtualEconomyContract {
         env: Env,
         order_id: BytesN<32>,
     ) -> Result<(), VirtualEconomyError> {
-        let mut order: MarketplaceOrder = env.storage()
+        let mut order: MarketplaceOrder = env
+            .storage()
             .persistent()
             .get(&DataKey::MarketplaceOrder(order_id.clone()))
             .ok_or(VirtualEconomyError::OrderNotFound)?;
@@ -472,19 +566,26 @@ impl VirtualEconomyContract {
         }
 
         order.status = OrderStatus::Cancelled;
-        env.storage().persistent().set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.active_orders -= 1;
-        env.storage().instance().set(&DataKey::EconomyAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
 
         events::emit_marketplace_order_cancelled(&env, &order_id);
         Ok(())
     }
 
     /// Get marketplace order details
-    pub fn get_marketplace_order(env: Env, order_id: BytesN<32>) -> Result<MarketplaceOrder, VirtualEconomyError> {
+    pub fn get_marketplace_order(
+        env: Env,
+        order_id: BytesN<32>,
+    ) -> Result<MarketplaceOrder, VirtualEconomyError> {
         env.storage()
             .persistent()
             .get(&DataKey::MarketplaceOrder(order_id))
@@ -555,7 +656,9 @@ impl VirtualEconomyContract {
         new_config: CurrencyConfig,
     ) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::CurrencyConfig, &new_config);
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrencyConfig, &new_config);
         events::emit_inflation_controls_updated(&env);
         Ok(())
     }
@@ -563,7 +666,9 @@ impl VirtualEconomyContract {
     /// Emergency pause all economy functions
     pub fn emergency_pause(env: Env) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::EmergencyPaused, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyPaused, &true);
         events::emit_emergency_paused(&env);
         Ok(())
     }
@@ -571,7 +676,9 @@ impl VirtualEconomyContract {
     /// Resume economy functions after emergency
     pub fn emergency_resume(env: Env) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::EmergencyPaused, &false);
+        env.storage()
+            .instance()
+            .set(&DataKey::EmergencyPaused, &false);
         events::emit_emergency_resumed(&env);
         Ok(())
     }
@@ -592,7 +699,12 @@ impl VirtualEconomyContract {
 
     fn require_authorized_minter(env: &Env) -> Result<(), VirtualEconomyError> {
         // Check if emergency paused
-        if env.storage().instance().get(&DataKey::EmergencyPaused).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyPaused)
+            .unwrap_or(false)
+        {
             return Err(VirtualEconomyError::EmergencyPaused);
         }
 
@@ -606,8 +718,8 @@ impl VirtualEconomyContract {
             .get(&DataKey::CurrencyConfig)
             .unwrap_or(CurrencyConfig {
                 max_supply: 1_000_000_000_000, // 1 trillion
-                inflation_rate: 500, // 5% in basis points
-                deflation_rate: 200, // 2% in basis points
+                inflation_rate: 500,           // 5% in basis points
+                deflation_rate: 200,           // 2% in basis points
             })
     }
 

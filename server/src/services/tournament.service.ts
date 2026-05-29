@@ -54,7 +54,7 @@ export class TournamentService {
           description: config.description,
           format: config.format,
           gameId: config.gameId,
-          gameMode: config.gameMode,
+          gameModeId: config.gameMode,
           maxPlayers: config.maxPlayers,
           minPlayers: config.minPlayers || 2,
           entryFee: config.entryFee ? config.entryFee : null,

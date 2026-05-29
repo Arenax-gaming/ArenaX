@@ -38,6 +38,9 @@ export interface SystemHealth {
   serverLatency: number
   memoryUsage: number
   diskUsage: number
+  cpuUsage?: number
+  pendingModerations?: number
+  activeBans?: number
 }
 
 import { getDatabaseClient } from './database.service'
@@ -291,8 +294,17 @@ export class AdminService {
     content: string
   ): Promise<ModerationItem> {
     const prisma = getDatabaseClient()
-    const detection = ModerationService.detectProfanity(content)
-    const created = await prisma.moderationItem.create({ data: { type, reportedUserId: userId, content, flagged: detection.flagged, flagReason: detection.reason ?? null } })
+    const detection = ModerationService.detectAll(content)
+    const created = await prisma.moderationItem.create({ 
+      data: { 
+        type, 
+        reportedUserId: userId, 
+        content, 
+        flagged: detection.flagged, 
+        flagReason: detection.reason ?? null,
+        severity: detection.severity ?? 'LOW'
+      } 
+    })
     const item: ModerationItem = {
       id: created.id,
       type: type,
@@ -305,7 +317,15 @@ export class AdminService {
     console.log('[Admin] Content reported (db):', item)
     // Notify admin webhook for flagged content
     if (detection.flagged) {
-      NotificationService.notifyWebhook({ type: 'MODERATION_FLAGGED', payload: { moderationId: created.id, reason: detection.reason, matches: detection.matches } }).catch(() => null)
+      NotificationService.notifyWebhook({ 
+        type: 'MODERATION_FLAGGED', 
+        payload: { 
+          moderationId: created.id, 
+          reason: detection.reason, 
+          matches: detection.matches,
+          severity: detection.severity
+        } 
+      }).catch(() => null)
     }
 
     return item
@@ -320,18 +340,25 @@ export class AdminService {
     const dbLatency = Date.now() - dbStart
 
     // Get real metrics from database
-    const [userCount, activeMatches] = await Promise.all([
+    const [userCount, activeMatches, pendingModerations, activeBans] = await Promise.all([
       prisma.user.count(),
-      prisma.match.count({ where: { status: 'STARTED' } })
+      prisma.match.count({ where: { status: 'STARTED' } }),
+      prisma.moderationItem.count({ where: { status: 'PENDING' } }),
+      prisma.ban.count({ where: { OR: [{ unbannedAt: null }, { unbannedAt: { gt: new Date() } }] } })
     ])
 
     // Get system metrics
     const memoryUsage = process.memoryUsage()
     const memoryUsagePercent = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100
 
+    // CPU usage estimation (simple approximation)
+    const cpuUsage = process.cpuUsage()
+    const cpuUsagePercent = (cpuUsage.user + cpuUsage.system) / 1000000 // Convert to seconds
+
     // Determine overall status
     const isHealthy = dbLatency < 200 && memoryUsagePercent < 90
-    const status: 'healthy' | 'degraded' | 'down' = isHealthy ? 'healthy' : 'degraded'
+    const isDegraded = dbLatency < 500 && memoryUsagePercent < 95
+    const status: 'healthy' | 'degraded' | 'down' = isHealthy ? 'healthy' : isDegraded ? 'degraded' : 'down'
 
     return {
       status,
@@ -342,6 +369,9 @@ export class AdminService {
       serverLatency: 0, // Can be measured with request timing middleware
       memoryUsage: Math.floor(memoryUsagePercent),
       diskUsage: 0, // Requires filesystem access, placeholder for now
+      cpuUsage: Math.floor(cpuUsagePercent),
+      pendingModerations,
+      activeBans
     }
   }
 

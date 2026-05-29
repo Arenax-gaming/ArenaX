@@ -12,6 +12,19 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 export const metadata: Metadata = {
   title: "ArenaX",
   description: "Competitive Gaming Platform",
+  manifest: "/manifest.json",
+  themeColor: "#111827",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ArenaX",
+  },
 };
 
 export default function RootLayout({

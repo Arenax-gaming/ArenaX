@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import axios from 'axios';
 import { authConfig } from '../config/auth.config';
 import {
     DatabaseTransactionClient,
@@ -8,6 +9,7 @@ import {
 } from './database.service';
 import { HttpError } from '../utils/http-error';
 import stellarWalletService from './stellar-wallet.service';
+import emailService from './email.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -259,13 +261,34 @@ export const registerUser = async (input: RegisterInput) => {
                     data: {
                         email: normalizedEmail,
                         username: candidate,
-                        passwordHash
+                        passwordHash,
+                        provider: 'EMAIL'
                     }
                 });
 
                 await stellarWalletService.registerUserWallet(user.id, tx);
                 return user;
             });
+
+            // Generate and send verification email
+            const verificationToken = crypto.randomBytes(32).toString('hex');
+            const verificationTokenHash = toTokenHash(verificationToken);
+            const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+            await prisma.user.update({
+                where: { id: createdUser.id },
+                data: {
+                    verificationToken: verificationTokenHash,
+                    verificationTokenExpires
+                }
+            });
+
+            try {
+                await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
+            } catch (emailError) {
+                console.error('Failed to send verification email:', emailError);
+                // Don't fail registration if email fails
+            }
 
             const tokens = await issueSessionTokens(createdUser);
 
@@ -406,85 +429,86 @@ export interface SocialAuthInput {
 
 export const authenticateSocial = async (input: SocialAuthInput) => {
     const prisma = getDatabaseClient();
-    
-    // Validate OAuth token with provider (simplified - in production, call provider APIs)
+
     let userProfile: { email: string; username: string; providerId: string };
-    
     switch (input.provider) {
         case 'google':
-            // In production, validate with Google OAuth API
-            userProfile = {
-                email: `user${Date.now()}@google.com`, // Placeholder
-                username: `google_user${Date.now()}`,
-                providerId: `google_${Date.now()}`
-            };
+            userProfile = await validateGoogleToken(input.accessToken);
             break;
         case 'discord':
-            // In production, validate with Discord OAuth API
-            userProfile = {
-                email: `user${Date.now()}@discord.com`, // Placeholder
-                username: `discord_user${Date.now()}`,
-                providerId: `discord_${Date.now()}`
-            };
+            userProfile = await validateDiscordToken(input.accessToken);
             break;
         case 'twitch':
-            // In production, validate with Twitch OAuth API
-            userProfile = {
-                email: `user${Date.now()}@twitch.com`, // Placeholder
-                username: `twitch_user${Date.now()}`,
-                providerId: `twitch_${Date.now()}`
-            };
+            userProfile = await validateTwitchToken(input.accessToken);
             break;
         default:
             throw new HttpError(400, 'Unsupported provider');
     }
-    
+
     const normalizedEmail = normalizeEmail(userProfile.email);
-    
-    // Check if user exists by email
-    let user = await prisma.user.findUnique({
-        where: { email: normalizedEmail }
+
+    // Try to find user by provider id first
+    let user = await prisma.user.findFirst({
+        where: {
+            provider: input.provider.toUpperCase(),
+            providerId: userProfile.providerId
+        }
     });
-    
+
     if (!user) {
-        // Create new user from social login
-        const usernameBase = buildUsernameBase(normalizedEmail, userProfile.username);
-        
-        for (let attempt = 0; attempt < MAX_USERNAME_ATTEMPTS; attempt += 1) {
-            const candidate = buildCandidateUsername(usernameBase, attempt);
-            try {
-                user = await prisma.$transaction(async (tx) => {
-                    const newUser = await tx.user.create({
-                        data: {
-                            email: normalizedEmail,
-                            username: candidate,
-                            passwordHash: '', // No password for social users
-                            isVerified: true // Social users are pre-verified
-                        }
+        // Try to find by email to link accounts
+        user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+        if (user) {
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    provider: input.provider.toUpperCase(),
+                    providerId: userProfile.providerId,
+                    isVerified: true
+                }
+            });
+        } else {
+            const usernameBase = buildUsernameBase(normalizedEmail, userProfile.username);
+
+            for (let attempt = 0; attempt < MAX_USERNAME_ATTEMPTS; attempt += 1) {
+                const candidate = buildCandidateUsername(usernameBase, attempt);
+                try {
+                    user = await prisma.$transaction(async (tx) => {
+                        const newUser = await tx.user.create({
+                            data: {
+                                email: normalizedEmail,
+                                username: candidate,
+                                passwordHash: '',
+                                isVerified: true,
+                                provider: input.provider.toUpperCase(),
+                                providerId: userProfile.providerId
+                            }
+                        });
+
+                        await stellarWalletService.registerUserWallet(newUser.id, tx);
+                        return newUser;
                     });
-                    
-                    await stellarWalletService.registerUserWallet(newUser.id, tx);
-                    return newUser;
-                });
-                break;
-            } catch (error) {
-                if (isUniqueConstraintError(error, 'email')) {
-                    throw new HttpError(409, 'Email already in use');
+                    break;
+                } catch (error) {
+                    if (isUniqueConstraintError(error, 'email')) {
+                        throw new HttpError(409, 'Email already in use');
+                    }
+                    if (isUniqueConstraintError(error, 'username')) {
+                        continue;
+                    }
+                    throw error;
                 }
-                if (isUniqueConstraintError(error, 'username')) {
-                    continue;
-                }
-                throw error;
             }
         }
     }
-    
+
     if (!user) {
         throw new HttpError(500, 'Unable to create user from social login');
     }
-    
+
     const tokens = await issueSessionTokens(user);
-    
+
     return {
         user: mapUserToSafeUser(user),
         tokens: {
@@ -495,6 +519,49 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
         }
     };
 };
+
+// OAuth validation functions
+async function validateGoogleToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    const { email, sub, name } = response.data;
+    return {
+        email,
+        username: name || email.split('@')[0],
+        providerId: sub
+    };
+}
+
+async function validateDiscordToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://discord.com/api/users/@me', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    const { email, id, username: discordUsername, global_name } = response.data;
+    return {
+        email: email || `${id}@discord.local`,
+        username: global_name || discordUsername || `discord_${id}`,
+        providerId: id
+    };
+}
+
+async function validateTwitchToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://api.twitch.tv/helix/users', {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID || ''
+        }
+    });
+    
+    const { email, id, login } = response.data.data[0];
+    return {
+        email: email || `${id}@twitch.local`,
+        username: login || `twitch_${id}`,
+        providerId: id
+    };
+}
 
 export const createGuestSession = async () => {
     const prisma = getDatabaseClient();
@@ -538,15 +605,44 @@ export interface VerifyEmailInput {
 
 export const verifyEmail = async (input: VerifyEmailInput) => {
     const prisma = getDatabaseClient();
-    
-    // In production, validate the verification token from email link
-    // For now, we'll use a simple token-based approach
     const tokenHash = toTokenHash(input.token);
     
-    // Find user by verification token (would need to add verificationToken field to User model)
-    // For now, we'll skip this and mark user as verified if they exist
+    const user = await prisma.user.findFirst({
+        where: {
+            verificationToken: tokenHash
+        }
+    });
     
-    throw new HttpError(501, 'Email verification not yet implemented');
+    if (!user) {
+        throw new HttpError(400, 'Invalid verification token');
+    }
+    
+    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Verification token has expired');
+    }
+    
+    if (user.isVerified) {
+        throw new HttpError(400, 'Email already verified');
+    }
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            isVerified: true,
+            verificationToken: null,
+            verificationTokenExpires: null
+        }
+    });
+    
+    // Send welcome email
+    try {
+        await emailService.sendWelcomeEmail(user.email, user.username);
+    } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail verification if welcome email fails
+    }
+    
+    return { message: 'Email verified successfully' };
 };
 
 export interface ForgotPasswordInput {
@@ -571,6 +667,21 @@ export const forgotPassword = async (input: ForgotPasswordInput) => {
     const resetTokenHash = toTokenHash(resetToken);
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
     
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            passwordResetToken: resetTokenHash,
+            passwordResetExpires: expiresAt
+        }
+    });
+    
+    // Send password reset email
+    try {
+        await emailService.sendPasswordResetEmail(normalizedEmail, resetToken);
+    } catch (emailError) {
+        console.error('Failed to send password reset email:', emailError);
+        // Don't fail if email fails
+    }
     // In production, store reset token in database and send email
     // For now, we'll just log it
     console.log('[Auth] Password reset token for', normalizedEmail, ':', resetToken);
@@ -585,9 +696,32 @@ export interface ResetPasswordInput {
 
 export const resetPassword = async (input: ResetPasswordInput) => {
     const prisma = getDatabaseClient();
+    const tokenHash = toTokenHash(input.token);
     
-    // Validate reset token (would need to add resetToken field to User model)
-    // For now, we'll skip this
+    const user = await prisma.user.findFirst({
+        where: {
+            passwordResetToken: tokenHash
+        }
+    });
     
-    throw new HttpError(501, 'Password reset not yet implemented');
+    if (!user) {
+        throw new HttpError(400, 'Invalid reset token');
+    }
+    
+    if (!user.passwordResetExpires || user.passwordResetExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Reset token has expired');
+    }
+    
+    const passwordHash = await bcrypt.hash(input.newPassword, BCRYPT_ROUNDS);
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            passwordHash,
+            passwordResetToken: null,
+            passwordResetExpires: null
+        }
+    });
+    
+    return { message: 'Password reset successfully' };
 };

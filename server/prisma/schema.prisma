@@ -17,8 +17,15 @@ model User {
   bio           String?
   socials       Json?
   walletAddress String?   @unique
+  verificationToken        String?   @unique
+  verificationTokenExpires DateTime?
+  passwordResetToken      String?   @unique
+  passwordResetExpires   DateTime?
+  provider               String?   @default("EMAIL")
+  providerId             String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
   projects      Project[]
   wallet        UserWallet?
   refreshTokens RefreshToken[]
@@ -46,7 +53,13 @@ model User {
   tournamentParticipations TournamentParticipant[]
   tournamentRegistrations  TournamentRegistration[]
   organizedTournaments     Tournament[]
+  leaderboardEntries       LeaderboardEntry[]
 
+  @@index([deletedAt])
+  @@index([provider])
+  @@index([providerId])
+  @@index([verificationToken])
+  @@index([passwordResetToken])
 }
 
 enum AchievementCategory {
@@ -69,11 +82,13 @@ model Achievement {
   sortOrder    Int                   @default(0)
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
+  deletedAt    DateTime?
   playerProgress PlayerAchievement[]
   shares       AchievementShare[]
   notifications AchievementNotification[]
 
   @@index([category])
+  @@index([deletedAt])
 }
 
 model PlayerAchievement {
@@ -265,6 +280,7 @@ model ModerationItem {
   status         ModerationStatus @default(PENDING)
   flagged        Boolean          @default(false)
   flagReason     String?
+  severity       String           @default("LOW")
   reviewerId     String?
   reviewedAt     DateTime?
   actionTaken    String?
@@ -274,6 +290,7 @@ model ModerationItem {
 
   @@index([reportedUserId])
   @@index([status])
+  @@index([severity])
 }
 
 // Immutable transaction history with idempotency key
@@ -540,6 +557,119 @@ model KycReview {
   @@index([status])
 }
 
+// Game Mode Model
+enum GameModeType {
+  ONE_V_ONE
+  TWO_V_TWO
+  THREE_V_THREE
+  FOUR_V_FOUR
+  FIVE_V_FIVE
+  FREE_FOR_ALL
+  TEAM_DEATHMATCH
+  CAPTURE_THE_FLAG
+}
+
+model GameMode {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  displayName String
+  type        GameModeType
+  description String?
+  maxPlayers  Int
+  minPlayers  Int
+  rules       Json         @default("{}")
+  settings    Json         @default("{}")
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  tournaments Tournament[]
+  gameSessions GameSession[]
+  leaderboards Leaderboard[]
+
+  @@index([type])
+  @@index([isActive])
+}
+
+// Leaderboard Models
+enum LeaderboardType {
+  GLOBAL
+  GAME_MODE
+  SEASON
+  EVENT
+}
+
+model Leaderboard {
+  id          String            @id @default(uuid())
+  name        String
+  type        LeaderboardType
+  gameModeId  String?
+  gameMode    GameMode?         @relation(fields: [gameModeId], references: [id])
+  season      Int?
+  isActive    Boolean           @default(true)
+  startDate   DateTime
+  endDate     DateTime?
+  metadata    Json              @default("{}")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+
+  entries     LeaderboardEntry[]
+
+  @@index([type])
+  @@index([gameModeId])
+  @@index([isActive])
+  @@index([season])
+}
+
+model LeaderboardEntry {
+  id            String     @id @default(uuid())
+  leaderboardId String
+  leaderboard   Leaderboard @relation(fields: [leaderboardId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rank          Int
+  score         Decimal    @default(0) @db.Decimal(20, 7)
+  wins          Int        @default(0)
+  losses        Int        @default(0)
+  draws         Int        @default(0)
+  winRate       Decimal    @default(0) @db.Decimal(5, 4)
+  gamesPlayed   Int        @default(0)
+  metadata      Json       @default("{}")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([leaderboardId, userId])
+  @@index([leaderboardId])
+  @@index([userId])
+  @@index([rank])
+}
+
+// Match History Model
+model MatchHistory {
+  id           String      @id @default(uuid())
+  gameSessionId String?
+  gameSession  GameSession? @relation(fields: [gameSessionId], references: [id])
+  playerAId    String
+  playerBId    String
+  winnerId     String?
+  scoreA       Int
+  scoreB       Int
+  duration     Int
+  analytics    Json        @default("{}")
+  metadata     Json        @default("{}")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+
+  @@index([gameSessionId])
+  @@index([playerAId])
+  @@index([playerBId])
+  @@index([winnerId])
+  @@index([createdAt])
+}
+
 // Tournament and Game Session Models
 enum TournamentFormat {
   SINGLE_ELIMINATION
@@ -600,7 +730,8 @@ model Tournament {
   format            TournamentFormat
   status            TournamentStatus  @default(PENDING)
   gameId            String
-  gameMode          String
+  gameModeId        String
+  gameMode          GameMode          @relation(fields: [gameModeId], references: [id])
   maxPlayers        Int
   minPlayers        Int               @default(2)
   entryFee          Decimal?          @db.Decimal(20, 7)
@@ -619,12 +750,14 @@ model Tournament {
   metadata          Json              @default("{}")
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
   participants      TournamentParticipant[]
   matches           TournamentMatch[]
   registrations     TournamentRegistration[]
 
   @@index([status])
   @@index([gameId])
+  @@index([gameModeId])
   @@index([organizerId])
   @@index([startDate])
 }
@@ -648,6 +781,7 @@ model TournamentParticipant {
   prizeAmount       Decimal?  @db.Decimal(20, 7)
   metadata          Json       @default("{}")
   registeredAt      DateTime   @default(now())
+  deletedAt         DateTime?
   matchesAsPlayerA  TournamentMatch[] @relation("MatchPlayerA")
   matchesAsPlayerB  TournamentMatch[] @relation("MatchPlayerB")
   matchesAsWinner   TournamentMatch[] @relation("MatchWinner")
@@ -656,6 +790,7 @@ model TournamentParticipant {
   @@index([tournamentId])
   @@index([userId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model TournamentMatch {
@@ -682,12 +817,14 @@ model TournamentMatch {
   metadata          Json       @default("{}")
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
+  deletedAt         DateTime?
 
   @@index([tournamentId])
   @@index([round])
   @@index([status])
   @@index([playerAId])
   @@index([playerBId])
+  @@index([deletedAt])
 }
 
 model TournamentRegistration {
@@ -713,7 +850,8 @@ model TournamentRegistration {
 model GameSession {
   id                String            @id @default(uuid())
   gameId            String
-  gameMode          String
+  gameModeId        String
+  gameMode          GameMode          @relation(fields: [gameModeId], references: [id])
   sessionType       GameSessionType   @default(CASUAL)
   status            GameSessionStatus @default(CREATED)
   hostId            String
@@ -730,12 +868,15 @@ model GameSession {
   duration          Int?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
   players           GameSessionPlayer[]
   actions           GameSessionAction[]
   events            GameSessionEvent[]
+  matchHistories    MatchHistory[]
 
   @@index([status])
   @@index([gameId])
+  @@index([gameModeId])
   @@index([hostId])
   @@index([sessionType])
 }
@@ -758,12 +899,14 @@ model GameSessionPlayer {
   joinedAt          DateTime       @default(now())
   leftAt            DateTime?
   metadata          Json           @default("{}")
+  deletedAt         DateTime?
   actions           GameSessionAction[]
 
   @@unique([sessionId, userId])
   @@index([sessionId])
   @@index([userId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model GameSessionAction {
