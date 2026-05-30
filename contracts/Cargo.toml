@@ -30,6 +30,7 @@ members = [
     "virtual-economy",
     "governance",
     "prize-distribution",
+    "random-generation",
 ]
 resolver = "2"
 
