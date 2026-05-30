@@ -146,3 +146,10 @@ test-results.xml
 
 # Design docs (local only)
 docs/superpowers/
+
+# Kiro IDE workspace files
+.kiro/
+
+# Pull request drafts
+PULL_REQUEST.md
+pr-*.md
