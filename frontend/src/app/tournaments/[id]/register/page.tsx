@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 export default function TournamentRegisterPage() {
   const params = useParams();
   const router = useRouter();
-  const tournamentId = params.id as string;
+  const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const [tournament, setTournament] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
