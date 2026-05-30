@@ -80,6 +80,18 @@ export default function LeaderboardPage() {
     }));
   }, [players, search, gameFilter, sortBy]);
 
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
+
+  const totalCount = filteredPlayers.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const pagedPlayers = filteredPlayers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, totalCount);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [search, gameFilter, sortBy]);
+
   const games = ["all", "Chess", "Checkers", "Go", "Poker"];
 
   return (
@@ -139,56 +151,84 @@ export default function LeaderboardPage() {
               No players found matching your filters.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 font-semibold">Rank</th>
-                    <th className="text-left py-3 px-4 font-semibold">Player</th>
-                    <th className="text-left py-3 px-4 font-semibold">Game</th>
-                    <th
-                      className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
-                      onClick={() => setSortBy("points")}
-                    >
-                      Points {sortBy === "points" && <ArrowDown className="inline w-4 h-4" />}
-                    </th>
-                    <th
-                      className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
-                      onClick={() => setSortBy("wins")}
-                    >
-                      Wins {sortBy === "wins" && <ArrowDown className="inline w-4 h-4" />}
-                    </th>
-                    <th
-                      className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
-                      onClick={() => setSortBy("winRate")}
-                    >
-                      Win Rate {sortBy === "winRate" && <ArrowDown className="inline w-4 h-4" />}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPlayers.map((player) => (
-                    <tr key={player.userId} className="border-b hover:bg-muted/50">
-                      <td className="py-3 px-4">
-                        <Badge variant="outline">#{player.rank}</Badge>
-                      </td>
-                      <td className="py-3 px-4 flex items-center gap-2">
-                        <Image className="w-4 h-4 text-muted-foreground" />
-                        {player.username}
-                      </td>
-                      <td className="py-3 px-4">{player.game}</td>
-                      <td className="py-3 px-4 font-semibold">
-                        {Math.round(player.points)}
-                      </td>
-                      <td className="py-3 px-4">{player.wins}</td>
-                      <td className="py-3 px-4">
-                        {(player.winRate * 100).toFixed(1)}%
-                      </td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-semibold">Rank</th>
+                      <th className="text-left py-3 px-4 font-semibold">Player</th>
+                      <th className="text-left py-3 px-4 font-semibold">Game</th>
+                      <th
+                        className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
+                        onClick={() => setSortBy("points")}
+                      >
+                        Points {sortBy === "points" && <ArrowDown className="inline w-4 h-4" />}
+                      </th>
+                      <th
+                        className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
+                        onClick={() => setSortBy("wins")}
+                      >
+                        Wins {sortBy === "wins" && <ArrowDown className="inline w-4 h-4" />}
+                      </th>
+                      <th
+                        className="text-left py-3 px-4 font-semibold cursor-pointer hover:text-primary"
+                        onClick={() => setSortBy("winRate")}
+                      >
+                        Win Rate {sortBy === "winRate" && <ArrowDown className="inline w-4 h-4" />}
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {pagedPlayers.map((player) => (
+                      <tr key={player.userId} className="border-b hover:bg-muted/50">
+                        <td className="py-3 px-4">
+                          <Badge variant="outline">#{player.rank}</Badge>
+                        </td>
+                        <td className="py-3 px-4 flex items-center gap-2">
+                          <Image className="w-4 h-4 text-muted-foreground" />
+                          {player.username}
+                        </td>
+                        <td className="py-3 px-4">{player.game}</td>
+                        <td className="py-3 px-4 font-semibold">
+                          {Math.round(player.points)}
+                        </td>
+                        <td className="py-3 px-4">{player.wins}</td>
+                        <td className="py-3 px-4">
+                          {(player.winRate * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="flex items-center justify-between pt-4 text-sm">
+                <p className="text-muted-foreground">
+                  Showing {rangeStart}–{rangeEnd} of {totalCount} players
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => p - 1)}
+                    disabled={page === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-muted transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={page === totalPages}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40 hover:bg-muted transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
