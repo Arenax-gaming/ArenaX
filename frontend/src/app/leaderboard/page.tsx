@@ -13,16 +13,7 @@ import {
 } from "@/components/ui/Select";
 import { Image as ImageIcon } from "lucide-react";
 import { ArrowUp, ArrowDown } from "lucide-react";
-
-export interface LeaderboardPlayer {
-  rank: number;
-  userId: string;
-  username: string;
-  points: number;
-  wins: number;
-  winRate: number;
-  game: string;
-}
+import type { LeaderboardPlayer } from "@/types/leaderboard";
 
 export default function LeaderboardPage() {
   const [search, setSearch] = useState("");

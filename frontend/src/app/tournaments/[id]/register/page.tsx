@@ -6,12 +6,13 @@ import { RegistrationForm } from "@/components/tournaments/RegistrationForm";
 import { Button } from "@/components/ui/Button";
 import { ArrowLeft, AlertCircle } from "lucide-react";
 import { api } from "@/lib/api";
+import type { Tournament } from "@/types/tournament";
 
 export default function TournamentRegisterPage() {
   const params = useParams();
   const router = useRouter();
   const tournamentId = params.id as string;
-  const [tournament, setTournament] = useState<any | null>(null);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 

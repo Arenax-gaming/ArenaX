@@ -14,6 +14,7 @@ import { ArrowLeft, RadioTower, ShieldAlert, Swords, Trophy } from "lucide-react
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
+import type { Tournament } from "@/types/tournament";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -24,7 +25,7 @@ export default function TournamentDetailsPage() {
   // branch below rather than rendering a hardcoded fallback.
   const tournamentId = params.id as string;
   const currentUserId = user?.id ?? "user-123";
-  const [tournament, setTournament] = useState<any | null>(null);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 

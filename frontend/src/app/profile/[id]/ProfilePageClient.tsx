@@ -11,17 +11,7 @@ import { FriendsList } from '@/components/profile/FriendsList';
 import { ActivityFeed } from '@/components/profile/ActivityFeed';
 import { Button } from '@/components/ui/Button';
 import { Share2, Settings, UserPlus, MessageCircle } from 'lucide-react';
-import type { PublicProfile, PlayerStats, Achievement, FriendEntry, ActivityEvent } from '@/types/profile';
-import type { EloPoint } from '@/types/user';
-
-interface ProfilePageClientProps {
-  profile: PublicProfile;
-  stats: PlayerStats;
-  achievements: Achievement[];
-  friends: FriendEntry[];
-  activities: ActivityEvent[];
-  eloHistory: EloPoint[];
-}
+import type { PublicProfileViewProps } from '@/types/profile';
 
 export function ProfilePageClient({
   profile,
@@ -30,7 +20,7 @@ export function ProfilePageClient({
   friends,
   activities,
   eloHistory,
-}: ProfilePageClientProps) {
+}: PublicProfileViewProps) {
   const { user } = useAuth();
 
   const viewerRelation: 'owner' | 'friend' | 'public' =

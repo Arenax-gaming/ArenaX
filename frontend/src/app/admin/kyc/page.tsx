@@ -7,21 +7,7 @@ import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-
-type KycStatus = "PENDING" | "APPROVED" | "REJECTED" | "ESCALATED";
-
-interface KycReview {
-  id: string;
-  userId: string;
-  status: KycStatus;
-  documents: any[];
-  notes?: string;
-  user: {
-    username: string;
-    email: string;
-  };
-  createdAt: string;
-}
+import type { KycDocument, KycReview, KycStatus } from "@/types/admin";
 
 export default function KycDashboard() {
   const [reviews, setReviews] = useState<KycReview[]>([]);
@@ -172,7 +158,7 @@ export default function KycDashboard() {
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
                     {Array.isArray(selectedReview.documents) && selectedReview.documents.length > 0 ? (
-                      selectedReview.documents.map((doc: any, i: number) => (
+                      selectedReview.documents.map((doc: KycDocument, i: number) => (
                         <div key={i} className="group relative aspect-video bg-muted rounded-xl overflow-hidden border-2 border-transparent hover:border-primary transition-all">
                           <Image 
                             src={doc.url} 

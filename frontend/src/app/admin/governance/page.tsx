@@ -5,9 +5,10 @@ import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import type { GovernanceProposal } from "@/types/admin";
 
 export default function GovernanceDashboard() {
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<GovernanceProposal[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,7 +18,7 @@ export default function GovernanceDashboard() {
   const fetchProposals = async () => {
     try {
       const data = await api.getProposals();
-      setProposals(data);
+      setProposals(data as GovernanceProposal[]);
     } catch (error) {
       console.error("Failed to fetch proposals:", error);
     } finally {

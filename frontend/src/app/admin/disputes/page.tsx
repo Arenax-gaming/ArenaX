@@ -5,9 +5,10 @@ import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import type { Dispute } from "@/types/admin";
 
 export default function DisputeDashboard() {
-  const [disputes, setDisputes] = useState<any[]>([]);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,7 +18,7 @@ export default function DisputeDashboard() {
   const fetchDisputes = async () => {
     try {
       const data = await api.getDisputes();
-      setDisputes(data as any[]);
+      setDisputes(data as Dispute[]);
     } catch (error) {
       console.error("Failed to fetch disputes:", error);
     } finally {

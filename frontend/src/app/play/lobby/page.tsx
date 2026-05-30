@@ -5,17 +5,11 @@ import PartyManager from '@/components/game/PartyManager';
 import ChatPanel from '@/components/game/ChatPanel';
 import GameSettings from '@/components/game/GameSettings';
 import CountdownTimer from '@/components/game/CountdownTimer';
-
-interface Player {
-  id: string;
-  username: string;
-  isReady: boolean;
-  isHost: boolean;
-}
+import type { PartyPlayer } from '@/types/player';
 
 export default function LobbyPage() {
   const [sessionId, setSessionId] = useState<string>('');
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<PartyPlayer[]>([]);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
