@@ -3,6 +3,7 @@ export interface Tournament {
   id: string;
   name: string;
   description?: string;
+  banner?: string;
   gameType: string;
   tournamentType: string;
   entryFee: number;
