@@ -14,11 +14,11 @@ interface MatchCardProps {
 }
 
 const statusConfig = {
-  pending: { label: "Pending", color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-800" },
-  ready: { label: "Ready", color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-900" },
-  in_progress: { label: "Live", color: "text-green-600", bg: "bg-green-100 dark:bg-green-900" },
+  pending: { label: "Pending", color: "text-muted-foreground", bg: "bg-muted dark:bg-surface" },
+  ready: { label: "Ready", color: "text-primary", bg: "bg-blue-100 dark:bg-info-muted" },
+  in_progress: { label: "Live", color: "text-success", bg: "bg-success-muted dark:bg-success-muted" },
   completed: { label: "Completed", color: "text-purple-600", bg: "bg-purple-100 dark:bg-purple-900" },
-  disputed: { label: "Disputed", color: "text-red-600", bg: "bg-red-100 dark:bg-red-900" },
+  disputed: { label: "Disputed", color: "text-destructive", bg: "bg-destructive/10 dark:bg-destructive/20" },
 };
 
 export function MatchCard({ match, currentUserId, showLink = true }: MatchCardProps) {
@@ -35,8 +35,8 @@ export function MatchCard({ match, currentUserId, showLink = true }: MatchCardPr
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          {isLive && <RadioTower className="h-4 w-4 animate-pulse text-green-500" />}
-          {isDisputed && <AlertTriangle className="h-4 w-4 text-red-500" />}
+          {isLive && <RadioTower className="h-4 w-4 animate-pulse text-success" />}
+          {isDisputed && <AlertTriangle className="h-4 w-4 text-destructive" />}
           {isCompleted && <CheckCircle className="h-4 w-4 text-purple-500" />}
           {!isLive && !isDisputed && !isCompleted && <Swords className="h-4 w-4 text-muted-foreground" />}
           <span className="text-sm font-medium text-foreground">
@@ -60,14 +60,14 @@ export function MatchCard({ match, currentUserId, showLink = true }: MatchCardPr
           <div
             key={idx}
             className={`flex items-center justify-between px-4 py-3 ${
-              isWinner ? "bg-green-50 dark:bg-green-950/20" : ""
+              isWinner ? "bg-success-muted dark:bg-success-muted/20" : ""
             }`}
           >
             <div className="flex items-center gap-3">
               <div
                 className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${
                   player?.id === currentUserId
-                    ? "bg-blue-600"
+                    ? "bg-primary/90"
                     : "bg-gradient-to-br from-slate-500 to-slate-700"
                 }`}
               >
@@ -77,7 +77,7 @@ export function MatchCard({ match, currentUserId, showLink = true }: MatchCardPr
                 <p className={`text-sm font-semibold ${isWinner ? "text-green-700 dark:text-green-300" : "text-foreground"}`}>
                   {player ? player.username : "TBD"}
                   {player?.id === currentUserId && (
-                    <span className="ml-1 text-xs text-blue-500">(you)</span>
+                    <span className="ml-1 text-xs text-primary">(you)</span>
                   )}
                 </p>
                 {player?.elo && (
@@ -86,9 +86,9 @@ export function MatchCard({ match, currentUserId, showLink = true }: MatchCardPr
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {isWinner && <CheckCircle className="h-4 w-4 text-green-500" />}
+              {isWinner && <CheckCircle className="h-4 w-4 text-success" />}
               {score !== undefined && (
-                <span className={`text-lg font-bold ${isWinner ? "text-green-600 dark:text-green-400" : "text-foreground"}`}>
+                <span className={`text-lg font-bold ${isWinner ? "text-success dark:text-success/80" : "text-foreground"}`}>
                   {score}
                 </span>
               )}
@@ -125,7 +125,7 @@ export function MatchCard({ match, currentUserId, showLink = true }: MatchCardPr
 
       {/* Dispute notice */}
       {isDisputed && match.conflictReason && (
-        <div className="border-t bg-red-50 px-4 py-2 dark:bg-red-950/20">
+        <div className="border-t bg-destructive/5 px-4 py-2 dark:bg-destructive/10/20">
           <p className="text-xs text-red-700 dark:text-red-300">{match.conflictReason}</p>
         </div>
       )}

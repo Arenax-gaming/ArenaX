@@ -22,17 +22,17 @@ export function PasswordStrengthIndicator({ password }: PasswordStrengthIndicato
   const getStrengthLabel = () => {
     switch (strength) {
       case 0: return '';
-      case 1: return { text: 'Very Weak', color: 'text-red-500' };
+      case 1: return { text: 'Very Weak', color: 'text-destructive' };
       case 2: return { text: 'Weak', color: 'text-orange-500' };
       case 3: return { text: 'Good', color: 'text-yellow-500' };
-      case 4: return { text: 'Strong', color: 'text-green-500' };
+      case 4: return { text: 'Strong', color: 'text-success' };
       default: return { text: '', color: '' };
     }
   };
 
   const getBarColors = () => {
-    const colors = ['bg-gray-200', 'bg-gray-200', 'bg-gray-200', 'bg-gray-200'];
-    const activeColor = strength === 1 ? 'bg-red-500' : strength === 2 ? 'bg-orange-500' : strength === 3 ? 'bg-yellow-500' : 'bg-green-500';
+    const colors = ['bg-muted', 'bg-muted', 'bg-muted', 'bg-muted'];
+    const activeColor = strength === 1 ? 'bg-destructive' : strength === 2 ? 'bg-orange-500' : strength === 3 ? 'bg-yellow-500' : 'bg-success';
     
     for (let i = 0; i < strength && i < colors.length; i++) {
       colors[i] = activeColor;

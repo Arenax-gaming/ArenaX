@@ -102,7 +102,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
             aria-invalid={!!errors.username}
           />
           {errors.username && (
-            <p id="username-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="username-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.username}
             </p>
@@ -125,7 +125,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
             aria-invalid={!!errors.email || !!error}
           />
           {errors.email && (
-            <p id="register-email-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="register-email-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.email}
             </p>
@@ -149,7 +149,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
           />
           <PasswordStrengthIndicator password={formData.password} />
           {errors.password && (
-            <p id="register-password-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="register-password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.password}
             </p>
@@ -172,7 +172,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
             aria-invalid={!!errors.confirmPassword}
           />
           {errors.confirmPassword && (
-            <p id="confirm-password-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="confirm-password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.confirmPassword}
             </p>
@@ -180,7 +180,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
         </div>
         
         {error && (
-          <div className="flex gap-2 p-3 rounded-md bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10/30 dark:text-red-200">
             <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <p className="text-sm">{error}</p>
           </div>
@@ -193,22 +193,22 @@ export function RegisterForm({ className }: RegisterFormProps) {
               type="checkbox"
               checked={formData.agreeToTerms}
               onChange={(e) => setFormData({ ...formData, agreeToTerms: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
           </div>
           <div className="ml-2 text-sm">
             <label htmlFor="agree-terms" className="text-muted-foreground">
               I agree to the{' '}
-              <a href="/terms" className="text-blue-600 hover:text-blue-700 font-medium">
+              <a href="/terms" className="text-primary hover:text-info font-medium">
                 Terms of Service
               </a>{' '}
               and{' '}
-              <a href="/privacy" className="text-blue-600 hover:text-blue-700 font-medium">
+              <a href="/privacy" className="text-primary hover:text-info font-medium">
                 Privacy Policy
               </a>
             </label>
             {errors.agreeToTerms && (
-              <p className="flex items-center gap-1 mt-1 text-xs text-red-500">
+              <p className="flex items-center gap-1 mt-1 text-xs text-destructive">
                 <AlertCircle className="h-3 w-3" />
                 {errors.agreeToTerms}
               </p>

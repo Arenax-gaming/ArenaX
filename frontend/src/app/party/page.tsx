@@ -43,7 +43,7 @@ export default function PartyPage() {
             <Users className="w-8 h-8" />
             Party System
           </h1>
-          <p className="text-gray-400">
+          <p className="text-muted-foreground">
             Create or join a party to play with friends
           </p>
         </div>
@@ -51,7 +51,7 @@ export default function PartyPage() {
         {/* Create Party Button */}
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
-          className="mb-8 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors"
+          className="mb-8 bg-primary/90 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors"
         >
           <Plus className="w-5 h-5" />
           Create Party
@@ -59,13 +59,13 @@ export default function PartyPage() {
 
         {/* Create Party Form */}
         {showCreateForm && (
-          <div className="bg-gray-800/50 rounded-lg border border-gray-700 p-6 mb-8">
+          <div className="bg-surface/50 rounded-lg border border-border p-6 mb-8">
             <h2 className="text-xl font-bold text-white mb-4">
               Create New Party
             </h2>
             <div className="space-y-4">
               <div>
-                <label htmlFor="party-name-create" className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="party-name-create" className="block text-sm font-medium text-foreground/80 mb-2">
                   Party Name
                 </label>
                 <input
@@ -74,12 +74,12 @@ export default function PartyPage() {
                   value={partyName}
                   onChange={(e) => setPartyName(e.target.value)}
                   placeholder="Enter party name..."
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-surface-raised border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-primary"
                 />
               </div>
 
               <div>
-                <label htmlFor="party-description" className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="party-description" className="block text-sm font-medium text-foreground/80 mb-2">
                   Description (Optional)
                 </label>
                 <textarea
@@ -87,12 +87,12 @@ export default function PartyPage() {
                   value={partyDescription}
                   onChange={(e) => setPartyDescription(e.target.value)}
                   placeholder="Enter party description..."
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 h-20 resize-none"
+                  className="w-full bg-surface-raised border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-primary h-20 resize-none"
                 />
               </div>
 
               <div>
-                <label htmlFor="max-members" className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="max-members" className="block text-sm font-medium text-foreground/80 mb-2">
                   Max Members: {maxMembers}
                 </label>
                 <input
@@ -110,7 +110,7 @@ export default function PartyPage() {
                 <button
                   onClick={handleCreateParty}
                   disabled={createPartyMutation.isPending || !partyName.trim()}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  className="flex-1 bg-primary/90 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                 >
                   {createPartyMutation.isPending
                     ? "Creating..."
@@ -118,7 +118,7 @@ export default function PartyPage() {
                 </button>
                 <button
                   onClick={() => setShowCreateForm(false)}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  className="flex-1 bg-surface-raised hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                 >
                   Cancel
                 </button>

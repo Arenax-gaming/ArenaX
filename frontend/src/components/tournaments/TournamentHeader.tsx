@@ -14,12 +14,12 @@ const statusConfig: Record<
   draft: {
     label: "Draft",
     color: "text-gray-600",
-    bgColor: "bg-gray-100 dark:bg-gray-800",
+    bgColor: "bg-muted dark:bg-surface",
   },
   registration_open: {
     label: "Registration Open",
-    color: "text-green-600",
-    bgColor: "bg-green-100 dark:bg-green-900",
+    color: "text-success",
+    bgColor: "bg-success-muted dark:bg-success-muted",
   },
   registration_closed: {
     label: "Registration Closed",
@@ -28,8 +28,8 @@ const statusConfig: Record<
   },
   in_progress: {
     label: "Ongoing",
-    color: "text-blue-600",
-    bgColor: "bg-blue-100 dark:bg-blue-900",
+    color: "text-primary",
+    bgColor: "bg-blue-100 dark:bg-info-muted",
   },
   completed: {
     label: "Completed",
@@ -38,8 +38,8 @@ const statusConfig: Record<
   },
   cancelled: {
     label: "Cancelled",
-    color: "text-red-600",
-    bgColor: "bg-red-100 dark:bg-red-900",
+    color: "text-destructive",
+    bgColor: "bg-destructive/10 dark:bg-destructive/20",
   },
 };
 
@@ -127,7 +127,7 @@ export function TournamentHeader({ tournament }: TournamentHeaderProps) {
 
         {/* Start Date */}
         <div className="flex items-start gap-3">
-          <Calendar className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <Calendar className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">
               Start Date
@@ -141,7 +141,7 @@ export function TournamentHeader({ tournament }: TournamentHeaderProps) {
 
         {/* Participants */}
         <div className="flex items-start gap-3">
-          <Users className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
+          <Users className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">
               Participants
@@ -149,10 +149,10 @@ export function TournamentHeader({ tournament }: TournamentHeaderProps) {
             <p className="text-lg font-bold text-foreground">
               {tournament.currentParticipants}/{tournament.maxParticipants}
             </p>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
+            <div className="w-full bg-muted dark:bg-surface-raised rounded-full h-1.5 mt-1">
               <div
                 className={`h-1.5 rounded-full transition-all ${
-                  isFull ? "bg-red-500" : "bg-green-500"
+                  isFull ? "bg-destructive" : "bg-success"
                 }`}
                 style={{ width: `${participantPercentage}%` }}
               />

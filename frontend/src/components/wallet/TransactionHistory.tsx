@@ -26,7 +26,7 @@ const statusStyles: Record<TxHistoryItem["status"], string> = {
     "bg-amber-100 text-amber-900 dark:bg-amber-900/25 dark:text-amber-100",
   success:
     "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/25 dark:text-emerald-100",
-  failed: "bg-red-100 text-red-900 dark:bg-red-900/25 dark:text-red-100",
+  failed: "bg-destructive/10 text-red-900 dark:bg-destructive/20/25 dark:text-destructive-foreground",
 };
 
 export function TransactionHistory({ items, onClear }: TransactionHistoryProps) {
@@ -85,7 +85,7 @@ export function TransactionHistory({ items, onClear }: TransactionHistoryProps) 
                       href={item.explorerUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-blue-600 hover:underline dark:text-blue-400"
+                      className="text-primary hover:underline dark:text-primary/80"
                     >
                       View Explorer
                     </a>

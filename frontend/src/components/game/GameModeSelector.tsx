@@ -94,13 +94,13 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
             }
           `}
         >
-          <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 border border-gray-700 h-full">
+          <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 border border-border h-full">
             <div className="text-5xl mb-4">{mode.icon}</div>
             <h3 className="text-2xl font-bold text-white mb-2">{mode.name}</h3>
-            <p className="text-gray-400 mb-4">{mode.description}</p>
+            <p className="text-muted-foreground mb-4">{mode.description}</p>
             
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-300 bg-gray-700 px-3 py-1 rounded-full">
+              <span className="text-foreground/80 bg-surface-raised px-3 py-1 rounded-full">
                 {mode.players}
               </span>
               <span className="text-purple-400 font-semibold">

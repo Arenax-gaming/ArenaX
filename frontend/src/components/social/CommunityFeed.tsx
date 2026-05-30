@@ -102,7 +102,7 @@ export function CommunityFeed({
               placeholder="Share something with the community..."
               value={newPostContent}
               onChange={(e) => setNewPostContent(e.target.value)}
-              className="w-full p-3 bg-muted rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 bg-muted rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
               rows={3}
             />
             <div className="flex items-center justify-between">
@@ -111,7 +111,7 @@ export function CommunityFeed({
                 placeholder="Tags (comma separated, e.g., guide, tips)"
                 value={newPostTags}
                 onChange={(e) => setNewPostTags(e.target.value)}
-                className="flex-1 mr-3 px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 mr-3 px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <Button
                 variant="primary"
@@ -203,7 +203,7 @@ export function CommunityFeed({
                     Share
                   </button>
                   <button
-                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-red-600"
+                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-destructive"
                     onClick={() => {
                       onReportPost?.(post.id);
                       setActiveMenu(null);
@@ -216,7 +216,7 @@ export function CommunityFeed({
                     <>
                       <div className="border-t my-1" />
                       <button
-                        className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-red-600"
+                        className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-destructive"
                         onClick={() => setActiveMenu(null)}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -274,7 +274,7 @@ export function CommunityFeed({
             <Button
               variant="ghost"
               size="sm"
-              className={`flex-1 ${isLiked ? "text-red-500" : ""}`}
+              className={`flex-1 ${isLiked ? "text-destructive" : ""}`}
               onClick={() => onLikePost(post.id)}
             >
               <Heart className={`h-4 w-4 mr-2 ${isLiked ? "fill-current" : ""}`} />
@@ -314,7 +314,7 @@ export function CommunityFeed({
                       handleAddComment(post.id);
                     }
                   }}
-                  className="flex-1 px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 <Button
                   variant="primary"

@@ -89,7 +89,7 @@ export function LoginForm({ className }: LoginFormProps) {
             aria-invalid={!!errors.email || !!error}
           />
           {errors.email && (
-            <p id="email-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="email-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.email}
             </p>
@@ -101,7 +101,7 @@ export function LoginForm({ className }: LoginFormProps) {
             <label htmlFor="password" className="block text-sm font-medium text-foreground">
               Password
             </label>
-            <Link href="/auth/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+            <Link href="/auth/forgot-password" className="text-sm text-primary hover:text-info font-medium">
               Forgot password?
             </Link>
           </div>
@@ -117,7 +117,7 @@ export function LoginForm({ className }: LoginFormProps) {
             aria-invalid={!!errors.password || !!error}
           />
           {errors.password && (
-            <p id="password-error" className="flex items-center gap-1 text-xs text-red-500">
+            <p id="password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.password}
             </p>
@@ -125,7 +125,7 @@ export function LoginForm({ className }: LoginFormProps) {
         </div>
         
         {error && (
-          <div className="flex gap-2 p-3 rounded-md bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10/30 dark:text-red-200">
             <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <p className="text-sm">{error}</p>
           </div>
@@ -137,7 +137,7 @@ export function LoginForm({ className }: LoginFormProps) {
             type="checkbox"
             checked={formData.rememberMe}
             onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
           />
           <label htmlFor="remember-me" className="ml-2 block text-sm text-muted-foreground">
             Remember me
