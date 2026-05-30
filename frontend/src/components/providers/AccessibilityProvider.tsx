@@ -5,7 +5,7 @@ import React, { useEffect } from "react";
 export function AccessibilityProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
-      const loadAxe();
+      loadAxe();
     }
   }, []);
 

@@ -75,8 +75,14 @@ export function TournamentCardWithQuickJoin({
     onJoinSuccess?.(tournamentId);
   };
 
+  const cardHref =
+    tournament.status === "completed"
+      ? `/tournaments/${tournament.id}/results`
+      : `/tournaments/${tournament.id}`;
+
   return (
     <>
+      <Link href={cardHref} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg">
       <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
         {/* Header with Status */}
         <div className="flex items-start justify-between border-b p-4">
@@ -194,37 +200,27 @@ export function TournamentCardWithQuickJoin({
               Quick Join
             </Button>
           ) : (
-            // #324: route completed tournaments to the dedicated
-            // results page so the View Results CTA actually lands the
-            // user on a results view rather than the live detail page.
-            <Link
-              href={
-                tournament.status === "completed"
-                  ? `/tournaments/${tournament.id}/results`
-                  : `/tournaments/${tournament.id}`
-              }
-              className="block"
+            <Button
+              variant={isJoined ? "secondary" : "outline"}
+              size="md"
+              className="w-full"
+              disabled={!isJoined && tournament.status !== "registration_open"}
+              tabIndex={-1}
             >
-              <Button
-                variant={isJoined ? "secondary" : "outline"}
-                size="md"
-                className="w-full"
-                disabled={!isJoined && tournament.status !== "registration_open"}
-              >
-                {isJoined
-                  ? "View Details"
-                  : isFull
-                    ? "Tournament Full"
-                    : tournament.status === "in_progress"
-                      ? "View Bracket"
-                      : tournament.status === "completed"
-                        ? "View Results"
-                        : "View Details"}
-              </Button>
-            </Link>
+              {isJoined
+                ? "View Details"
+                : isFull
+                  ? "Tournament Full"
+                  : tournament.status === "in_progress"
+                    ? "View Bracket"
+                    : tournament.status === "completed"
+                      ? "View Results"
+                      : "View Details"}
+            </Button>
           )}
         </div>
       </Card>
+      </Link>
 
       {/* Quick Join Modal */}
       <QuickJoinModal

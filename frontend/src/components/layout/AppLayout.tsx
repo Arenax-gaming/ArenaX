@@ -21,13 +21,12 @@ export function AppLayout({ children }: AppLayoutProps) {
           <MobileHeaderActions />
         </div>
       </header>
-      <main id="main-content" className="container py-6 md:py-10 flex-1" role="main">{children}</main>
-      <ToastContainer />
-      <footer className="border-t py-6 md:py-8" role="contentinfo">
-      <main className="container py-6 md:py-10 flex-1 pb-20 md:pb-10">{children}</main>
+      <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main">
+        {children}
+      </main>
       <ToastContainer />
       <BottomNav />
-      <footer className="border-t py-6 md:py-8">
+      <footer className="border-t py-6 md:py-8" role="contentinfo">
         <div className="container flex flex-col items-center justify-between gap-4 md:flex-row">
           <p className="text-sm text-muted-foreground">
             © 2026 ArenaX. All rights reserved.
