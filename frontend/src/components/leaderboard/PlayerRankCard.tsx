@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import NextImage from "next/image";
 import { Trophy, TrendingUp, TrendingDown } from "lucide-react";
 import { RankChange } from "./RankChange";
 
@@ -54,10 +55,12 @@ export const PlayerRankCard: React.FC<PlayerRankCardProps> = ({
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-4">
           {avatar && (
-            <img
+            <NextImage
               src={avatar}
               alt={username}
-              className="w-16 h-16 rounded-full border-2 border-gray-700"
+              width={64}
+              height={64}
+              className="w-16 h-16 rounded-full border-2 border-gray-700 object-cover"
             />
           )}
           <div>

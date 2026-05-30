@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Image } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 import { ArrowUp, ArrowDown } from "lucide-react";
 
 export interface LeaderboardPlayer {
@@ -110,8 +110,9 @@ export default function LeaderboardPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Search Player</label>
+              <label htmlFor="search-player" className="text-sm font-medium">Search Player</label>
               <Input
+                id="search-player"
                 placeholder="Search by username..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -119,9 +120,9 @@ export default function LeaderboardPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Game</label>
+              <label htmlFor="game-filter" className="text-sm font-medium">Game</label>
               <Select value={gameFilter} onValueChange={setGameFilter}>
-                <SelectTrigger>
+                <SelectTrigger id="game-filter">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -186,7 +187,7 @@ export default function LeaderboardPage() {
                           <Badge variant="outline">#{player.rank}</Badge>
                         </td>
                         <td className="py-3 px-4 flex items-center gap-2">
-                          <Image className="w-4 h-4 text-muted-foreground" />
+                          <ImageIcon className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                           {player.username}
                         </td>
                         <td className="py-3 px-4">{player.game}</td>

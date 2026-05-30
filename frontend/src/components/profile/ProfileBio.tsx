@@ -47,8 +47,9 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
         {isEditing ? (
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Bio</label>
+              <label htmlFor="bio" className="text-sm font-medium">Bio</label>
               <textarea
+                id="bio"
                 className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
@@ -57,20 +58,22 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
+                <label htmlFor="bio-twitter" className="text-sm font-medium flex items-center gap-2">
                   <Twitter className="h-4 w-4" /> Twitter URL
                 </label>
                 <Input
+                  id="bio-twitter"
                   value={twitter}
                   onChange={(e) => setTwitter(e.target.value)}
                   placeholder="https://twitter.com/..."
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
+                <label htmlFor="bio-twitch" className="text-sm font-medium flex items-center gap-2">
                    Twitch URL
                 </label>
                 <Input
+                  id="bio-twitch"
                   value={twitch}
                   onChange={(e) => setTwitch(e.target.value)}
                   placeholder="https://twitch.tv/..."

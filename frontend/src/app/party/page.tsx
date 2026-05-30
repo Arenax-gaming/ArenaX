@@ -65,10 +65,11 @@ export default function PartyPage() {
             </h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="party-name-create" className="block text-sm font-medium text-gray-300 mb-2">
                   Party Name
                 </label>
                 <input
+                  id="party-name-create"
                   type="text"
                   value={partyName}
                   onChange={(e) => setPartyName(e.target.value)}
@@ -78,10 +79,11 @@ export default function PartyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="party-description" className="block text-sm font-medium text-gray-300 mb-2">
                   Description (Optional)
                 </label>
                 <textarea
+                  id="party-description"
                   value={partyDescription}
                   onChange={(e) => setPartyDescription(e.target.value)}
                   placeholder="Enter party description..."
@@ -90,10 +92,11 @@ export default function PartyPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label htmlFor="max-members" className="block text-sm font-medium text-gray-300 mb-2">
                   Max Members: {maxMembers}
                 </label>
                 <input
+                  id="max-members"
                   type="range"
                   min="2"
                   max="8"

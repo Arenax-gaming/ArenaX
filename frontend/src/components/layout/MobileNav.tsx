@@ -190,13 +190,14 @@ export function MobileNav() {
                               </Link>
                             }
                           >
-                            <span
+                            <button
+                              type="button"
                               className="flex items-center justify-between w-full"
                               onClick={() => setIsOpen(false)}
                             >
                               {item.label}
                               <ChevronRight className="h-4 w-4 opacity-50" />
-                            </span>
+                            </button>
                           </ProtectedLink>
                         );
                       }
