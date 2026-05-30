@@ -80,6 +80,12 @@ class ApiClient {
     );
   }
 
+  async checkUsernameAvailability(username: string): Promise<{ available: boolean }> {
+    return this.request<{ available: boolean }>(
+      `/auth/username-check?username=${encodeURIComponent(username)}`
+    );
+  }
+
   // Tournament endpoints
   async getTournaments(params?: Record<string, any>) {
     const queryString = params ? "?" + new URLSearchParams(params) : "";
