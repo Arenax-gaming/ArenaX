@@ -1,29 +1,37 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { PageError } from "@/components/common/PageError";
+import { ListItemSkeleton, PageHeaderSkeleton } from "@/components/common/PageSkeleton";
+import { ShieldAlert } from "lucide-react";
+import { EmptyState } from "@/components/common/EmptyState";
 
 export default function DisputeDashboard() {
   const [disputes, setDisputes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchDisputes();
-  }, []);
-
-  const fetchDisputes = async () => {
+  const fetchDisputes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await api.getDisputes();
       setDisputes(data as any[]);
-    } catch (error) {
-      console.error("Failed to fetch disputes:", error);
+    } catch (err) {
+      console.error("Failed to fetch disputes:", err);
+      setError((err as Error).message ?? "Failed to load disputes.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchDisputes();
+  }, [fetchDisputes]);
 
   const handleResolve = async (id: string, status: "RESOLVED" | "DISMISSED", winnerOverrideId?: string) => {
     try {
@@ -32,13 +40,40 @@ export default function DisputeDashboard() {
         resolution: status === "RESOLVED" ? "Admin override applied" : "Dispute dismissed",
         winnerOverrideId,
       });
-      fetchDisputes(); // Refresh list
-    } catch (error) {
-      alert("Failed to resolve dispute: " + (error as Error).message);
+      fetchDisputes();
+    } catch (err) {
+      alert("Failed to resolve dispute: " + (err as Error).message);
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-xl font-medium">Loading disputes...</div>;
+  if (loading) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6 space-y-8">
+          <PageHeaderSkeleton />
+          <div className="grid gap-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <ListItemSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      </ProtectedPage>
+    );
+  }
+
+  if (error) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6">
+          <PageError
+            title="Failed to load disputes"
+            message={error}
+            onRetry={fetchDisputes}
+          />
+        </div>
+      </ProtectedPage>
+    );
+  }
 
   return (
     <ProtectedPage requiredRole="admin">
@@ -54,11 +89,12 @@ export default function DisputeDashboard() {
 
       <div className="grid gap-6">
         {disputes.length === 0 ? (
-          <Card className="bg-muted/50 border-dashed border-2">
-            <CardContent className="flex flex-col items-center justify-center h-40 text-muted-foreground">
-              <p>No open disputes at this time.</p>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={ShieldAlert}
+            title="No open disputes"
+            description="There are no disputes requiring review at this time."
+            size="lg"
+          />
         ) : (
           disputes.map((dispute) => (
             <Card key={dispute.id} className="overflow-hidden border-2 border-indigo-100 dark:border-indigo-900 shadow-lg hover:shadow-xl transition-shadow duration-300">
