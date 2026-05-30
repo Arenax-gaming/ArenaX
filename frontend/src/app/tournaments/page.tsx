@@ -12,12 +12,22 @@ import {
   TournamentStatus,
   Tournament,
   TournamentFilters,
+  TournamentPageStatus,
+  TOURNAMENT_PAGE_STATUS_COLORS,
+  TOURNAMENT_PAGE_STATUSES,
+  toTournamentPageStatus,
 } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
 import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
+
+const statusColors = TOURNAMENT_PAGE_STATUS_COLORS;
+
+function getStatusStyles(pageStatus: TournamentPageStatus) {
+  return statusColors[pageStatus];
+}
 
 function TournamentsContent() {
   const { user } = useAuth();
@@ -89,6 +99,13 @@ function TournamentsContent() {
     if (filters.status) {
       tournaments = tournaments.filter(
         (tournament) => tournament.status === filters.status,
+      );
+    }
+
+    if (filters.pageStatus) {
+      tournaments = tournaments.filter(
+        (tournament) =>
+          toTournamentPageStatus(tournament.status) === filters.pageStatus,
       );
     }
 
@@ -217,12 +234,25 @@ function TournamentsContent() {
         />
       </div>
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <p className="text-sm text-muted-foreground">
           {filteredTournaments.length} tournament
           {filteredTournaments.length !== 1 ? "s" : ""} found
           {activeTab === "joined" ? " (joined)" : " (available)"}
         </p>
+        <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
+          {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
+            const { badgeClass, label } = getStatusStyles(pageStatus);
+            return (
+              <span
+                key={pageStatus}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClass}`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
       {isLoading ? (
