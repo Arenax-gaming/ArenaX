@@ -21,7 +21,7 @@ export function initGameSocket(io: Server) {
     });
 
     // Receive player actions and broadcast to other participants
-    socket.on('action', ({ sessionId, playerId, action }) => {
+    socket.on('action', ({ sessionId, playerId, action }: { sessionId: string; playerId: string; action: unknown }) => {
       try {
         const session = gameSessionService.processPlayerAction(sessionId, playerId, action);
         // Broadcast the new action to all participants

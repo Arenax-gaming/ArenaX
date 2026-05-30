@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React from "react";
 import { Monitor, Zap, Volume2, Crosshair, MousePointer, Check, Settings } from "lucide-react";
@@ -62,7 +63,7 @@ export function GamePreferences({
         <CardContent className="space-y-6">
           {/* Quality Preset */}
           <div className="space-y-3">
-            <label className="text-sm font-medium">Quality Preset</label>
+            <p className="text-sm font-medium">Quality Preset</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {(Object.keys(qualityPresets) as Array<keyof typeof qualityPresets>).map((preset) => (
                 <button
@@ -89,11 +90,12 @@ export function GamePreferences({
 
           {/* Resolution */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
+            <label htmlFor="resolution" className="text-sm font-medium flex items-center gap-2">
               <Monitor className="h-4 w-4 text-muted-foreground" />
               Resolution
             </label>
             <select
+              id="resolution"
               value={settings.resolution}
               onChange={(e) => onUpdate({ resolution: e.target.value as GamePreferencesType["resolution"] })}
               className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -108,10 +110,10 @@ export function GamePreferences({
 
           {/* Frame Rate */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Zap className="h-4 w-4 text-muted-foreground" />
+            <p className="text-sm font-medium flex items-center gap-2">
+              <Zap className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               Frame Rate Limit
-            </label>
+            </p>
             <div className="grid grid-cols-5 gap-2">
               {frameRateOptions.map((option) => (
                 <button
@@ -136,43 +138,28 @@ export function GamePreferences({
                 <p className="text-sm font-medium">Fullscreen</p>
                 <p className="text-xs text-muted-foreground">Play in fullscreen mode</p>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.fullscreen}
-                  onChange={(e) => onUpdate({ fullscreen: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
+              <Switch checked={settings.fullscreen} onCheckedChange={(checked) => onUpdate({ fullscreen: checked })} />
             </div>
             <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
               <div>
                 <p className="text-sm font-medium">V-Sync</p>
                 <p className="text-xs text-muted-foreground">Reduce screen tearing</p>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.vsync}
-                  onChange={(e) => onUpdate({ vsync: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
+              <Switch checked={settings.vsync} onCheckedChange={(checked) => onUpdate({ vsync: checked })} />
             </div>
           </div>
 
           {/* FOV Slider */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="fov" className="text-sm font-medium flex items-center gap-2">
                 <Crosshair className="h-4 w-4 text-muted-foreground" />
                 Field of View
               </label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.fov}°</span>
             </div>
             <input
+              id="fov"
               type="range"
               min="60"
               max="120"
@@ -205,10 +192,11 @@ export function GamePreferences({
           {/* Master Volume */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Master Volume</label>
+              <label htmlFor="master-volume" className="text-sm font-medium">Master Volume</label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.masterVolume}%</span>
             </div>
             <input
+              id="master-volume"
               type="range"
               min="0"
               max="100"
@@ -221,10 +209,11 @@ export function GamePreferences({
           {/* Music Volume */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Music Volume</label>
+              <label htmlFor="music-volume" className="text-sm font-medium">Music Volume</label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.musicVolume}%</span>
             </div>
             <input
+              id="music-volume"
               type="range"
               min="0"
               max="100"
@@ -237,10 +226,11 @@ export function GamePreferences({
           {/* SFX Volume */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Sound Effects</label>
+              <label htmlFor="sfx-volume" className="text-sm font-medium">Sound Effects</label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.sfxVolume}%</span>
             </div>
             <input
+              id="sfx-volume"
               type="range"
               min="0"
               max="100"
@@ -253,10 +243,11 @@ export function GamePreferences({
           {/* Voice Volume */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Voice Chat</label>
+              <label htmlFor="voice-volume" className="text-sm font-medium">Voice Chat</label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.voiceVolume}%</span>
             </div>
             <input
+              id="voice-volume"
               type="range"
               min="0"
               max="100"
@@ -285,13 +276,14 @@ export function GamePreferences({
           {/* Sensitivity */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="sensitivity" className="text-sm font-medium flex items-center gap-2">
                 <MousePointer className="h-4 w-4 text-muted-foreground" />
                 Mouse Sensitivity
               </label>
               <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{settings.sensitivity}</span>
             </div>
             <input
+              id="sensitivity"
               type="range"
               min="1"
               max="100"

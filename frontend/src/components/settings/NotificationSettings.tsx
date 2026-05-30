@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React, { useState } from "react";
 import { Bell, Mail, Smartphone, MessageSquare, Monitor, Check, Clock, Save, Eye, X, Trophy, Gamepad2, DollarSign, Users } from "lucide-react";
@@ -141,15 +142,7 @@ export function NotificationSettings({
                   <p className="text-xs text-muted-foreground">{notification.description}</p>
                 </div>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings[notification.key as keyof NotificationPreference] as boolean}
-                  onChange={() => toggleNotification(notification.key as keyof NotificationPreference)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
+              <Switch checked={settings[notification.key as keyof NotificationPreference] as boolean} onCheckedChange={() => toggleNotification(notification.key as keyof NotificationPreference)} />
             </div>
           ))}
         </CardContent>
@@ -193,15 +186,7 @@ export function NotificationSettings({
                     </p>
                   </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isChannelEnabled(channelValue)}
-                    onChange={() => toggleChannel(channelValue)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
+                <Switch checked={isChannelEnabled(channelValue)} onCheckedChange={() => toggleChannel(channelValue)} />
               </div>
             );
           })}
@@ -229,26 +214,19 @@ export function NotificationSettings({
                 Mute notifications during scheduled hours
               </p>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.quietHours.enabled}
-                onChange={(e) =>
+            <Switch checked={settings.quietHours.enabled} onCheckedChange={(e) =>
                   onUpdate({
-                    quietHours: { ...settings.quietHours, enabled: e.target.checked },
+                    quietHours: { ...settings.quietHours, enabled: checked },
                   })
-                }
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+                } />
           </div>
 
           {settings.quietHours.enabled && (
             <div className="grid grid-cols-2 gap-4 pl-4 border-l-2 border-muted">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Start Time</label>
+                <label htmlFor="quiet-start" className="text-sm font-medium">Start Time</label>
                 <input
+                  id="quiet-start"
                   type="time"
                   value={settings.quietHours.start}
                   onChange={(e) =>
@@ -260,8 +238,9 @@ export function NotificationSettings({
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">End Time</label>
+                <label htmlFor="quiet-end" className="text-sm font-medium">End Time</label>
                 <input
+                  id="quiet-end"
                   type="time"
                   value={settings.quietHours.end}
                   onChange={(e) =>

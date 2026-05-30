@@ -80,13 +80,14 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {gameModes.map((mode) => (
-        <div
+        <button
           key={mode.id}
+          type="button"
           onClick={() => onSelect(mode.id)}
           onMouseEnter={() => setHoveredMode(mode.id)}
           onMouseLeave={() => setHoveredMode(null)}
           className={`
-            relative overflow-hidden rounded-xl cursor-pointer transition-all duration-300 transform
+            relative overflow-hidden rounded-xl cursor-pointer transition-all duration-300 transform text-left
             ${selectedMode === mode.id 
               ? 'ring-4 ring-purple-500 scale-105 shadow-2xl shadow-purple-500/50' 
               : 'hover:scale-105 hover:shadow-xl'
@@ -111,7 +112,7 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
               <div className="absolute inset-0 bg-purple-500/10 transition-all duration-300" />
             )}
           </div>
-        </div>
+        </button>
       ))}
     </div>
   );

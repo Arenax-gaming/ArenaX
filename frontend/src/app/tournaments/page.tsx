@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
@@ -18,7 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 type TabType = "joined" | "available";
 
-export default function TournamentsPage() {
+function TournamentsContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
 
@@ -273,5 +273,21 @@ export default function TournamentsPage() {
         </EmptyState>
       )}
     </div>
+  );
+}
+
+export default function TournamentsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen px-4 py-8 bg-background">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TournamentCardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    }>
+      <TournamentsContent />
+    </Suspense>
   );
 }

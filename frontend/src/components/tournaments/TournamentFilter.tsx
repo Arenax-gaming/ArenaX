@@ -289,7 +289,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
 
         {/* Entry Fee Range */}
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Entry Fee</label>
+          <p className="text-xs font-medium text-muted-foreground">Entry Fee</p>
           <div className="flex gap-2">
             <Input
               placeholder="Min"
@@ -297,6 +297,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
               value={minEntryFee}
               onChange={(e) => setMinEntryFee(e.target.value)}
               className="w-full"
+              aria-label="Minimum entry fee"
             />
             <Input
               placeholder="Max"
@@ -304,13 +305,14 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
               value={maxEntryFee}
               onChange={(e) => setMaxEntryFee(e.target.value)}
               className="w-full"
+              aria-label="Maximum entry fee"
             />
           </div>
         </div>
 
         {/* Prize Pool Range */}
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Prize Pool</label>
+          <p className="text-xs font-medium text-muted-foreground">Prize Pool</p>
           <div className="flex gap-2">
             <Input
               placeholder="Min"
@@ -318,6 +320,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
               value={minPrizePool}
               onChange={(e) => setMinPrizePool(e.target.value)}
               className="w-full"
+              aria-label="Minimum prize pool"
             />
             <Input
               placeholder="Max"
@@ -325,6 +328,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
               value={maxPrizePool}
               onChange={(e) => setMaxPrizePool(e.target.value)}
               className="w-full"
+              aria-label="Maximum prize pool"
             />
           </div>
         </div>

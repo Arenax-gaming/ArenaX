@@ -15,6 +15,7 @@ interface EmptyStateProps {
   };
   className?: string;
   size?: "sm" | "md" | "lg";
+  children?: React.ReactNode;
 }
 
 export function EmptyState({
@@ -25,6 +26,7 @@ export function EmptyState({
   action,
   className,
   size = "md",
+  children,
 }: EmptyStateProps) {
   const sizeStyles = {
     sm: {
@@ -74,6 +76,7 @@ export function EmptyState({
           {action.label}
         </Button>
       )}
+      {children}
     </div>
   );
 }

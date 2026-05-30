@@ -239,8 +239,9 @@ export function InviteFriends({
             {onInviteByEmail ? (
               <form onSubmit={handleEmailInvite} className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">Email Address</label>
+                  <label htmlFor="invite-email" className="text-sm font-medium mb-1 block">Email Address</label>
                   <input
+                    id="invite-email"
                     type="email"
                     placeholder="friend@example.com"
                     value={emailInput}

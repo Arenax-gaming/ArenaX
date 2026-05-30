@@ -98,10 +98,12 @@ export function RegisterForm({ className }: RegisterFormProps) {
             value={formData.username}
             onChange={(e) => setFormData({ ...formData, username: e.target.value })}
             error={!!errors.username}
+            aria-describedby={errors.username ? "username-error" : undefined}
+            aria-invalid={!!errors.username}
           />
           {errors.username && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="username-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.username}
             </p>
           )}
@@ -119,10 +121,12 @@ export function RegisterForm({ className }: RegisterFormProps) {
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             error={!!errors.email || !!error}
+            aria-describedby={errors.email ? "register-email-error" : undefined}
+            aria-invalid={!!errors.email || !!error}
           />
           {errors.email && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="register-email-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.email}
             </p>
           )}
@@ -140,11 +144,13 @@ export function RegisterForm({ className }: RegisterFormProps) {
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             error={!!errors.password}
+            aria-describedby={errors.password ? "register-password-error" : undefined}
+            aria-invalid={!!errors.password}
           />
           <PasswordStrengthIndicator password={formData.password} />
           {errors.password && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="register-password-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.password}
             </p>
           )}
@@ -162,10 +168,12 @@ export function RegisterForm({ className }: RegisterFormProps) {
             value={formData.confirmPassword}
             onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
             error={!!errors.confirmPassword}
+            aria-describedby={errors.confirmPassword ? "confirm-password-error" : undefined}
+            aria-invalid={!!errors.confirmPassword}
           />
           {errors.confirmPassword && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="confirm-password-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.confirmPassword}
             </p>
           )}

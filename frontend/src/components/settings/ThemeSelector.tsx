@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React, { useState } from "react";
 import { Sun, Moon, Monitor, Check, Save, Palette, Layout, Sparkles } from "lucide-react";
@@ -176,15 +177,7 @@ export function ThemeSelector({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.compactMode}
-                onChange={(e) => onUpdate({ compactMode: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.compactMode} onCheckedChange={(checked) => onUpdate({ compactMode: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -199,15 +192,7 @@ export function ThemeSelector({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.animationsEnabled}
-                onChange={(e) => onUpdate({ animationsEnabled: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.animationsEnabled} onCheckedChange={(checked) => onUpdate({ animationsEnabled: checked })} />
           </div>
         </CardContent>
       </Card>
