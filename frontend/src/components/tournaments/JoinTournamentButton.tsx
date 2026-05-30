@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
 import { LogIn, CheckCircle, AlertCircle, Clock, Users, X } from "lucide-react";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { api } from "@/lib/api";
 
 interface JoinTournamentButtonProps {
   tournament: Tournament;
@@ -21,6 +22,7 @@ export function JoinTournamentButton({
     "idle" | "confirming" | "success" | "error"
   >("idle");
   const [isJoined, setIsJoined] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Determine button state
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
@@ -75,45 +77,58 @@ export function JoinTournamentButton({
 
   const buttonState = getButtonState();
 
+  useEffect(() => {
+    const joined = localStorage.getItem(`tournament-joined-${tournament.id}`);
+    setIsJoined(joined === "true");
+  }, [tournament.id]);
+
   const handleJoinClick = () => {
-    // Check if user is authenticated (mock check)
     const isAuthenticated = localStorage.getItem("auth_token") !== null;
 
+    setShowModal(true);
+    setErrorMessage(null);
+
     if (!isAuthenticated) {
-      setShowModal(true);
       setJoinStatus("idle");
       return;
     }
 
-    setShowModal(true);
-    setJoinStatus("confirming");
+    setJoinStatus("idle");
   };
 
   const handleConfirmJoin = async () => {
     setJoinStatus("confirming");
+    setErrorMessage(null);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      await api.joinTournament(tournament.id);
+      setJoinStatus("success");
+      setIsJoined(true);
+      localStorage.setItem(`tournament-joined-${tournament.id}`, "true");
 
-    setJoinStatus("success");
-    setIsJoined(true);
+      notify({
+        type: "match",
+        title: "Tournament Joined",
+        message: `You've joined ${tournament.name}. We'll notify you when your match is ready.`,
+        link: `/tournaments/${tournament.id}`,
+        linkLabel: "View Tournament",
+        persistent: true,
+        toast: true,
+        toastDuration: 5000,
+      });
 
-    notify({
-      type: "match",
-      title: "Tournament Joined",
-      message: `You've joined ${tournament.name}. We'll notify you when your match is ready.`,
-      link: `/tournaments/${tournament.id}`,
-      linkLabel: "View Tournament",
-      persistent: true,
-      toast: true,
-      toastDuration: 5000,
-    });
-
-    // Auto-close after 2 seconds
-    setTimeout(() => {
-      setShowModal(false);
-      setJoinStatus("idle");
-    }, 2000);
+      setTimeout(() => {
+        setShowModal(false);
+        setJoinStatus("idle");
+      }, 2000);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to join tournament. Please try again.";
+      setErrorMessage(message);
+      setJoinStatus("error");
+    }
   };
 
   const handleLoginRedirect = () => {
@@ -276,6 +291,13 @@ export function JoinTournamentButton({
                 </>
               )}
 
+              {joinStatus === "error" && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/20 dark:text-red-100">
+                  <p className="font-semibold">Unable to join tournament</p>
+                  <p className="mt-2">{errorMessage}</p>
+                </div>
+              )}
+
               {/* Success State */}
               {joinStatus === "success" && (
                 <>
@@ -341,6 +363,21 @@ export function JoinTournamentButton({
                   </Button>
                   <Button onClick={handleConfirmJoin} className="flex-1">
                     Confirm Join
+                  </Button>
+                </>
+              )}
+
+              {joinStatus === "error" && localStorage.getItem("auth_token") && (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowModal(false)}
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                  <Button onClick={handleConfirmJoin} className="flex-1">
+                    Retry
                   </Button>
                 </>
               )}
