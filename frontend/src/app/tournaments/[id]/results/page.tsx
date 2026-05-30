@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/Button";
 import { mockTournaments } from "@/data/mockTournaments";
 import { generateMockBracket } from "@/data/mockBracket";
 import { TournamentHeader } from "@/components/tournaments/TournamentHeader";
+import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -139,7 +140,10 @@ export default function TournamentResultsPage() {
       </div>
 
       <div className="space-y-8">
-        <TournamentHeader tournament={tournament} />
+        <TournamentHeader
+          tournament={tournament}
+          bannerSizes={TOURNAMENT_DETAIL_BANNER_SIZES}
+        />
 
         {isResultsPending ? (
           <section

@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 export function TournamentCardSkeleton() {
   return (
     <Card className="flex flex-col overflow-hidden">
+      <div className="h-36 w-full shrink-0 animate-pulse bg-muted" />
       {/* Header with Status */}
       <div className="flex items-start justify-between border-b p-4">
         <div className="flex-1 space-y-2">
