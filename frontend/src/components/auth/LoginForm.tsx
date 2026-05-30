@@ -85,10 +85,12 @@ export function LoginForm({ className }: LoginFormProps) {
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             error={!!errors.email || !!error}
+            aria-describedby={errors.email ? "email-error" : undefined}
+            aria-invalid={!!errors.email || !!error}
           />
           {errors.email && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="email-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.email}
             </p>
           )}
@@ -111,10 +113,12 @@ export function LoginForm({ className }: LoginFormProps) {
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             error={!!errors.password || !!error}
+            aria-describedby={errors.password ? "password-error" : undefined}
+            aria-invalid={!!errors.password || !!error}
           />
           {errors.password && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
-              <AlertCircle className="h-3 w-3" />
+            <p id="password-error" className="flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="h-3 w-3" aria-hidden="true" />
               {errors.password}
             </p>
           )}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { useAuth } from '@/hooks/useAuth';
@@ -26,7 +26,7 @@ const DEFAULT_CUSTOMIZATION: ProfileCustomization = {
 // Mock usernames for uniqueness check
 const existingUsernames = new Set(['ProGamer99', 'EliteSniper', 'ShadowNinja', 'DragonSlayer', 'NightWalker']);
 
-export default function ProfileEditPage() {
+function ProfileEditContent() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -511,5 +511,13 @@ export default function ProfileEditPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ProfileEditPage() {
+  return (
+    <Suspense>
+      <ProfileEditContent />
+    </Suspense>
   );
 }

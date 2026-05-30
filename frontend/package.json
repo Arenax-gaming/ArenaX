@@ -37,6 +37,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@axe-core/react": "^4.11.3",
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.2",
     "@babel/preset-react": "^7.28.5",
