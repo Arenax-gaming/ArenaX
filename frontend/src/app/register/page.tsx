@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
 import { registerSchema, type RegisterFormData } from "@/lib/validations/auth";
+import { PasswordStrengthIndicator } from "@/components/auth/PasswordStrengthIndicator";
 
 export default function RegisterPage() {
   const router = useRouter();
