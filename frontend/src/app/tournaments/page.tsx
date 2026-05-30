@@ -15,6 +15,7 @@ import {
 } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
+import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
 
@@ -238,6 +239,7 @@ function TournamentsContent() {
               tournament={tournament}
               isJoined={joinedTournamentIds.has(tournament.id)}
               onJoinSuccess={handleJoinSuccess}
+              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
             />
           ))}
         </div>
