@@ -22,7 +22,7 @@ export default function TournamentDetailsPage() {
   // #320: read the dynamic [id] route param and look up the tournament
   // by id. Unknown ids fall through to the "Tournament Not Found"
   // branch below rather than rendering a hardcoded fallback.
-  const tournamentId = params.id as string;
+  const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
   const [tournament, setTournament] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);

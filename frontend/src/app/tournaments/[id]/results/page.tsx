@@ -69,7 +69,7 @@ export default function TournamentResultsPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
-  const tournamentId = params.id as string;
+  const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
 
   const tournament = useMemo(
