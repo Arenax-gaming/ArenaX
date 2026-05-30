@@ -7,6 +7,10 @@ import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PageError } from "@/components/common/PageError";
+import { ListItemSkeleton, PageHeaderSkeleton, Skeleton } from "@/components/common/PageSkeleton";
+import { EmptyState } from "@/components/common/EmptyState";
+import { FileText } from "lucide-react";
 
 type KycStatus = "PENDING" | "APPROVED" | "REJECTED" | "ESCALATED";
 
@@ -26,6 +30,7 @@ interface KycReview {
 export default function KycDashboard() {
   const [reviews, setReviews] = useState<KycReview[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<KycStatus | "ALL">("ALL");
   const [selectedReview, setSelectedReview] = useState<KycReview | null>(null);
   const [decisionNotes, setDecisionNotes] = useState("");
@@ -33,12 +38,14 @@ export default function KycDashboard() {
 
   const fetchReviews = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = filterStatus !== "ALL" ? { status: filterStatus } : {};
       const data = await api.getKycReviews(params);
       setReviews((data as any).reviews || []);
-    } catch (error) {
-      console.error("Failed to fetch KYC reviews:", error);
+    } catch (err) {
+      console.error("Failed to fetch KYC reviews:", err);
+      setError((err as Error).message ?? "Failed to load KYC reviews.");
     } finally {
       setLoading(false);
     }
@@ -55,8 +62,6 @@ export default function KycDashboard() {
     }
 
     setIsSubmitting(true);
-    
-    // Optimistic Update
     const previousReviews = [...reviews];
     setReviews(reviews.map((r: KycReview) => r.id === id ? { ...r, status } : r));
     if (selectedReview?.id === id) {
@@ -64,25 +69,70 @@ export default function KycDashboard() {
     }
 
     try {
-      await api.processKycReview(id, {
-        status,
-        notes: decisionNotes,
-      });
+      await api.processKycReview(id, { status, notes: decisionNotes });
       setDecisionNotes("");
       setSelectedReview(null);
-      // Re-fetch to ensure sync
       fetchReviews();
-    } catch (error) {
-      // Rollback on failure
+    } catch (err) {
       setReviews(previousReviews);
-      alert("Failed to process KYC review: " + (error as Error).message);
+      alert("Failed to process KYC review: " + (err as Error).message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // ── Loading skeleton ──────────────────────────────────────────────────────
   if (loading && reviews.length === 0) {
-    return <div className="p-8 text-center text-xl font-medium">Loading KYC reviews...</div>;
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6 space-y-8">
+          <PageHeaderSkeleton />
+          <div className="grid lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 space-y-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <ListItemSkeleton key={i} />
+              ))}
+            </div>
+            <div className="lg:col-span-2">
+              <div className="rounded-3xl border bg-card p-8 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <Skeleton className="h-8 w-40" />
+                    <Skeleton className="h-4 w-56" />
+                  </div>
+                  <Skeleton className="h-10 w-24 rounded-md" />
+                </div>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <Skeleton className="aspect-video rounded-xl" />
+                  <Skeleton className="aspect-video rounded-xl" />
+                </div>
+                <Skeleton className="h-24 w-full rounded-xl" />
+                <div className="flex gap-3">
+                  <Skeleton className="h-10 flex-1 rounded-md" />
+                  <Skeleton className="h-10 flex-1 rounded-md" />
+                  <Skeleton className="h-10 w-32 rounded-md" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProtectedPage>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6">
+          <PageError
+            title="Failed to load KYC reviews"
+            message={error}
+            onRetry={fetchReviews}
+          />
+        </div>
+      </ProtectedPage>
+    );
   }
 
   return (
@@ -118,11 +168,12 @@ export default function KycDashboard() {
         {/* Review List */}
         <div className="lg:col-span-1 space-y-4 max-h-[calc(100vh-250px)] overflow-y-auto pr-2">
           {reviews.length === 0 ? (
-            <Card className="bg-muted/50 border-dashed border-2">
-              <CardContent className="flex flex-col items-center justify-center h-40 text-muted-foreground text-center">
-                <p>No reviews found for this status.</p>
-              </CardContent>
-            </Card>
+            <EmptyState
+              icon={FileText}
+              title="No reviews found"
+              description={filterStatus === "ALL" ? "There are no KYC reviews in the queue." : `No reviews with status "${filterStatus}".`}
+              size="sm"
+            />
           ) : (
             reviews.map((review: KycReview) => (
               <Card 
