@@ -4,11 +4,12 @@ import express, { Express, Request, Response } from 'express';
 import compression from 'compression';
 import { createApp } from './app';
 import { logger } from './services/logger.service';
-import { createAdminService } from './services/admin.service';
+import { createAdminService, getAdminService } from './services/admin.service';
 import { validateEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
+import { getDatabaseClient } from './services/database.service';
 
 dotenv.config();
 const env = validateEnv();
@@ -17,7 +18,7 @@ registerAchievementIntegration();
 
 const app: Express = createApp();
 const port = env.PORT;
-const adminService = createAdminService();
+const adminService = getAdminService();
 
 let server: any;
 
@@ -71,18 +72,46 @@ const gracefulShutdown = (signal: string) => {
     });
 };
 
-if (env.NODE_ENV !== 'test') {
-    server = app.listen(port, () => {
-        logger.info('Server started', { 
-            url: `http://localhost:${port}`, 
-            port, 
-            environment: env.NODE_ENV 
-        });
-    });
+/** Probe the database with retries before accepting traffic. */
+const waitForDatabase = async (
+    maxAttempts = 10,
+    delayMs = 1000
+): Promise<void> => {
+    const prisma = getDatabaseClient();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            logger.info('Database ready', { attempt });
+            return;
+        } catch (err) {
+            logger.warn('Database not ready, retrying…', { attempt, maxAttempts, error: err });
+            if (attempt === maxAttempts) {
+                throw new Error(`Database unavailable after ${maxAttempts} attempts`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+};
 
-    startHealthMonitor({ 
-        intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
-    });
+if (env.NODE_ENV !== 'test') {
+    waitForDatabase()
+        .then(() => {
+            server = app.listen(port, () => {
+                logger.info('Server started', {
+                    url: `http://localhost:${port}`,
+                    port,
+                    environment: env.NODE_ENV
+                });
+            });
+
+            startHealthMonitor({
+                intervalMs: env.HEALTH_CHECK_INTERVAL_MS
+            });
+        })
+        .catch((err) => {
+            logger.error('Server failed to start — database not ready', { error: err });
+            process.exit(1);
+        });
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));

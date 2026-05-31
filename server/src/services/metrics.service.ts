@@ -2,52 +2,74 @@ import client from 'prom-client';
 import { logger } from './logger.service';
 
 // Enable default metrics (CPU, memory, etc.)
-const collectDefaultMetrics = client.collectDefaultMetrics;
-collectDefaultMetrics({ register: client.register });
+// Guard against duplicate registration when the module is reloaded (e.g. Jest
+// resetModules or worker threads sharing the same prom-client registry).
+if (!client.register.getSingleMetric('process_cpu_user_seconds_total')) {
+  client.collectDefaultMetrics({ register: client.register });
+}
+
+/** Register a metric only if it has not already been registered. */
+function getOrCreateHistogram(config: client.HistogramConfiguration<string>): client.Histogram<string> {
+  const existing = client.register.getSingleMetric(config.name);
+  if (existing) return existing as client.Histogram<string>;
+  return new client.Histogram(config);
+}
+
+function getOrCreateCounter(config: client.CounterConfiguration<string>): client.Counter<string> {
+  const existing = client.register.getSingleMetric(config.name);
+  if (existing) return existing as client.Counter<string>;
+  return new client.Counter(config);
+}
+
+function getOrCreateGauge(config: client.GaugeConfiguration<string>): client.Gauge<string> {
+  const existing = client.register.getSingleMetric(config.name);
+  if (existing) return existing as client.Gauge<string>;
+  return new client.Gauge(config);
+}
 
 // HTTP request metrics
-const httpRequestDuration = new client.Histogram({
+const httpRequestDuration = getOrCreateHistogram({
   name: 'http_request_duration_seconds',
   help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'route', 'status_code'],
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
 });
 
-const httpRequestTotal = new client.Counter({
+const httpRequestTotal = getOrCreateCounter({
   name: 'http_requests_total',
   help: 'Total number of HTTP requests',
   labelNames: ['method', 'route', 'status_code'],
 });
 
 // Database metrics
-const dbQueryDuration = new client.Histogram({
+const dbQueryDuration = getOrCreateHistogram({
   name: 'db_query_duration_seconds',
   help: 'Duration of database queries in seconds',
   labelNames: ['operation', 'table'],
   buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
 });
 
-const dbQueryTotal = new client.Counter({
+const dbQueryTotal = getOrCreateCounter({
   name: 'db_queries_total',
   help: 'Total number of database queries',
   labelNames: ['operation', 'table', 'status'],
 });
 
 // Error metrics
-const errorsTotal = new client.Counter({
+const errorsTotal = getOrCreateCounter({
   name: 'errors_total',
   help: 'Total number of errors',
   labelNames: ['type', 'severity'],
 });
 
 // Active connections
-const activeConnections = new client.Gauge({
+const activeConnections = getOrCreateGauge({
   name: 'active_connections',
   help: 'Number of active connections',
 });
 
 // Response size
-const responseSizeBytes = new client.Histogram({
+const responseSizeBytes = getOrCreateHistogram({
   name: 'response_size_bytes',
   help: 'Size of HTTP responses in bytes',
   labelNames: ['route'],
