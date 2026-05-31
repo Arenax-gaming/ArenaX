@@ -15,6 +15,10 @@ const envSchema = z.object({
   RATE_LIMIT_TRUSTED_ACCOUNTS: z.string().optional(),
   METRICS_ENABLED: z.string().transform(val => val === 'true').default('true'),
   METRICS_PORT: z.string().transform(val => parseInt(val, 10)).default('9090'),
+  // Optional Redis URL — when absent the server falls back to in-memory cache
+  REDIS_URL: z.string().url().optional(),
+  // Profile cache TTL in seconds (default 5 minutes)
+  PROFILE_CACHE_TTL_SECONDS: z.string().transform(val => parseInt(val, 10)).default('300'),
 });
 
 export const validateEnv = () => {
