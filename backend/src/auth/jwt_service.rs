@@ -93,9 +93,13 @@ pub struct JwtConfig {
 
 impl Default for JwtConfig {
     fn default() -> Self {
+        let secret_key = std::env::var("JWT_SECRET")
+            .expect("JWT_SECRET must be set — refusing to start with no signing key");
+        if secret_key.trim().is_empty() || secret_key.len() < 32 {
+            panic!("JWT_SECRET must be at least 32 characters");
+        }
         Self {
-            secret_key: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "default_secret_change_in_production".to_string()),
+            secret_key,
             access_token_expiry: Duration::minutes(15),
             refresh_token_expiry: Duration::days(7),
             algorithm: Algorithm::HS256,
@@ -632,7 +636,9 @@ mod tests {
 
     #[test]
     fn test_jwt_config_default() {
-        let config = JwtConfig::default();
+        // JwtConfig::default() now requires JWT_SECRET to be set.
+        // Test the expected field values using create_test_config() instead.
+        let config = create_test_config();
         assert_eq!(config.algorithm, Algorithm::HS256);
         assert_eq!(config.access_token_expiry.num_minutes(), 15);
         assert_eq!(config.refresh_token_expiry.num_days(), 7);

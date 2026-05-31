@@ -167,24 +167,33 @@ REDIS_URL=redis://localhost:6379
 # Storage
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
-S3_SECRET_KEY=secret
+# [REQUIRED SECRET] Generate with: openssl rand -hex 32
+S3_SECRET_KEY=<generate-with-openssl-rand-hex-32>
 
 # Payments
-PAYSTACK_SECRET=sk_test_xxx
-FLUTTERWAVE_SECRET=FLWSECK_TEST-xxx
+# [REQUIRED SECRET] Use your Paystack live/test key
+PAYSTACK_SECRET=<your-paystack-secret-key>
+# [REQUIRED SECRET] Use your Flutterwave live/test key
+FLUTTERWAVE_SECRET=<your-flutterwave-secret-key>
 
 # Authentication
-JWT_SECRET=supersecretkey
+# [REQUIRED SECRET] Minimum 32 chars. Generate with: openssl rand -hex 32
+JWT_SECRET=<generate-with-openssl-rand-hex-32>
 
 # Stellar Configuration
 STELLAR_NETWORK_URL=https://horizon-testnet.stellar.org
-STELLAR_ADMIN_SECRET=SBXXX...
-SOROBAN_CONTRACT_PRIZE=CAXXX...
-SOROBAN_CONTRACT_REPUTATION=CBXXX...
+# [REQUIRED SECRET] Your Stellar admin account secret key (starts with S)
+STELLAR_ADMIN_SECRET=<your-stellar-admin-secret-key>
+SOROBAN_CONTRACT_PRIZE=<your-prize-contract-id>
+SOROBAN_CONTRACT_REPUTATION=<your-reputation-contract-id>
 
 # AI
 AI_MODEL_PATH=./models/anti_cheat.tflite
 ```
+
+> **Security note:** All variables marked `[REQUIRED SECRET]` must be set to
+> strong, randomly-generated values. The application will **refuse to start**
+> if any required secret is missing, empty, or matches a known placeholder.
 
 ## Code Organization & Architecture
 
