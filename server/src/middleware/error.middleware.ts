@@ -13,7 +13,12 @@ const normalizeError = (err: unknown): BaseError => {
         return new BaseError(
             err.message,
             err.status,
-            err.status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'HTTP_ERROR'
+            err.status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'HTTP_ERROR',
+            {
+                httpStatus: err.status
+            },
+            err.status < 500,
+            err.status < 500
         );
     }
 
@@ -50,9 +55,12 @@ export const errorHandler = (
         errorCode: normalizedError.code
     });
 
+    // Improve error messaging: expose more details for client debugging while protecting sensitive info
     const shouldMask = isProduction && (!normalizedError.isOperational || !normalizedError.expose);
     const message = shouldMask ? 'Internal Server Error' : normalizedError.message;
     const code = shouldMask ? 'INTERNAL_SERVER_ERROR' : normalizedError.code;
+    
+    // Include details for operational errors in non-production, or safe details in production
     const details = shouldMask ? undefined : normalizedError.details;
 
     res.status(normalizedError.statusCode).json({
@@ -62,7 +70,9 @@ export const errorHandler = (
             details,
             status: normalizedError.statusCode,
             timestamp: new Date().toISOString(),
-            requestId
+            requestId,
+            // Add hint for client-side debugging
+            hint: isProduction && !shouldMask ? 'Check request details and try again' : undefined
         }
     });
 };

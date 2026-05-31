@@ -11,6 +11,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
   HEALTH_CHECK_INTERVAL_MS: z.string().transform(val => parseInt(val, 10)).default('60000'),
+  RATE_LIMIT_TRUSTED_IPS: z.string().optional(),
+  RATE_LIMIT_TRUSTED_ACCOUNTS: z.string().optional(),
 });
 
 export const validateEnv = () => {
