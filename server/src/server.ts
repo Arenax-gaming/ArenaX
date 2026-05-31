@@ -9,6 +9,9 @@ import { validateEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
+import { Server as SocketIOServer } from 'socket.io';
+import { initGameSocket } from './websockets/game.socket';
+import { MaintenanceService } from './services/maintenance.service';
 
 dotenv.config();
 const env = validateEnv();
@@ -79,6 +82,15 @@ if (env.NODE_ENV !== 'test') {
             environment: env.NODE_ENV 
         });
     });
+
+    const io = new SocketIOServer(server, {
+        cors: {
+            origin: "*",
+            credentials: true
+        }
+    });
+    initGameSocket(io);
+    MaintenanceService.getInstance().setSocketServer(io);
 
     startHealthMonitor({ 
         intervalMs: env.HEALTH_CHECK_INTERVAL_MS 

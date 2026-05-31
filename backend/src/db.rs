@@ -5,10 +5,16 @@ use sqlx::{postgres::PgPoolOptions, PgPool};
 pub type DbPool = PgPool;
 
 pub async fn create_pool(config: &Config) -> Result<DbPool, sqlx::Error> {
-    PgPoolOptions::new()
+    let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&config.database.url)
-        .await
+        .await?;
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await?;
+
+    Ok(pool)
 }
 
 pub async fn health_check(pool: &DbPool) -> Result<(), ApiError> {
