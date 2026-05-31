@@ -76,6 +76,19 @@ const responseSizeBytes = getOrCreateHistogram({
   buckets: [100, 1000, 10000, 100000, 1000000],
 });
 
+// Cache metrics
+const cacheHitsTotal = getOrCreateCounter({
+  name: 'cache_hits_total',
+  help: 'Total number of cache hits',
+  labelNames: ['namespace'],
+});
+
+const cacheMissesTotal = getOrCreateCounter({
+  name: 'cache_misses_total',
+  help: 'Total number of cache misses',
+  labelNames: ['namespace'],
+});
+
 export class MetricsService {
   private static instance: MetricsService;
 
@@ -111,6 +124,15 @@ export class MetricsService {
     errorsTotal.inc({ type, severity });
   }
 
+  // Cache metrics
+  recordCacheHit(namespace: string) {
+    cacheHitsTotal.inc({ namespace });
+  }
+
+  recordCacheMiss(namespace: string) {
+    cacheMissesTotal.inc({ namespace });
+  }
+
   // Connection metrics
   setActiveConnections(count: number) {
     activeConnections.set(count);
@@ -139,6 +161,8 @@ export class MetricsService {
     errorsTotal.reset();
     activeConnections.reset();
     responseSizeBytes.reset();
+    cacheHitsTotal.reset();
+    cacheMissesTotal.reset();
     logger.info('Metrics reset');
   }
 
