@@ -257,7 +257,21 @@ export class CacheService {
 // Singleton — shared across the whole server process
 // ---------------------------------------------------------------------------
 
-export const cacheService = new CacheService(
-  process.env.REDIS_URL,
-  Number(process.env.PROFILE_CACHE_TTL_SECONDS ?? 300)
-);
+import { getEnv } from '../config/env';
+
+const _resolveConfig = (): { redisUrl?: string; ttl: number } => {
+    try {
+        const env = getEnv();
+        return { redisUrl: env.REDIS_URL, ttl: env.PROFILE_CACHE_TTL_SECONDS };
+    } catch {
+        // Fallback before initEnv() runs (e.g. unit tests importing this module directly).
+        return {
+            redisUrl: process.env.REDIS_URL,
+            ttl: Number(process.env.PROFILE_CACHE_TTL_SECONDS ?? 300),
+        };
+    }
+};
+
+const { redisUrl, ttl } = _resolveConfig();
+
+export const cacheService = new CacheService(redisUrl, ttl);

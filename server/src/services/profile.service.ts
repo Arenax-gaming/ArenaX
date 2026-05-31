@@ -3,6 +3,7 @@ import { getDatabaseClient } from './database.service';
 import { HttpError } from '../utils/http-error';
 import { cacheService } from './cache.service';
 import { logger } from './logger.service';
+import { getEnv } from '../config/env';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,8 +35,14 @@ export interface PublicProfile {
 // ---------------------------------------------------------------------------
 
 const CACHE_NAMESPACE = 'profile';
-/** TTL in seconds — falls back to the CacheService default if not set. */
-const PROFILE_TTL = Number(process.env.PROFILE_CACHE_TTL_SECONDS ?? 300);
+/** TTL in seconds — read from the validated env singleton. */
+const PROFILE_TTL = (() => {
+    try {
+        return getEnv().PROFILE_CACHE_TTL_SECONDS;
+    } catch {
+        return Number(process.env.PROFILE_CACHE_TTL_SECONDS ?? 300);
+    }
+})();
 
 /** Derive a stable cache key from a normalised username. */
 const profileCacheKey = (username: string): string =>

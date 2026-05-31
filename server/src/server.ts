@@ -1,18 +1,42 @@
 import dotenv from 'dotenv';
+import path from 'node:path';
 import os from 'node:os';
 import express, { Express, Request, Response } from 'express';
 import compression from 'compression';
 import { createApp } from './app';
 import { logger } from './services/logger.service';
 import { createAdminService, getAdminService } from './services/admin.service';
-import { validateEnv } from './config/env';
+import { initEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
 import { getDatabaseClient } from './services/database.service';
 
-dotenv.config();
-const env = validateEnv();
+// ---------------------------------------------------------------------------
+// 1. Load environment files in priority order before any other module reads
+//    process.env. The NODE_ENV shell variable determines which file is loaded.
+//
+//    Priority (highest → lowest):
+//      .env.<NODE_ENV>.local   machine-local overrides (git-ignored)
+//      .env.<NODE_ENV>         environment-specific committed defaults
+//      .env.local              cross-env local overrides (git-ignored)
+//      .env                    base defaults
+// ---------------------------------------------------------------------------
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const root = path.resolve(__dirname, '..');
+
+// Load in reverse priority so higher-priority files win (dotenv skips already-
+// set variables when `override` is false, which is the default).
+dotenv.config({ path: path.join(root, '.env') });
+dotenv.config({ path: path.join(root, '.env.local') });
+dotenv.config({ path: path.join(root, `.env.${nodeEnv}`) });
+dotenv.config({ path: path.join(root, `.env.${nodeEnv}.local`) });
+
+// ---------------------------------------------------------------------------
+// 2. Validate and freeze the environment. All code after this point should
+//    import `getEnv()` rather than reading process.env directly.
+// ---------------------------------------------------------------------------
+const env = initEnv();
 initializeTelemetry();
 registerAchievementIntegration();
 

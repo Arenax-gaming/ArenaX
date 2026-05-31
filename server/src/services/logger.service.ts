@@ -3,7 +3,11 @@ import path from 'node:path';
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 
-const logDirectory = process.env.LOG_DIR ?? path.resolve(process.cwd(), 'logs');
+// Logger is initialised before initEnv() runs (it is imported by env.ts
+// indirectly), so we fall back to process.env directly here. All other
+// services should use getEnv() instead.
+const logDirectory =
+    process.env.LOG_DIR ?? path.resolve(process.cwd(), 'logs');
 const logLevel = process.env.LOG_LEVEL ?? 'info';
 const maxSize = process.env.LOG_MAX_SIZE ?? '20m';
 const maxFiles = process.env.LOG_MAX_FILES ?? '14d';
@@ -25,7 +29,10 @@ const transports: winston.transport[] = [
             winston.format.colorize(),
             winston.format.timestamp(),
             winston.format.printf(({ level, message, timestamp, ...metadata }) => {
-                const metadataPayload = Object.keys(metadata).length > 0 ? ` ${JSON.stringify(metadata)}` : '';
+                const metadataPayload =
+                    Object.keys(metadata).length > 0
+                        ? ` ${JSON.stringify(metadata)}`
+                        : '';
                 return `${timestamp} ${level}: ${message}${metadataPayload}`;
             })
         )
@@ -56,7 +63,8 @@ export const logger = winston.createLogger({
     level: logLevel,
     format: baseFormat,
     defaultMeta: {
-        service: 'arenax-server'
+        service: 'arenax-server',
+        environment: process.env.NODE_ENV ?? 'development'
     },
     transports
 });
