@@ -8,7 +8,7 @@ export type AssetSourceType = "native" | "classic" | "soroban";
 
 export type TxKind = "classic" | "soroban";
 
-export type TxDirection = "deposit" | "withdraw";
+export type TxDirection = "deposit" | "withdraw" | "earning";
 
 export type TxStatus = "pending" | "success" | "failed";
 
