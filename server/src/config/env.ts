@@ -13,6 +13,8 @@ const envSchema = z.object({
   HEALTH_CHECK_INTERVAL_MS: z.string().transform(val => parseInt(val, 10)).default('60000'),
   RATE_LIMIT_TRUSTED_IPS: z.string().optional(),
   RATE_LIMIT_TRUSTED_ACCOUNTS: z.string().optional(),
+  METRICS_ENABLED: z.string().transform(val => val === 'true').default('true'),
+  METRICS_PORT: z.string().transform(val => parseInt(val, 10)).default('9090'),
 });
 
 export const validateEnv = () => {
