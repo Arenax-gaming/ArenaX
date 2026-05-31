@@ -24,7 +24,10 @@ export const configurePassport = (
         return;
     }
 
-    passportInstance.use(
+    // Guard against concurrent calls (e.g. during tests or hot-reload).
+    // If a previous attempt threw, strategyInitialized stays false and we retry.
+    try {
+        passportInstance.use(
         'jwt',
         new JwtStrategy(
             {
@@ -57,9 +60,15 @@ export const configurePassport = (
                 }
             }
         )
-    );
+        );
 
-    strategyInitialized = true;
+        strategyInitialized = true;
+    } catch (err) {
+        // Reset so the next call can retry cleanly.
+        strategyInitialized = false;
+        logger.error('Failed to configure passport JWT strategy', { error: err });
+        throw err;
+    }
 };
 
 export const authenticateJWT = (
