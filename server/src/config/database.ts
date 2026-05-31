@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { Prisma } from '@prisma/client';
+import { logger } from '../services/logger.service';
+import { metricsService } from '../services/metrics.service';
 
 // Database connection pool configuration
 const poolConfig = {
@@ -37,16 +39,31 @@ let connectionCount = 0;
 prisma.$use(async (params: Prisma.MiddlewareParams, next: (params: Prisma.MiddlewareParams) => Promise<any>) => {
   const before = Date.now();
   connectionCount++;
-  
+
+  const model = params.model ?? 'unknown';
+  const action = params.action;
+
   try {
     const result = await next(params);
-    const after = Date.now();
-    
+    const durationMs = Date.now() - before;
+    const durationSec = durationMs / 1000;
+
+    metricsService.recordDbQuery(action, model, durationSec, 'success');
+
     if (process.env.NODE_ENV === 'development') {
-      console.log(`Query: ${params.model}.${params.action} took ${after - before}ms`);
+      logger.debug('DB query', { model, action, durationMs });
     }
-    
+
+    if (durationMs > 500) {
+      logger.warn('Slow DB query detected', { model, action, durationMs });
+    }
+
     return result;
+  } catch (err) {
+    const durationMs = Date.now() - before;
+    metricsService.recordDbQuery(action, model, durationMs / 1000, 'error');
+    logger.error('DB query failed', { model, action, durationMs, error: err });
+    throw err;
   } finally {
     connectionCount--;
   }
@@ -58,7 +75,7 @@ export async function checkDatabaseHealth(): Promise<boolean> {
     await prisma.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
-    console.error('Database health check failed:', error);
+    logger.error('Database health check failed', { error });
     return false;
   }
 }
@@ -74,7 +91,7 @@ export function getConnectionStats() {
 // Graceful shutdown
 export async function disconnectDatabase(): Promise<void> {
   await prisma.$disconnect();
-  console.log('Database connection closed');
+  logger.info('Database connection closed');
 }
 
 export default prisma;
