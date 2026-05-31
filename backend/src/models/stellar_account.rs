@@ -4,11 +4,18 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Database row for a Stellar account.
+///
+/// `encrypted_secret_key` is intentionally excluded from `Serialize` and
+/// `Debug` output so it can never leak into API responses, logs, or traces.
+#[derive(Clone, Deserialize, FromRow)]
 pub struct StellarAccount {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
     pub public_key: String,
+    /// Opaque versioned ciphertext — never serialised or printed.
+    /// Decrypt only via `key_encryption::decrypt_secret_key`.
+    #[serde(skip)]
     pub encrypted_secret_key: Option<String>,
     pub account_type: String,
     pub is_funded: bool,
@@ -16,6 +23,24 @@ pub struct StellarAccount {
     pub balance_xlm: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Manual `Debug` impl that redacts the encrypted secret key.
+impl std::fmt::Debug for StellarAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StellarAccount")
+            .field("id", &self.id)
+            .field("user_id", &self.user_id)
+            .field("public_key", &self.public_key)
+            .field("encrypted_secret_key", &"[REDACTED]")
+            .field("account_type", &self.account_type)
+            .field("is_funded", &self.is_funded)
+            .field("is_active", &self.is_active)
+            .field("balance_xlm", &self.balance_xlm)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +70,9 @@ impl From<String> for StellarAccountType {
     }
 }
 
+/// Request to create a Stellar account.
+/// `secret_key_encrypted` accepts the caller-supplied ciphertext; the raw
+/// secret key must never be passed through this struct.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateStellarAccountRequest {
     pub user_id: Uuid,
@@ -54,6 +82,7 @@ pub struct CreateStellarAccountRequest {
     pub account_type: Option<StellarAccountType>,
 }
 
+/// Public-facing API response — contains no secret material.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StellarAccountResponse {
     pub id: Uuid,
