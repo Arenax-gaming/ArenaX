@@ -14,7 +14,7 @@ interface MatchCardProps {
 }
 
 const statusConfig = {
-  pending: { label: "Pending", color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-800" },
+  pending: { label: "Pending", color: "text-gray-500 dark:text-gray-400", bg: "bg-gray-100 dark:bg-gray-800" },
   ready: { label: "Ready", color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-900" },
   in_progress: { label: "Live", color: "text-green-600", bg: "bg-green-100 dark:bg-green-900" },
   completed: { label: "Completed", color: "text-purple-600", bg: "bg-purple-100 dark:bg-purple-900" },

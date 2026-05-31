@@ -68,7 +68,7 @@ export function ProfileHeader({
     if (rank <= 10) return 'text-yellow-500';
     if (rank <= 100) return 'text-orange-500';
     if (rank <= 1000) return 'text-blue-500';
-    return 'text-gray-500';
+    return 'text-gray-500 dark:text-gray-400';
   };
 
   const getEloTier = (elo: number) => {
