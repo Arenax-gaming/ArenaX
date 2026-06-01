@@ -91,10 +91,12 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               error={!!error}
+              aria-describedby={error ? "reset-email-error" : undefined}
+              aria-invalid={!!error}
             />
             {error && (
-              <p className="flex items-center gap-1 text-xs text-red-500">
-                <AlertCircle className="h-3 w-3" />
+              <p id="reset-email-error" className="flex items-center gap-1 text-xs text-red-500">
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
                 {error}
               </p>
             )}
@@ -117,6 +119,7 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               error={!!error}
+              aria-invalid={!!error}
             />
           </div>
           
@@ -131,10 +134,12 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               error={!!error}
+              aria-describedby={error ? "confirm-new-password-error" : undefined}
+              aria-invalid={!!error}
             />
             {error && (
-              <p className="flex items-center gap-1 text-xs text-red-500">
-                <AlertCircle className="h-3 w-3" />
+              <p id="confirm-new-password-error" className="flex items-center gap-1 text-xs text-red-500">
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
                 {error}
               </p>
             )}

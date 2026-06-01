@@ -1,23 +1,33 @@
 import dotenv from 'dotenv';
+import path from 'node:path';
 import os from 'node:os';
 import express, { Express, Request, Response } from 'express';
 import compression from 'compression';
 import { createApp } from './app';
 import { logger } from './services/logger.service';
-import { createAdminService } from './services/admin.service';
-import { validateEnv } from './config/env';
+import { createAdminService, getAdminService } from './services/admin.service';
+import { initEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
+import { getDatabaseClient } from './services/database.service';
+import eventMonitoringService from './services/event-monitoring.service';
 
-dotenv.config();
-const env = validateEnv();
+const nodeEnv = process.env.NODE_ENV ?? 'development';
+const root = path.resolve(__dirname, '..');
+
+dotenv.config({ path: path.join(root, '.env') });
+dotenv.config({ path: path.join(root, '.env.local') });
+dotenv.config({ path: path.join(root, `.env.${nodeEnv}`) });
+dotenv.config({ path: path.join(root, `.env.${nodeEnv}.local`) });
+
+const env = initEnv();
 initializeTelemetry();
 registerAchievementIntegration();
 
 const app: Express = createApp();
 const port = env.PORT;
-const adminService = createAdminService();
+const adminService = getAdminService();
 
 let server: any;
 
@@ -36,7 +46,10 @@ app.get('/health', async (_req: Request, res: Response) => {
                 activeUsers: health.activeUsers,
                 activeMatches: health.activeMatches,
                 memoryUsagePercent: health.memoryUsage,
-                diskUsagePercent: health.diskUsage
+                diskUsagePercent: health.diskUsage,
+                memoryUsageMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+                eventMonitorRunning: eventMonitoringService.isRunning(),
+                lastProcessedLedger: eventMonitoringService.getLastProcessedLedger(),
             }
         });
     } catch (error) {
@@ -51,8 +64,32 @@ app.get('/health', async (_req: Request, res: Response) => {
 
 app.use(compression());
 
+let memoryWarningInterval: ReturnType<typeof setInterval> | null = null;
+
+const startMemoryMonitor = (thresholdMB = 1500, intervalMs = 300000): void => {
+    memoryWarningInterval = setInterval(() => {
+        const mem = process.memoryUsage();
+        const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
+        const rssMB = Math.round(mem.rss / 1024 / 1024);
+        logger.debug('Memory usage', { heapMB, rssMB });
+        if (heapMB > thresholdMB) {
+            logger.warn('High memory usage detected', { heapMB, rssMB, thresholdMB });
+        }
+    }, intervalMs);
+};
+
+const stopMemoryMonitor = (): void => {
+    if (memoryWarningInterval) {
+        clearInterval(memoryWarningInterval);
+        memoryWarningInterval = null;
+    }
+};
+
 const gracefulShutdown = (signal: string) => {
     logger.info(`Received ${signal}, starting graceful shutdown`);
+
+    stopMemoryMonitor();
+    eventMonitoringService.stop();
 
     if (!server) {
         logger.info('No server running, exiting');
@@ -69,20 +106,63 @@ const gracefulShutdown = (signal: string) => {
         logger.info('Graceful shutdown completed');
         process.exit(0);
     });
+
+    setTimeout(() => {
+        logger.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 30000).unref();
+};
+
+const waitForDatabase = async (
+    maxAttempts = 10,
+    delayMs = 1000
+): Promise<void> => {
+    const prisma = getDatabaseClient();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            logger.info('Database ready', { attempt });
+            return;
+        } catch (err) {
+            logger.warn('Database not ready, retrying…', { attempt, maxAttempts, error: err });
+            if (attempt === maxAttempts) {
+                throw new Error(`Database unavailable after ${maxAttempts} attempts`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
 };
 
 if (env.NODE_ENV !== 'test') {
-    server = app.listen(port, () => {
-        logger.info('Server started', { 
-            url: `http://localhost:${port}`, 
-            port, 
-            environment: env.NODE_ENV 
-        });
-    });
+    waitForDatabase()
+        .then(() => {
+            server = app.listen(port, () => {
+                logger.info('Server started', {
+                    url: `http://localhost:${port}`,
+                    port,
+                    environment: env.NODE_ENV
+                });
 
-    startHealthMonitor({ 
-        intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
-    });
+                eventMonitoringService.configure({
+                    intervalMs: 10_000,
+                    maxLedgerBatch: 100,
+                    contracts: (process.env.SOROBAN_CONTRACT_ADDRESSES ?? '').split(',').filter(Boolean),
+                });
+                eventMonitoringService.start().catch((err) => {
+                    logger.error('Failed to start event monitoring', { error: err });
+                });
+
+                startMemoryMonitor();
+            });
+
+            startHealthMonitor({
+                intervalMs: env.HEALTH_CHECK_INTERVAL_MS
+            });
+        })
+        .catch((err) => {
+            logger.error('Server failed to start — database not ready', { error: err });
+            process.exit(1);
+        });
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));

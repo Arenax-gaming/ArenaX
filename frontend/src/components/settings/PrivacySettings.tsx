@@ -1,6 +1,7 @@
  "use client";
 
 import React, { useState } from "react";
+import { Switch } from "@/components/ui/Switch";
 import {
   Eye,
   Users,
@@ -90,7 +91,7 @@ export function PrivacySettings({
         <CardContent className="space-y-4">
           {/* Profile Visibility */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Profile Visibility</label>
+            <p className="text-sm font-medium">Profile Visibility</p>
             <div className="grid grid-cols-3 gap-3">
               {visibilityOptions.map((option) => (
                 <button
@@ -142,15 +143,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.showOnlineStatus}
-                onChange={(e) => onUpdate({ showOnlineStatus: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.showOnlineStatus} onCheckedChange={(checked) => onUpdate({ showOnlineStatus: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -165,15 +158,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.showGameActivity}
-                onChange={(e) => onUpdate({ showGameActivity: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.showGameActivity} onCheckedChange={(checked) => onUpdate({ showGameActivity: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -188,15 +173,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.showMatchHistory}
-                onChange={(e) => onUpdate({ showMatchHistory: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.showMatchHistory} onCheckedChange={(checked) => onUpdate({ showMatchHistory: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -211,15 +188,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.showEloRating}
-                onChange={(e) => onUpdate({ showEloRating: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.showEloRating} onCheckedChange={(checked) => onUpdate({ showEloRating: checked })} />
           </div>
         </CardContent>
       </Card>
@@ -250,15 +219,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.allowFriendRequests}
-                onChange={(e) => onUpdate({ allowFriendRequests: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.allowFriendRequests} onCheckedChange={(checked) => onUpdate({ allowFriendRequests: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -273,15 +234,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.allowPartyInvites}
-                onChange={(e) => onUpdate({ allowPartyInvites: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.allowPartyInvites} onCheckedChange={(checked) => onUpdate({ allowPartyInvites: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -296,15 +249,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.allowDirectMessages}
-                onChange={(e) => onUpdate({ allowDirectMessages: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.allowDirectMessages} onCheckedChange={(checked) => onUpdate({ allowDirectMessages: checked })} />
           </div>
         </CardContent>
       </Card>
@@ -335,15 +280,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.dataCollection}
-                onChange={(e) => onUpdate({ dataCollection: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.dataCollection} onCheckedChange={(checked) => onUpdate({ dataCollection: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -358,15 +295,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.analyticsTracking}
-                onChange={(e) => onUpdate({ analyticsTracking: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.analyticsTracking} onCheckedChange={(checked) => onUpdate({ analyticsTracking: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -381,15 +310,7 @@ export function PrivacySettings({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.personalizedAds}
-                onChange={(e) => onUpdate({ personalizedAds: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.personalizedAds} onCheckedChange={(checked) => onUpdate({ personalizedAds: checked })} />
           </div>
         </CardContent>
       </Card>

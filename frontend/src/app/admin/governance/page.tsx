@@ -1,29 +1,37 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { PageError } from "@/components/common/PageError";
+import { CardSkeleton, PageHeaderSkeleton } from "@/components/common/PageSkeleton";
+import { EmptyState } from "@/components/common/EmptyState";
+import { FileText } from "lucide-react";
 
 export default function GovernanceDashboard() {
   const [proposals, setProposals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchProposals();
-  }, []);
-
-  const fetchProposals = async () => {
+  const fetchProposals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await api.getProposals();
       setProposals(data);
-    } catch (error) {
-      console.error("Failed to fetch proposals:", error);
+    } catch (err) {
+      console.error("Failed to fetch proposals:", err);
+      setError((err as Error).message ?? "Failed to load proposals.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchProposals();
+  }, [fetchProposals]);
 
   const handleStartVoting = async (id: string) => {
     await api.startVoting(id);
@@ -40,7 +48,38 @@ export default function GovernanceDashboard() {
     fetchProposals();
   };
 
-  if (loading) return <div className="p-8 text-center text-xl font-medium">Loading proposals...</div>;
+  // ── Loading skeleton ──────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6 space-y-8">
+          <div className="flex items-center justify-between">
+            <PageHeaderSkeleton />
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} lines={4} hasFooter />
+            ))}
+          </div>
+        </div>
+      </ProtectedPage>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6">
+          <PageError
+            title="Failed to load proposals"
+            message={error}
+            onRetry={fetchProposals}
+          />
+        </div>
+      </ProtectedPage>
+    );
+  }
 
   return (
     <ProtectedPage requiredRole="admin">
@@ -61,9 +100,14 @@ export default function GovernanceDashboard() {
 
       <div className="grid md:grid-cols-2 gap-6">
         {proposals.length === 0 ? (
-           <div className="col-span-full py-20 text-center text-muted-foreground border-2 border-dashed rounded-xl">
-             No proposals found.
-           </div>
+          <div className="col-span-full">
+            <EmptyState
+              icon={FileText}
+              title="No proposals found"
+              description="There are no governance proposals yet. Create one to get started."
+              size="lg"
+            />
+          </div>
         ) : (
           proposals.map((proposal) => (
             <Card key={proposal.id} className="group border-2 hover:border-indigo-400 dark:hover:border-indigo-600 transition-all duration-300 shadow-sm hover:shadow-xl">

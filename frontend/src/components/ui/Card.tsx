@@ -31,7 +31,7 @@ export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
 interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {}
 
 export const CardTitle = React.forwardRef<HTMLParagraphElement, CardTitleProps>(
-  ({ className, ...props }, ref) => (
+  ({ className, children, ...props }, ref) => (
     <h3
       ref={ref}
       className={cn(
@@ -39,7 +39,9 @@ export const CardTitle = React.forwardRef<HTMLParagraphElement, CardTitleProps>(
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+    </h3>
   ),
 );
 

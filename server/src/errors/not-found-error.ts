@@ -2,6 +2,17 @@ import { BaseError, ErrorDetails } from './base-error';
 
 export class NotFoundError extends BaseError {
     constructor(message = 'Resource not found', details?: ErrorDetails) {
-        super(message, 404, 'NOT_FOUND', details);
+        super(
+            message,
+            404,
+            'NOT_FOUND',
+            {
+                resource: details?.resource || 'unknown',
+                id: details?.id,
+                ...details
+            },
+            true,
+            true
+        );
     }
 }

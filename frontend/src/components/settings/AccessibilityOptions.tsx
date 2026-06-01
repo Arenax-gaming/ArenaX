@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React, { useState } from "react";
 import {
@@ -79,24 +80,17 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.highContrastMode}
-                onChange={(e) => onUpdate({ highContrastMode: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.highContrastMode} onCheckedChange={(checked) => onUpdate({ highContrastMode: checked })} />
           </div>
 
           {/* Colorblind Mode */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
+            <label htmlFor="colorblind-mode" className="text-sm font-medium flex items-center gap-2">
               <Eye className="h-4 w-4 text-muted-foreground" />
               Colorblind Mode
             </label>
             <select
+              id="colorblind-mode"
               value={settings.colorblindMode}
               onChange={(e) =>
                 onUpdate({
@@ -116,7 +110,7 @@ export function AccessibilityOptions({
           {/* Text Scale */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="text-scale" className="text-sm font-medium flex items-center gap-2">
                 <Type className="h-4 w-4 text-muted-foreground" />
                 Text Scale
               </label>
@@ -125,6 +119,7 @@ export function AccessibilityOptions({
               </span>
             </div>
             <input
+              id="text-scale"
               type="range"
               min="50"
               max="200"
@@ -141,7 +136,7 @@ export function AccessibilityOptions({
           {/* UI Scale */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="ui-scale" className="text-sm font-medium flex items-center gap-2">
                 <Layout className="h-4 w-4 text-muted-foreground" />
                 UI Scale
               </label>
@@ -150,6 +145,7 @@ export function AccessibilityOptions({
               </span>
             </div>
             <input
+              id="ui-scale"
               type="range"
               min="50"
               max="150"
@@ -192,21 +188,13 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.subtitlesEnabled}
-                onChange={(e) => onUpdate({ subtitlesEnabled: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.subtitlesEnabled} onCheckedChange={(checked) => onUpdate({ subtitlesEnabled: checked })} />
           </div>
 
           {settings.subtitlesEnabled && (
             <div className="pl-4 border-l-2 border-muted">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Subtitle Size</label>
+                <p className="text-sm font-medium">Subtitle Size</p>
                 <div className="grid grid-cols-3 gap-2">
                   {(["small", "medium", "large"] as const).map((size) => (
                     <button
@@ -254,15 +242,7 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.customKeybindings}
-                onChange={(e) => onUpdate({ customKeybindings: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.customKeybindings} onCheckedChange={(checked) => onUpdate({ customKeybindings: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -277,15 +257,7 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.stickyKeys}
-                onChange={(e) => onUpdate({ stickyKeys: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.stickyKeys} onCheckedChange={(checked) => onUpdate({ stickyKeys: checked })} />
           </div>
         </CardContent>
       </Card>
@@ -316,15 +288,7 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.reducedMotion}
-                onChange={(e) => onUpdate({ reducedMotion: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.reducedMotion} onCheckedChange={(checked) => onUpdate({ reducedMotion: checked })} />
           </div>
 
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
@@ -339,15 +303,7 @@ export function AccessibilityOptions({
                 </p>
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.screenReaderSupport}
-                onChange={(e) => onUpdate({ screenReaderSupport: e.target.checked })}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
+            <Switch checked={settings.screenReaderSupport} onCheckedChange={(checked) => onUpdate({ screenReaderSupport: checked })} />
           </div>
         </CardContent>
       </Card>

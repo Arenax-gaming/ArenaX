@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Match State Machine contract for ArenaX"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk.workspace = true

@@ -18,3 +18,5 @@ pub mod slashing;
 pub mod staking;
 pub mod tournament;
 pub mod virtual_economy;
+pub mod prize_distribution;
+

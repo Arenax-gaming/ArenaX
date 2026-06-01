@@ -112,7 +112,7 @@ class ApiClient {
   }
 
   async joinTournament(id: string) {
-    return this.request(`/tournaments/${id}/join`, {
+    return this.request(`/tournaments/${id}/register`, {
       method: "POST",
     });
   }

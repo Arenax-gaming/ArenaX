@@ -1,4 +1,4 @@
-import { createAdminService } from './admin.service'
+import { getAdminService } from './admin.service'
 import { NotificationService } from './notification.service'
 
 export interface HealthMonitorOptions {
@@ -12,7 +12,7 @@ export interface HealthMonitorOptions {
 export function startHealthMonitor(opts: HealthMonitorOptions = {}) {
   const { intervalMs = 60_000, thresholds = { dbLatency: 200, serverLatency: 500 } } = opts
 
-  const adminService = createAdminService()
+  const adminService = getAdminService()
 
   let lastAlertState: { alerted: boolean; lastStatus?: string } = { alerted: false }
 

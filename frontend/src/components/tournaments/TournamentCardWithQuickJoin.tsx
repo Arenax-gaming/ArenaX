@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Tournament, TournamentStatus } from "@/types/tournament";
+import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { QuickJoinModal } from "./QuickJoinModal";
@@ -12,6 +14,7 @@ interface TournamentCardProps {
   tournament: Tournament;
   isJoined?: boolean;
   onJoinSuccess?: (tournamentId: string) => void;
+  bannerSizes: string;
 }
 
 const statusConfig: Record<
@@ -54,6 +57,7 @@ export function TournamentCardWithQuickJoin({
   tournament,
   isJoined = false,
   onJoinSuccess,
+  bannerSizes,
 }: TournamentCardProps) {
   const [showQuickJoin, setShowQuickJoin] = useState(false);
 
@@ -75,9 +79,24 @@ export function TournamentCardWithQuickJoin({
     onJoinSuccess?.(tournamentId);
   };
 
+  const cardHref =
+    tournament.status === "completed"
+      ? `/tournaments/${tournament.id}/results`
+      : `/tournaments/${tournament.id}`;
+
   return (
     <>
+      <Link href={cardHref} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg">
       <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
+        <div className="relative h-36 w-full shrink-0 bg-muted">
+          <Image
+            src={getTournamentBannerUrl(tournament.id)}
+            alt={`${tournament.name} banner`}
+            fill
+            sizes={bannerSizes}
+            className="object-cover"
+          />
+        </div>
         {/* Header with Status */}
         <div className="flex items-start justify-between border-b p-4">
           <div className="flex-1">
@@ -194,37 +213,27 @@ export function TournamentCardWithQuickJoin({
               Quick Join
             </Button>
           ) : (
-            // #324: route completed tournaments to the dedicated
-            // results page so the View Results CTA actually lands the
-            // user on a results view rather than the live detail page.
-            <Link
-              href={
-                tournament.status === "completed"
-                  ? `/tournaments/${tournament.id}/results`
-                  : `/tournaments/${tournament.id}`
-              }
-              className="block"
+            <Button
+              variant={isJoined ? "secondary" : "outline"}
+              size="md"
+              className="w-full"
+              disabled={!isJoined && tournament.status !== "registration_open"}
+              tabIndex={-1}
             >
-              <Button
-                variant={isJoined ? "secondary" : "outline"}
-                size="md"
-                className="w-full"
-                disabled={!isJoined && tournament.status !== "registration_open"}
-              >
-                {isJoined
-                  ? "View Details"
-                  : isFull
-                    ? "Tournament Full"
-                    : tournament.status === "in_progress"
-                      ? "View Bracket"
-                      : tournament.status === "completed"
-                        ? "View Results"
-                        : "View Details"}
-              </Button>
-            </Link>
+              {isJoined
+                ? "View Details"
+                : isFull
+                  ? "Tournament Full"
+                  : tournament.status === "in_progress"
+                    ? "View Bracket"
+                    : tournament.status === "completed"
+                      ? "View Results"
+                      : "View Details"}
+            </Button>
           )}
         </div>
       </Card>
+      </Link>
 
       {/* Quick Join Modal */}
       <QuickJoinModal

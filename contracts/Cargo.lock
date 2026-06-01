@@ -1123,6 +1123,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prize-distribution"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "dispute-resolution",
+ "match-contract",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"

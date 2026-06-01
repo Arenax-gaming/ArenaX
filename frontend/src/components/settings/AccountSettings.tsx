@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React, { useState } from "react";
 import { Eye, EyeOff, Shield, Mail, User, Lock, Check, AlertCircle } from "lucide-react";
@@ -63,12 +64,13 @@ export function AccountSettings({
       <CardContent className="space-y-6">
         {/* Email */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label htmlFor="account-email" className="text-sm font-medium flex items-center gap-2">
             <Mail className="h-4 w-4 text-muted-foreground" />
             Email Address
           </label>
           <div className="relative">
             <input
+              id="account-email"
               type="email"
               value={settings.email}
               onChange={(e) => onUpdate({ email: e.target.value })}
@@ -87,12 +89,13 @@ export function AccountSettings({
 
         {/* Username */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label htmlFor="account-username" className="text-sm font-medium flex items-center gap-2">
             <User className="h-4 w-4 text-muted-foreground" />
             Username
           </label>
           <div className="relative">
             <input
+              id="account-username"
               type="text"
               value={settings.username}
               onChange={(e) => onUpdate({ username: e.target.value })}
@@ -128,9 +131,10 @@ export function AccountSettings({
             <div className="space-y-4 pl-4 border-l-2 border-muted">
               {/* Current Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Current Password</label>
+                <label htmlFor="current-password" className="text-sm font-medium">Current Password</label>
                 <div className="relative">
                   <input
+                    id="current-password"
                     type={showPasswords.current ? "text" : "password"}
                     value={settings.currentPassword}
                     onChange={(e) => onUpdate({ currentPassword: e.target.value })}
@@ -154,9 +158,10 @@ export function AccountSettings({
 
               {/* New Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">New Password</label>
+                <label htmlFor="new-password" className="text-sm font-medium">New Password</label>
                 <div className="relative">
                   <input
+                    id="new-password"
                     type={showPasswords.new ? "text" : "password"}
                     value={settings.newPassword || ""}
                     onChange={(e) => onUpdate({ newPassword: e.target.value })}
@@ -182,9 +187,10 @@ export function AccountSettings({
 
               {/* Confirm New Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Confirm New Password</label>
+                <label htmlFor="confirm-new-password" className="text-sm font-medium">Confirm New Password</label>
                 <div className="relative">
                   <input
+                    id="confirm-new-password"
                     type={showPasswords.confirm ? "text" : "password"}
                     value={settings.confirmNewPassword || ""}
                     onChange={(e) => onUpdate({ confirmNewPassword: e.target.value })}
@@ -224,15 +230,7 @@ export function AccountSettings({
               </p>
             </div>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.twoFactorEnabled}
-              onChange={(e) => onUpdate({ twoFactorEnabled: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <Switch checked={settings.twoFactorEnabled} onCheckedChange={(checked) => onUpdate({ twoFactorEnabled: checked })} />
         </div>
 
         {/* Save Button */}

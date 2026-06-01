@@ -8,7 +8,7 @@ export const getNotifications = async (req: Request, res: Response) => {
   const userId = req.user?.id; // Assuming auth middleware sets req.user
   if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
   const filter = {
-    unreadOnly: req.query.unreadOnly === 'true',
+    read: req.query.unreadOnly === 'true' ? false : undefined,
   };
   const notifs = await notificationService.getNotifications(userId, filter);
   res.json(notifs);
@@ -35,7 +35,7 @@ export const updatePreferences = async (req: Request, res: Response) => {
 /** POST /api/v1/notifications/send (admin only) */
 export const sendNotification = async (req: Request, res: Response) => {
   // Simple admin guard – in production replace with proper role check
-  const admin = req.user?.isAdmin;
+  const admin = req.user?.role === 'admin';
   if (!admin) return res.status(403).json({ error: 'Forbidden' });
   const { userId, type, title, content } = req.body;
   const notif = await notificationService.sendNotification(userId, type, title, content);

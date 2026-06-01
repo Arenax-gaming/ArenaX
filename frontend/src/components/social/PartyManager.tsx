@@ -100,8 +100,9 @@ export function PartyManager({
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium mb-1 block">Party Name</label>
+                    <label htmlFor="party-name" className="text-sm font-medium mb-1 block">Party Name</label>
                     <input
+                      id="party-name"
                       type="text"
                       placeholder="Enter party name..."
                       value={partyName}
@@ -111,13 +112,15 @@ export function PartyManager({
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <label className="text-sm font-medium">Private Party</label>
+                      <p className="text-sm font-medium">Private Party</p>
                       <p className="text-xs text-muted-foreground">
                         Only invited players can join
                       </p>
                     </div>
                     <button
                       onClick={() => setIsPrivate(!isPrivate)}
+                      aria-label={isPrivate ? "Disable private party" : "Enable private party"}
+                      aria-pressed={isPrivate}
                       className={`relative h-6 w-11 rounded-full transition-colors ${
                         isPrivate ? "bg-primary" : "bg-muted"
                       }`}
