@@ -58,12 +58,12 @@ export class GameSessionService {
       actions: [],
       startedAt: Date.now(),
     };
-    this.sessions.set(id, session);
+    GameSessionService.sessions.set(id, session);
     return session;
   }
 
   getSession(id: string): GameSession | undefined {
-    return this.sessions.get(id);
+    return GameSessionService.sessions.get(id);
   }
 
   async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
@@ -112,6 +112,18 @@ export class GameSessionService {
 
   getActiveSessionCount(): number {
     return this.sessions.size;
+  }
+
+  /** Get all active sessions. */
+  getActiveSessions(): GameSession[] {
+    return Array.from(GameSessionService.sessions.values()).filter(s => !s.finishedAt);
+  }
+
+  /** Forcefully/safely close all active sessions. */
+  closeAllActiveSessions(reason: string = 'Server entering maintenance mode'): void {
+    for (const session of this.getActiveSessions()) {
+      this.finishGame(session.id, { error: reason, closedGracefully: true });
+    }
   }
 }
 

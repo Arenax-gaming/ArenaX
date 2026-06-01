@@ -10,6 +10,9 @@ import { initEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
+import { Server as SocketIOServer } from 'socket.io';
+import { initGameSocket } from './websockets/game.socket';
+import { MaintenanceService } from './services/maintenance.service';
 import { getDatabaseClient } from './services/database.service';
 import eventMonitoringService from './services/event-monitoring.service';
 
@@ -155,14 +158,18 @@ if (env.NODE_ENV !== 'test') {
                 startMemoryMonitor();
             });
 
-            startHealthMonitor({
-                intervalMs: env.HEALTH_CHECK_INTERVAL_MS
-            });
-        })
-        .catch((err) => {
-            logger.error('Server failed to start — database not ready', { error: err });
-            process.exit(1);
-        });
+    const io = new SocketIOServer(server, {
+        cors: {
+            origin: "*",
+            credentials: true
+        }
+    });
+    initGameSocket(io);
+    MaintenanceService.getInstance().setSocketServer(io);
+
+    startHealthMonitor({ 
+        intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
+    });
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
