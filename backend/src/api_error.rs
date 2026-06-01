@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, ResponseError};
 use serde::Serialize;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -38,13 +39,14 @@ pub enum ApiError {
     TooManyRequests(String),
 }
 
-// Helper methods for convenience
 impl ApiError {
+    // ── constructor helpers ───────────────────────────────────────────────────
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         ApiError::BadRequest(message.into())
     }
 
-    pub fn internal_error(message: impl Into<String>) -> Self {
+    pub fn internal_error(_message: impl Into<String>) -> Self {
         ApiError::InternalServerError
     }
 
@@ -52,20 +54,34 @@ impl ApiError {
         ApiError::DatabaseError(e.into())
     }
 
-    pub fn not_found(message: impl Into<String>) -> Self {
+    pub fn not_found(_message: impl Into<String>) -> Self {
         ApiError::NotFound
     }
 
-    pub fn unauthorized(message: impl Into<String>) -> Self {
+    pub fn unauthorized(_message: impl Into<String>) -> Self {
         ApiError::Unauthorized
     }
 
-    pub fn forbidden(message: impl Into<String>) -> Self {
+    pub fn forbidden(_message: impl Into<String>) -> Self {
         ApiError::Forbidden
     }
 
     pub fn conflict(message: impl Into<String>) -> Self {
         ApiError::Conflict(message.into())
+    }
+
+    // ── classification ────────────────────────────────────────────────────────
+
+    /// Returns `true` for server-side (5xx) errors whose internal details
+    /// must never be exposed to API clients.
+    fn is_server_error(&self) -> bool {
+        matches!(
+            self,
+            ApiError::InternalServerError
+                | ApiError::DatabaseError(_)
+                | ApiError::RedisError(_)
+                | ApiError::StellarError(_)
+        )
     }
 }
 
@@ -73,48 +89,51 @@ impl ApiError {
 struct ErrorResponse {
     error: String,
     code: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
     details: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<String>,
 }
 
 impl ResponseError for ApiError {
-    fn error_response(&self) -> HttpResponse {
-        let (status, message) = match self {
-            ApiError::InternalServerError => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                self.to_string(),
-            ),
-            ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
-            ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
-            ApiError::Forbidden => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
-            ApiError::NotFound => (actix_web::http::StatusCode::NOT_FOUND, self.to_string()),
-            ApiError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, self.to_string()),
-            ApiError::DatabaseError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ),
-            ApiError::RedisError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Cache error".to_string(),
-            ),
-            ApiError::StellarError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Blockchain error".to_string(),
-            ),
-            ApiError::ValidationError(_) => {
-                (actix_web::http::StatusCode::BAD_REQUEST, self.to_string())
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        match self {
+            ApiError::InternalServerError
+            | ApiError::DatabaseError(_)
+            | ApiError::RedisError(_)
+            | ApiError::StellarError(_) => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::BadRequest(_) | ApiError::ValidationError(_) => {
+                actix_web::http::StatusCode::BAD_REQUEST
             }
-            ApiError::TooManyRequests(_) => (
-                actix_web::http::StatusCode::TOO_MANY_REQUESTS,
-                self.to_string(),
-            ),
+            ApiError::Unauthorized => actix_web::http::StatusCode::UNAUTHORIZED,
+            ApiError::Forbidden => actix_web::http::StatusCode::FORBIDDEN,
+            ApiError::NotFound => actix_web::http::StatusCode::NOT_FOUND,
+            ApiError::Conflict(_) => actix_web::http::StatusCode::CONFLICT,
+            ApiError::TooManyRequests(_) => actix_web::http::StatusCode::TOO_MANY_REQUESTS,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        let status = self.status_code();
+
+        let (message, correlation_id) = if self.is_server_error() {
+            let cid = Uuid::new_v4().to_string();
+            tracing::error!(
+                correlation_id = %cid,
+                error = %self,
+                error_kind = ?std::mem::discriminant(self),
+                "Internal server error"
+            );
+            ("An internal error occurred".to_string(), Some(cid))
+        } else {
+            (self.to_string(), None)
         };
 
-        let error_response = ErrorResponse {
+        HttpResponse::build(status).json(ErrorResponse {
             error: message,
             code: status.as_u16(),
-            details: Some(self.to_string()),
-        };
-
-        HttpResponse::build(status).json(error_response)
+            details: None,
+            correlation_id,
+        })
     }
 }

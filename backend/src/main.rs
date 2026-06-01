@@ -189,6 +189,7 @@ async fn main() -> io::Result<()> {
                     .service(
                         web::scope("/tournaments")
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
+                            .route("/{id}/status", web::patch().to(crate::http::tournament_handler::update_tournament_status))
                     )
                     // Matchmaking endpoints
                     .service(
