@@ -17,6 +17,26 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
+    pub migration_mode: MigrationMode,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum MigrationMode {
+    Run,
+    Disabled,
+}
+
+impl MigrationMode {
+    fn from_env_value(value: &str) -> Result<Self, anyhow::Error> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "run" | "auto" | "true" | "1" => Ok(Self::Run),
+            "disabled" | "disable" | "off" | "false" | "0" => Ok(Self::Disabled),
+            other => anyhow::bail!(
+                "invalid BACKEND_MIGRATION_MODE value `{}`; expected `run` or `disabled`",
+                other
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -135,6 +155,9 @@ impl Config {
 
         // ── Non-secret vars (? is fine) ───────────────────────────────────────
         let database_url = env::var("DATABASE_URL")?;
+        let migration_mode = env::var("BACKEND_MIGRATION_MODE")
+            .map(|value| MigrationMode::from_env_value(&value))
+            .unwrap_or(Ok(MigrationMode::Run))?;
         let redis_url = env::var("REDIS_URL")?;
         let s3_endpoint = env::var("S3_ENDPOINT")?;
         let s3_access_key = env::var("S3_ACCESS_KEY")?;
@@ -170,7 +193,10 @@ impl Config {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(Config {
-            database: DatabaseConfig { url: database_url },
+            database: DatabaseConfig {
+                url: database_url,
+                migration_mode,
+            },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
                 s3_endpoint,

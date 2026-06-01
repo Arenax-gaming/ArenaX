@@ -5,6 +5,7 @@ import paymentMonitorWorker from '../services/payment-monitor.worker';
 import prisma from '../services/database.service';
 import { createAdminService, AdminService } from '../services/admin.service';
 import { confirmationService } from '../services/confirmation.service';
+import { MaintenanceService } from '../services/maintenance.service';
 
 const matchService = new MatchService();
 const adminService: AdminService = createAdminService();
@@ -307,4 +308,81 @@ export const getSystemHealth = async (_req: Request, res: Response): Promise<voi
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
     }
+};
+
+export const scheduleMaintenance = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { startTime, endTime, message } = req.body;
+        if (!startTime || !endTime) {
+            res.status(400).json({ error: 'startTime and endTime are required' });
+            return;
+        }
+        MaintenanceService.getInstance().scheduleMaintenance(new Date(startTime), new Date(endTime), message);
+        
+        await AuditService.logAction({
+            adminId: req.user!.id,
+            action: 'SCHEDULE_MAINTENANCE',
+            targetType: 'SYSTEM',
+            targetId: 'MAINTENANCE',
+            details: { startTime, endTime, message },
+            requestId: req.auditContext?.requestId,
+            ipAddress: req.auditContext?.ipAddress,
+            userAgent: req.auditContext?.userAgent
+        });
+
+        res.status(200).json({ message: 'Maintenance scheduled successfully' });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+};
+
+export const enableMaintenanceImmediately = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { endTime, message } = req.body;
+        if (!endTime) {
+            res.status(400).json({ error: 'endTime is required' });
+            return;
+        }
+        MaintenanceService.getInstance().enableMaintenanceImmediately(new Date(endTime), message);
+
+        await AuditService.logAction({
+            adminId: req.user!.id,
+            action: 'ENABLE_MAINTENANCE_IMMEDIATELY',
+            targetType: 'SYSTEM',
+            targetId: 'MAINTENANCE',
+            details: { endTime, message },
+            requestId: req.auditContext?.requestId,
+            ipAddress: req.auditContext?.ipAddress,
+            userAgent: req.auditContext?.userAgent
+        });
+
+        res.status(200).json({ message: 'Maintenance enabled immediately' });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+};
+
+export const disableMaintenance = async (req: Request, res: Response): Promise<void> => {
+    try {
+        MaintenanceService.getInstance().disableMaintenance();
+
+        await AuditService.logAction({
+            adminId: req.user!.id,
+            action: 'DISABLE_MAINTENANCE',
+            targetType: 'SYSTEM',
+            targetId: 'MAINTENANCE',
+            details: {},
+            requestId: req.auditContext?.requestId,
+            ipAddress: req.auditContext?.ipAddress,
+            userAgent: req.auditContext?.userAgent
+        });
+
+        res.status(200).json({ message: 'Maintenance disabled successfully' });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+};
+
+export const getMaintenanceStatus = (req: Request, res: Response): void => {
+    res.status(200).json(MaintenanceService.getInstance().getStatus());
 };

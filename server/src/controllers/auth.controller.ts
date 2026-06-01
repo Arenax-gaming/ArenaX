@@ -8,6 +8,7 @@ import {
     authenticateSocial,
     createGuestSession,
     verifyEmail,
+    resendVerificationEmail,
     forgotPassword,
     resetPassword
 } from '../services/auth.service';
@@ -45,6 +46,10 @@ const socialAuthSchema = z.object({
 
 const verifyEmailSchema = z.object({
     token: z.string().min(1)
+});
+
+const resendVerificationEmailSchema = z.object({
+    email: z.string().email()
 });
 
 const forgotPasswordSchema = z.object({
@@ -121,6 +126,16 @@ export const verifyEmailHandler = async (req: Request, res: Response, next: Next
         const payload = parseBody(verifyEmailSchema, req.body);
         await verifyEmail(payload);
         res.status(200).json({ message: 'Email verified successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const resendVerificationEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(resendVerificationEmailSchema, req.body);
+        const result = await resendVerificationEmail(payload);
+        res.status(200).json(result);
     } catch (error) {
         next(error);
     }

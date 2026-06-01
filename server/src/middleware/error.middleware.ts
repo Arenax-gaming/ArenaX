@@ -3,6 +3,7 @@ import { BaseError, InternalServerError, isBaseError } from '../errors';
 import { logger } from '../services/logger.service';
 import { captureException } from '../services/telemetry.service';
 import { HttpError } from '../utils/http-error';
+import { getEnv } from '../config/env';
 
 const normalizeError = (err: unknown): BaseError => {
     if (isBaseError(err)) {
@@ -32,7 +33,7 @@ export const errorHandler = (
     next: NextFunction
 ) => {
     const normalizedError = normalizeError(err);
-    const isProduction = process.env.NODE_ENV === 'production';
+    const { isProductionLike } = getEnv();
     const requestId = req.requestId ?? 'unknown';
     const requestLogger = req.log ?? logger;
 
@@ -56,11 +57,10 @@ export const errorHandler = (
     });
 
     // Improve error messaging: expose more details for client debugging while protecting sensitive info
-    const shouldMask = isProduction && (!normalizedError.isOperational || !normalizedError.expose);
+    const shouldMask = isProductionLike && (!normalizedError.isOperational || !normalizedError.expose);
     const message = shouldMask ? 'Internal Server Error' : normalizedError.message;
     const code = shouldMask ? 'INTERNAL_SERVER_ERROR' : normalizedError.code;
     
-    // Include details for operational errors in non-production, or safe details in production
     const details = shouldMask ? undefined : normalizedError.details;
 
     res.status(normalizedError.statusCode).json({
@@ -71,8 +71,7 @@ export const errorHandler = (
             status: normalizedError.statusCode,
             timestamp: new Date().toISOString(),
             requestId,
-            // Add hint for client-side debugging
-            hint: isProduction && !shouldMask ? 'Check request details and try again' : undefined
+            hint: isProductionLike && !shouldMask ? 'Check request details and try again' : undefined
         }
     });
 };

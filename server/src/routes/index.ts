@@ -14,11 +14,21 @@ import dashboardRoutes from './dashboard.routes';
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
+import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
+import { MaintenanceService } from '../services/maintenance.service';
 
 const router = Router();
 
 router.use(publicRateLimiter);
 router.use(auditMiddleware);
+
+// Public maintenance status endpoint
+router.get('/maintenance/status', (req, res) => {
+    res.status(200).json(MaintenanceService.getInstance().getStatus());
+});
+
+router.use(maintenanceMiddleware);
+
 router.use('/api/v1/auth', authRoutes);
 router.use('/profiles', profileRoutes);
 router.use('/matches', matchRoutes);

@@ -492,24 +492,20 @@ impl StellarService {
         Ok((public_key, secret_key))
     }
 
-    /// Encrypt a secret key for storage
+    /// Encrypt a secret key for storage using AES-256-GCM envelope encryption.
     fn encrypt_secret_key(&self, secret_key: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual encryption using app secret
-        // For now, just base64 encode (NOT SECURE - implement proper encryption)
-        use base64::{engine::general_purpose, Engine as _};
-        Ok(general_purpose::STANDARD.encode(secret_key))
+        crate::service::key_encryption::encrypt_secret_key(secret_key)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
     }
 
-    /// Decrypt a secret key from storage
-    fn decrypt_secret_key(&self, encrypted: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual decryption
-        // For now, just base64 decode (NOT SECURE - implement proper decryption)
-        use base64::{engine::general_purpose, Engine as _};
-        general_purpose::STANDARD
-            .decode(encrypted)
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-            .ok_or(StellarError::InvalidPublicKey)
+    /// Decrypt a secret key from storage.
+    /// Returns a `ZeroizingSecret` that zeroes memory on drop.
+    fn decrypt_secret_key(
+        &self,
+        encrypted: &str,
+    ) -> Result<crate::service::key_encryption::ZeroizingSecret, StellarError> {
+        crate::service::key_encryption::decrypt_secret_key(encrypted)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
     }
 
     /// Convert XLM to stroops (1 XLM = 10,000,000 stroops)

@@ -16,7 +16,7 @@ mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
-use crate::db::create_pool;
+use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
@@ -40,6 +40,10 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create database pool");
 
+    run_startup_migrations(&config, &db_pool)
+        .await
+        .expect("Failed to run database migrations");
+
     // Spawn the Reaper — forfeits players who miss the reporting deadline
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));
     reaper.run();
@@ -60,11 +64,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
-    // Initialize matchmaking service
+    // Initialize matchmaking service — pass the shared ConnectionManager so
+    // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
     let matchmaker_service = Arc::new(MatchmakerService::new(
         db_pool.clone(),
-        redis_client.clone(),
+        redis_conn.clone(),
         matchmaking_config,
     ));
     

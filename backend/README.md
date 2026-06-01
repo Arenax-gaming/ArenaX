@@ -115,7 +115,7 @@ cp .env.example .env
 # Edit .env with your configuration
 
 # Run database migrations
-sqlx migrate run
+./scripts/migrate.sh
 
 # Start the backend server
 cargo run
@@ -149,9 +149,12 @@ cargo clippy
 ./test_ci_locally.sh
 
 # Database operations
-sqlx migrate add <migration_name>
-sqlx migrate run
-sqlx migrate revert
+sqlx migrate add -r <migration_name>
+./scripts/verify-migrations.sh
+./scripts/migrate.sh
+./scripts/migration-status.sh
+./scripts/backup-database.sh
+./scripts/rollback-last-migration.sh
 
 # Stellar integration testing
 ./scripts/test_stellar.sh
@@ -162,6 +165,7 @@ sqlx migrate revert
 ```env
 # Database
 DATABASE_URL=postgres://user:pass@localhost:5432/arenax
+BACKEND_MIGRATION_MODE=run
 REDIS_URL=redis://localhost:6379
 
 # Storage
@@ -191,9 +195,7 @@ SOROBAN_CONTRACT_REPUTATION=<your-reputation-contract-id>
 AI_MODEL_PATH=./models/anti_cheat.tflite
 ```
 
-> **Security note:** All variables marked `[REQUIRED SECRET]` must be set to
-> strong, randomly-generated values. The application will **refuse to start**
-> if any required secret is missing, empty, or matches a known placeholder.
+`BACKEND_MIGRATION_MODE` defaults to `run`, which applies and validates SQLx migrations during backend startup. Use `disabled` only when migrations are applied by a separate deployment step. See [MIGRATIONS.md](MIGRATIONS.md) for the full migration workflow, rollback process, and CI expectations.
 
 ## Code Organization & Architecture
 
