@@ -1,18 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-
-interface Player {
-  id: string;
-  username: string;
-  avatar?: string;
-  isReady: boolean;
-  isHost: boolean;
-}
+import type { PartyPlayer } from '@/types/player';
 
 interface PartyManagerProps {
   partyId?: string;
-  players: Player[];
+  players: PartyPlayer[];
   maxPlayers?: number;
   onInvite?: (playerId: string) => void;
   onLeave?: () => void;

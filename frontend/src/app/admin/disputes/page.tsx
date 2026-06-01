@@ -5,13 +5,10 @@ import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { PageError } from "@/components/common/PageError";
-import { ListItemSkeleton, PageHeaderSkeleton } from "@/components/common/PageSkeleton";
-import { ShieldAlert } from "lucide-react";
-import { EmptyState } from "@/components/common/EmptyState";
+import type { Dispute } from "@/types/admin";
 
 export default function DisputeDashboard() {
-  const [disputes, setDisputes] = useState<any[]>([]);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,10 +17,9 @@ export default function DisputeDashboard() {
     setError(null);
     try {
       const data = await api.getDisputes();
-      setDisputes(data as any[]);
-    } catch (err) {
-      console.error("Failed to fetch disputes:", err);
-      setError((err as Error).message ?? "Failed to load disputes.");
+      setDisputes(data as Dispute[]);
+    } catch (error) {
+      console.error("Failed to fetch disputes:", error);
     } finally {
       setLoading(false);
     }

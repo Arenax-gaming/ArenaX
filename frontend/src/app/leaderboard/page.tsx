@@ -12,9 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Image as ImageIcon, Trophy } from "lucide-react";
-import { useLeaderboard } from "@/hooks/useLeaderboard";
-import { LeaderboardCategory } from "@/types/leaderboard";
+import { Image as ImageIcon } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
+import type { LeaderboardPlayer } from "@/types/leaderboard";
 
 // ---------------------------------------------------------------------------
 // Constants

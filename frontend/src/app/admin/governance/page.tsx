@@ -5,13 +5,10 @@ import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { PageError } from "@/components/common/PageError";
-import { CardSkeleton, PageHeaderSkeleton } from "@/components/common/PageSkeleton";
-import { EmptyState } from "@/components/common/EmptyState";
-import { FileText } from "lucide-react";
+import type { GovernanceProposal } from "@/types/admin";
 
 export default function GovernanceDashboard() {
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<GovernanceProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,10 +17,9 @@ export default function GovernanceDashboard() {
     setError(null);
     try {
       const data = await api.getProposals();
-      setProposals(data);
-    } catch (err) {
-      console.error("Failed to fetch proposals:", err);
-      setError((err as Error).message ?? "Failed to load proposals.");
+      setProposals(data as GovernanceProposal[]);
+    } catch (error) {
+      console.error("Failed to fetch proposals:", error);
     } finally {
       setLoading(false);
     }

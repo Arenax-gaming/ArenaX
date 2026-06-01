@@ -22,33 +22,14 @@ import {
   DollarSign,
   Gamepad2
 } from "lucide-react";
-import { TournamentType, TournamentVisibility } from "@/types/tournament";
+import {
+  CreateCreateTournamentFormData,
+  CreateTournamentWizardStep,
+  TournamentType,
+  TournamentVisibility,
+} from "@/types/tournament";
 
-type Step = 1 | 2 | 3 | 4 | "preview" | "success";
-
-interface TournamentFormData {
-  // Step 1: Basic Info
-  name: string;
-  gameType: string;
-  description: string;
-  // Step 2: Format & Rules
-  tournamentType: TournamentType;
-  matchFormat: string;
-  rules: string;
-  // Step 3: Entry & Prizes
-  entryFee: number;
-  prizePool: number;
-  prizeDistribution: string;
-  // Step 4: Schedule & Registration
-  visibility: TournamentVisibility;
-  maxParticipants: number;
-  registrationOpenDate: string;
-  registrationCloseDate: string;
-  startDate: string;
-  endDate: string;
-}
-
-const initialFormData: TournamentFormData = {
+const initialFormData: CreateCreateTournamentFormData = {
   name: "",
   gameType: "",
   description: "",
@@ -95,8 +76,8 @@ const tournamentTypes: { value: TournamentType; label: string; description: stri
 ];
 
 export default function CreateTournamentPage() {
-  const [currentStep, setCurrentStep] = useState<Step>(1);
-  const [formData, setFormData] = useState<TournamentFormData>(initialFormData);
+  const [currentStep, setCurrentStep] = useState<CreateTournamentWizardStep>(1);
+  const [formData, setFormData] = useState<CreateTournamentFormData>(initialFormData);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -136,7 +117,7 @@ export default function CreateTournamentPage() {
     return () => clearTimeout(timer);
   }, [formData, saveDraft]);
 
-  const validateStep = (step: Step): boolean => {
+  const validateStep = (step: CreateTournamentWizardStep): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (step === 1) {
@@ -183,15 +164,15 @@ export default function CreateTournamentPage() {
 
   const handleNext = () => {
     if (validateStep(currentStep)) {
-      setCurrentStep((prev) => (prev === 4 ? "preview" : (prev as Step) + 1) as Step);
+      setCurrentStep((prev) => (prev === 4 ? "preview" : (prev as CreateTournamentWizardStep) + 1) as CreateTournamentWizardStep);
     }
   };
 
   const handleBack = () => {
-    setCurrentStep((prev) => (prev === "preview" ? 4 : (prev as Step) - 1) as Step);
+    setCurrentStep((prev) => (prev === "preview" ? 4 : (prev as CreateTournamentWizardStep) - 1) as CreateTournamentWizardStep);
   };
 
-  const handleFieldChange = (field: keyof TournamentFormData, value: string | number) => {
+  const handleFieldChange = (field: keyof CreateTournamentFormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error for this field
     if (errors[field]) {
