@@ -7,6 +7,7 @@ import { logger } from '../services/logger.service';
 // the disconnect handler can clean up all of them without relying on
 // per-connection closure state alone.
 const socketSessions = new Map<string, Set<string>>();
+const sessionSockets = new Map<string, Set<string>>();
 
 export function initGameSocket(io: Server) {
   const gameSessionService = new GameSessionService();
@@ -31,8 +32,18 @@ export function initGameSocket(io: Server) {
         }
         sessions.add(sessionId);
 
+        let connectedSockets = sessionSockets.get(sessionId);
+        if (!connectedSockets) {
+          connectedSockets = new Set();
+          sessionSockets.set(sessionId, connectedSockets);
+        }
+        const isNewJoin = !connectedSockets.has(socket.id);
+        connectedSockets.add(socket.id);
+
         socket.emit('joined', { sessionId });
-        io.to(sessionId).emit('game:player-joined', { playerId: socket.id });
+        if (isNewJoin) {
+          io.to(sessionId).emit('game:player-joined', { playerId: socket.id });
+        }
       } catch (err) {
         socket.emit('error', { message: (err as Error).message });
       }
@@ -57,28 +68,9 @@ export function initGameSocket(io: Server) {
 
       const sessions = socketSessions.get(socket.id);
       if (sessions) {
-        for (const sessionId of sessions) {
-          socket.leave(sessionId);
-
-          const session = gameSessionService.getSession(sessionId);
-          if (session) {
-            // Remove this player from the session's player list.
-            session.players = session.players.filter((id) => id !== socket.id);
-
-            if (session.players.length === 0) {
-              // Last player left — delete the session to free memory immediately
-              // rather than waiting for the stale-session cleanup interval.
-              gameSessionService.removeSession(sessionId);
-              logger.info('Game session deleted (no players remaining)', { sessionId });
-            } else {
-              // Notify remaining players that this player left.
-              io.to(sessionId).emit('game:player-left', { playerId: socket.id });
-            }
-          }
+        for (const sessionId of Array.from(sessions)) {
+          cleanupSocketFromSession(socket, io, gameSessionService, sessionId, 'disconnect');
         }
-
-        // Remove the socket's entry from the tracking map.
-        socketSessions.delete(socket.id);
       }
     });
   });
@@ -90,6 +82,16 @@ async function handleLeave(
   gameSessionService: GameSessionService,
   sessionId: string,
 ): Promise<void> {
+  cleanupSocketFromSession(socket, io, gameSessionService, sessionId, 'leave');
+}
+
+function cleanupSocketFromSession(
+  socket: Socket,
+  io: Server,
+  gameSessionService: GameSessionService,
+  sessionId: string,
+  reason: 'disconnect' | 'leave',
+): void {
   socket.leave(sessionId);
 
   const sessions = socketSessions.get(socket.id);
@@ -100,14 +102,19 @@ async function handleLeave(
     }
   }
 
-  const session = gameSessionService.getSession(sessionId);
-  if (session) {
-    session.players = session.players.filter((id) => id !== socket.id);
-    if (session.players.length === 0) {
-      gameSessionService.removeSession(sessionId);
-      logger.info('Game session deleted after explicit leave (no players remaining)', { sessionId });
-    } else {
-      io.to(sessionId).emit('game:player-left', { playerId: socket.id });
-    }
+  const connectedSockets = sessionSockets.get(sessionId);
+  if (!connectedSockets) {
+    return;
   }
+
+  connectedSockets.delete(socket.id);
+
+  if (connectedSockets.size === 0) {
+    sessionSockets.delete(sessionId);
+    gameSessionService.removeSession(sessionId);
+    logger.info('Game session deleted (no connected sockets remaining)', { sessionId, reason });
+    return;
+  }
+
+  io.to(sessionId).emit('game:player-left', { playerId: socket.id });
 }
