@@ -16,7 +16,7 @@ mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
-use crate::db::create_pool;
+use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
@@ -39,6 +39,10 @@ async fn main() -> io::Result<()> {
     let db_pool = create_pool(&config)
         .await
         .expect("Failed to create database pool");
+
+    run_startup_migrations(&config, &db_pool)
+        .await
+        .expect("Failed to run database migrations");
 
     // Spawn the Reaper — forfeits players who miss the reporting deadline
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));
