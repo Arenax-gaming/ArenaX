@@ -5,7 +5,6 @@ import {
     SorobanRpc,
     Networks,
     Account,
-    Keypair,
     BASE_FEE,
     xdr,
     Address,
@@ -14,6 +13,7 @@ import {
 import prisma from './database.service';
 import sorobanRpcService from './soroban-rpc.service';
 import stellarSigningService from './stellar-signing.service';
+import sorobanMonitorWorker from './soroban-monitor.worker';
 import { TxStatus } from '@prisma/client';
 
 const NETWORK_PASSPHRASE =
@@ -216,73 +216,3 @@ export class SorobanService {
 }
 
 export const sorobanService = new SorobanService();
-
-// ── Monitor Worker (upgraded) ─────────────────────────────────────────────────
-
-export class SorobanMonitorWorker {
-    private readonly MAX_RETRIES = 15;
-    private readonly INITIAL_BACKOFF_MS = 1_000;
-    private readonly MAX_BACKOFF_MS = 30_000;
-
-    async monitor(txHash: string): Promise<void> {
-        let attempt = 0;
-        let backoff = this.INITIAL_BACKOFF_MS;
-        const rpc = sorobanRpcService.getClient();
-
-        while (attempt < this.MAX_RETRIES) {
-            await new Promise((r) => setTimeout(r, backoff));
-            backoff = Math.min(backoff * 2, this.MAX_BACKOFF_MS);
-            attempt++;
-
-            try {
-                const response = await rpc.getTransaction(txHash);
-
-                if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-                    await this._update(txHash, TxStatus.SUCCESS);
-                    return;
-                }
-
-                if (response.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
-                    // Extract Soroban-specific error code from result XDR
-                    const errorDetail = this._extractSorobanError(response);
-                    await this._update(txHash, TxStatus.FAILED, errorDetail);
-                    return;
-                }
-
-                // status === NOT_FOUND or PENDING — keep polling
-            } catch (err: any) {
-                // RPC error — keep retrying with backoff
-                console.warn(`[monitor] poll error for ${txHash} (attempt ${attempt}): ${err.message}`);
-            }
-        }
-
-        await this._update(txHash, TxStatus.FAILED, 'Transaction finality timeout after max retries');
-    }
-
-    private _extractSorobanError(response: any): string {
-        try {
-            if (response.resultXdr) {
-                const txResult = xdr.TransactionResult.fromXDR(response.resultXdr, 'base64');
-                const code = txResult.result().switch().name;
-                return `Soroban error code: ${code}`;
-            }
-            if (response.resultMetaXdr) {
-                return `resultMetaXdr: ${response.resultMetaXdr}`;
-            }
-        } catch {/* fall through */}
-        return 'Soroban execution failed (no error XDR)';
-    }
-
-    private async _update(txHash: string, status: TxStatus, error?: string) {
-        try {
-            await prisma.blockchainTransaction.update({
-                where: { txHash },
-                data: { status, error, updatedAt: new Date() },
-            });
-        } catch (err) {
-            console.error(`[monitor] DB update failed for ${txHash}:`, err);
-        }
-    }
-}
-
-export const sorobanMonitorWorker = new SorobanMonitorWorker();

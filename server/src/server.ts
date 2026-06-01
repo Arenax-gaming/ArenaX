@@ -11,31 +11,16 @@ import { initializeTelemetry } from './services/telemetry.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
 import { getDatabaseClient } from './services/database.service';
+import eventMonitoringService from './services/event-monitoring.service';
 
-// ---------------------------------------------------------------------------
-// 1. Load environment files in priority order before any other module reads
-//    process.env. The NODE_ENV shell variable determines which file is loaded.
-//
-//    Priority (highest → lowest):
-//      .env.<NODE_ENV>.local   machine-local overrides (git-ignored)
-//      .env.<NODE_ENV>         environment-specific committed defaults
-//      .env.local              cross-env local overrides (git-ignored)
-//      .env                    base defaults
-// ---------------------------------------------------------------------------
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const root = path.resolve(__dirname, '..');
 
-// Load in reverse priority so higher-priority files win (dotenv skips already-
-// set variables when `override` is false, which is the default).
 dotenv.config({ path: path.join(root, '.env') });
 dotenv.config({ path: path.join(root, '.env.local') });
 dotenv.config({ path: path.join(root, `.env.${nodeEnv}`) });
 dotenv.config({ path: path.join(root, `.env.${nodeEnv}.local`) });
 
-// ---------------------------------------------------------------------------
-// 2. Validate and freeze the environment. All code after this point should
-//    import `getEnv()` rather than reading process.env directly.
-// ---------------------------------------------------------------------------
 const env = initEnv();
 initializeTelemetry();
 registerAchievementIntegration();
@@ -61,7 +46,10 @@ app.get('/health', async (_req: Request, res: Response) => {
                 activeUsers: health.activeUsers,
                 activeMatches: health.activeMatches,
                 memoryUsagePercent: health.memoryUsage,
-                diskUsagePercent: health.diskUsage
+                diskUsagePercent: health.diskUsage,
+                memoryUsageMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+                eventMonitorRunning: eventMonitoringService.isRunning(),
+                lastProcessedLedger: eventMonitoringService.getLastProcessedLedger(),
             }
         });
     } catch (error) {
@@ -76,8 +64,32 @@ app.get('/health', async (_req: Request, res: Response) => {
 
 app.use(compression());
 
+let memoryWarningInterval: ReturnType<typeof setInterval> | null = null;
+
+const startMemoryMonitor = (thresholdMB = 1500, intervalMs = 300000): void => {
+    memoryWarningInterval = setInterval(() => {
+        const mem = process.memoryUsage();
+        const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
+        const rssMB = Math.round(mem.rss / 1024 / 1024);
+        logger.debug('Memory usage', { heapMB, rssMB });
+        if (heapMB > thresholdMB) {
+            logger.warn('High memory usage detected', { heapMB, rssMB, thresholdMB });
+        }
+    }, intervalMs);
+};
+
+const stopMemoryMonitor = (): void => {
+    if (memoryWarningInterval) {
+        clearInterval(memoryWarningInterval);
+        memoryWarningInterval = null;
+    }
+};
+
 const gracefulShutdown = (signal: string) => {
     logger.info(`Received ${signal}, starting graceful shutdown`);
+
+    stopMemoryMonitor();
+    eventMonitoringService.stop();
 
     if (!server) {
         logger.info('No server running, exiting');
@@ -94,9 +106,13 @@ const gracefulShutdown = (signal: string) => {
         logger.info('Graceful shutdown completed');
         process.exit(0);
     });
+
+    setTimeout(() => {
+        logger.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 30000).unref();
 };
 
-/** Probe the database with retries before accepting traffic. */
 const waitForDatabase = async (
     maxAttempts = 10,
     delayMs = 1000
@@ -126,6 +142,17 @@ if (env.NODE_ENV !== 'test') {
                     port,
                     environment: env.NODE_ENV
                 });
+
+                eventMonitoringService.configure({
+                    intervalMs: 10_000,
+                    maxLedgerBatch: 100,
+                    contracts: (process.env.SOROBAN_CONTRACT_ADDRESSES ?? '').split(',').filter(Boolean),
+                });
+                eventMonitoringService.start().catch((err) => {
+                    logger.error('Failed to start event monitoring', { error: err });
+                });
+
+                startMemoryMonitor();
             });
 
             startHealthMonitor({
