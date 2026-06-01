@@ -58,6 +58,13 @@ export default function MatchHubPage() {
     setPlayer2Score(String(match.scorePlayer2));
   }, [match]);
 
+  useEffect(() => {
+    if (match) {
+      const statusText = match.status.replace("_", " ");
+      setStatusAnnouncement(`Match status changed to ${statusText}`);
+    }
+  }, [match?.status]);
+
   const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
     matchId,
     enabled: match?.status === "in_progress" || match?.status === "disputed",
@@ -222,6 +229,9 @@ export default function MatchHubPage() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8">
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
+      </div>
       <div className="mx-auto max-w-7xl">
         <div className="mb-6">
           <Button
