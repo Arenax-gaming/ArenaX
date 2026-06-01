@@ -44,15 +44,9 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (user) {
-      addToast({
-        type: "success",
-        title: "Account created",
-        message: `Welcome, ${user.username}!`,
-        duration: 3000,
-      });
-      router.replace("/");
+      router.replace("/auth/verify-email");
     }
-  }, [user, router, addToast]);
+  }, [user, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.id]: e.target.value }));

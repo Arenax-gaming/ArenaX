@@ -80,6 +80,20 @@ class ApiClient {
     );
   }
 
+  async verifyEmail(token: string) {
+    return this.authRequest<{ message: string }>(
+      "/auth/verify-email",
+      { method: "POST", body: JSON.stringify({ token }) }
+    );
+  }
+
+  async resendVerificationEmail(email: string) {
+    return this.authRequest<{ message: string }>(
+      "/auth/resend-verification-email",
+      { method: "POST", body: JSON.stringify({ email }) }
+    );
+  }
+
   // Tournament endpoints
   async getTournaments(params?: Record<string, any>) {
     const queryString = params ? "?" + new URLSearchParams(params) : "";
