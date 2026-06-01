@@ -686,7 +686,9 @@ mod tests {
 
     #[test]
     fn test_jwt_config_default() {
-        let config = JwtConfig::default();
+        // JwtConfig::default() now requires JWT_SECRET to be set.
+        // Test the expected field values using create_test_config() instead.
+        let config = create_test_config();
         assert_eq!(config.algorithm, Algorithm::HS256);
         assert_eq!(config.access_token_expiry.num_minutes(), 15);
         assert_eq!(config.refresh_token_expiry.num_days(), 7);

@@ -243,9 +243,12 @@ impl StellarService {
         let tx_hash = format!("escrow-{}", Uuid::new_v4());
 
         // Record transaction
+        let admin_key = self.admin_secret.as_deref()
+            .ok_or_else(|| crate::api_error::ApiError::InternalServerError)?;
+
         self.record_transaction(
             &tx_hash,
-            self.admin_secret.as_deref().unwrap_or("admin"),
+            admin_key,
             prize_pool_account,
             amount,
             "XLM",
