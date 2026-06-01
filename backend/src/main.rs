@@ -60,11 +60,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
-    // Initialize matchmaking service
+    // Initialize matchmaking service — pass the shared ConnectionManager so
+    // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
     let matchmaker_service = Arc::new(MatchmakerService::new(
         db_pool.clone(),
-        redis_client.clone(),
+        redis_conn.clone(),
         matchmaking_config,
     ));
     
