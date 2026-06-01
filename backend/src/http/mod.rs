@@ -13,6 +13,7 @@ pub mod social_handler;
 pub mod staking_handler;
 pub mod analytics_handler;
 pub mod tournament_handler;
+pub mod users;
 
 // TODO: Add more HTTP modules as implemented:
 // pub mod auth;
