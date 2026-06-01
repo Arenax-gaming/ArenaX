@@ -9,6 +9,7 @@ import { authConfig } from '../config/auth.config';
 import { getDatabaseClient } from '../services/database.service';
 import { AuthenticatedUser } from '../types/auth.types';
 import { HttpError } from '../utils/http-error';
+import { logger } from '../services/logger.service';
 
 interface JwtPayload {
     sub: string;
@@ -23,7 +24,10 @@ export const configurePassport = (
         return;
     }
 
-    passportInstance.use(
+    // Guard against concurrent calls (e.g. during tests or hot-reload).
+    // If a previous attempt threw, strategyInitialized stays false and we retry.
+    try {
+        passportInstance.use(
         'jwt',
         new JwtStrategy(
             {
@@ -45,18 +49,26 @@ export const configurePassport = (
                     });
 
                     if (!user) {
+                        logger.warn('JWT authentication failed: user not found', { sub: payload.sub });
                         return done(null, false);
                     }
 
                     return done(null, user as AuthenticatedUser);
                 } catch (error) {
+                    logger.error('JWT strategy error', { error });
                     return done(error as Error, false);
                 }
             }
         )
-    );
+        );
 
-    strategyInitialized = true;
+        strategyInitialized = true;
+    } catch (err) {
+        // Reset so the next call can retry cleanly.
+        strategyInitialized = false;
+        logger.error('Failed to configure passport JWT strategy', { error: err });
+        throw err;
+    }
 };
 
 export const authenticateJWT = (
@@ -69,10 +81,16 @@ export const authenticateJWT = (
         { session: false },
         (err: Error | null, user: Express.User | false) => {
             if (err) {
+                logger.error('JWT authentication error', { error: err, path: req.originalUrl });
                 return next(err);
             }
 
             if (!user) {
+                (req.log ?? logger).warn('Unauthorized request', {
+                    method: req.method,
+                    path: req.originalUrl,
+                    ip: req.ip
+                });
                 return next(new HttpError(401, 'Unauthorized'));
             }
 

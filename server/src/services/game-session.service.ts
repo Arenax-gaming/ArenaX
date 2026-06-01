@@ -17,11 +17,16 @@ export interface GameSession {
 
 /**
  * In‑memory service handling game sessions.
- * This implementation purposefully avoids any external dependencies to keep the change minimal
- * and merge‑safe. All data lives in a Map keyed by the session ID.
+ * All data lives in a module-level Map so that the HTTP controller and the
+ * WebSocket handler share the same session store regardless of how many times
+ * GameSessionService is instantiated.
  */
+const sessionStore: Map<string, GameSession> = new Map();
+
 export class GameSessionService {
   private static sessions: Map<string, GameSession> = new Map();
+  // Expose the shared store so callers can inject a test-scoped Map if needed.
+  private sessions: Map<string, GameSession> = sessionStore;
 
   /** Create a new game session. */
   createSession(players: string[], gameMode: string, settings: Record<string, any> = {}): GameSession {
@@ -94,3 +99,6 @@ export class GameSessionService {
     }
   }
 }
+
+/** Clear the shared session store — for use in tests only. */
+export const clearSessionStore = (): void => sessionStore.clear();

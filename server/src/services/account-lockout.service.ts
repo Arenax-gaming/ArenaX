@@ -1,5 +1,6 @@
 import { getDatabaseClient } from './database.service';
 import { HttpError } from '../utils/http-error';
+import { logger } from './logger.service';
 
 /**
  * Account Lockout Service
@@ -20,13 +21,18 @@ interface FailedAttempt {
 // Store failed attempts in memory (in production, use Redis)
 const failedAttempts = new Map<string, FailedAttempt>();
 
-// Clean up expired lockouts every 5 minutes
+// Clean up expired lockouts every 5 minutes.
+// Collect keys first, then delete — avoids mutating the Map while iterating it.
 setInterval(() => {
     const now = new Date();
+    const expiredKeys: string[] = [];
     for (const [key, attempt] of failedAttempts.entries()) {
         if (attempt.lockedUntil && attempt.lockedUntil < now) {
-            failedAttempts.delete(key);
+            expiredKeys.push(key);
         }
+    }
+    for (const key of expiredKeys) {
+        failedAttempts.delete(key);
     }
 }, 5 * 60 * 1000);
 
@@ -45,19 +51,23 @@ export const recordFailedAttempt = async (
     ipAddress: string
 ): Promise<{ locked: boolean; remainingAttempts: number }> => {
     const key = getAttemptKey(userId, ipAddress);
+
+    // Atomic read-modify-write: fetch the current record, compute the new
+    // state, and write it back in a single synchronous block so that two
+    // concurrent async callers cannot both read attempts=0 and both write
+    // attempts=1 (losing one increment).
     const existing = failedAttempts.get(key);
-    
-    const attempts = existing ? existing.attempts + 1 : 1;
+    const attempts = (existing?.attempts ?? 0) + 1;
     const now = new Date();
-    
-    let lockedUntil: Date | undefined;
+
+    let lockedUntil: Date | undefined = existing?.lockedUntil;
     let locked = false;
-    
+
     if (attempts >= MAX_FAILED_ATTEMPTS) {
         lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS);
         locked = true;
     }
-    
+
     failedAttempts.set(key, {
         userId,
         ipAddress,
@@ -65,10 +75,14 @@ export const recordFailedAttempt = async (
         lastAttemptAt: now,
         lockedUntil
     });
-    
-    // Log the failed attempt
-    console.warn(`[Security] Failed auth attempt for user ${userId} from IP ${ipAddress}. Total: ${attempts}`);
-    
+
+    logger.warn('Failed auth attempt recorded', {
+        userId,
+        ipAddress,
+        attempts,
+        locked
+    });
+
     return {
         locked,
         remainingAttempts: Math.max(0, MAX_FAILED_ATTEMPTS - attempts)
