@@ -1,69 +1,58 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { AlertCircle, CheckCircle, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
 
 interface EmailVerificationProps {
   className?: string;
 }
 
 export function EmailVerification({ className }: EmailVerificationProps) {
-  const [code, setCode] = useState(['', '', '', '', '', '']);
-  const [loading, setLoading] = useState(false);
+  const { verifyEmail, resendVerificationEmail, loading, error, clearError, user } = useAuth();
+  const router = useRouter();
+  const [token, setToken] = useState('');
   const [resending, setResending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const handleInputChange = (index: number, value: string) => {
-    if (value.length > 1) {
-      value = value.slice(-1);
-    }
-    
-    const newCode = [...code];
-    newCode[index] = value;
-    setCode(newCode);
-    
-    if (value && index < 5) {
-      const nextInput = document.getElementById(`code-${index + 1}`);
-      nextInput?.focus();
-    }
-  };
+  const pendingEmail = user?.email || (typeof window !== 'undefined' ? localStorage.getItem('arenax_pending_email') || '' : '');
 
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !code[index] && index > 0) {
-      const prevInput = document.getElementById(`code-${index - 1}`);
-      prevInput?.focus();
+  useEffect(() => {
+    clearError();
+  }, [clearError]);
+
+  useEffect(() => {
+    if (success) {
+      const timer = setTimeout(() => {
+        router.push('/');
+      }, 2000);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [success, router]);
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    
+    if (!token.trim()) return;
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await verifyEmail(token.trim());
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
-    } finally {
-      setLoading(false);
+      // Error is handled by useAuth
     }
   };
 
   const handleResend = async () => {
+    if (!pendingEmail) return;
     setResending(true);
-    setError(null);
-    
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await resendVerificationEmail(pendingEmail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend code');
+      // Error is handled by useAuth
     } finally {
       setResending(false);
     }
@@ -72,10 +61,10 @@ export function EmailVerification({ className }: EmailVerificationProps) {
   if (success) {
     return (
       <div className={cn('text-center py-8', className)}>
-        <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+        <CheckCircle className="h-16 w-16 text-success mx-auto mb-4" />
         <h2 className="text-xl font-bold text-foreground mb-2">Email verified!</h2>
         <p className="text-muted-foreground mb-6">
-          Your email has been successfully verified.
+          Your email has been successfully verified. Redirecting...
         </p>
       </div>
     );
@@ -84,32 +73,32 @@ export function EmailVerification({ className }: EmailVerificationProps) {
   return (
     <div className={cn('space-y-6', className)}>
       <div className="text-center">
-        <Mail className="h-12 w-12 text-blue-500 mx-auto mb-4" />
+        <Mail className="h-12 w-12 text-primary mx-auto mb-4" />
         <p className="text-muted-foreground mb-2">
-          We&apos;ve sent a verification code to your email
+          We've sent a verification link to your email
         </p>
+        {pendingEmail && (
+          <p className="text-sm font-medium text-foreground">{pendingEmail}</p>
+        )}
       </div>
 
       <form onSubmit={handleVerify} className="space-y-6">
-        <div className="flex justify-center gap-2">
-          {code.map((digit, index) => (
-            <Input
-              key={index}
-              id={`code-${index}`}
-              type="text"
-              inputMode="numeric"
-              maxLength={1}
-              value={digit}
-              onChange={(e) => handleInputChange(index, e.target.value)}
-              onKeyDown={(e) => handleKeyDown(index, e)}
-              className="w-12 h-14 text-center text-lg font-bold"
-              error={!!error}
-            />
-          ))}
+        <div className="space-y-2">
+          <label htmlFor="token" className="block text-sm font-medium text-foreground">
+            Verification token
+          </label>
+          <Input
+            id="token"
+            type="text"
+            placeholder="Enter the verification token from the email"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            error={!!error}
+          />
         </div>
         
         {error && (
-          <div className="flex gap-2 p-3 rounded-md bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10/30 dark:text-red-200">
             <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <p className="text-sm">{error}</p>
           </div>
@@ -122,14 +111,14 @@ export function EmailVerification({ className }: EmailVerificationProps) {
 
       <div className="text-center">
         <p className="text-sm text-muted-foreground">
-          Didn&apos;t receive the code?{' '}
+          Didn't receive the email?{' '}
           <button
             type="button"
             onClick={handleResend}
             disabled={resending}
-            className="text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+            className="text-primary hover:text-info font-medium disabled:opacity-50"
           >
-            {resending ? 'Sending...' : 'Resend code'}
+            {resending ? 'Sending...' : 'Resend verification email'}
           </button>
         </p>
       </div>

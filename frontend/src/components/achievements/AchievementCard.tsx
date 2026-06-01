@@ -28,7 +28,7 @@ export function AchievementCard({ achievement, showLink = true }: AchievementCar
     >
       {/* New badge */}
       {isNew && (
-        <span className="absolute top-2 right-2 rounded-full bg-green-500 px-2 py-0.5 text-xs font-bold text-white">
+        <span className="absolute top-2 right-2 rounded-full bg-success px-2 py-0.5 text-xs font-bold text-white">
           NEW
         </span>
       )}

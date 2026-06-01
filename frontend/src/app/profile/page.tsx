@@ -57,7 +57,7 @@ export default function ProfilePage() {
               </span>
             )}
           </div>
-          <div className="absolute -bottom-1 -right-1 h-8 w-8 bg-green-500 border-4 border-card rounded-full" title="Online" />
+          <div className="absolute -bottom-1 -right-1 h-8 w-8 bg-success border-4 border-card rounded-full" title="Online" />
         </div>
 
         <div className="flex-1 space-y-2">

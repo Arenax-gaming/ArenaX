@@ -23,14 +23,14 @@ export function TournamentRules({ tournament }: TournamentRulesProps) {
         title: "Eligibility",
         description:
           "Players must be 18+ years old and have a valid account to participate in this tournament.",
-        color: "text-green-600",
+        color: "text-success",
       },
       {
         icon: Clock,
         title: "Check-in Requirement",
         description:
           "Players must check in 15 minutes before their match starts. Failure to do so results in forfeit.",
-        color: "text-blue-600",
+        color: "text-primary",
       },
       {
         icon: Users,
@@ -50,7 +50,7 @@ export function TournamentRules({ tournament }: TournamentRulesProps) {
         title: "Disqualification",
         description:
           "Players will be disqualified for: cheating, abusive conduct, failure to show up, or violating tournament rules.",
-        color: "text-red-600",
+        color: "text-destructive",
       },
       {
         icon: Trophy,
@@ -112,11 +112,11 @@ export function TournamentRules({ tournament }: TournamentRulesProps) {
       </div>
 
       {/* Additional Info Section */}
-      <div className="bg-blue-50 dark:bg-blue-950/20 border-t border-blue-200 dark:border-blue-900 p-6 md:p-8">
+      <div className="bg-info-muted dark:bg-info-muted/20 border-t border-blue-200 dark:border-info/30 p-6 md:p-8">
         <div className="flex gap-3">
-          <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+          <AlertCircle className="h-5 w-5 text-primary dark:text-primary/80 flex-shrink-0 mt-0.5" />
           <div>
-            <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
+            <h4 className="font-semibold text-info dark:text-info-muted-foreground mb-2">
               Important: Before You Join
             </h4>
             <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">

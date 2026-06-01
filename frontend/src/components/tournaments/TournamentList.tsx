@@ -3,6 +3,7 @@
 import React from "react";
 import { Tournament } from "@/types/tournament";
 import { TournamentCardWithQuickJoin } from "./TournamentCardWithQuickJoin";
+import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 import { Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
@@ -44,6 +45,7 @@ export function TournamentList({
           tournament={tournament}
           isJoined={joinedIds.has(tournament.id)}
           onJoinSuccess={onJoinSuccess}
+          bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
         />
       ))}
     </div>

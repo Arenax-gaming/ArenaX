@@ -795,7 +795,7 @@ impl TournamentService {
     // Additional helper methods would be implemented here...
     // For brevity, I'll include the essential ones and mark others as TODO
 
-    async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
+    pub async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
         sqlx::query_as!(
             Tournament,
             "SELECT * FROM tournaments WHERE id = $1",

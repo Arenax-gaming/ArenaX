@@ -77,7 +77,7 @@ export default function PlayPartyPage() {
                     <h1 className="text-4xl font-bold text-white mb-2">
                         Party Setup
                     </h1>
-                    <p className="text-gray-300">
+                    <p className="text-foreground/80">
                         Invite teammates, mark yourselves ready, then queue
                         together.
                     </p>

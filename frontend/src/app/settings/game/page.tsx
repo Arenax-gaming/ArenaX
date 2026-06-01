@@ -99,7 +99,7 @@ export default function GameSettingsPage() {
                   href={item.href}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                     item.active
-                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                      ? "bg-primary/10 text-primary border border-primary/20"
                       : "hover:bg-muted text-foreground"
                   }`}
                 >

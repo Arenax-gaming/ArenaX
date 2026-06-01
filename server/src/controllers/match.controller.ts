@@ -1,20 +1,20 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { MatchService } from '../services/match.service';
 
 const matchService = new MatchService();
 
-export const reportScore = async (req: Request, res: Response): Promise<void> => {
+export const reportScore = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
         const { id } = req.params;
         const { winnerId } = req.body;
         const match = await matchService.reportScore(id, winnerId);
         res.status(200).json(match);
     } catch (error) {
-        res.status(500).json({ error: (error as Error).message });
+        next(error);
     }
 };
 
-export const raiseDispute = async (req: Request, res: Response): Promise<void> => {
+export const raiseDispute = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
         const { id } = req.params;
         const { reason, evidenceUrls } = req.body;
@@ -24,6 +24,24 @@ export const raiseDispute = async (req: Request, res: Response): Promise<void> =
         });
         res.status(201).json(dispute);
     } catch (error) {
-        res.status(500).json({ error: (error as Error).message });
+        next(error);
+    }
+};
+
+export const createMatch = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { playerAId, playerBId, onChainId } = req.body;
+        if (!playerAId || !playerBId || !onChainId) {
+            res.status(400).json({ error: 'playerAId, playerBId, and onChainId are required' });
+            return;
+        }
+        const match = await matchService.createMatch(playerAId, playerBId, onChainId);
+        res.status(201).json(match);
+    } catch (error) {
+        if ((error as Error).message.includes('under heavy load')) {
+            res.status(429).json({ error: (error as Error).message });
+        } else {
+            res.status(500).json({ error: (error as Error).message });
+        }
     }
 };

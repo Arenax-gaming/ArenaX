@@ -32,19 +32,19 @@ export default function FriendsPage() {
             <Users className="w-8 h-8" />
             Friends
           </h1>
-          <p className="text-gray-400">
+          <p className="text-muted-foreground">
             {onlineFriends} of {friends.length} friends online
           </p>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-4 mb-8 border-b border-gray-700">
+        <div className="flex gap-4 mb-8 border-b border-border">
           <button
             onClick={() => setActiveTab("list")}
             className={`px-4 py-2 font-medium transition-colors ${
               activeTab === "list"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-gray-300"
+                ? "text-primary/80 border-b-2 border-primary/70"
+                : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
             <Users className="w-4 h-4 inline mr-2" />
@@ -54,8 +54,8 @@ export default function FriendsPage() {
             onClick={() => setActiveTab("requests")}
             className={`px-4 py-2 font-medium transition-colors ${
               activeTab === "requests"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-gray-300"
+                ? "text-primary/80 border-b-2 border-primary/70"
+                : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
             <UserPlus className="w-4 h-4 inline mr-2" />
@@ -65,8 +65,8 @@ export default function FriendsPage() {
             onClick={() => setActiveTab("invite")}
             className={`px-4 py-2 font-medium transition-colors ${
               activeTab === "invite"
-                ? "text-blue-400 border-b-2 border-blue-400"
-                : "text-gray-400 hover:text-gray-300"
+                ? "text-primary/80 border-b-2 border-primary/70"
+                : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
             <UserPlus className="w-4 h-4 inline mr-2" />
@@ -77,19 +77,19 @@ export default function FriendsPage() {
         {/* Search Bar */}
         {activeTab === "list" && (
           <div className="mb-6 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search friends..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary"
             />
           </div>
         )}
 
         {/* Content */}
-        <div className="bg-gray-800/50 rounded-lg border border-gray-700 p-6">
+        <div className="bg-surface/50 rounded-lg border border-border p-6">
           {activeTab === "list" && (
             <FriendsList
               friends={filteredFriends}

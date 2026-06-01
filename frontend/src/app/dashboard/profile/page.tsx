@@ -31,7 +31,7 @@ export default function DashboardProfilePage() {
               <span className="text-3xl font-bold text-muted-foreground">{user.username.charAt(0)}</span>
             )}
           </div>
-          <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-green-500 border-4 border-card rounded-full" />
+          <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-success border-4 border-card rounded-full" />
         </div>
         <div className="flex-1 space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight">{user.username}</h1>
