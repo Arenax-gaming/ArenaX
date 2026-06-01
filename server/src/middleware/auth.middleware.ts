@@ -33,7 +33,13 @@ export const configurePassport = (
             {
                 jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
                 secretOrKey: authConfig.verificationKey,
-                algorithms: [authConfig.jwtAlgorithm]
+                algorithms: [authConfig.jwtAlgorithm],
+                // 30-second tolerance for clock skew between distributed
+                // services (e.g. Rust backend issuing tokens, Node.js
+                // validating them, or vice-versa).  Without this, even a
+                // 1-second drift causes intermittent 401s for tokens
+                // validated near their expiry boundary.
+                clockTolerance: 30
             },
             async (payload: JwtPayload, done: VerifiedCallback) => {
                 try {
