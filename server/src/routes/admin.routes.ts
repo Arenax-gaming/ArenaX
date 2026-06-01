@@ -12,7 +12,11 @@ import {
     updateGameConfig,
     getModerationQueue,
     reviewContent,
-    getSystemHealth
+    getSystemHealth,
+    scheduleMaintenance,
+    enableMaintenanceImmediately,
+    disableMaintenance,
+    getMaintenanceStatus
 } from '../controllers/admin.controller';
 import { confirmationService } from '../services/confirmation.service';
 import {
@@ -70,5 +74,11 @@ router.post('/kyc/:id/process', processKycReview);
 router.get('/refunds', listRefundRequests);
 router.patch('/refunds/:id/status', updateRefundStatus);
 router.post('/refunds', createRefundRequest);
+
+// Maintenance Management
+router.post('/maintenance/schedule', restrictToScope('SYSTEM:WRITE'), scheduleMaintenance);
+router.post('/maintenance/enable', restrictToScope('SYSTEM:WRITE'), enableMaintenanceImmediately);
+router.post('/maintenance/disable', restrictToScope('SYSTEM:WRITE'), disableMaintenance);
+router.get('/maintenance/status', getMaintenanceStatus);
 
 export default router;

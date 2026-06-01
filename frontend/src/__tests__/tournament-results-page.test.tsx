@@ -49,13 +49,23 @@ describe('TournamentResultsPage (#324)', () => {
   });
 
   it('surfaces a link back to the live detail page even in the pending state', () => {
-    // Acceptance: "Page handles the case where results are not yet
-    // available". The detail-page link should be reachable from the
-    // pending state so users have a clear next step.
     mockUseParams = jest.fn(() => ({ id: '1' }));
     render(<TournamentResultsPage />);
     expect(
       screen.getByRole('link', { name: 'Tournament details' })
     ).toBeInTheDocument();
+  });
+
+  it('handles params.id as a string array by using the first element', () => {
+    // When Next.js provides params.id as string[], the first element is used.
+    mockUseParams = jest.fn(() => ({ id: ['1', 'extra'] }));
+    render(<TournamentResultsPage />);
+    expect(screen.getByTestId('results-pending')).toBeInTheDocument();
+  });
+
+  it('shows "Tournament Not Found" when params.id array contains an unknown id', () => {
+    mockUseParams = jest.fn(() => ({ id: ['definitely-not-real'] }));
+    render(<TournamentResultsPage />);
+    expect(screen.getByText('Tournament Not Found')).toBeInTheDocument();
   });
 });

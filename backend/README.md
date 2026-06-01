@@ -115,7 +115,7 @@ cp .env.example .env
 # Edit .env with your configuration
 
 # Run database migrations
-sqlx migrate run
+./scripts/migrate.sh
 
 # Start the backend server
 cargo run
@@ -149,9 +149,12 @@ cargo clippy
 ./test_ci_locally.sh
 
 # Database operations
-sqlx migrate add <migration_name>
-sqlx migrate run
-sqlx migrate revert
+sqlx migrate add -r <migration_name>
+./scripts/verify-migrations.sh
+./scripts/migrate.sh
+./scripts/migration-status.sh
+./scripts/backup-database.sh
+./scripts/rollback-last-migration.sh
 
 # Stellar integration testing
 ./scripts/test_stellar.sh
@@ -162,29 +165,37 @@ sqlx migrate revert
 ```env
 # Database
 DATABASE_URL=postgres://user:pass@localhost:5432/arenax
+BACKEND_MIGRATION_MODE=run
 REDIS_URL=redis://localhost:6379
 
 # Storage
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
-S3_SECRET_KEY=secret
+# [REQUIRED SECRET] Generate with: openssl rand -hex 32
+S3_SECRET_KEY=<generate-with-openssl-rand-hex-32>
 
 # Payments
-PAYSTACK_SECRET=sk_test_xxx
-FLUTTERWAVE_SECRET=FLWSECK_TEST-xxx
+# [REQUIRED SECRET] Use your Paystack live/test key
+PAYSTACK_SECRET=<your-paystack-secret-key>
+# [REQUIRED SECRET] Use your Flutterwave live/test key
+FLUTTERWAVE_SECRET=<your-flutterwave-secret-key>
 
 # Authentication
-JWT_SECRET=supersecretkey
+# [REQUIRED SECRET] Minimum 32 chars. Generate with: openssl rand -hex 32
+JWT_SECRET=<generate-with-openssl-rand-hex-32>
 
 # Stellar Configuration
 STELLAR_NETWORK_URL=https://horizon-testnet.stellar.org
-STELLAR_ADMIN_SECRET=SBXXX...
-SOROBAN_CONTRACT_PRIZE=CAXXX...
-SOROBAN_CONTRACT_REPUTATION=CBXXX...
+# [REQUIRED SECRET] Your Stellar admin account secret key (starts with S)
+STELLAR_ADMIN_SECRET=<your-stellar-admin-secret-key>
+SOROBAN_CONTRACT_PRIZE=<your-prize-contract-id>
+SOROBAN_CONTRACT_REPUTATION=<your-reputation-contract-id>
 
 # AI
 AI_MODEL_PATH=./models/anti_cheat.tflite
 ```
+
+`BACKEND_MIGRATION_MODE` defaults to `run`, which applies and validates SQLx migrations during backend startup. Use `disabled` only when migrations are applied by a separate deployment step. See [MIGRATIONS.md](MIGRATIONS.md) for the full migration workflow, rollback process, and CI expectations.
 
 ## Code Organization & Architecture
 

@@ -83,14 +83,14 @@ export function TournamentParticipants({
               {tournament.currentParticipants} of {tournament.maxParticipants}{" "}
               slots filled
               {!isFull && (
-                <span className="text-green-600 dark:text-green-400 font-medium">
+                <span className="text-success dark:text-success/80 font-medium">
                   {" "}
                   • {availableSlots} spot{availableSlots > 1 ? "s" : ""}{" "}
                   available
                 </span>
               )}
               {isFull && (
-                <span className="text-red-600 dark:text-red-400 font-medium">
+                <span className="text-destructive dark:text-destructive/80 font-medium">
                   {" "}
                   • Tournament is full
                 </span>
@@ -187,8 +187,8 @@ export function TournamentParticipants({
 
         {/* Available Slots Info */}
         {!isFull && (
-          <div className="mt-6 p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg">
-            <p className="text-sm text-green-900 dark:text-green-100">
+          <div className="mt-6 p-4 bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg">
+            <p className="text-sm text-green-900 dark:text-success-muted-foreground">
               <span className="font-semibold">
                 {availableSlots} spot{availableSlots > 1 ? "s" : ""} available!
               </span>{" "}

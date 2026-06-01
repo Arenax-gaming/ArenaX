@@ -18,17 +18,10 @@ import PartyManager from '@/components/game/PartyManager';
 import CountdownTimer from '@/components/game/CountdownTimer';
 import ChatPanel from '@/components/game/ChatPanel';
 import PlayerList from '@/components/game/PlayerList';
+import type { PartyPlayer } from '@/types/player';
 
 const MAX_PARTY_SIZE = 4;
 const COUNTDOWN_SECONDS = 15;
-
-interface PartyPlayer {
-    id: string;
-    username: string;
-    avatar?: string;
-    isReady: boolean;
-    isHost: boolean;
-}
 
 export default function PlayPartyPage() {
     const router = useRouter();
@@ -84,7 +77,7 @@ export default function PlayPartyPage() {
                     <h1 className="text-4xl font-bold text-white mb-2">
                         Party Setup
                     </h1>
-                    <p className="text-gray-300">
+                    <p className="text-foreground/80">
                         Invite teammates, mark yourselves ready, then queue
                         together.
                     </p>

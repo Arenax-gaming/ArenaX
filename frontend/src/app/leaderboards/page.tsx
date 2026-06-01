@@ -29,32 +29,32 @@ export default function LeaderboardsPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Leaderboards</h1>
-          <p className="text-gray-400">Compete and climb the ranks</p>
+          <p className="text-muted-foreground">Compete and climb the ranks</p>
         </div>
 
         {/* Stats */}
         {statsData && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-              <p className="text-gray-400 text-sm mb-1">Total Players</p>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Total Players</p>
               <p className="text-2xl font-bold text-white">
                 {statsData.totalPlayers}
               </p>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-              <p className="text-gray-400 text-sm mb-1">Average Elo</p>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Average Elo</p>
               <p className="text-2xl font-bold text-white">
                 {Math.round(statsData.averageElo)}
               </p>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-              <p className="text-gray-400 text-sm mb-1">Median Elo</p>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Median Elo</p>
               <p className="text-2xl font-bold text-white">
                 {statsData.medianElo}
               </p>
             </div>
-            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-              <p className="text-gray-400 text-sm mb-1">Top Player Elo</p>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Top Player Elo</p>
               <p className="text-2xl font-bold text-white">
                 {statsData.topPlayerElo}
               </p>
@@ -75,7 +75,7 @@ export default function LeaderboardsPage() {
         <PersonalRank category={category} season={season} />
 
         {/* Leaderboard Table */}
-        <div className="bg-gray-800/50 rounded-lg p-6 backdrop-blur border border-gray-700">
+        <div className="bg-surface/50 rounded-lg p-6 backdrop-blur border border-border">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-white">
               {category === "global"
@@ -86,7 +86,7 @@ export default function LeaderboardsPage() {
                     ? "Casual Rankings"
                     : "Ranked Rankings"}
             </h2>
-            <div className="text-sm text-gray-400">
+            <div className="text-sm text-muted-foreground">
               {filteredEntries.length} players
             </div>
           </div>

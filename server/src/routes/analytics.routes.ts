@@ -10,30 +10,36 @@
 
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
+import { paymentRateLimiter, publicRateLimiter } from '../middleware/rate-limit.middleware';
 import defaultAnalyticsController from '../controllers/analytics.controller';
 
-const router = Router();
+const router: Router = Router();
 
 router.use(authenticateJWT);
 
 router.post(
     '/events',
+    paymentRateLimiter,
     defaultAnalyticsController.trackEvent.bind(defaultAnalyticsController)
 );
 router.get(
     '/dashboard',
+    publicRateLimiter,
     defaultAnalyticsController.getDashboard.bind(defaultAnalyticsController)
 );
 router.get(
     '/players/:id',
+    publicRateLimiter,
     defaultAnalyticsController.getPlayerAnalytics.bind(defaultAnalyticsController)
 );
 router.get(
     '/games/metrics',
+    publicRateLimiter,
     defaultAnalyticsController.getGameMetrics.bind(defaultAnalyticsController)
 );
 router.get(
     '/reports/:type',
+    publicRateLimiter,
     defaultAnalyticsController.getReport.bind(defaultAnalyticsController)
 );
 

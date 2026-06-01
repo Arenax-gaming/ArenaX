@@ -13,8 +13,9 @@ import {
     slashEscrow
 } from '../controllers/wallet.controller';
 import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
+import { paymentRateLimiter, publicRateLimiter } from '../middleware/rate-limit.middleware';
 
-const router = Router();
+const router: Router = Router();
 
 const walletRecoveryLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -31,17 +32,17 @@ const walletRecoveryLimiter = rateLimit({
 
 router.use(authenticateJWT);
 
-router.get('/me', getMyWallet);
+router.get('/me', publicRateLimiter, getMyWallet);
 router.post('/me/recovery/challenges', walletRecoveryLimiter, createRecoveryChallenge);
 router.post('/me/recovery/export', walletRecoveryLimiter, exportMyWallet);
-router.post('/me/rotate-encryption', rotateWalletEncryption);
-router.post('/rotate-encryption', restrictTo('ADMIN'), rotateWalletEncryption);
+router.post('/me/rotate-encryption', paymentRateLimiter, rotateWalletEncryption);
+router.post('/rotate-encryption', restrictTo('ADMIN'), paymentRateLimiter, rotateWalletEncryption);
 
-router.get('/ledger', getLedger);
-router.get('/transactions', getTransactions);
-router.post('/escrow/lock', lockEscrow);
-router.post('/escrow/release', releaseEscrow);
-router.post('/escrow/slash', slashEscrow);
-router.post('/transfer', internalTransfer);
+router.get('/ledger', publicRateLimiter, getLedger);
+router.get('/transactions', publicRateLimiter, getTransactions);
+router.post('/escrow/lock', paymentRateLimiter, lockEscrow);
+router.post('/escrow/release', paymentRateLimiter, releaseEscrow);
+router.post('/escrow/slash', paymentRateLimiter, slashEscrow);
+router.post('/transfer', paymentRateLimiter, internalTransfer);
 
 export default router;

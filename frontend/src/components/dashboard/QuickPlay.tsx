@@ -5,9 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
 const gameModes = [
-  { label: "Quick Match", description: "Jump into a ranked 1v1", href: "/tournaments", icon: "⚡", color: "bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20" },
+  { label: "Quick Match", description: "Jump into a ranked 1v1", href: "/tournaments", icon: "⚡", color: "bg-primary/10 hover:bg-primary/20 border-primary/20" },
   { label: "Tournament", description: "Browse open tournaments", href: "/tournaments", icon: "🏆", color: "bg-yellow-500/10 hover:bg-yellow-500/20 border-yellow-500/20" },
-  { label: "Practice", description: "Unranked casual match", href: "/tournaments", icon: "🎮", color: "bg-green-500/10 hover:bg-green-500/20 border-green-500/20" },
+  { label: "Practice", description: "Unranked casual match", href: "/tournaments", icon: "🎮", color: "bg-success/10 hover:bg-success/20 border-green-500/20" },
 ];
 
 export function QuickPlay() {

@@ -27,6 +27,50 @@ export type TournamentStatus =
   | 'completed'
   | 'cancelled';
 
+/** Simplified status buckets for the tournaments list UI (badges, colors, filters). */
+export type TournamentPageStatus = 'ongoing' | 'upcoming' | 'completed';
+
+export const TOURNAMENT_PAGE_STATUSES: TournamentPageStatus[] = [
+  'ongoing',
+  'upcoming',
+  'completed',
+];
+
+export const TOURNAMENT_PAGE_STATUS_COLORS: Record<
+  TournamentPageStatus,
+  { badgeClass: string; label: string }
+> = {
+  ongoing: {
+    badgeClass:
+      'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200',
+    label: 'Ongoing',
+  },
+  upcoming: {
+    badgeClass:
+      'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200',
+    label: 'Upcoming',
+  },
+  completed: {
+    badgeClass:
+      'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200',
+    label: 'Completed',
+  },
+};
+
+export function toTournamentPageStatus(status: TournamentStatus): TournamentPageStatus {
+  if (status === 'in_progress') {
+    return 'ongoing';
+  }
+  if (status === 'completed' || status === 'cancelled') {
+    return 'completed';
+  }
+  return 'upcoming';
+}
+
+export function isTournamentPageStatus(value: string): value is TournamentPageStatus {
+  return (TOURNAMENT_PAGE_STATUSES as readonly string[]).includes(value);
+}
+
 export type TournamentVisibility =
   | 'public'
   | 'private'
@@ -49,9 +93,31 @@ export interface CreateTournamentRequest {
   startTime: string;
 }
 
+export type CreateTournamentWizardStep = 1 | 2 | 3 | 4 | "preview" | "success";
+
+export interface CreateTournamentFormData {
+  name: string;
+  gameType: string;
+  description: string;
+  tournamentType: TournamentType;
+  matchFormat: string;
+  rules: string;
+  entryFee: number;
+  prizePool: number;
+  prizeDistribution: string;
+  visibility: TournamentVisibility;
+  maxParticipants: number;
+  registrationOpenDate: string;
+  registrationCloseDate: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface TournamentFilters {
   gameType?: string;
   status?: TournamentStatus;
+  /** Filter by simplified list status (ongoing / upcoming / completed). */
+  pageStatus?: TournamentPageStatus;
   visibility?: TournamentVisibility;
   tournamentType?: TournamentType;
   minEntryFee?: number;

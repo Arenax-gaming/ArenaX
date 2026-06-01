@@ -59,7 +59,7 @@ class EmailService {
   }
 
   async sendVerificationEmail(email: string, token: string): Promise<void> {
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+    const verificationUrl = `${process.env.FRONTEND_URL}/auth/verify-email?token=${token}`;
     
     const template: EmailTemplate = {
       subject: 'Verify your ArenaX account',

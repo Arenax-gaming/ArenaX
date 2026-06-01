@@ -1,29 +1,33 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import type { GovernanceProposal } from "@/types/admin";
 
 export default function GovernanceDashboard() {
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<GovernanceProposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchProposals();
-  }, []);
-
-  const fetchProposals = async () => {
+  const fetchProposals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await api.getProposals();
-      setProposals(data);
+      setProposals(data as GovernanceProposal[]);
     } catch (error) {
       console.error("Failed to fetch proposals:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchProposals();
+  }, [fetchProposals]);
 
   const handleStartVoting = async (id: string) => {
     await api.startVoting(id);
@@ -40,14 +44,45 @@ export default function GovernanceDashboard() {
     fetchProposals();
   };
 
-  if (loading) return <div className="p-8 text-center text-xl font-medium">Loading proposals...</div>;
+  // ── Loading skeleton ──────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6 space-y-8">
+          <div className="flex items-center justify-between">
+            <PageHeaderSkeleton />
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <CardSkeleton key={i} lines={4} hasFooter />
+            ))}
+          </div>
+        </div>
+      </ProtectedPage>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <ProtectedPage requiredRole="admin">
+        <div className="container mx-auto p-6">
+          <PageError
+            title="Failed to load proposals"
+            message={error}
+            onRetry={fetchProposals}
+          />
+        </div>
+      </ProtectedPage>
+    );
+  }
 
   return (
     <ProtectedPage requiredRole="admin">
       <div className="container mx-auto p-6 space-y-8">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-gray-900 dark:text-gray-100">
+          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-foreground dark:text-foreground">
             Governance
           </h1>
           <p className="text-xl text-muted-foreground mt-2">
@@ -61,9 +96,14 @@ export default function GovernanceDashboard() {
 
       <div className="grid md:grid-cols-2 gap-6">
         {proposals.length === 0 ? (
-           <div className="col-span-full py-20 text-center text-muted-foreground border-2 border-dashed rounded-xl">
-             No proposals found.
-           </div>
+          <div className="col-span-full">
+            <EmptyState
+              icon={FileText}
+              title="No proposals found"
+              description="There are no governance proposals yet. Create one to get started."
+              size="lg"
+            />
+          </div>
         ) : (
           proposals.map((proposal) => (
             <Card key={proposal.id} className="group border-2 hover:border-indigo-400 dark:hover:border-indigo-600 transition-all duration-300 shadow-sm hover:shadow-xl">
@@ -85,9 +125,9 @@ export default function GovernanceDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-700">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Target Contract</p>
-                    <p className="text-sm font-mono truncate text-gray-700 dark:text-gray-300">{proposal.targetContract}</p>
+                  <div className="p-4 bg-muted dark:bg-surface/50 rounded-lg border border-gray-100 dark:border-border">
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">Target Contract</p>
+                    <p className="text-sm font-mono truncate text-foreground/70 dark:text-foreground/80">{proposal.targetContract}</p>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex -space-x-2 overflow-hidden">
@@ -101,7 +141,7 @@ export default function GovernanceDashboard() {
                       {proposal._count.votes} / 3 signatures
                     </p>
                   </div>
-                  <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+                  <div className="w-full bg-muted dark:bg-surface rounded-full h-2">
                     <div 
                       className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-500" 
                       style={{ width: `${Math.min((proposal._count.votes / 3) * 100, 100)}%` }}
@@ -117,7 +157,7 @@ export default function GovernanceDashboard() {
                     </Button>
                   )}
                   {proposal.status === "VOTING" && (
-                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleVote(proposal.id)}>
+                    <Button className="w-full bg-success/90 hover:bg-green-700" onClick={() => handleVote(proposal.id)}>
                       Sign Proposal
                     </Button>
                   )}

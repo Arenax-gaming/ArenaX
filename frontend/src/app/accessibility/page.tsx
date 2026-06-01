@@ -60,7 +60,7 @@ export default function AccessibilityPage() {
             We welcome your feedback on the accessibility of ArenaX. Please let us know if you
             encounter accessibility barriers:
           </p>
-          <Link href="/contact" className="text-blue-600 hover:underline">
+          <Link href="/contact" className="text-primary hover:underline">
             Contact Us
           </Link>
         </CardContent>

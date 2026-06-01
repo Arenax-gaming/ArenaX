@@ -22,7 +22,7 @@ export default function AchievementsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
   }
@@ -40,14 +40,14 @@ export default function AchievementsPage() {
               <Trophy className="h-8 w-8 text-yellow-400" />
               Achievements
             </h1>
-            <p className="text-gray-400">
+            <p className="text-muted-foreground">
               {unlockedCount} of {totalAchievements} unlocked · {totalPoints}{" "}
               points earned
             </p>
           </div>
           <Link
             href="/achievements/progress"
-            className="inline-flex items-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors self-start"
+            className="inline-flex items-center gap-2 rounded-md bg-primary/90 hover:bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors self-start"
           >
             📊 View Progress
           </Link>

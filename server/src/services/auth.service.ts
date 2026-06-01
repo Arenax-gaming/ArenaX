@@ -10,6 +10,7 @@ import {
 import { HttpError } from '../utils/http-error';
 import stellarWalletService from './stellar-wallet.service';
 import emailService from './email.service';
+import { logger } from './logger.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -101,6 +102,7 @@ const mapUserToSafeUser = (user: {
     socials: unknown;
     createdAt: Date;
     updatedAt: Date;
+    isVerified: boolean;
 }) => ({
     id: user.id,
     email: user.email,
@@ -109,7 +111,8 @@ const mapUserToSafeUser = (user: {
     bio: user.bio,
     socials: user.socials,
     createdAt: user.createdAt,
-    updatedAt: user.updatedAt
+    updatedAt: user.updatedAt,
+    isVerified: user.isVerified
 });
 
 const createAccessToken = (user: {
@@ -262,7 +265,8 @@ export const registerUser = async (input: RegisterInput) => {
                         email: normalizedEmail,
                         username: candidate,
                         passwordHash,
-                        provider: 'EMAIL'
+                        provider: 'EMAIL',
+                        isVerified: false
                     }
                 });
 
@@ -286,11 +290,21 @@ export const registerUser = async (input: RegisterInput) => {
             try {
                 await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
             } catch (emailError) {
-                console.error('Failed to send verification email:', emailError);
+                logger.warn('Failed to send verification email', {
+                    userId: createdUser.id,
+                    email: normalizedEmail,
+                    error: emailError
+                });
                 // Don't fail registration if email fails
             }
 
             const tokens = await issueSessionTokens(createdUser);
+
+            logger.info('User registered', {
+                userId: createdUser.id,
+                username: createdUser.username,
+                provider: 'EMAIL'
+            });
 
             return {
                 user: mapUserToSafeUser(createdUser),
@@ -330,10 +344,13 @@ export const loginUser = async (input: LoginInput) => {
 
     const isPasswordValid = await bcrypt.compare(input.password, user.passwordHash);
     if (!isPasswordValid) {
+        logger.warn('Failed login attempt', { email: normalizedEmail });
         throw new HttpError(401, 'Invalid credentials');
     }
 
     const tokens = await issueSessionTokens(user);
+
+    logger.info('User logged in', { userId: user.id, username: user.username });
 
     return {
         user: mapUserToSafeUser(user),
@@ -367,6 +384,10 @@ export const refreshSession = async (input: RefreshInput) => {
     if (storedToken.revokedAt) {
         if (storedToken.replacedByTokenId) {
             await revokeTokenFamily(storedToken.familyId);
+            logger.warn('Refresh token reuse detected — token family revoked', {
+                userId: storedToken.userId,
+                familyId: storedToken.familyId
+            });
             throw new HttpError(
                 401,
                 'Refresh token reuse detected, please login again'
@@ -419,6 +440,7 @@ export const logoutUser = async (input: LogoutInput): Promise<void> => {
             where: { id: storedToken.id },
             data: { revokedAt: new Date() }
         });
+        logger.info('User logged out', { userId: storedToken.userId });
     }
 };
 
@@ -634,15 +656,65 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
         }
     });
     
-    // Send welcome email
     try {
         await emailService.sendWelcomeEmail(user.email, user.username);
     } catch (emailError) {
-        console.error('Failed to send welcome email:', emailError);
+        logger.warn('Failed to send welcome email', {
+            userId: user.id,
+            email: user.email,
+            error: emailError
+        });
         // Don't fail verification if welcome email fails
     }
+
+    logger.info('Email verified', { userId: user.id });
     
     return { message: 'Email verified successfully' };
+};
+
+export interface ResendVerificationEmailInput {
+    email: string;
+}
+
+export const resendVerificationEmail = async (input: ResendVerificationEmailInput) => {
+    const prisma = getDatabaseClient();
+    const normalizedEmail = normalizeEmail(input.email);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    // Always return success to prevent email enumeration
+    if (!user) {
+        return { message: 'If the email exists, a verification link has been sent' };
+    }
+    
+    if (user.isVerified) {
+        return { message: 'Email already verified' };
+    }
+    
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenHash = toTokenHash(verificationToken);
+    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            verificationToken: verificationTokenHash,
+            verificationTokenExpires
+        }
+    });
+    
+    // Send verification email
+    try {
+        await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
+    } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Don't fail if email fails
+    }
+    
+    return { message: 'If the email exists, a verification link has been sent' };
 };
 
 export interface ForgotPasswordInput {
@@ -679,12 +751,15 @@ export const forgotPassword = async (input: ForgotPasswordInput) => {
     try {
         await emailService.sendPasswordResetEmail(normalizedEmail, resetToken);
     } catch (emailError) {
-        console.error('Failed to send password reset email:', emailError);
+        logger.warn('Failed to send password reset email', {
+            userId: user.id,
+            email: normalizedEmail,
+            error: emailError
+        });
         // Don't fail if email fails
     }
-    // In production, store reset token in database and send email
-    // For now, we'll just log it
-    console.log('[Auth] Password reset token for', normalizedEmail, ':', resetToken);
+
+    logger.info('Password reset requested', { userId: user.id });
     
     return { message: 'If the email exists, a reset link has been sent' };
 };
