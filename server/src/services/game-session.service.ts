@@ -1,34 +1,52 @@
 import { v4 as uuidv4 } from 'uuid';
 
-/**
- * Types for game session management.
- */
 export interface GameSession {
   id: string;
-  players: string[]; // player IDs
+  players: string[];
   gameMode: string;
   settings: Record<string, any>;
-  state: any; // can be any serializable object representing the game state
-  actions: any[]; // list of actions applied
+  state: any;
+  actions: any[];
   startedAt: number;
   finishedAt?: number;
   replayData?: any;
 }
 
-/**
- * In‑memory service handling game sessions.
- * All data lives in a module-level Map so that the HTTP controller and the
- * WebSocket handler share the same session store regardless of how many times
- * GameSessionService is instantiated.
- */
 const sessionStore: Map<string, GameSession> = new Map();
+const sessionLocks: Map<string, Promise<void>> = new Map();
+
+function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(sessionId) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  sessionLocks.set(sessionId, next.then(() => {}, () => {}));
+  return next;
+}
+
+const STALE_TIMEOUT_MS = 30 * 60 * 1000;
+let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+function startCleanupInterval(): void {
+  if (cleanupInterval) return;
+  cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [id, session] of sessionStore) {
+      if (session.finishedAt && (now - session.finishedAt) > STALE_TIMEOUT_MS) {
+        sessionStore.delete(id);
+        sessionLocks.delete(id);
+      }
+    }
+    if (sessionStore.size === 0 && cleanupInterval) {
+      clearInterval(cleanupInterval);
+      cleanupInterval = null;
+    }
+  }, 60_000);
+}
+
+startCleanupInterval();
 
 export class GameSessionService {
-  private static sessions: Map<string, GameSession> = new Map();
-  // Expose the shared store so callers can inject a test-scoped Map if needed.
   private sessions: Map<string, GameSession> = sessionStore;
 
-  /** Create a new game session. */
   createSession(players: string[], gameMode: string, settings: Record<string, any> = {}): GameSession {
     const id = uuidv4();
     const session: GameSession = {
@@ -44,47 +62,56 @@ export class GameSessionService {
     return session;
   }
 
-  /** Retrieve a session by ID. */
   getSession(id: string): GameSession | undefined {
     return GameSessionService.sessions.get(id);
   }
 
-  /** Update the mutable part of a session's game state. */
-  updateGameState(sessionId: string, newState: any): GameSession {
-    const session = GameSessionService.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    session.state = { ...session.state, ...newState };
-    return session;
+  async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      session.state = { ...session.state, ...newState };
+      return session;
+    });
   }
 
-  /** Record a player action. */
-  processPlayerAction(sessionId: string, playerId: string, action: any): GameSession {
-    const session = GameSessionService.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    // Basic validation – ensure the player belongs to the session.
-    if (!session.players.includes(playerId)) {
-      throw new Error('Player not part of this session');
-    }
-    // Store the raw action; real implementation would include anti‑cheat logic.
-    session.actions.push({ playerId, action, timestamp: Date.now() });
-    return session;
+  async processPlayerAction(sessionId: string, playerId: string, action: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      if (!session.players.includes(playerId)) {
+        throw new Error('Player not part of this session');
+      }
+      session.actions.push({ playerId, action, timestamp: Date.now() });
+      return session;
+    });
   }
 
-  /** Finish a session and optionally store the final results. */
-  finishGame(sessionId: string, results: any): GameSession {
-    const session = GameSessionService.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    session.finishedAt = Date.now();
-    session.state = results; // simple assignment for demo purposes
-    return session;
+  async finishGame(sessionId: string, results: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      session.finishedAt = Date.now();
+      session.state = results;
+      return session;
+    });
   }
 
-  /** Generate a replay payload from stored actions. */
-  generateReplayData(sessionId: string): any {
-    const session = GameSessionService.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    // Replay data is just the ordered list of actions for now.
-    return session.actions;
+  async generateReplayData(sessionId: string): Promise<any> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      return session.actions;
+    });
+  }
+
+  removeSession(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    sessionLocks.delete(sessionId);
+  }
+
+  getActiveSessionCount(): number {
+    return this.sessions.size;
   }
 
   /** Get all active sessions. */
@@ -100,5 +127,11 @@ export class GameSessionService {
   }
 }
 
-/** Clear the shared session store — for use in tests only. */
-export const clearSessionStore = (): void => sessionStore.clear();
+export const clearSessionStore = (): void => {
+  sessionStore.clear();
+  sessionLocks.clear();
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+};
