@@ -14,7 +14,7 @@ export const RankChange: React.FC<RankChangeProps> = ({
 }) => {
   if (change === null || change === undefined) {
     return (
-      <div className={`flex items-center gap-1 text-gray-400 ${className}`}>
+      <div className={`flex items-center gap-1 text-muted-foreground ${className}`}>
         <Minus className="w-4 h-4" />
         <span className="text-xs">—</span>
       </div>
@@ -23,7 +23,7 @@ export const RankChange: React.FC<RankChangeProps> = ({
 
   if (change === 0) {
     return (
-      <div className={`flex items-center gap-1 text-gray-400 ${className}`}>
+      <div className={`flex items-center gap-1 text-muted-foreground ${className}`}>
         <Minus className="w-4 h-4" />
         <span className="text-xs">0</span>
       </div>
@@ -31,8 +31,8 @@ export const RankChange: React.FC<RankChangeProps> = ({
   }
 
   const isPositive = change > 0;
-  const color = isPositive ? "text-green-500" : "text-red-500";
-  const bgColor = isPositive ? "bg-green-500/10" : "bg-red-500/10";
+  const color = isPositive ? "text-success" : "text-destructive";
+  const bgColor = isPositive ? "bg-success/10" : "bg-destructive/10";
 
   return (
     <div

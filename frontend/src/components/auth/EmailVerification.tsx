@@ -61,7 +61,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
   if (success) {
     return (
       <div className={cn('text-center py-8', className)}>
-        <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+        <CheckCircle className="h-16 w-16 text-success mx-auto mb-4" />
         <h2 className="text-xl font-bold text-foreground mb-2">Email verified!</h2>
         <p className="text-muted-foreground mb-6">
           Your email has been successfully verified. Redirecting...
@@ -73,7 +73,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
   return (
     <div className={cn('space-y-6', className)}>
       <div className="text-center">
-        <Mail className="h-12 w-12 text-blue-500 mx-auto mb-4" />
+        <Mail className="h-12 w-12 text-primary mx-auto mb-4" />
         <p className="text-muted-foreground mb-2">
           We've sent a verification link to your email
         </p>
@@ -98,7 +98,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
         </div>
         
         {error && (
-          <div className="flex gap-2 p-3 rounded-md bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-200">
+          <div className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10/30 dark:text-red-200">
             <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <p className="text-sm">{error}</p>
           </div>
@@ -116,7 +116,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
             type="button"
             onClick={handleResend}
             disabled={resending}
-            className="text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+            className="text-primary hover:text-info font-medium disabled:opacity-50"
           >
             {resending ? 'Sending...' : 'Resend verification email'}
           </button>

@@ -86,7 +86,7 @@ export default function GovernanceDashboard() {
       <div className="container mx-auto p-6 space-y-8">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-gray-900 dark:text-gray-100">
+          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-foreground dark:text-foreground">
             Governance
           </h1>
           <p className="text-xl text-muted-foreground mt-2">
@@ -129,9 +129,9 @@ export default function GovernanceDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-700">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Target Contract</p>
-                    <p className="text-sm font-mono truncate text-gray-700 dark:text-gray-300">{proposal.targetContract}</p>
+                  <div className="p-4 bg-muted dark:bg-surface/50 rounded-lg border border-gray-100 dark:border-border">
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">Target Contract</p>
+                    <p className="text-sm font-mono truncate text-foreground/70 dark:text-foreground/80">{proposal.targetContract}</p>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex -space-x-2 overflow-hidden">
@@ -145,7 +145,7 @@ export default function GovernanceDashboard() {
                       {proposal._count.votes} / 3 signatures
                     </p>
                   </div>
-                  <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+                  <div className="w-full bg-muted dark:bg-surface rounded-full h-2">
                     <div 
                       className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-500" 
                       style={{ width: `${Math.min((proposal._count.votes / 3) * 100, 100)}%` }}
@@ -161,7 +161,7 @@ export default function GovernanceDashboard() {
                     </Button>
                   )}
                   {proposal.status === "VOTING" && (
-                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleVote(proposal.id)}>
+                    <Button className="w-full bg-success/90 hover:bg-green-700" onClick={() => handleVote(proposal.id)}>
                       Sign Proposal
                     </Button>
                   )}

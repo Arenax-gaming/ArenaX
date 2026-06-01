@@ -144,7 +144,7 @@ export function FriendsList({
                 </button>
                 <div className="border-t my-1" />
                 <button
-                  className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-red-600"
+                  className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-destructive"
                   onClick={() => {
                     onRemoveFriend(friend.id);
                     setActiveMenu(null);
@@ -212,7 +212,7 @@ export function FriendsList({
             placeholder="Search friends..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
       </div>

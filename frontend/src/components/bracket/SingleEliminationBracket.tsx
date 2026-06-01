@@ -61,7 +61,7 @@ export function SingleEliminationBracket({
   return (
     <div className="space-y-8">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="rounded-[28px] border border-slate-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(30,41,59,0.96))] p-4 text-white shadow-[0_30px_80px_-45px_rgba(14,165,233,0.65)] sm:p-6">
+        <div className="rounded-[28px] border border-border/80 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(30,41,59,0.96))] p-4 text-white shadow-[0_30px_80px_-45px_rgba(14,165,233,0.65)] sm:p-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">
@@ -72,7 +72,7 @@ export function SingleEliminationBracket({
                   ? "Interactive Double Elimination View"
                   : "Interactive Single Elimination View"}
               </h3>
-              <p className="mt-2 max-w-2xl text-sm text-slate-300">
+              <p className="mt-2 max-w-2xl text-sm text-foreground/80">
                 Live-active matches glow, user paths are accented, and every node opens richer match intelligence.
               </p>
             </div>
@@ -96,8 +96,8 @@ export function SingleEliminationBracket({
         </div>
 
         <aside className="space-y-4">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <Eye className="h-4 w-4 text-cyan-600" />
               ArenaX View State
             </div>
@@ -121,8 +121,8 @@ export function SingleEliminationBracket({
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <Trophy className="h-4 w-4 text-amber-500" />
               Prize Distribution
             </div>
@@ -130,23 +130,23 @@ export function SingleEliminationBracket({
               {processedBracketData.prizeDistribution.map((prize) => (
                 <div
                   key={prize.position}
-                  className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                  className="flex items-center justify-between rounded-2xl border border-border bg-slate-50 px-4 py-3"
                 >
                   <div>
-                    <p className="font-medium text-slate-900">
+                    <p className="font-medium text-foreground">
                       {prize.label ?? `Top ${prize.position}`}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-muted-foreground">
                       Position {prize.position}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-slate-900">
+                    <p className="font-semibold text-foreground">
                       {prize.amount !== undefined
                         ? `$${prize.amount.toLocaleString()}`
                         : `${prize.percentage}%`}
                     </p>
-                    <p className="text-xs text-slate-500">{prize.percentage}%</p>
+                    <p className="text-xs text-muted-foreground">{prize.percentage}%</p>
                   </div>
                 </div>
               ))}
@@ -187,7 +187,7 @@ function BracketSectionBoard({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h4 className="text-lg font-semibold text-white">{section.title}</h4>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-muted-foreground">
             {section.type === "losers"
               ? "Elimination pressure and comeback routes."
               : section.type === "finals"
@@ -254,13 +254,13 @@ function BracketSectionBoard({
           >
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">
                   {round.shortLabel ?? `R${round.roundNumber}`}
                 </p>
                 <h5 className="text-sm font-semibold text-white">{round.roundName}</h5>
               </div>
               {roundIndex < section.rounds.length - 1 ? (
-                <ChevronRight className="h-4 w-4 text-slate-500" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
               ) : null}
             </div>
 
@@ -316,10 +316,10 @@ function MatchCard({
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+            <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">
               {match.label ?? `Match ${match.matchNumber}`}
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               {match.roundLabel ?? `Round ${match.round}`}
             </p>
           </div>
@@ -337,7 +337,7 @@ function MatchCard({
           winnerId={match.winnerId}
         />
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           {match.scheduledTime ? (
             <span className="inline-flex items-center gap-1">
               <Clock3 className="h-3.5 w-3.5" />
@@ -345,7 +345,7 @@ function MatchCard({
             </span>
           ) : null}
           {match.streamTitle ? (
-            <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-300">
+            <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-foreground/80">
               Stream
             </span>
           ) : null}
@@ -366,7 +366,7 @@ function MatchCard({
           <p className="mt-3 font-medium text-white">
             {match.player1?.username ?? "TBD"} vs {match.player2?.username ?? "TBD"}
           </p>
-          <p className="mt-2 text-xs leading-5 text-slate-400">
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
             {match.notes ?? "Open full details for player stats, reports, and payout context."}
           </p>
           {match.conflictReason ? (
@@ -400,13 +400,13 @@ function PlayerRow({
     >
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/5">
-          <User className="h-4 w-4 text-slate-400" />
+          <User className="h-4 w-4 text-muted-foreground" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-white">
             {player?.username ?? "Awaiting Result"}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {player
               ? `Seed ${player.seed ?? "-"} | ${player.record ?? `ELO ${player.elo}`}`
               : "Bracket slot pending"}
@@ -462,9 +462,9 @@ function LegendPill({
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-slate-900">{value}</p>
+    <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+      <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
 }

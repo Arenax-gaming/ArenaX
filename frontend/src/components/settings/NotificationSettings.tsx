@@ -75,7 +75,7 @@ export function NotificationSettings({
     },
     {
       type: "matchStarted",
-      icon: <Gamepad2 className="h-5 w-5 text-blue-500" />,
+      icon: <Gamepad2 className="h-5 w-5 text-primary" />,
       title: "Match Started",
       message: "Your match vs ProGamer123 has begun. Good luck!",
       time: "15 min ago",
@@ -83,7 +83,7 @@ export function NotificationSettings({
     },
     {
       type: "prizeWinnings",
-      icon: <DollarSign className="h-5 w-5 text-green-500" />,
+      icon: <DollarSign className="h-5 w-5 text-success" />,
       title: "Prize Won!",
       message: "Congratulations! You've won $500 from the Weekend Tournament.",
       time: "1 hour ago",
@@ -120,8 +120,8 @@ export function NotificationSettings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Bell className="h-5 w-5 text-blue-500" />
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Bell className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle>Notification Types</CardTitle>
@@ -168,13 +168,13 @@ export function NotificationSettings({
               <div
                 key={channelValue}
                 className={`flex items-center justify-between p-4 rounded-lg border-2 transition-all ${isChannelEnabled(channelValue)
-                  ? "border-blue-500/50 bg-blue-500/5"
+                  ? "border-primary/50 bg-primary/5"
                   : "border-muted hover:border-muted-foreground/50"
                   }`}
               >
                 <div className="flex items-center gap-3">
                   <div
-                    className={`p-2 rounded-lg ${isChannelEnabled(channelValue) ? "bg-blue-500/20" : "bg-muted"
+                    className={`p-2 rounded-lg ${isChannelEnabled(channelValue) ? "bg-primary/20" : "bg-muted"
                       }`}
                   >
                     {getChannelIcon(channelValue)}
@@ -234,7 +234,7 @@ export function NotificationSettings({
                       quietHours: { ...settings.quietHours, start: e.target.value },
                     })
                   }
-                  className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
               <div className="space-y-2">
@@ -248,7 +248,7 @@ export function NotificationSettings({
                       quietHours: { ...settings.quietHours, end: e.target.value },
                     })
                   }
-                  className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
             </div>
@@ -261,8 +261,8 @@ export function NotificationSettings({
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/10 rounded-lg">
-                <Eye className="h-5 w-5 text-green-500" />
+              <div className="p-2 bg-success/10 rounded-lg">
+                <Eye className="h-5 w-5 text-success" />
               </div>
               <div>
                 <CardTitle>Notification Preview</CardTitle>
@@ -295,7 +295,7 @@ export function NotificationSettings({
                       <span className="text-xs text-muted-foreground flex-shrink-0">{notif.time}</span>
                     </div>
                     <p className="text-sm text-muted-foreground mb-2">{notif.message}</p>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-500">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
                       {notif.category}
                     </span>
                   </div>
@@ -317,7 +317,7 @@ export function NotificationSettings({
                   </span>
                 ))
               ) : (
-                <span className="text-red-500">No channels enabled</span>
+                <span className="text-destructive">No channels enabled</span>
               )}
             </div>
           </CardContent>
@@ -327,7 +327,7 @@ export function NotificationSettings({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

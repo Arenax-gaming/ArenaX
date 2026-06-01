@@ -78,7 +78,7 @@ function getEventContent(event: ActivityEvent): {
         icon: <Swords className="h-4 w-4 flex-shrink-0" />,
         text: `${event.payload.result} vs ${event.payload.opponent}`,
         subtext: event.payload.gameType ? `${event.payload.gameType} • ${event.payload.score || 'No score'}` : undefined,
-        color: isWin ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
+        color: isWin ? "text-success dark:text-success/80" : "text-destructive dark:text-destructive/80",
       };
     case "achievement_unlocked":
       return {
@@ -92,7 +92,7 @@ function getEventContent(event: ActivityEvent): {
         icon: <Flag className="h-4 w-4 flex-shrink-0" />,
         text: `Joined tournament: ${event.payload.tournamentName}`,
         subtext: event.payload.tournamentType ? `${event.payload.tournamentType} tournament` : undefined,
-        color: "text-blue-600 dark:text-blue-400",
+        color: "text-primary dark:text-primary/80",
       };
     case "tournament_completed":
       return {

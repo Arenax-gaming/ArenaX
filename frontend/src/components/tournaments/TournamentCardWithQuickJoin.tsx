@@ -24,12 +24,12 @@ const statusConfig: Record<
   draft: {
     label: "Draft",
     color: "text-gray-600",
-    bgColor: "bg-gray-100 dark:bg-gray-800",
+    bgColor: "bg-muted dark:bg-surface",
   },
   registration_open: {
     label: "Registration Open",
-    color: "text-green-600",
-    bgColor: "bg-green-100 dark:bg-green-900",
+    color: "text-success",
+    bgColor: "bg-success-muted dark:bg-success-muted",
   },
   registration_closed: {
     label: "Registration Closed",
@@ -38,8 +38,8 @@ const statusConfig: Record<
   },
   in_progress: {
     label: "Ongoing",
-    color: "text-blue-600",
-    bgColor: "bg-blue-100 dark:bg-blue-900",
+    color: "text-primary",
+    bgColor: "bg-blue-100 dark:bg-info-muted",
   },
   completed: {
     label: "Completed",
@@ -48,8 +48,8 @@ const statusConfig: Record<
   },
   cancelled: {
     label: "Cancelled",
-    color: "text-red-600",
-    bgColor: "bg-red-100 dark:bg-red-900",
+    color: "text-destructive",
+    bgColor: "bg-destructive/10 dark:bg-destructive/20",
   },
 };
 
@@ -184,7 +184,7 @@ export function TournamentCardWithQuickJoin({
             <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
-                  isFull ? "bg-orange-500" : "bg-blue-500"
+                  isFull ? "bg-orange-500" : "bg-primary"
                 }`}
                 style={{ width: `${participantPercentage}%` }}
               />
@@ -193,7 +193,7 @@ export function TournamentCardWithQuickJoin({
 
           {/* Joined Badge */}
           {isJoined && (
-            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-2 text-center">
+            <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-2 text-center">
               <p className="text-xs font-medium text-green-700 dark:text-green-300">
                 ✓ You have joined this tournament
               </p>
