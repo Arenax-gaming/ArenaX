@@ -117,13 +117,13 @@ export default function DisputeDashboard() {
                 <div className="grid md:grid-cols-2 gap-8">
                   <div className="space-y-4">
                     <div>
-                      <h4 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-1">Reason</h4>
+                      <h4 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">Reason</h4>
                       <p className="text-lg text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-100 dark:border-gray-700">
                         {dispute.reason}
                       </p>
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-2">Evidence</h4>
+                      <h4 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">Evidence</h4>
                       <div className="grid grid-cols-3 gap-2">
                         {dispute.evidenceUrls.map((url: string, index: number) => (
                           <div key={index} className="aspect-square bg-gray-200 rounded-md overflow-hidden border">
@@ -136,7 +136,7 @@ export default function DisputeDashboard() {
                   </div>
                   <div className="flex flex-col justify-between border-l pl-8 border-indigo-50 dark:border-indigo-900">
                     <div className="space-y-4">
-                      <h4 className="text-sm font-bold text-gray-500 uppercase tracking-widest">Match Details</h4>
+                      <h4 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Match Details</h4>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-lg">
                           <p className="text-xs text-red-600 font-bold uppercase">Player A</p>
