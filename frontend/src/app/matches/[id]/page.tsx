@@ -10,8 +10,7 @@ import {
   useMatchScoreReporting,
   useMatchWebSocket,
 } from "@/hooks/useMatchWebSocket";
-import { matchHubDetails } from "@/data/matchHub";
-import { mockMatchDetails } from "@/data/matches";
+import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
 import {
   AlertTriangle,
@@ -26,36 +25,37 @@ import {
   WifiOff,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { MatchHubDetails } from "@/data/matchHub";
+import { MatchDetail } from "@/types/match";
 
 export default function MatchHubPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
-  const matchId = params.id as string;
+  const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
 
-  const [match, setMatch] = useState(matchHubDetails[matchId] ?? null);
-  const [matchDetail, setMatchDetail] = useState(mockMatchDetails[matchId] ?? null);
+  const { data: matchData, isLoading, error, refetch } = useMatch(matchId);
+
+  // Handle both possible data shapes
+  const match = matchData as (MatchHubDetails | null);
+  const matchDetail = matchData as (MatchDetail | null);
+
   const [player1Score, setPlayer1Score] = useState("");
   const [player2Score, setPlayer2Score] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const [liveFeed, setLiveFeed] = useState(match?.feed ?? []);
+  const [liveFeed, setLiveFeed] = useState<
+    Array<{ id: string; type: string; message: string; createdAt: string }>
+  >([]);
 
   useEffect(() => {
-    const hubDetails = matchHubDetails[matchId] ?? null;
-    const detailData = mockMatchDetails[matchId] ?? null;
-    setMatch(hubDetails);
-    setMatchDetail(detailData);
-    setLiveFeed(hubDetails?.feed ?? []);
-  }, [matchId]);
-
-  useEffect(() => {
-    if (!match) {
-      return;
+    if (match) {
+      setPlayer1Score(String(match.scorePlayer1 ?? 0));
+      setPlayer2Score(String(match.scorePlayer2 ?? 0));
+      if ("feed" in match) {
+        setLiveFeed(match.feed);
+      }
     }
-
-    setPlayer1Score(String(match.scorePlayer1));
-    setPlayer2Score(String(match.scorePlayer2));
   }, [match]);
 
   const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
@@ -89,8 +89,11 @@ export default function MatchHubPage() {
     if (!match) {
       return false;
     }
-
-    return match.player1.id === currentUserId || match.player2.id === currentUserId;
+    if ("player1" in match && "player2" in match) {
+      return match.player1.id === currentUserId || match.player2.id === currentUserId;
+    }
+    // Fallback for other data shapes
+    return (match as any).player1Id === currentUserId || (match as any).player2Id === currentUserId;
   }, [currentUserId, match]);
 
   useEffect(() => {
@@ -98,23 +101,9 @@ export default function MatchHubPage() {
       return;
     }
 
-    setMatch((previous) =>
-      previous
-        ? {
-          ...previous,
-          status: lastUpdate.status ?? previous.status,
-          scorePlayer1: lastUpdate.scorePlayer1 ?? previous.scorePlayer1,
-          scorePlayer2: lastUpdate.scorePlayer2 ?? previous.scorePlayer2,
-          winnerId: lastUpdate.winnerId ?? previous.winnerId,
-        }
-        : previous,
-    );
-
-    if (typeof lastUpdate.scorePlayer1 === "number") {
-      setPlayer1Score(String(lastUpdate.scorePlayer1));
-    }
-    if (typeof lastUpdate.scorePlayer2 === "number") {
-      setPlayer2Score(String(lastUpdate.scorePlayer2));
+    if (match && "scorePlayer1" in match) {
+      setPlayer1Score(String(lastUpdate.scorePlayer1 ?? match.scorePlayer1));
+      setPlayer2Score(String(lastUpdate.scorePlayer2 ?? match.scorePlayer2));
     }
 
     if (lastUpdate.message) {
@@ -128,17 +117,35 @@ export default function MatchHubPage() {
         ...previous,
       ]);
     }
-  }, [lastUpdate]);
+  }, [lastUpdate, match]);
 
-  if (!match && !matchDetail) {
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <RefreshCw className="mx-auto h-12 w-12 animate-spin text-primary" />
+          <h1 className="mt-4 text-2xl font-bold text-foreground">Loading match...</h1>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state or no data
+  if (error || (!match && !matchDetail)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
           <p className="mb-6 text-muted-foreground">
-            The match you&apos;re looking for doesn&apos;t exist.
+            The match you&apos;re looking for doesn&apos;t exist or failed to load.
           </p>
-          <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
+          <div className="flex gap-4 justify-center">
+            <Button onClick={() => refetch()}>Retry</Button>
+            <Button variant="ghost" onClick={() => router.push("/tournaments")}>
+              Back to Tournaments
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -168,6 +175,23 @@ export default function MatchHubPage() {
               router.push(`/matches/${matchId}/dispute`);
             }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  // Make sure we have the MatchHubDetails shape for the rest of the component
+  if (!("player1" in match) || !("player2" in match)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
+          <p className="mb-6 text-muted-foreground">
+            The match data is invalid.
+          </p>
+          <Button onClick={() => router.push("/tournaments")}>
+            Back to Tournaments
+          </Button>
         </div>
       </div>
     );
@@ -513,7 +537,7 @@ function CompetitorCard({
   isWinner,
   isCurrentUser,
 }: {
-  player: (typeof matchHubDetails)[string]["player1"];
+  player: { id: string; username: string; elo: number; region: string; seed: number; stats: Array<{ label: string; value: string }> };
   score: number;
   isWinner: boolean;
   isCurrentUser: boolean;

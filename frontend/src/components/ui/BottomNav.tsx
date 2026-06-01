@@ -1,7 +1,7 @@
 // filepath: frontend/src/components/ui/BottomNav.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,14 +46,14 @@ export function BottomNav({ className }: BottomNavProps) {
   const pathname = usePathname();
   const { isMobile, safeAreaInsets } = useDevice();
   const [isVisible, setIsVisible] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const lastScrollY = useRef(0);
 
   // Hide on scroll down, show on scroll up
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       
-      if (currentScrollY > lastScrollY && currentScrollY > 100) {
+      if (currentScrollY > lastScrollY.current && currentScrollY > 100) {
         // Scrolling down - hide
         setIsVisible(false);
       } else {
@@ -61,12 +61,12 @@ export function BottomNav({ className }: BottomNavProps) {
         setIsVisible(true);
       }
       
-      setLastScrollY(currentScrollY);
+      lastScrollY.current = currentScrollY;
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [lastScrollY]);
+  }, []);
 
   // Don't render on desktop
   if (!isMobile) {

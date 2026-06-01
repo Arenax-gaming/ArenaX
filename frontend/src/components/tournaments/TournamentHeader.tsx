@@ -1,10 +1,13 @@
 import React from "react";
+import Image from "next/image";
 import { Tournament, TournamentStatus } from "@/types/tournament";
+import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Trophy, Users, Calendar, Zap } from "lucide-react";
 
 interface TournamentHeaderProps {
   tournament: Tournament;
+  bannerSizes: string;
 }
 
 const statusConfig: Record<
@@ -43,7 +46,7 @@ const statusConfig: Record<
   },
 };
 
-export function TournamentHeader({ tournament }: TournamentHeaderProps) {
+export function TournamentHeader({ tournament, bannerSizes }: TournamentHeaderProps) {
   const status = statusConfig[tournament.status];
   const startDate = new Date(tournament.startTime);
   const participantPercentage = Math.round(
@@ -65,9 +68,20 @@ export function TournamentHeader({ tournament }: TournamentHeaderProps) {
   });
 
   return (
-    <Card className="border-0 shadow-none p-0">
+    <Card className="border-0 shadow-none p-0 overflow-hidden">
+      <div className="relative h-44 w-full md:h-56 bg-muted">
+        <Image
+          src={getTournamentBannerUrl(tournament.id)}
+          alt={`${tournament.name} banner`}
+          fill
+          sizes={bannerSizes}
+          className="object-cover"
+          priority
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/40 to-transparent" />
+      </div>
       {/* Header Background */}
-      <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border-b p-6 md:p-8 rounded-lg">
+      <div className="border-b p-6 md:p-8">
         <div className="space-y-4">
           {/* Status Badge */}
           <div>

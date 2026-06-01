@@ -5,7 +5,9 @@ import passport from 'passport';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
+import { getEnv } from './config/env';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -13,22 +15,24 @@ const defaultArenaXOrigins = [
     'https://app.arenax.gg'
 ];
 
-const buildAllowedOrigins = (isProduction: boolean): string[] => {
-    const configuredOrigins = process.env.ARENAX_ALLOWED_ORIGINS
-        ? process.env.ARENAX_ALLOWED_ORIGINS.split(',')
+const buildAllowedOrigins = (isProductionLike: boolean): string[] => {
+    const env = getEnv();
+    const configuredOrigins = env.ARENAX_ALLOWED_ORIGINS
+        ? env.ARENAX_ALLOWED_ORIGINS.split(',')
               .map((origin) => origin.trim())
               .filter(Boolean)
         : defaultArenaXOrigins;
 
-    return isProduction
+    return isProductionLike
         ? configuredOrigins
         : [...configuredOrigins, 'http://localhost:3000', 'http://localhost:5173'];
 };
 
 export const createApp = (): Express => {
     const app: Express = express();
-    const isProduction = process.env.NODE_ENV === 'production';
-    const allowedOrigins = buildAllowedOrigins(isProduction);
+    const env = getEnv();
+    const { isProductionLike } = env;
+    const allowedOrigins = buildAllowedOrigins(isProductionLike);
     const cspConnectSources = [...new Set(["'self'", ...allowedOrigins])];
 
     configurePassport(passport);
@@ -49,7 +53,7 @@ export const createApp = (): Express => {
                     scriptSrcAttr: ["'none'"],
                     styleSrc: ["'self'"],
                     connectSrc: cspConnectSources,
-                    upgradeInsecureRequests: isProduction ? [] : null
+                    upgradeInsecureRequests: isProductionLike ? [] : null
                 }
             },
             hsts: {
@@ -75,6 +79,7 @@ export const createApp = (): Express => {
     app.use(express.json());
     app.use(requestIdMiddleware);
     app.use(passport.initialize());
+    app.use(metricsMiddleware);
     app.use('/api', routes);
     app.use(errorHandler);
 

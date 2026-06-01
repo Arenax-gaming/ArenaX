@@ -10,7 +10,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal", "migrate"] }
 validator = { version = "0.20.0", features = ["derive"] }
 rust_decimal = { version = "1.40.0", features = ["db-postgres"] }
 actix-web = "4.12.1"
@@ -23,6 +23,8 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "std"] }
 sha2 = "0.10"
+aes-gcm = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
 dotenvy = "0.15"
 actix-cors = "0.6"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

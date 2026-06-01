@@ -3,6 +3,7 @@ import { BaseError, InternalServerError, isBaseError } from '../errors';
 import { logger } from '../services/logger.service';
 import { captureException } from '../services/telemetry.service';
 import { HttpError } from '../utils/http-error';
+import { getEnv } from '../config/env';
 
 const normalizeError = (err: unknown): BaseError => {
     if (isBaseError(err)) {
@@ -13,7 +14,12 @@ const normalizeError = (err: unknown): BaseError => {
         return new BaseError(
             err.message,
             err.status,
-            err.status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'HTTP_ERROR'
+            err.status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'HTTP_ERROR',
+            {
+                httpStatus: err.status
+            },
+            err.status < 500,
+            err.status < 500
         );
     }
 
@@ -27,7 +33,7 @@ export const errorHandler = (
     next: NextFunction
 ) => {
     const normalizedError = normalizeError(err);
-    const isProduction = process.env.NODE_ENV === 'production';
+    const { isProductionLike } = getEnv();
     const requestId = req.requestId ?? 'unknown';
     const requestLogger = req.log ?? logger;
 
@@ -50,9 +56,11 @@ export const errorHandler = (
         errorCode: normalizedError.code
     });
 
-    const shouldMask = isProduction && (!normalizedError.isOperational || !normalizedError.expose);
+    // Improve error messaging: expose more details for client debugging while protecting sensitive info
+    const shouldMask = isProductionLike && (!normalizedError.isOperational || !normalizedError.expose);
     const message = shouldMask ? 'Internal Server Error' : normalizedError.message;
     const code = shouldMask ? 'INTERNAL_SERVER_ERROR' : normalizedError.code;
+    
     const details = shouldMask ? undefined : normalizedError.details;
 
     res.status(normalizedError.statusCode).json({
@@ -62,7 +70,8 @@ export const errorHandler = (
             details,
             status: normalizedError.statusCode,
             timestamp: new Date().toISOString(),
-            requestId
+            requestId,
+            hint: isProductionLike && !shouldMask ? 'Check request details and try again' : undefined
         }
     });
 };

@@ -14,6 +14,7 @@ import { ArrowLeft, RadioTower, ShieldAlert, Swords, Trophy } from "lucide-react
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
+import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -22,7 +23,7 @@ export default function TournamentDetailsPage() {
   // #320: read the dynamic [id] route param and look up the tournament
   // by id. Unknown ids fall through to the "Tournament Not Found"
   // branch below rather than rendering a hardcoded fallback.
-  const tournamentId = params.id as string;
+  const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
   const [tournament, setTournament] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -128,7 +129,10 @@ export default function TournamentDetailsPage() {
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <div className="space-y-8 lg:col-span-2">
-          <TournamentHeader tournament={tournament} />
+          <TournamentHeader
+            tournament={tournament}
+            bannerSizes={TOURNAMENT_DETAIL_BANNER_SIZES}
+          />
 
           {showBracket && bracketData ? (
             <section className="space-y-4">

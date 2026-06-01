@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Tournament, TournamentStatus } from "@/types/tournament";
+import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { QuickJoinModal } from "./QuickJoinModal";
@@ -12,6 +14,7 @@ interface TournamentCardProps {
   tournament: Tournament;
   isJoined?: boolean;
   onJoinSuccess?: (tournamentId: string) => void;
+  bannerSizes: string;
 }
 
 const statusConfig: Record<
@@ -54,6 +57,7 @@ export function TournamentCardWithQuickJoin({
   tournament,
   isJoined = false,
   onJoinSuccess,
+  bannerSizes,
 }: TournamentCardProps) {
   const [showQuickJoin, setShowQuickJoin] = useState(false);
 
@@ -84,6 +88,15 @@ export function TournamentCardWithQuickJoin({
     <>
       <Link href={cardHref} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg">
       <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
+        <div className="relative h-36 w-full shrink-0 bg-muted">
+          <Image
+            src={getTournamentBannerUrl(tournament.id)}
+            alt={`${tournament.name} banner`}
+            fill
+            sizes={bannerSizes}
+            className="object-cover"
+          />
+        </div>
         {/* Header with Status */}
         <div className="flex items-start justify-between border-b p-4">
           <div className="flex-1">
