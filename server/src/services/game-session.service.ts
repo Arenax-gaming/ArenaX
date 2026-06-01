@@ -105,6 +105,14 @@ export class GameSessionService {
     });
   }
 
+  /**
+   * Remove a session from the store and free all associated resources
+   * (including its lock entry).
+   *
+   * Must be called when a game ends or when all players disconnect so the
+   * module-level `sessionStore` Map does not grow unboundedly over the
+   * server's lifetime.
+   */
   removeSession(sessionId: string): void {
     this.sessions.delete(sessionId);
     sessionLocks.delete(sessionId);

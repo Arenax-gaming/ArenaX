@@ -188,8 +188,13 @@ impl Actor for MatchWebSocket {
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         info!(
             session_id = %self.id,
-            "WebSocket connection closed"
+            subscription_count = self.subscriptions.len(),
+            "WebSocket connection closed — releasing subscriptions"
         );
+        // Explicitly free the subscription list so any heap allocation is
+        // released immediately rather than waiting for the actor to be dropped.
+        self.subscriptions.clear();
+        self.subscriptions.shrink_to_fit();
     }
 }
 
