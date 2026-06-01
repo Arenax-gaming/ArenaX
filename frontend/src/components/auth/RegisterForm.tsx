@@ -17,7 +17,7 @@ interface RegisterFormProps {
 }
 
 export function RegisterForm({ className }: RegisterFormProps) {
-  const { register, loading, error, clearError } = useAuth();
+  const { register, loading, error, clearError, user } = useAuth();
   const router = useRouter();
 
   const [formData, setFormData] = useState({
@@ -30,6 +30,12 @@ export function RegisterForm({ className }: RegisterFormProps) {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const usernameStatus = useUsernameAvailability(formData.username);
+
+  useEffect(() => {
+    if (user) {
+      router.push('/auth/verify-email');
+    }
+  }, [user, router]);
 
   useEffect(() => {
     clearError();
