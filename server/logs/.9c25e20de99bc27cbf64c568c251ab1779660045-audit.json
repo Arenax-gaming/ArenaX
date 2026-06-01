@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/mnt/c/Users/ritik/Desktop/4ever/ArenaX/server/logs/.9c25e20de99bc27cbf64c568c251ab1779660045-audit.json",
+    "files": [
+        {
+            "date": 1780297326101,
+            "name": "/mnt/c/Users/ritik/Desktop/4ever/ArenaX/server/logs/error-2026-06-01.log",
+            "hash": "0c83ff561e27e5e56cb0bf36c4397d4a553d176e724c8c338464c2b584649fc3"
+        }
+    ],
+    "hashType": "sha256"
+}
