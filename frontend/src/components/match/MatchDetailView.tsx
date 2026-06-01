@@ -74,7 +74,7 @@ export function MatchDetailView({
             <div
               className={cn(
                 "text-center flex-1",
-                player1Won ? "text-green-600 dark:text-green-400" : "",
+                player1Won ? "text-success dark:text-success/80" : "",
               )}
             >
               <p className="text-2xl font-bold">{match.player1Username}</p>
@@ -92,7 +92,7 @@ export function MatchDetailView({
             <div
               className={cn(
                 "text-center flex-1",
-                player2Won ? "text-green-600 dark:text-green-400" : "",
+                player2Won ? "text-success dark:text-success/80" : "",
               )}
             >
               <p className="text-2xl font-bold">{match.player2Username}</p>
@@ -193,12 +193,12 @@ export function MatchDetailView({
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="flex items-center justify-between p-3 bg-success-muted dark:bg-success-muted/20 rounded-lg">
                 <div className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-green-600" />
+                  <Trophy className="h-5 w-5 text-success" />
                   <span className="font-medium">Winner</span>
                 </div>
-                <span className="text-xl font-bold text-green-600">
+                <span className="text-xl font-bold text-success">
                   {match.prizeDistribution.currency || "$"}
                   {match.prizeDistribution.winner.toLocaleString()}
                 </span>
@@ -245,15 +245,15 @@ function RoundRow({
 }) {
   const winnerColor =
     round.winner === "player1"
-      ? "text-green-600 dark:text-green-400"
+      ? "text-success dark:text-success/80"
       : round.winner === "player2"
-        ? "text-blue-600 dark:text-blue-400"
+        ? "text-primary dark:text-primary/80"
         : "";
   const winnerBg =
     round.winner === "player1"
-      ? "bg-green-50 dark:bg-green-900/20"
+      ? "bg-success-muted dark:bg-success-muted/20"
       : round.winner === "player2"
-        ? "bg-blue-50 dark:bg-blue-900/20"
+        ? "bg-info-muted dark:bg-info-muted/20"
         : "";
 
   return (
@@ -408,11 +408,11 @@ function ScoreProgressionChart({ match }: { match: MatchDetail }) {
 
       <div className="flex items-center justify-center gap-6 mt-4">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-green-500" />
+          <div className="w-3 h-3 rounded-full bg-success" />
           <span className="text-sm">{match.player1Username}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-blue-500" />
+          <div className="w-3 h-3 rounded-full bg-primary" />
           <span className="text-sm">{match.player2Username}</span>
         </div>
       </div>
@@ -428,12 +428,12 @@ function PlayerStatsCard({
   isWinner: boolean;
 }) {
   return (
-    <Card className={isWinner ? "border-green-200 dark:border-green-800" : ""}>
+    <Card className={isWinner ? "border-success/30 dark:border-green-800" : ""}>
       <CardHeader>
         <CardTitle
           className={cn(
             "flex items-center gap-2",
-            isWinner ? "text-green-600 dark:text-green-400" : "",
+            isWinner ? "text-success dark:text-success/80" : "",
           )}
         >
           {isWinner && <Trophy className="h-5 w-5" />}

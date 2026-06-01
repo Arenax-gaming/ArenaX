@@ -59,8 +59,8 @@ export function ContactForm() {
             animate={{ opacity: 1, y: 0 }}
             className="text-center py-8"
           >
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900 mb-4">
-              <Send className="h-8 w-8 text-green-600 dark:text-green-400" />
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-success-muted dark:bg-success-muted mb-4">
+              <Send className="h-8 w-8 text-success dark:text-success/80" />
             </div>
             <h3 className="text-xl font-bold mb-2">Message Sent!</h3>
             <p className="text-muted-foreground">

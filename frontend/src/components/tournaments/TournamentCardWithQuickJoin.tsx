@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Tournament, TournamentStatus } from "@/types/tournament";
+import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { QuickJoinModal } from "./QuickJoinModal";
@@ -12,6 +14,7 @@ interface TournamentCardProps {
   tournament: Tournament;
   isJoined?: boolean;
   onJoinSuccess?: (tournamentId: string) => void;
+  bannerSizes: string;
 }
 
 const statusConfig: Record<
@@ -21,12 +24,12 @@ const statusConfig: Record<
   draft: {
     label: "Draft",
     color: "text-gray-600",
-    bgColor: "bg-gray-100 dark:bg-gray-800",
+    bgColor: "bg-muted dark:bg-surface",
   },
   registration_open: {
     label: "Registration Open",
-    color: "text-green-600",
-    bgColor: "bg-green-100 dark:bg-green-900",
+    color: "text-success",
+    bgColor: "bg-success-muted dark:bg-success-muted",
   },
   registration_closed: {
     label: "Registration Closed",
@@ -35,8 +38,8 @@ const statusConfig: Record<
   },
   in_progress: {
     label: "Ongoing",
-    color: "text-blue-600",
-    bgColor: "bg-blue-100 dark:bg-blue-900",
+    color: "text-primary",
+    bgColor: "bg-blue-100 dark:bg-info-muted",
   },
   completed: {
     label: "Completed",
@@ -45,8 +48,8 @@ const statusConfig: Record<
   },
   cancelled: {
     label: "Cancelled",
-    color: "text-red-600",
-    bgColor: "bg-red-100 dark:bg-red-900",
+    color: "text-destructive",
+    bgColor: "bg-destructive/10 dark:bg-destructive/20",
   },
 };
 
@@ -54,6 +57,7 @@ export function TournamentCardWithQuickJoin({
   tournament,
   isJoined = false,
   onJoinSuccess,
+  bannerSizes,
 }: TournamentCardProps) {
   const [showQuickJoin, setShowQuickJoin] = useState(false);
 
@@ -75,9 +79,24 @@ export function TournamentCardWithQuickJoin({
     onJoinSuccess?.(tournamentId);
   };
 
+  const cardHref =
+    tournament.status === "completed"
+      ? `/tournaments/${tournament.id}/results`
+      : `/tournaments/${tournament.id}`;
+
   return (
     <>
+      <Link href={cardHref} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg">
       <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
+        <div className="relative h-36 w-full shrink-0 bg-muted">
+          <Image
+            src={getTournamentBannerUrl(tournament.id)}
+            alt={`${tournament.name} banner`}
+            fill
+            sizes={bannerSizes}
+            className="object-cover"
+          />
+        </div>
         {/* Header with Status */}
         <div className="flex items-start justify-between border-b p-4">
           <div className="flex-1">
@@ -165,7 +184,7 @@ export function TournamentCardWithQuickJoin({
             <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
-                  isFull ? "bg-orange-500" : "bg-blue-500"
+                  isFull ? "bg-orange-500" : "bg-primary"
                 }`}
                 style={{ width: `${participantPercentage}%` }}
               />
@@ -174,7 +193,7 @@ export function TournamentCardWithQuickJoin({
 
           {/* Joined Badge */}
           {isJoined && (
-            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-2 text-center">
+            <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-2 text-center">
               <p className="text-xs font-medium text-green-700 dark:text-green-300">
                 ✓ You have joined this tournament
               </p>
@@ -194,37 +213,27 @@ export function TournamentCardWithQuickJoin({
               Quick Join
             </Button>
           ) : (
-            // #324: route completed tournaments to the dedicated
-            // results page so the View Results CTA actually lands the
-            // user on a results view rather than the live detail page.
-            <Link
-              href={
-                tournament.status === "completed"
-                  ? `/tournaments/${tournament.id}/results`
-                  : `/tournaments/${tournament.id}`
-              }
-              className="block"
+            <Button
+              variant={isJoined ? "secondary" : "outline"}
+              size="md"
+              className="w-full"
+              disabled={!isJoined && tournament.status !== "registration_open"}
+              tabIndex={-1}
             >
-              <Button
-                variant={isJoined ? "secondary" : "outline"}
-                size="md"
-                className="w-full"
-                disabled={!isJoined && tournament.status !== "registration_open"}
-              >
-                {isJoined
-                  ? "View Details"
-                  : isFull
-                    ? "Tournament Full"
-                    : tournament.status === "in_progress"
-                      ? "View Bracket"
-                      : tournament.status === "completed"
-                        ? "View Results"
-                        : "View Details"}
-              </Button>
-            </Link>
+              {isJoined
+                ? "View Details"
+                : isFull
+                  ? "Tournament Full"
+                  : tournament.status === "in_progress"
+                    ? "View Bracket"
+                    : tournament.status === "completed"
+                      ? "View Results"
+                      : "View Details"}
+            </Button>
           )}
         </div>
       </Card>
+      </Link>
 
       {/* Quick Join Modal */}
       <QuickJoinModal

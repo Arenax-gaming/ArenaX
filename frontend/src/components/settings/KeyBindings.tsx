@@ -114,7 +114,7 @@ export function KeyBindings({
               autoFocus
               onKeyDown={(e) => handleKeyDown(e, binding.action, true)}
               onBlur={() => setListeningFor(null)}
-              className="w-20 px-2 py-1 text-center text-sm bg-blue-500/20 border-2 border-blue-500 rounded-md focus:outline-none"
+              className="w-20 px-2 py-1 text-center text-sm bg-primary/20 border-2 border-primary rounded-md focus:outline-none"
               placeholder="..."
             />
           ) : (
@@ -136,7 +136,7 @@ export function KeyBindings({
                 autoFocus
                 onKeyDown={(e) => handleKeyDown(e, binding.action, false)}
                 onBlur={() => setListeningFor(null)}
-                className="w-20 px-2 py-1 text-center text-sm bg-blue-500/20 border-2 border-blue-500 rounded-md focus:outline-none"
+                className="w-20 px-2 py-1 text-center text-sm bg-primary/20 border-2 border-primary rounded-md focus:outline-none"
                 placeholder="..."
               />
             ) : (
@@ -168,8 +168,8 @@ export function KeyBindings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Keyboard className="h-5 w-5 text-blue-500" />
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Keyboard className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle>Movement</CardTitle>
@@ -188,8 +188,8 @@ export function KeyBindings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Keyboard className="h-5 w-5 text-green-500" />
+            <div className="p-2 bg-success/10 rounded-lg">
+              <Keyboard className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>Actions</CardTitle>
@@ -242,7 +242,7 @@ export function KeyBindings({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

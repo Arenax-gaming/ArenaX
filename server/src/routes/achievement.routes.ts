@@ -7,13 +7,14 @@ import {
     shareAchievement
 } from '../controllers/achievement.controller';
 import { authenticateJWT, optionalAuthenticateJWT } from '../middleware/auth.middleware';
+import { publicRateLimiter, paymentRateLimiter } from '../middleware/rate-limit.middleware';
 
-const router = Router();
+const router: Router = Router();
 
-router.get('/', listAchievements);
-router.get('/player/:playerId', optionalAuthenticateJWT, getPlayerAchievements);
-router.get('/:id/stats', getAchievementStats);
-router.post('/:id/progress', authenticateJWT, postAchievementProgress);
-router.post('/share/:id', authenticateJWT, shareAchievement);
+router.get('/', publicRateLimiter, listAchievements);
+router.get('/player/:playerId', optionalAuthenticateJWT, publicRateLimiter, getPlayerAchievements);
+router.get('/:id/stats', publicRateLimiter, getAchievementStats);
+router.post('/:id/progress', authenticateJWT, paymentRateLimiter, postAchievementProgress);
+router.post('/share/:id', authenticateJWT, paymentRateLimiter, shareAchievement);
 
 export default router;

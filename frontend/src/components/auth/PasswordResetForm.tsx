@@ -58,7 +58,7 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
   if (step === 'request' && success) {
     return (
       <div className={cn('text-center py-8', className)}>
-        <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+        <CheckCircle className="h-16 w-16 text-success mx-auto mb-4" />
         <h2 className="text-xl font-bold text-foreground mb-2">Check your email</h2>
         <p className="text-muted-foreground mb-6">
           We&apos;ve sent a password reset link to <span className="font-medium">{email}</span>
@@ -67,7 +67,7 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
           Didn&apos;t receive the email? Check your spam folder or{' '}
           <button
             onClick={() => setSuccess(false)}
-            className="text-blue-600 hover:text-blue-700 font-medium"
+            className="text-primary hover:text-info font-medium"
           >
             try again
           </button>
@@ -91,10 +91,12 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               error={!!error}
+              aria-describedby={error ? "reset-email-error" : undefined}
+              aria-invalid={!!error}
             />
             {error && (
-              <p className="flex items-center gap-1 text-xs text-red-500">
-                <AlertCircle className="h-3 w-3" />
+              <p id="reset-email-error" className="flex items-center gap-1 text-xs text-destructive">
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
                 {error}
               </p>
             )}
@@ -117,6 +119,7 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               error={!!error}
+              aria-invalid={!!error}
             />
           </div>
           
@@ -131,10 +134,12 @@ export function PasswordResetForm({ className }: PasswordResetFormProps) {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               error={!!error}
+              aria-describedby={error ? "confirm-new-password-error" : undefined}
+              aria-invalid={!!error}
             />
             {error && (
-              <p className="flex items-center gap-1 text-xs text-red-500">
-                <AlertCircle className="h-3 w-3" />
+              <p id="confirm-new-password-error" className="flex items-center gap-1 text-xs text-destructive">
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
                 {error}
               </p>
             )}

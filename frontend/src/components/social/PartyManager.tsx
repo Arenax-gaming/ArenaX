@@ -100,24 +100,27 @@ export function PartyManager({
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium mb-1 block">Party Name</label>
+                    <label htmlFor="party-name" className="text-sm font-medium mb-1 block">Party Name</label>
                     <input
+                      id="party-name"
                       type="text"
                       placeholder="Enter party name..."
                       value={partyName}
                       onChange={(e) => setPartyName(e.target.value)}
-                      className="w-full px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <label className="text-sm font-medium">Private Party</label>
+                      <p className="text-sm font-medium">Private Party</p>
                       <p className="text-xs text-muted-foreground">
                         Only invited players can join
                       </p>
                     </div>
                     <button
                       onClick={() => setIsPrivate(!isPrivate)}
+                      aria-label={isPrivate ? "Disable private party" : "Enable private party"}
+                      aria-pressed={isPrivate}
                       className={`relative h-6 w-11 rounded-full transition-colors ${
                         isPrivate ? "bg-primary" : "bg-muted"
                       }`}
@@ -286,7 +289,7 @@ export function PartyManager({
                     size="md"
                   />
                   {member.isSpeaking && (
-                    <div className="absolute -bottom-1 -right-1 h-4 w-4 bg-green-500 rounded-full flex items-center justify-center">
+                    <div className="absolute -bottom-1 -right-1 h-4 w-4 bg-success rounded-full flex items-center justify-center">
                       <Volume2 className="h-2 w-2 text-white" />
                     </div>
                   )}
@@ -298,7 +301,7 @@ export function PartyManager({
                       <Crown className="h-4 w-4 text-yellow-500" />
                     )}
                     {member.isReady && (
-                      <Check className="h-4 w-4 text-green-500" />
+                      <Check className="h-4 w-4 text-success" />
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground">
@@ -315,7 +318,7 @@ export function PartyManager({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                      className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/5"
                       onClick={() => onKickFromParty(member.user.id)}
                     >
                       <X className="h-4 w-4" />
@@ -331,7 +334,7 @@ export function PartyManager({
         <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
           <div className="flex items-center gap-2">
             {party.voiceChatEnabled ? (
-              <Mic className="h-5 w-5 text-green-500" />
+              <Mic className="h-5 w-5 text-success" />
             ) : (
               <MicOff className="h-5 w-5 text-muted-foreground" />
             )}

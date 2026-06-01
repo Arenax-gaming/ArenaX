@@ -44,7 +44,7 @@ export default function MessagesPage() {
             <MessageSquare className="w-8 h-8" />
             Messages
           </h1>
-          <p className="text-gray-400">
+          <p className="text-muted-foreground">
             Chat with friends and party members in real-time
           </p>
         </div>
@@ -52,24 +52,24 @@ export default function MessagesPage() {
         {/* Chat Interface */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[600px]">
           {/* Conversations List */}
-          <div className="bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-gray-700">
+          <div className="bg-surface/50 rounded-lg border border-border overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-border">
               <h2 className="text-lg font-bold text-white">Conversations</h2>
             </div>
             <div className="flex-1 overflow-y-auto">
               {conversationsLoading ? (
                 <div className="flex items-center justify-center h-full">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                 </div>
               ) : conversations && conversations.length > 0 ? (
                 conversations.map((conv) => (
                   <button
                     key={conv.id}
                     onClick={() => setSelectedConversationId(conv.id)}
-                    className={`w-full p-4 border-b border-gray-700 text-left transition-colors ${
+                    className={`w-full p-4 border-b border-border text-left transition-colors ${
                       selectedConversationId === conv.id
-                        ? "bg-blue-600/20 border-l-2 border-l-blue-500"
-                        : "hover:bg-gray-700/50"
+                        ? "bg-primary/90/20 border-l-2 border-l-blue-500"
+                        : "hover:bg-surface-raised/50"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -77,12 +77,12 @@ export default function MessagesPage() {
                         <p className="font-medium text-white truncate">
                           {conv.participantUsername}
                         </p>
-                        <p className="text-sm text-gray-400 truncate">
+                        <p className="text-sm text-muted-foreground truncate">
                           {conv.lastMessage}
                         </p>
                       </div>
                       {conv.unreadCount > 0 && (
-                        <span className="ml-2 bg-blue-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                        <span className="ml-2 bg-primary/90 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                           {conv.unreadCount}
                         </span>
                       )}
@@ -90,7 +90,7 @@ export default function MessagesPage() {
                   </button>
                 ))
               ) : (
-                <div className="flex items-center justify-center h-full text-gray-400">
+                <div className="flex items-center justify-center h-full text-muted-foreground">
                   No conversations yet
                 </div>
               )}
@@ -98,11 +98,11 @@ export default function MessagesPage() {
           </div>
 
           {/* Chat Area */}
-          <div className="md:col-span-2 bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden flex flex-col">
+          <div className="md:col-span-2 bg-surface/50 rounded-lg border border-border overflow-hidden flex flex-col">
             {selectedConversation ? (
               <>
                 {/* Chat Header */}
-                <div className="p-4 border-b border-gray-700">
+                <div className="p-4 border-b border-border">
                   <h3 className="text-lg font-bold text-white">
                     {selectedConversation.participantUsername}
                   </h3>
@@ -110,14 +110,14 @@ export default function MessagesPage() {
 
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  <div className="text-center text-gray-400 text-sm">
+                  <div className="text-center text-muted-foreground text-sm">
                     Start of conversation with{" "}
                     {selectedConversation.participantUsername}
                   </div>
                 </div>
 
                 {/* Message Input */}
-                <div className="p-4 border-t border-gray-700">
+                <div className="p-4 border-t border-border">
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -127,14 +127,14 @@ export default function MessagesPage() {
                       onKeyPress={(e) => {
                         if (e.key === "Enter") handleSendMessage();
                       }}
-                      className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                      className="flex-1 bg-surface-raised border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-primary"
                     />
                     <button
                       onClick={handleSendMessage}
                       disabled={
                         sendMessageMutation.isPending || !messageContent.trim()
                       }
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                      className="bg-primary/90 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
                     >
                       Send
                     </button>
@@ -142,7 +142,7 @@ export default function MessagesPage() {
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-400">
+              <div className="flex items-center justify-center h-full text-muted-foreground">
                 Select a conversation to start messaging
               </div>
             )}

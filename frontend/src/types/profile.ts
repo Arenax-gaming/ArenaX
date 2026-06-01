@@ -49,6 +49,7 @@ export interface FriendEntry {
   avatar?: string;
   elo: number;
   status: 'online' | 'in-game' | 'offline';
+  gamesPlayed?: number;
   lastSeen?: string;
   currentActivity?: string;
   mutualFriends?: number;
@@ -76,6 +77,15 @@ export interface ProfileCustomization {
 }
 
 export type PrivacySetting = 'everyone' | 'friends' | 'only_me';
+
+export interface PublicProfileViewProps {
+  profile: PublicProfile;
+  stats: PlayerStats;
+  achievements: Achievement[];
+  friends: FriendEntry[];
+  activities: ActivityEvent[];
+  eloHistory: EloPoint[];
+}
 
 export interface PrivacySettings {
   stats: PrivacySetting;

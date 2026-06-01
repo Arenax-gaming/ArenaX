@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
@@ -12,13 +12,24 @@ import {
   TournamentStatus,
   Tournament,
   TournamentFilters,
+  TournamentPageStatus,
+  TOURNAMENT_PAGE_STATUS_COLORS,
+  TOURNAMENT_PAGE_STATUSES,
+  toTournamentPageStatus,
 } from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
+import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
 
-export default function TournamentsPage() {
+const statusColors = TOURNAMENT_PAGE_STATUS_COLORS;
+
+function getStatusStyles(pageStatus: TournamentPageStatus) {
+  return statusColors[pageStatus];
+}
+
+function TournamentsContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
 
@@ -88,6 +99,13 @@ export default function TournamentsPage() {
     if (filters.status) {
       tournaments = tournaments.filter(
         (tournament) => tournament.status === filters.status,
+      );
+    }
+
+    if (filters.pageStatus) {
+      tournaments = tournaments.filter(
+        (tournament) =>
+          toTournamentPageStatus(tournament.status) === filters.pageStatus,
       );
     }
 
@@ -216,12 +234,25 @@ export default function TournamentsPage() {
         />
       </div>
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <p className="text-sm text-muted-foreground">
           {filteredTournaments.length} tournament
           {filteredTournaments.length !== 1 ? "s" : ""} found
           {activeTab === "joined" ? " (joined)" : " (available)"}
         </p>
+        <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
+          {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
+            const { badgeClass, label } = getStatusStyles(pageStatus);
+            return (
+              <span
+                key={pageStatus}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClass}`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
       {isLoading ? (
@@ -238,6 +269,7 @@ export default function TournamentsPage() {
               tournament={tournament}
               isJoined={joinedTournamentIds.has(tournament.id)}
               onJoinSuccess={handleJoinSuccess}
+              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
             />
           ))}
         </div>
@@ -273,5 +305,21 @@ export default function TournamentsPage() {
         </EmptyState>
       )}
     </div>
+  );
+}
+
+export default function TournamentsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen px-4 py-8 bg-background">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TournamentCardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    }>
+      <TournamentsContent />
+    </Suspense>
   );
 }

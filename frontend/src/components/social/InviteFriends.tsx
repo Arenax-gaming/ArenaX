@@ -105,7 +105,7 @@ export function InviteFriends({
                 placeholder="Search by username..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 
@@ -239,13 +239,14 @@ export function InviteFriends({
             {onInviteByEmail ? (
               <form onSubmit={handleEmailInvite} className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">Email Address</label>
+                  <label htmlFor="invite-email" className="text-sm font-medium mb-1 block">Email Address</label>
                   <input
+                    id="invite-email"
                     type="email"
                     placeholder="friend@example.com"
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
                 <Button type="submit" variant="primary" className="w-full">
@@ -290,7 +291,7 @@ export function QuickInviteButton({
 
   if (invited) {
     return (
-      <Button variant="outline" size="sm" className="h-8 text-green-600" disabled>
+      <Button variant="outline" size="sm" className="h-8 text-success" disabled>
         <Check className="h-4 w-4 mr-1" />
         Invited
       </Button>

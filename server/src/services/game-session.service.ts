@@ -1,29 +1,52 @@
 import { v4 as uuidv4 } from 'uuid';
 
-/**
- * Types for game session management.
- */
 export interface GameSession {
   id: string;
-  players: string[]; // player IDs
+  players: string[];
   gameMode: string;
   settings: Record<string, any>;
-  state: any; // can be any serializable object representing the game state
-  actions: any[]; // list of actions applied
+  state: any;
+  actions: any[];
   startedAt: number;
   finishedAt?: number;
   replayData?: any;
 }
 
-/**
- * In‑memory service handling game sessions.
- * This implementation purposefully avoids any external dependencies to keep the change minimal
- * and merge‑safe. All data lives in a Map keyed by the session ID.
- */
-export class GameSessionService {
-  private sessions: Map<string, GameSession> = new Map();
+const sessionStore: Map<string, GameSession> = new Map();
+const sessionLocks: Map<string, Promise<void>> = new Map();
 
-  /** Create a new game session. */
+function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(sessionId) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  sessionLocks.set(sessionId, next.then(() => {}, () => {}));
+  return next;
+}
+
+const STALE_TIMEOUT_MS = 30 * 60 * 1000;
+let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+function startCleanupInterval(): void {
+  if (cleanupInterval) return;
+  cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [id, session] of sessionStore) {
+      if (session.finishedAt && (now - session.finishedAt) > STALE_TIMEOUT_MS) {
+        sessionStore.delete(id);
+        sessionLocks.delete(id);
+      }
+    }
+    if (sessionStore.size === 0 && cleanupInterval) {
+      clearInterval(cleanupInterval);
+      cleanupInterval = null;
+    }
+  }, 60_000);
+}
+
+startCleanupInterval();
+
+export class GameSessionService {
+  private sessions: Map<string, GameSession> = sessionStore;
+
   createSession(players: string[], gameMode: string, settings: Record<string, any> = {}): GameSession {
     const id = uuidv4();
     const session: GameSession = {
@@ -35,50 +58,88 @@ export class GameSessionService {
       actions: [],
       startedAt: Date.now(),
     };
-    this.sessions.set(id, session);
+    GameSessionService.sessions.set(id, session);
     return session;
   }
 
-  /** Retrieve a session by ID. */
   getSession(id: string): GameSession | undefined {
-    return this.sessions.get(id);
+    return GameSessionService.sessions.get(id);
   }
 
-  /** Update the mutable part of a session's game state. */
-  updateGameState(sessionId: string, newState: any): GameSession {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    session.state = { ...session.state, ...newState };
-    return session;
+  async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      session.state = { ...session.state, ...newState };
+      return session;
+    });
   }
 
-  /** Record a player action. */
-  processPlayerAction(sessionId: string, playerId: string, action: any): GameSession {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    // Basic validation – ensure the player belongs to the session.
-    if (!session.players.includes(playerId)) {
-      throw new Error('Player not part of this session');
+  async processPlayerAction(sessionId: string, playerId: string, action: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      if (!session.players.includes(playerId)) {
+        throw new Error('Player not part of this session');
+      }
+      session.actions.push({ playerId, action, timestamp: Date.now() });
+      return session;
+    });
+  }
+
+  async finishGame(sessionId: string, results: any): Promise<GameSession> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      session.finishedAt = Date.now();
+      session.state = results;
+      return session;
+    });
+  }
+
+  async generateReplayData(sessionId: string): Promise<any> {
+    return withSessionLock(sessionId, async () => {
+      const session = this.sessions.get(sessionId);
+      if (!session) throw new Error('Session not found');
+      return session.actions;
+    });
+  }
+
+  /**
+   * Remove a session from the store and free all associated resources
+   * (including its lock entry).
+   *
+   * Must be called when a game ends or when all players disconnect so the
+   * module-level `sessionStore` Map does not grow unboundedly over the
+   * server's lifetime.
+   */
+  removeSession(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    sessionLocks.delete(sessionId);
+  }
+
+  getActiveSessionCount(): number {
+    return this.sessions.size;
+  }
+
+  /** Get all active sessions. */
+  getActiveSessions(): GameSession[] {
+    return Array.from(GameSessionService.sessions.values()).filter(s => !s.finishedAt);
+  }
+
+  /** Forcefully/safely close all active sessions. */
+  closeAllActiveSessions(reason: string = 'Server entering maintenance mode'): void {
+    for (const session of this.getActiveSessions()) {
+      this.finishGame(session.id, { error: reason, closedGracefully: true });
     }
-    // Store the raw action; real implementation would include anti‑cheat logic.
-    session.actions.push({ playerId, action, timestamp: Date.now() });
-    return session;
-  }
-
-  /** Finish a session and optionally store the final results. */
-  finishGame(sessionId: string, results: any): GameSession {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    session.finishedAt = Date.now();
-    session.state = results; // simple assignment for demo purposes
-    return session;
-  }
-
-  /** Generate a replay payload from stored actions. */
-  generateReplayData(sessionId: string): any {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error('Session not found');
-    // Replay data is just the ordered list of actions for now.
-    return session.actions;
   }
 }
+
+export const clearSessionStore = (): void => {
+  sessionStore.clear();
+  sessionLocks.clear();
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+};

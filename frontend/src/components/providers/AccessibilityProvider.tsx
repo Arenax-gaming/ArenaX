@@ -1,23 +1,17 @@
 "use client";
 
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 
 export function AccessibilityProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
-      const loadAxe();
+      import("@axe-core/react").then((axe) => {
+        const ReactDOM = require("react-dom");
+        const React = require("react");
+        axe.default(React, ReactDOM, 1000);
+      }).catch(() => {});
     }
   }, []);
-
-  async function loadAxe() {
-    try {
-      const ReactDOM = require("react-dom");
-      const axe = require("@axe-core/react");
-      await axe(React, ReactDOM, 1000);
-    } catch (error) {
-      console.error("Failed to load axe accessibility checker");
-    }
-  }
 
   return <>{children}</>;
 }

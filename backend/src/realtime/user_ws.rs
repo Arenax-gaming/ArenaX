@@ -2,6 +2,7 @@ use crate::auth::jwt_service::{Claims, JwtService};
 use crate::realtime::auth::RealtimeAuth;
 use crate::realtime::events::{channels, ClientMessage, DeliverEvent, WsEnvelope};
 use crate::realtime::session_registry::SessionRegistry;
+use crate::realtime::ws_broadcaster::WsAddressBook;
 use actix::{Actor, ActorContext, AsyncContext, Handler, StreamHandler, ActorFutureExt};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
@@ -20,6 +21,10 @@ pub struct UserWebSocket {
     claims: Claims,
     hb: Instant,
     registry: Arc<SessionRegistry>,
+    /// Address book used to route inbound Redis Pub/Sub events to this actor.
+    /// The actor registers itself on start and removes itself on stop so the
+    /// broadcaster never holds a dangling `Addr` after disconnect.
+    address_book: Arc<WsAddressBook>,
     auth: Arc<RealtimeAuth>,
 }
 
@@ -28,6 +33,7 @@ impl UserWebSocket {
         user_id: Uuid,
         claims: Claims,
         registry: Arc<SessionRegistry>,
+        address_book: Arc<WsAddressBook>,
         auth: Arc<RealtimeAuth>,
     ) -> Self {
         Self {
@@ -36,6 +42,7 @@ impl UserWebSocket {
             claims,
             hb: Instant::now(),
             registry,
+            address_book,
             auth,
         }
     }
@@ -77,6 +84,9 @@ impl Actor for UserWebSocket {
         );
         self.registry.register(self.user_id, self.session_id);
 
+        // Register this actor's address so the broadcaster can deliver events.
+        self.address_book.insert(self.session_id, ctx.address());
+
         // Automatically subscribe to own user channel
         let user_channel = channels::user_channel(self.user_id);
         self.registry.subscribe(self.session_id, user_channel);
@@ -90,6 +100,12 @@ impl Actor for UserWebSocket {
             session_id = %self.session_id,
             "WebSocket session stopped"
         );
+        // Remove from the address book first so the broadcaster stops routing
+        // events to this (now-dead) actor address immediately.
+        self.address_book.remove(&self.session_id);
+
+        // Unregister from the session registry, which also cleans up all
+        // channel subscriptions for this session.
         self.registry.unregister(self.user_id, self.session_id);
     }
 }
@@ -248,6 +264,7 @@ pub async fn ws_handler(
     req: HttpRequest,
     stream: web::Payload,
     registry: web::Data<Arc<SessionRegistry>>,
+    address_book: web::Data<Arc<WsAddressBook>>,
     jwt_service: web::Data<Arc<JwtService>>,
     auth_guard: web::Data<Arc<RealtimeAuth>>,
 ) -> Result<HttpResponse, Error> {
@@ -277,7 +294,8 @@ pub async fn ws_handler(
     let ws_actor = UserWebSocket::new(
         user_id, 
         claims,
-        registry.get_ref().clone(), 
+        registry.get_ref().clone(),
+        address_book.get_ref().clone(),
         auth_guard.get_ref().clone()
     );
 

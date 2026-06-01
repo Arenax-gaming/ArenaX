@@ -45,8 +45,8 @@ export const PersonalRank: React.FC<PersonalRankProps> = ({ category, season }) 
 
   if (isLoading) {
     return (
-      <div className="mb-8 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-lg p-6 border border-blue-500/50">
-        <div className="animate-pulse h-20 bg-gray-700 rounded"></div>
+      <div className="mb-8 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-lg p-6 border border-primary/50">
+        <div className="animate-pulse h-20 bg-surface-raised rounded"></div>
       </div>
     )
   }
@@ -61,28 +61,28 @@ export const PersonalRank: React.FC<PersonalRankProps> = ({ category, season }) 
   const isRankImproved = rankChange > 0
 
   return (
-    <div className="mb-8 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-lg p-6 border border-blue-500/50">
+    <div className="mb-8 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-lg p-6 border border-primary/50">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="bg-blue-600 rounded-full p-3">
+          <div className="bg-primary/90 rounded-full p-3">
             <Trophy className="w-6 h-6 text-white" />
           </div>
           <div>
-            <p className="text-sm text-gray-400">Your Rank</p>
+            <p className="text-sm text-muted-foreground">Your Rank</p>
             <h2 className="text-3xl font-bold text-white">#{personalRank.rank}</h2>
           </div>
         </div>
 
         <div className="flex gap-6">
           <div className="text-center">
-            <p className="text-sm text-gray-400">Points</p>
+            <p className="text-sm text-muted-foreground">Points</p>
             <p className="text-2xl font-bold text-white">
               {personalRank.points.toLocaleString()}
             </p>
           </div>
 
           <div className="text-center">
-            <p className="text-sm text-gray-400">Percentile</p>
+            <p className="text-sm text-muted-foreground">Percentile</p>
             <p className="text-2xl font-bold text-white">
               Top {Math.max(1, 100 - personalRank.percentile)}%
             </p>
@@ -90,10 +90,10 @@ export const PersonalRank: React.FC<PersonalRankProps> = ({ category, season }) 
 
           {rankChange !== 0 && (
             <div className="text-center">
-              <p className="text-sm text-gray-400">Change</p>
+              <p className="text-sm text-muted-foreground">Change</p>
               <div
                 className={`flex items-center justify-center gap-1 text-lg font-bold ${
-                  isRankImproved ? 'text-green-400' : 'text-red-400'
+                  isRankImproved ? 'text-success/80' : 'text-destructive/80'
                 }`}
               >
                 <TrendingUp
@@ -107,7 +107,7 @@ export const PersonalRank: React.FC<PersonalRankProps> = ({ category, season }) 
           )}
         </div>
 
-        <button className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300 hover:text-white transition-colors">
+        <button className="p-2 bg-surface-raised hover:bg-gray-600 rounded-lg text-foreground/80 hover:text-white transition-colors">
           <Share2 className="w-5 h-5" />
         </button>
       </div>

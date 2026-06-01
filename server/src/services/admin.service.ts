@@ -407,3 +407,17 @@ export class AdminService {
 export function createAdminService() {
   return new AdminService()
 }
+
+// Singleton — all callers share the same in-memory state and DB connection.
+let _adminServiceInstance: AdminService | null = null;
+export function getAdminService(): AdminService {
+  if (!_adminServiceInstance) {
+    _adminServiceInstance = new AdminService();
+  }
+  return _adminServiceInstance;
+}
+
+/** Reset the singleton — for use in tests only. */
+export function resetAdminService(): void {
+  _adminServiceInstance = null;
+}
