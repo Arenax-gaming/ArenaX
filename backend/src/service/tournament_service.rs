@@ -324,20 +324,57 @@ impl TournamentService {
         tournament_id: Uuid,
         request: JoinTournamentRequest,
     ) -> Result<TournamentParticipant, ApiError> {
-        // Validate tournament can be joined
+        // ── Pre-transaction reads & external verification ────────────────────
+        // These must run outside the transaction: reads are non-mutating, and
+        // the external payment-provider call must not hold a DB connection open.
+
         let tournament = self.get_tournament_by_id(tournament_id).await?;
         self.validate_tournament_join(&tournament, user_id).await?;
 
-        // Check if user is already a participant
         if self.is_user_participant(user_id, tournament_id).await? {
             return Err(ApiError::bad_request("User is already a participant"));
         }
 
-        // Process payment
-        self.process_entry_fee_payment(user_id, &tournament, &request)
+        // For ArenaX token payments, verify the wallet balance before we
+        // open a transaction so we fail fast without acquiring a connection.
+        if request.payment_method == "arenax_token" {
+            let wallet = self.get_user_wallet(user_id).await?;
+            let balance = wallet.balance_arenax_tokens.unwrap_or(0);
+            if balance < tournament.entry_fee {
+                return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
+            }
+        }
+
+        // For fiat payments, call the external provider API before the
+        // transaction so network latency never blocks a DB connection.
+        if request.payment_method == "fiat" {
+            let reference = request
+                .payment_reference
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("Payment reference is required for fiat payments"))?;
+
+            let payment_verified = self
+                .verify_payment_with_provider(reference, tournament.entry_fee)
+                .await?;
+
+            if !payment_verified {
+                return Err(ApiError::bad_request("Payment verification failed"));
+            }
+        }
+
+        // ── Atomic DB writes inside a transaction ────────────────────────────
+        // Begin transaction: all writes below succeed or all are rolled back.
+        let mut tx = self
+            .db_pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // Step 1: record the payment (wallet debit + transaction log)
+        self.process_entry_fee_payment_in_tx(user_id, &tournament, &request, &mut tx)
             .await?;
 
-        // Add participant
+        // Step 2: register the participant
         let participant = sqlx::query_as!(
             TournamentParticipant,
             r#"
@@ -354,33 +391,47 @@ impl TournamentService {
             true,
             ParticipantStatus::Paid as _
         )
-        .fetch_one(&self.db_pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Update prize pool
-        self.update_prize_pool(tournament_id, tournament.entry_fee)
+        // Step 3: add entry fee to prize pool
+        self.update_prize_pool_in_tx(tournament_id, tournament.entry_fee, &mut tx)
             .await?;
 
-        // Update tournament status if needed
-        self.update_tournament_status_if_needed(tournament_id)
+        // Step 4: close registration if the tournament is now full
+        self.update_tournament_status_if_needed_in_tx(tournament_id, &mut tx)
             .await?;
 
-        // Get username for event
+        // Commit — if anything above failed we already returned an Err and
+        // the transaction will be rolled back automatically on drop.
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // ── Post-commit side-effects (non-atomic, best-effort) ───────────────
+        // Events are published after the commit so we never emit an event for
+        // a registration that was rolled back.
         let username = self
             .get_user_username(user_id)
             .await
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Publish participant joined event
-        self.publish_tournament_event(serde_json::json!({
-            "type": "participant_joined",
-            "tournament_id": tournament_id,
-            "user_id": user_id,
-            "username": username,
-            "participant_count": self.get_participant_count(tournament_id).await?,
-        }))
-        .await?;
+        let participant_count = self
+            .get_participant_count(tournament_id)
+            .await
+            .unwrap_or(0);
+
+        // Fire-and-forget: event publication failure must not un-register the player.
+        let _ = self
+            .publish_tournament_event(serde_json::json!({
+                "type": "participant_joined",
+                "tournament_id": tournament_id,
+                "user_id": user_id,
+                "username": username,
+                "participant_count": participant_count,
+            }))
+            .await;
 
         Ok(participant)
     }
@@ -675,6 +726,208 @@ impl TournamentService {
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(())
+    }
+
+    // ── Transaction-aware variants used by join_tournament ───────────────────
+    //
+    // Each `_in_tx` method mirrors its pool-based counterpart but accepts a
+    // `&mut sqlx::Transaction<'_, sqlx::Postgres>` so all writes participate
+    // in the same atomic unit. The original helpers are unchanged so any other
+    // caller continues to work without modification.
+
+    /// Record payment (wallet debit + transaction log) inside a transaction.
+    async fn process_entry_fee_payment_in_tx(
+        &self,
+        user_id: Uuid,
+        tournament: &Tournament,
+        request: &JoinTournamentRequest,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        match request.payment_method.as_str() {
+            "fiat" => {
+                // Payment was already verified outside the transaction.
+                // Only record the wallet credit and the transaction row here.
+                self.add_fiat_balance_in_tx(user_id, tournament.entry_fee, tx)
+                    .await?;
+                self.create_transaction_in_tx(
+                    user_id,
+                    TransactionType::EntryFee,
+                    tournament.entry_fee,
+                    tournament.entry_fee_currency.clone(),
+                    format!("Entry fee for tournament: {}", tournament.name),
+                    tx,
+                )
+                .await?;
+            }
+            "arenax_token" => {
+                // Balance was verified outside the transaction.
+                // Only perform the debit and log it here.
+                self.deduct_arenax_tokens_in_tx(user_id, tournament.entry_fee, tx)
+                    .await?;
+                self.create_transaction_in_tx(
+                    user_id,
+                    TransactionType::EntryFee,
+                    tournament.entry_fee,
+                    "ARENAX_TOKEN".to_string(),
+                    format!("Entry fee for tournament: {}", tournament.name),
+                    tx,
+                )
+                .await?;
+            }
+            _ => {
+                return Err(ApiError::bad_request("Invalid payment method"));
+            }
+        }
+        Ok(())
+    }
+
+    /// `UPDATE wallets SET balance_ngn = balance_ngn + $1` inside a transaction.
+    async fn add_fiat_balance_in_tx(
+        &self,
+        user_id: Uuid,
+        amount: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            "UPDATE wallets SET balance_ngn = balance_ngn + $1 WHERE user_id = $2",
+            amount,
+            user_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1`
+    /// inside a transaction.
+    async fn deduct_arenax_tokens_in_tx(
+        &self,
+        user_id: Uuid,
+        amount: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1 WHERE user_id = $2",
+            amount,
+            user_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `INSERT INTO transactions` inside a transaction.
+    async fn create_transaction_in_tx(
+        &self,
+        user_id: Uuid,
+        transaction_type: TransactionType,
+        amount: i64,
+        currency: String,
+        description: String,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO transactions (
+                id, user_id, transaction_type, amount, currency, status,
+                reference, description, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            )
+            "#,
+            Uuid::new_v4(),
+            user_id,
+            transaction_type as _,
+            amount,
+            currency,
+            TransactionStatus::Completed as _,
+            Uuid::new_v4().to_string(),
+            description,
+            Utc::now(),
+            Utc::now()
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `UPDATE prize_pools SET total_amount = total_amount + $1` inside a
+    /// transaction.
+    async fn update_prize_pool_in_tx(
+        &self,
+        tournament_id: Uuid,
+        entry_fee: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE prize_pools
+            SET total_amount = total_amount + $1, updated_at = $2
+            WHERE tournament_id = $3
+            "#,
+            entry_fee,
+            Utc::now(),
+            tournament_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// Close registration if the tournament is full — runs inside the
+    /// `join_tournament` transaction so the status update is atomic with the
+    /// participant INSERT.
+    async fn update_tournament_status_if_needed_in_tx(
+        &self,
+        tournament_id: Uuid,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        // Read current state through the transaction so we see the participant
+        // row we just inserted (READ COMMITTED isolation still sees its own
+        // uncommitted writes in the same transaction).
+        let row = sqlx::query!(
+            "SELECT status, max_participants FROM tournaments WHERE id = $1",
+            tournament_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let count_row = sqlx::query!(
+            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
+            tournament_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let participant_count = count_row.count.unwrap_or(0) as i32;
+        let max_participants = row.max_participants;
+
+        // Only close if we just filled the last spot.
+        if participant_count >= max_participants {
+            sqlx::query!(
+                r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3"#,
+                TournamentStatus::RegistrationClosed as _,
+                Utc::now(),
+                tournament_id
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            tracing::info!(
+                tournament_id = %tournament_id,
+                participant_count = participant_count,
+                "Tournament registration closed — capacity reached"
+            );
+        }
 
         Ok(())
     }
