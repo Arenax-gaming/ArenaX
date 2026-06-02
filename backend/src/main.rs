@@ -75,7 +75,7 @@ async fn main() -> io::Result<()> {
         redis_conn.clone(),
         matchmaking_config,
     ));
-    
+
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
     tokio::spawn(async move {
@@ -177,6 +177,15 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/notifications/{id}",
                         web::delete().to(crate::http::notification_handler::delete_notification),
+                    )
+                    // Wallet endpoints
+                    .service(
+                        web::scope("/wallet")
+                            .route("", web::get().to(crate::http::wallet::get_wallet))
+                            .route("/transactions", web::get().to(crate::http::wallet::get_transaction_history))
+                            .route("/deposit", web::post().to(crate::http::wallet::initiate_deposit))
+                            .route("/deposit/verify", web::post().to(crate::http::wallet::verify_deposit))
+                            .route("/withdraw", web::post().to(crate::http::wallet::initiate_withdrawal))
                     )
                     // Reputation endpoints
                     .route(
@@ -284,7 +293,3 @@ async fn main() -> io::Result<()> {
 
     server.await
 }
-
-
-
-
