@@ -117,6 +117,7 @@ impl Default for JwtConfig {
 pub struct SessionData {
     pub user_id: Uuid,
     pub session_id: String,
+    pub token_type: TokenType,
     pub device_id: Option<String>,
     pub created_at: i64,
     pub last_activity: i64,
@@ -165,6 +166,7 @@ impl KeyRotation {
 }
 
 /// Main JWT Service
+#[derive(Clone)]
 pub struct JwtService {
     config: JwtConfig,
     redis: ConnectionManager,
@@ -209,8 +211,15 @@ impl JwtService {
         let token = encode(&Header::new(self.config.algorithm), &claims, &encoding_key)
             .map_err(|e| JwtError::TokenGeneration(e.to_string()))?;
 
-        // Store session in Redis
-        self.store_session(&session_id, user_id, device_id).await?;
+        // Store access session in Redis
+        self.store_session(
+            &session_id,
+            user_id,
+            device_id.clone(),
+            TokenType::Access,
+            self.config.access_token_expiry,
+        )
+        .await?;
 
         info!(user_id = %user_id, session_id = %session_id, "Access token generated");
 
@@ -242,6 +251,15 @@ impl JwtService {
 
         let token = encode(&Header::new(self.config.algorithm), &claims, &encoding_key)
             .map_err(|e| JwtError::TokenGeneration(e.to_string()))?;
+
+        self.store_session(
+            &session_id,
+            user_id,
+            device_id.clone(),
+            TokenType::Refresh,
+            self.config.refresh_token_expiry,
+        )
+        .await?;
 
         info!(user_id = %user_id, session_id = %session_id, "Refresh token generated");
 
@@ -333,6 +351,28 @@ impl JwtService {
         Ok(token_data.claims)
     }
 
+    async fn decode_with_key_rotation(&self, token: &str) -> Result<Claims, JwtError> {
+        let key_rotation = self.key_rotation.read().await;
+        match self.decode_token(token, &key_rotation.current_key) {
+            Ok(claims) => Ok(claims),
+            Err(err) => {
+                if let Some(ref previous_key) = key_rotation.previous_key {
+                    debug!("Trying previous key for token rotation");
+                    self.decode_token(token, previous_key).or(Err(err))
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
+    async fn extract_jti(&self, token: &str) -> Option<String> {
+        self.decode_with_key_rotation(token)
+            .await
+            .ok()
+            .map(|claims| claims.jti)
+    }
+
     /// Refresh access token using refresh token
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, JwtError> {
         let claims = self.validate_token(refresh_token).await?;
@@ -361,12 +401,17 @@ impl JwtService {
     /// Blacklist a token
     pub async fn blacklist_token(&self, token: &str, reason: &str) -> Result<(), JwtError> {
         // Decode token to get expiration
-        let key_rotation = self.key_rotation.read().await;
-        let claims = self.decode_token(token, &key_rotation.current_key)?;
+        let claims = match self.decode_with_key_rotation(token).await {
+            Ok(claims) => claims,
+            Err(JwtError::TokenExpired) => {
+                // Already expired, no need to store blacklist metadata.
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
 
         let exp_duration = claims.exp - Utc::now().timestamp();
         if exp_duration <= 0 {
-            // Token already expired, no need to blacklist
             return Ok(());
         }
 
@@ -390,13 +435,7 @@ impl JwtService {
     /// that a concurrent `rotate_keys()` write is never blocked for the full
     /// duration of the network call.
     pub async fn is_token_blacklisted(&self, token: &str) -> Result<bool, JwtError> {
-        // Extract the JTI while holding the lock, then drop it immediately.
-        let jti_opt = {
-            let key_rotation = self.key_rotation.read().await;
-            self.decode_token(token, &key_rotation.current_key)
-                .ok()
-                .map(|c| c.jti)
-        }; // lock dropped here
+        let jti_opt = self.extract_jti(token).await;
 
         match jti_opt {
             Some(jti) => {
@@ -420,10 +459,13 @@ impl JwtService {
         session_id: &str,
         user_id: Uuid,
         device_id: Option<String>,
+        token_type: TokenType,
+        ttl: Duration,
     ) -> Result<(), JwtError> {
         let session_data = SessionData {
             user_id,
             session_id: session_id.to_string(),
+            token_type,
             device_id,
             created_at: Utc::now().timestamp(),
             last_activity: Utc::now().timestamp(),
@@ -436,12 +478,8 @@ impl JwtService {
             .map_err(|e| JwtError::RedisError(e.to_string()))?;
 
         let mut conn = self.redis.clone();
-        conn.set_ex(
-            &session_key,
-            session_json,
-            self.config.access_token_expiry.num_seconds() as u64,
-        )
-        .await?;
+        conn.set_ex(&session_key, session_json, ttl.num_seconds() as u64)
+            .await?;
 
         // Add to user's active sessions set; expire the set with the refresh TTL
         // so it outlives individual access token sessions.
@@ -481,13 +519,12 @@ impl JwtService {
             let updated_json =
                 serde_json::to_string(&session).map_err(|e| JwtError::RedisError(e.to_string()))?;
 
-            // Refresh the TTL using access_token_expiry (consistent with store_session).
-            conn.set_ex(
-                &session_key,
-                updated_json,
-                self.config.access_token_expiry.num_seconds() as u64,
-            )
-            .await?;
+            let ttl_seconds = match session.token_type {
+                TokenType::Access => self.config.access_token_expiry.num_seconds() as u64,
+                TokenType::Refresh => self.config.refresh_token_expiry.num_seconds() as u64,
+            };
+
+            conn.set_ex(&session_key, updated_json, ttl_seconds).await?;
         }
 
         Ok(())
@@ -537,6 +574,14 @@ impl JwtService {
     pub async fn revoke_session(&self, session_id: &str) -> Result<(), JwtError> {
         let session_key = format!("session:{}", session_id);
         let mut conn = self.redis.clone();
+
+        if let Some(session_json) = conn.get::<_, Option<String>>(&session_key).await? {
+            if let Ok(session) = serde_json::from_str::<SessionData>(&session_json) {
+                let user_sessions_key = format!("user_sessions:{}", session.user_id);
+                conn.srem(&user_sessions_key, session_id).await?;
+            }
+        }
+
         conn.del(&session_key).await?;
 
         info!(session_id = %session_id, "Session revoked");

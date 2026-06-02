@@ -245,6 +245,45 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn test_refresh_token_creates_refresh_session() {
+        let service = create_test_service().await;
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string()];
+
+        let token_pair = service
+            .generate_token_pair(user_id, roles.clone(), None)
+            .await
+            .unwrap();
+
+        let sessions = service.get_user_sessions(user_id).await.unwrap();
+        assert!(sessions.iter().any(|s| s.token_type == TokenType::Refresh));
+        assert!(sessions.iter().any(|s| s.token_type == TokenType::Access));
+        assert_eq!(sessions.len(), 2);
+
+        let refreshed = service.refresh_token(&token_pair.refresh_token).await;
+        assert!(refreshed.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_session_invalidates_token() {
+        let service = create_test_service().await;
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string()];
+
+        let token = service
+            .generate_access_token(user_id, roles.clone(), Some("device-test".to_string()))
+            .await
+            .unwrap();
+
+        let claims = service.validate_token(&token).await.unwrap();
+        service.revoke_session(&claims.session_id).await.unwrap();
+
+        let result = service.validate_token(&token).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), JwtError::SessionNotFound));
+    }
+
+    #[tokio::test]
     async fn test_key_rotation() {
         let service = create_test_service().await;
 

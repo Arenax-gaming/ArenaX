@@ -22,6 +22,7 @@ use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::service::ReaperService;
+use crate::service::AuthService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
@@ -29,6 +30,46 @@ use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
+use anyhow::anyhow;
+use redis::AsyncCommands;
+
+async fn create_redis_manager(redis_url: &str) -> io::Result<redis::aio::ConnectionManager> {
+    let redis_client = redis::Client::open(redis_url).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid Redis URL '{}': {}", redis_url, e),
+        )
+    })?;
+
+    let manager = redis::aio::ConnectionManager::new(redis_client.clone())
+        .await
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("Failed to initialize Redis connection manager for '{}': {}", redis_url, e),
+            )
+        })?;
+
+    let mut probe = manager.clone();
+    let pong: String = probe
+        .ping()
+        .await
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("Failed to ping Redis server at '{}': {}", redis_url, e),
+            )
+        })?;
+
+    if pong != "PONG" {
+        return Err(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            format!("Unexpected Redis ping response from '{}': {}", redis_url, pong),
+        ));
+    }
+
+    Ok(manager)
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -51,8 +92,6 @@ async fn main() -> io::Result<()> {
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));
     reaper.run();
 
-    // Create Redis client (placeholder)
-    // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
     // Spawn tournament orchestrator polling worker
     let _orchestrator_handle = crate::orchestrator::TournamentOrchestrator::spawn_polling_worker(
         db_pool.clone(),
@@ -60,12 +99,9 @@ async fn main() -> io::Result<()> {
     );
     tracing::info!("Tournament orchestrator polling worker started");
 
-    // Create Redis connection manager
-    let redis_client = redis::Client::open(config.redis.url.clone())
-        .expect("Failed to create Redis client");
-    let redis_conn = redis::aio::ConnectionManager::new(redis_client.clone())
-        .await
-        .expect("Failed to create Redis connection manager");
+    // Create and validate Redis client before startup.
+    let redis_conn = create_redis_manager(&config.redis.url).await?;
+    let redis_data = web::Data::new(redis_conn.clone());
 
     // Initialize matchmaking service — pass the shared ConnectionManager so
     // the service never opens a new connection per request.
@@ -120,6 +156,9 @@ async fn main() -> io::Result<()> {
     let jwt_service = Arc::new(crate::auth::jwt_service::JwtService::new(jwt_config, redis_conn.clone()));
     let auth_guard = Arc::new(crate::realtime::auth::RealtimeAuth::new(db_pool.clone()));
 
+    // Build the HTTP AuthService (wires JWT+Redis into register/login/logout/refresh)
+    let auth_service = Arc::new(AuthService::new(db_pool.clone(), jwt_service.clone()));
+
     // Start Redis Pub/Sub subscriber (broadcasts to local WebSocket actors)
     let broadcaster = WsBroadcaster::new(
         config.redis.url.clone(),
@@ -140,6 +179,8 @@ async fn main() -> io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
+            .app_data(redis_data.clone())
+            .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
@@ -292,4 +333,36 @@ async fn main() -> io::Result<()> {
     });
 
     server.await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_create_redis_manager_invalid_url_fails() {
+        let url = "not-a-redis-url";
+        let result = create_redis_manager(url).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid Redis URL"));
+    }
+
+    #[tokio::test]
+    async fn test_init_redis_connection_invalid_host_fails() {
+        let url = "redis://127.0.0.1:1/";
+        let result = create_redis_manager(url).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_redis_manager_success_when_redis_available() {
+        let url = match std::env::var("REDIS_TEST_URL") {
+            Ok(url) => url,
+            Err(_) => return,
+        };
+
+        let result = create_redis_manager(&url).await;
+        assert!(result.is_ok(), "Redis startup should succeed with a running Redis server");
+    }
 }
