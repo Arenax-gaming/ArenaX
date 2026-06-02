@@ -10,8 +10,7 @@ import {
   useMatchScoreReporting,
   useMatchWebSocket,
 } from "@/hooks/useMatchWebSocket";
-import { matchHubDetails } from "@/data/matchHub";
-import { mockMatchDetails } from "@/data/matches";
+import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
 import {
   AlertTriangle,
@@ -26,6 +25,8 @@ import {
   WifiOff,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { MatchHubDetails } from "@/data/matchHub";
+import { MatchDetail } from "@/types/match";
 
 export default function MatchHubPage() {
   const params = useParams();
@@ -34,29 +35,35 @@ export default function MatchHubPage() {
   const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
 
-  const [match, setMatch] = useState(matchHubDetails[matchId] ?? null);
-  const [matchDetail, setMatchDetail] = useState(mockMatchDetails[matchId] ?? null);
+  const { data: matchData, isLoading, error, refetch } = useMatch(matchId);
+
+  // Handle both possible data shapes
+  const match = matchData as (MatchHubDetails | null);
+  const matchDetail = matchData as (MatchDetail | null);
+
   const [player1Score, setPlayer1Score] = useState("");
   const [player2Score, setPlayer2Score] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const [liveFeed, setLiveFeed] = useState(match?.feed ?? []);
+  const [liveFeed, setLiveFeed] = useState<
+    Array<{ id: string; type: string; message: string; createdAt: string }>
+  >([]);
 
   useEffect(() => {
-    const hubDetails = matchHubDetails[matchId] ?? null;
-    const detailData = mockMatchDetails[matchId] ?? null;
-    setMatch(hubDetails);
-    setMatchDetail(detailData);
-    setLiveFeed(hubDetails?.feed ?? []);
-  }, [matchId]);
-
-  useEffect(() => {
-    if (!match) {
-      return;
+    if (match) {
+      setPlayer1Score(String(match.scorePlayer1 ?? 0));
+      setPlayer2Score(String(match.scorePlayer2 ?? 0));
+      if ("feed" in match) {
+        setLiveFeed(match.feed);
+      }
     }
-
-    setPlayer1Score(String(match.scorePlayer1));
-    setPlayer2Score(String(match.scorePlayer2));
   }, [match]);
+
+  useEffect(() => {
+    if (match) {
+      const statusText = match.status.replace("_", " ");
+      setStatusAnnouncement(`Match status changed to ${statusText}`);
+    }
+  }, [match?.status]);
 
   const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
     matchId,
@@ -89,8 +96,11 @@ export default function MatchHubPage() {
     if (!match) {
       return false;
     }
-
-    return match.player1.id === currentUserId || match.player2.id === currentUserId;
+    if ("player1" in match && "player2" in match) {
+      return match.player1.id === currentUserId || match.player2.id === currentUserId;
+    }
+    // Fallback for other data shapes
+    return (match as any).player1Id === currentUserId || (match as any).player2Id === currentUserId;
   }, [currentUserId, match]);
 
   useEffect(() => {
@@ -98,23 +108,9 @@ export default function MatchHubPage() {
       return;
     }
 
-    setMatch((previous) =>
-      previous
-        ? {
-          ...previous,
-          status: lastUpdate.status ?? previous.status,
-          scorePlayer1: lastUpdate.scorePlayer1 ?? previous.scorePlayer1,
-          scorePlayer2: lastUpdate.scorePlayer2 ?? previous.scorePlayer2,
-          winnerId: lastUpdate.winnerId ?? previous.winnerId,
-        }
-        : previous,
-    );
-
-    if (typeof lastUpdate.scorePlayer1 === "number") {
-      setPlayer1Score(String(lastUpdate.scorePlayer1));
-    }
-    if (typeof lastUpdate.scorePlayer2 === "number") {
-      setPlayer2Score(String(lastUpdate.scorePlayer2));
+    if (match && "scorePlayer1" in match) {
+      setPlayer1Score(String(lastUpdate.scorePlayer1 ?? match.scorePlayer1));
+      setPlayer2Score(String(lastUpdate.scorePlayer2 ?? match.scorePlayer2));
     }
 
     if (lastUpdate.message) {
@@ -128,17 +124,35 @@ export default function MatchHubPage() {
         ...previous,
       ]);
     }
-  }, [lastUpdate]);
+  }, [lastUpdate, match]);
 
-  if (!match && !matchDetail) {
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <RefreshCw className="mx-auto h-12 w-12 animate-spin text-primary" />
+          <h1 className="mt-4 text-2xl font-bold text-foreground">Loading match...</h1>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state or no data
+  if (error || (!match && !matchDetail)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
           <p className="mb-6 text-muted-foreground">
-            The match you&apos;re looking for doesn&apos;t exist.
+            The match you&apos;re looking for doesn&apos;t exist or failed to load.
           </p>
-          <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
+          <div className="flex gap-4 justify-center">
+            <Button onClick={() => refetch()}>Retry</Button>
+            <Button variant="ghost" onClick={() => router.push("/tournaments")}>
+              Back to Tournaments
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -168,6 +182,23 @@ export default function MatchHubPage() {
               router.push(`/matches/${matchId}/dispute`);
             }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  // Make sure we have the MatchHubDetails shape for the rest of the component
+  if (!("player1" in match) || !("player2" in match)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
+          <p className="mb-6 text-muted-foreground">
+            The match data is invalid.
+          </p>
+          <Button onClick={() => router.push("/tournaments")}>
+            Back to Tournaments
+          </Button>
         </div>
       </div>
     );
@@ -222,6 +253,9 @@ export default function MatchHubPage() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8">
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
+      </div>
       <div className="mx-auto max-w-7xl">
         <div className="mb-6">
           <Button
@@ -237,14 +271,14 @@ export default function MatchHubPage() {
 
         <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
           <section className="space-y-6">
-            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_30%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(30,41,59,0.96))] p-6 text-white shadow-[0_30px_80px_-45px_rgba(14,165,233,0.7)]">
+            <div className="overflow-hidden rounded-[32px] border border-border bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_30%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(30,41,59,0.96))] p-6 text-white shadow-[0_30px_80px_-45px_rgba(14,165,233,0.7)]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.35em] text-cyan-200/70">
                     Match Hub
                   </p>
                   <h1 className="mt-2 text-3xl font-semibold">{match.tournamentName}</h1>
-                  <p className="mt-2 text-sm text-slate-300">
+                  <p className="mt-2 text-sm text-foreground/80">
                     {match.gameType} | {match.roundLabel} | {match.bestOf > 0 ? `Best of ${match.bestOf}` : "Series"}
                   </p>
                 </div>
@@ -272,7 +306,7 @@ export default function MatchHubPage() {
                   isCurrentUser={match.player1.id === currentUserId}
                 />
                 <div className="flex items-center justify-center">
-                  <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.3em] text-slate-300">
+                  <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.3em] text-foreground/80">
                     VS
                   </div>
                 </div>
@@ -293,8 +327,8 @@ export default function MatchHubPage() {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <RadioTower className="h-4 w-4 text-cyan-600" />
                   Real-Time Event Feed
                 </div>
@@ -302,11 +336,11 @@ export default function MatchHubPage() {
                   {liveFeed.map((event) => (
                     <div
                       key={event.id}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+                      className="rounded-2xl border border-border bg-slate-50 px-4 py-4"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <EventTypeBadge type={event.type} />
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-muted-foreground">
                           {formatDate(event.createdAt)}
                         </span>
                       </div>
@@ -316,8 +350,8 @@ export default function MatchHubPage() {
                 </div>
               </div>
 
-              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <Trophy className="h-4 w-4 text-amber-500" />
                   Match Context
                 </div>
@@ -332,8 +366,8 @@ export default function MatchHubPage() {
           </section>
 
           <aside className="space-y-6">
-            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <ShieldAlert className="h-4 w-4 text-rose-500" />
                 Dual Score Reporting
               </div>
@@ -375,7 +409,7 @@ export default function MatchHubPage() {
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-900">
+                  <label className="mb-2 block text-sm font-medium text-foreground">
                     {match.player1.username} Score
                   </label>
                   <Input
@@ -386,7 +420,7 @@ export default function MatchHubPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-900">
+                  <label className="mb-2 block text-sm font-medium text-foreground">
                     {match.player2.username} Score
                   </label>
                   <Input
@@ -431,8 +465,8 @@ export default function MatchHubPage() {
               ) : null}
             </div>
 
-            <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <User className="h-4 w-4 text-slate-700" />
                 Submitted Reports
               </div>
@@ -440,16 +474,16 @@ export default function MatchHubPage() {
                 {match.reports.map((report) => (
                   <div
                     key={`${report.reporterId}-${report.submittedAt}`}
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+                    className="rounded-2xl border border-border bg-slate-50 px-4 py-4"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="font-medium text-slate-900">{report.reporterName}</p>
-                        <p className="text-xs text-slate-500">
+                        <p className="font-medium text-foreground">{report.reporterName}</p>
+                        <p className="text-xs text-muted-foreground">
                           {formatDate(report.submittedAt)}
                         </p>
                       </div>
-                      <p className="text-lg font-semibold text-slate-900">
+                      <p className="text-lg font-semibold text-foreground">
                         {report.player1Score} - {report.player2Score}
                       </p>
                     </div>
@@ -473,7 +507,7 @@ function ConnectionPill({
 }) {
   if (!active) {
     return (
-      <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300">
+      <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-foreground/80">
         Feed idle
       </div>
     );
@@ -513,7 +547,7 @@ function CompetitorCard({
   isWinner,
   isCurrentUser,
 }: {
-  player: (typeof matchHubDetails)[string]["player1"];
+  player: { id: string; username: string; elo: number; region: string; seed: number; stats: Array<{ label: string; value: string }> };
   score: number;
   isWinner: boolean;
   isCurrentUser: boolean;
@@ -526,7 +560,7 @@ function CompetitorCard({
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5">
-            <User className="h-6 w-6 text-slate-300" />
+            <User className="h-6 w-6 text-foreground/80" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -537,7 +571,7 @@ function CompetitorCard({
                 </span>
               ) : null}
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted-foreground">
               Seed {player.seed} | {player.region} | ELO {player.elo}
             </p>
           </div>
@@ -551,7 +585,7 @@ function CompetitorCard({
             key={`${player.id}-${stat.label}`}
             className="rounded-2xl border border-white/10 bg-black/10 px-3 py-2"
           >
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
               {stat.label}
             </p>
             <p className="mt-1 text-sm font-medium text-white">{stat.value}</p>
@@ -565,7 +599,7 @@ function CompetitorCard({
 function HubStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-      <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">{label}</p>
+      <p className="text-[11px] uppercase tracking-[0.25em] text-muted-foreground">{label}</p>
       <p className="mt-2 text-sm font-medium text-white">{value}</p>
     </div>
   );
@@ -598,14 +632,14 @@ function InfoRow({
   href?: string;
 }) {
   return (
-    <div className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
-      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{label}</p>
+    <div className="border-b border-border pb-4 last:border-b-0 last:pb-0">
+      <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">{label}</p>
       {href ? (
         <Link href={href} className="mt-2 inline-block font-medium text-cyan-700 hover:underline">
           {value}
         </Link>
       ) : (
-        <p className="mt-2 font-medium text-slate-900">{value}</p>
+        <p className="mt-2 font-medium text-foreground">{value}</p>
       )}
     </div>
   );

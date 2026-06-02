@@ -29,7 +29,7 @@ export default function CountdownTimer({ seconds, onComplete }: CountdownTimerPr
         <div className="text-9xl font-bold text-white mb-8 animate-pulse">
           {timeLeft}
         </div>
-        <p className="text-2xl text-gray-300">Game Starting...</p>
+        <p className="text-2xl text-foreground/80">Game Starting...</p>
       </div>
     </div>
   );

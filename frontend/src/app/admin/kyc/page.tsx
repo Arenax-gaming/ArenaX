@@ -7,25 +7,7 @@ import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { PageError } from "@/components/common/PageError";
-import { ListItemSkeleton, PageHeaderSkeleton, Skeleton } from "@/components/common/PageSkeleton";
-import { EmptyState } from "@/components/common/EmptyState";
-import { FileText } from "lucide-react";
-
-type KycStatus = "PENDING" | "APPROVED" | "REJECTED" | "ESCALATED";
-
-interface KycReview {
-  id: string;
-  userId: string;
-  status: KycStatus;
-  documents: any[];
-  notes?: string;
-  user: {
-    username: string;
-    email: string;
-  };
-  createdAt: string;
-}
+import type { KycDocument, KycReview, KycStatus } from "@/types/admin";
 
 export default function KycDashboard() {
   const [reviews, setReviews] = useState<KycReview[]>([]);
@@ -140,7 +122,7 @@ export default function KycDashboard() {
       <div className="container mx-auto p-6 space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-gray-900 dark:text-gray-100">
+          <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl text-foreground dark:text-foreground">
             KYC Review Queue
           </h1>
           <p className="text-xl text-muted-foreground">
@@ -186,8 +168,8 @@ export default function KycDashboard() {
                     <CardTitle className="text-lg truncate">{review.user.username}</CardTitle>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                       review.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                      review.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                      review.status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                      review.status === 'APPROVED' ? 'bg-success-muted text-green-800' :
+                      review.status === 'REJECTED' ? 'bg-destructive/10 text-red-800' : 'bg-muted text-gray-800'
                     }`}>
                       {review.status}
                     </span>
@@ -223,7 +205,7 @@ export default function KycDashboard() {
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
                     {Array.isArray(selectedReview.documents) && selectedReview.documents.length > 0 ? (
-                      selectedReview.documents.map((doc: any, i: number) => (
+                      selectedReview.documents.map((doc: KycDocument, i: number) => (
                         <div key={i} className="group relative aspect-video bg-muted rounded-xl overflow-hidden border-2 border-transparent hover:border-primary transition-all">
                           <Image 
                             src={doc.url} 
@@ -264,7 +246,7 @@ export default function KycDashboard() {
                       <div className="flex flex-wrap gap-3 pt-2">
                         <Button 
                           variant="primary" 
-                          className="flex-1 min-w-[140px] bg-green-600 hover:bg-green-700 text-white font-bold"
+                          className="flex-1 min-w-[140px] bg-success/90 hover:bg-green-700 text-white font-bold"
                           onClick={() => handleProcess(selectedReview.id, "APPROVED")}
                           disabled={isSubmitting}
                         >
@@ -289,9 +271,9 @@ export default function KycDashboard() {
                       </div>
                     ) : (
                       <div className={`p-4 rounded-xl border flex items-center justify-between ${
-                        selectedReview.status === 'APPROVED' ? 'bg-green-50 border-green-200 text-green-800' :
-                        selectedReview.status === 'REJECTED' ? 'bg-red-50 border-red-200 text-red-800' :
-                        'bg-gray-50 border-gray-200 text-gray-800'
+                        selectedReview.status === 'APPROVED' ? 'bg-success-muted border-success/30 text-green-800' :
+                        selectedReview.status === 'REJECTED' ? 'bg-destructive/5 border-red-200 text-red-800' :
+                        'bg-muted border-gray-200 text-gray-800'
                       }`}>
                         <div className="flex items-center gap-3">
                           <span className="font-bold uppercase tracking-wider text-xs">Final State: {selectedReview.status}</span>

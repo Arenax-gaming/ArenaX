@@ -1,8 +1,10 @@
 // Middleware module for ArenaX
 pub mod idempotency_middleware;
+pub mod rate_limit;
 pub mod security;
 
 pub use idempotency_middleware::IdempotencyMiddleware;
+pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 
 use actix_cors::Cors;

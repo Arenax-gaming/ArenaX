@@ -50,7 +50,7 @@ export function AchievementDetails({ achievement }: AchievementDetailsProps) {
                   <h1 className="text-2xl font-bold">{achievement.title}</h1>
                   <RarityIndicator rarity={achievement.rarity} />
                   {achievement.unlocked && (
-                    <span className="rounded-full bg-green-100 dark:bg-green-900 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-300">
+                    <span className="rounded-full bg-success-muted dark:bg-success-muted px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-300">
                       ✓ Unlocked
                     </span>
                   )}
@@ -92,7 +92,7 @@ export function AchievementDetails({ achievement }: AchievementDetailsProps) {
             <ul className="space-y-2">
               {achievement.requirements.map((req, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm">
-                  <span className={achievement.unlocked ? 'text-green-500' : 'text-muted-foreground'}>
+                  <span className={achievement.unlocked ? 'text-success' : 'text-muted-foreground'}>
                     {achievement.unlocked ? '✓' : '○'}
                   </span>
                   <span>{req}</span>

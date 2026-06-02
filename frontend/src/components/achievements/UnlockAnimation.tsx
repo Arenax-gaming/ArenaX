@@ -46,8 +46,8 @@ export function UnlockAnimation({ achievement, onClose }: UnlockAnimationProps) 
           visible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-75 translate-y-8',
           achievement.rarity === 'legendary' && 'border-yellow-400 shadow-yellow-400/30',
           achievement.rarity === 'epic' && 'border-purple-400 shadow-purple-400/30',
-          achievement.rarity === 'rare' && 'border-blue-400 shadow-blue-400/30',
-          achievement.rarity === 'common' && 'border-gray-300',
+          achievement.rarity === 'rare' && 'border-primary/70 shadow-blue-400/30',
+          achievement.rarity === 'common' && 'border-border',
         )}
       >
         {/* Sparkles for legendary/epic */}

@@ -9,7 +9,7 @@ const toastStyles: Record<string, string> = {
   success:
     "border-emerald-300 bg-emerald-100/90 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-100",
   failed:
-    "border-red-300 bg-red-100/90 text-red-950 dark:border-red-700 dark:bg-red-900/50 dark:text-red-100",
+    "border-red-300 bg-destructive/10/90 text-red-950 dark:border-red-700 dark:bg-destructive/20/50 dark:text-destructive-foreground",
 };
 
 export function TransactionToasts() {

@@ -102,6 +102,7 @@ const mapUserToSafeUser = (user: {
     socials: unknown;
     createdAt: Date;
     updatedAt: Date;
+    isVerified: boolean;
 }) => ({
     id: user.id,
     email: user.email,
@@ -110,7 +111,8 @@ const mapUserToSafeUser = (user: {
     bio: user.bio,
     socials: user.socials,
     createdAt: user.createdAt,
-    updatedAt: user.updatedAt
+    updatedAt: user.updatedAt,
+    isVerified: user.isVerified
 });
 
 const createAccessToken = (user: {
@@ -263,7 +265,8 @@ export const registerUser = async (input: RegisterInput) => {
                         email: normalizedEmail,
                         username: candidate,
                         passwordHash,
-                        provider: 'EMAIL'
+                        provider: 'EMAIL',
+                        isVerified: false
                     }
                 });
 
@@ -667,6 +670,51 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
     logger.info('Email verified', { userId: user.id });
     
     return { message: 'Email verified successfully' };
+};
+
+export interface ResendVerificationEmailInput {
+    email: string;
+}
+
+export const resendVerificationEmail = async (input: ResendVerificationEmailInput) => {
+    const prisma = getDatabaseClient();
+    const normalizedEmail = normalizeEmail(input.email);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    // Always return success to prevent email enumeration
+    if (!user) {
+        return { message: 'If the email exists, a verification link has been sent' };
+    }
+    
+    if (user.isVerified) {
+        return { message: 'Email already verified' };
+    }
+    
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenHash = toTokenHash(verificationToken);
+    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            verificationToken: verificationTokenHash,
+            verificationTokenExpires
+        }
+    });
+    
+    // Send verification email
+    try {
+        await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
+    } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Don't fail if email fails
+    }
+    
+    return { message: 'If the email exists, a verification link has been sent' };
 };
 
 export interface ForgotPasswordInput {

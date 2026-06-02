@@ -5,7 +5,7 @@ use crate::{
 };
 use actix_web::{web, HttpResponse};
 use serde::Deserialize;
-use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -15,21 +15,19 @@ pub struct TournamentStatisticsQuery {
 }
 
 pub async fn get_tournament_statistics(
-    db: web::Data<PgPool>,
+    svc: web::Data<Arc<TournamentService>>,
     path: web::Path<Uuid>,
     query: web::Query<TournamentStatisticsQuery>,
 ) -> Result<HttpResponse, ApiError> {
     let tournament_id = path.into_inner();
-    
+
     // Validate tournament ID
     validate_uuid(&tournament_id.to_string())
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    
-    let svc = TournamentService::new(db.get_ref().clone());
-    
+
     // Get tournament statistics
     let stats = svc.get_tournament_statistics(tournament_id).await?;
-    
+
     Ok(HttpResponse::Ok().json(stats))
 }
 

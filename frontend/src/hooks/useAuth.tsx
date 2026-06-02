@@ -12,6 +12,8 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   clearError: () => void;
+  verifyEmail: (token: string) => Promise<void>;
+  resendVerificationEmail: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,6 +22,7 @@ const TOKEN_KEY = "auth_token";
 const REFRESH_TOKEN_KEY = "auth_refresh_token";
 const STORAGE_KEY = "arenax_auth_user";
 const REMEMBER_KEY = "arenax_remember_me";
+const PENDING_VERIFICATION_EMAIL_KEY = "arenax_pending_email";
 
 function getStorage(remember: boolean): Storage {
   return remember ? localStorage : sessionStorage;
@@ -30,6 +33,7 @@ function mapBackendUserToAuthUser(
     id: string;
     email: string;
     username: string;
+    isVerified: boolean;
     [key: string]: unknown;
   },
   accessToken: string,
@@ -39,7 +43,7 @@ function mapBackendUserToAuthUser(
     id: backendUser.id,
     username: backendUser.username,
     email: backendUser.email,
-    isVerified: true,
+    isVerified: backendUser.isVerified,
     elo: typeof (backendUser as Record<string, unknown>).elo === "number"
       ? ((backendUser as Record<string, unknown>).elo as number)
       : 0,
@@ -141,11 +145,49 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         response.tokens.refreshToken
       );
       setUser(authUser);
-      persistSession(authUser, true);
+      localStorage.setItem(PENDING_VERIFICATION_EMAIL_KEY, userData.email);
+      // Don't persist session yet - user needs to verify email
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Registration failed";
       setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyEmail = async (token: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await api.verifyEmail(token);
+      // If we have a stored user, update their isVerified status
+      if (user) {
+        const updatedUser = { ...user, isVerified: true };
+        setUser(updatedUser);
+        const remember = localStorage.getItem(REMEMBER_KEY) === "true";
+        persistSession(updatedUser, remember);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Verification failed";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendVerificationEmail = async (email: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      await api.resendVerificationEmail(email);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to resend verification email";
+      setError(message);
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -158,13 +200,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       storage.removeItem(REFRESH_TOKEN_KEY);
     });
     localStorage.removeItem(REMEMBER_KEY);
+    localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
     setUser(null);
     setError(null);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, login, register, logout, loading, error, clearError }}
+      value={{ user, login, register, logout, loading, error, clearError, verifyEmail, resendVerificationEmail }}
     >
       {children}
     </AuthContext.Provider>

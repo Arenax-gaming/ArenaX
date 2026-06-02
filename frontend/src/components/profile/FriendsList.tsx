@@ -29,7 +29,7 @@ const STATUS_ORDER: Record<FriendEntry["status"], number> = {
 };
 
 const STATUS_COLOR: Record<FriendEntry["status"], string> = {
-  online: "bg-green-500",
+  online: "bg-success",
   "in-game": "bg-yellow-400",
   offline: "bg-gray-400",
 };
@@ -211,7 +211,7 @@ export function FriendsList({
                               onRemoveFriend?.(friend.id);
                               setSelectedFriend(null);
                             }}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-red-600 dark:text-red-400"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-destructive dark:text-destructive/80"
                           >
                             <UserMinus className="h-4 w-4" />
                             Remove Friend

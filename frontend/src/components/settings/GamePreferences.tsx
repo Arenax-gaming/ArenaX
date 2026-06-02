@@ -71,7 +71,7 @@ export function GamePreferences({
                   onClick={() => onUpdate({ quality: preset })}
                   className={`p-3 rounded-lg border-2 transition-all text-left ${
                     settings.quality === preset
-                      ? "border-blue-500 bg-blue-500/10"
+                      ? "border-primary bg-primary/10"
                       : "border-muted hover:border-muted-foreground/50"
                   }`}
                 >
@@ -81,7 +81,7 @@ export function GamePreferences({
                     {qualityPresets[preset].description}
                   </div>
                   {settings.quality === preset && (
-                    <Check className="absolute top-2 right-2 h-4 w-4 text-blue-500" />
+                    <Check className="absolute top-2 right-2 h-4 w-4 text-primary" />
                   )}
                 </button>
               ))}
@@ -98,7 +98,7 @@ export function GamePreferences({
               id="resolution"
               value={settings.resolution}
               onChange={(e) => onUpdate({ resolution: e.target.value as GamePreferencesType["resolution"] })}
-              className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {resolutionOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -121,7 +121,7 @@ export function GamePreferences({
                   onClick={() => onUpdate({ frameRate: option.value as GamePreferencesType["frameRate"] })}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     settings.frameRate === option.value
-                      ? "bg-blue-500 text-white"
+                      ? "bg-primary text-white"
                       : "bg-muted hover:bg-muted/80"
                   }`}
                 >
@@ -179,8 +179,8 @@ export function GamePreferences({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Volume2 className="h-5 w-5 text-green-500" />
+            <div className="p-2 bg-success/10 rounded-lg">
+              <Volume2 className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>Audio</CardTitle>
@@ -302,7 +302,7 @@ export function GamePreferences({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

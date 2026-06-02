@@ -24,7 +24,7 @@ export function ProgressBar({ value, max, className, showLabel = false, animated
           className={cn(
             'h-full rounded-full bg-primary transition-all duration-700 ease-out',
             animated && 'animate-in slide-in-from-left-full',
-            pct === 100 && 'bg-green-500'
+            pct === 100 && 'bg-success'
           )}
           style={{ width: `${pct}%` }}
           role="progressbar"

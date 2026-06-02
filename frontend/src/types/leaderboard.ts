@@ -1,3 +1,14 @@
+/** Compact player row used on the legacy /leaderboard page mock table. */
+export interface LeaderboardPlayer {
+  rank: number;
+  userId: string;
+  username: string;
+  points: number;
+  wins: number;
+  winRate: number;
+  game: string;
+}
+
 export interface LeaderboardEntry {
     id: string
     userId: string
