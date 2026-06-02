@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -12,9 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Image as ImageIcon, Trophy } from "lucide-react";
-import { useLeaderboard } from "@/hooks/useLeaderboard";
-import { LeaderboardCategory } from "@/types/leaderboard";
+import { Image as ImageIcon } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
+import type { LeaderboardPlayer } from "@/types/leaderboard";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -225,11 +225,13 @@ export default function LeaderboardPage() {
 
   // Client-side search filter (applied on top of server data while the API
   // doesn't yet support a search param — remove once the backend supports it)
-  const visibleEntries = debouncedSearch
-    ? entries.filter((e) =>
-        e.username.toLowerCase().includes(debouncedSearch.toLowerCase())
-      )
-    : entries;
+  const visibleEntries = useMemo(() => {
+    return debouncedSearch
+      ? entries.filter((e) =>
+          e.username.toLowerCase().includes(debouncedSearch.toLowerCase())
+        )
+      : entries;
+  }, [entries, debouncedSearch]);
 
   // Sort toggle
   const handleSort = useCallback(

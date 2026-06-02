@@ -6,16 +6,9 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Search, UserPlus, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { FriendEntry } from "@/types/profile";
 
-interface Friend {
-  id: string;
-  username: string;
-  elo: number;
-  status: "online" | "in-game" | "offline";
-  gamesPlayed: number;
-}
-
-const mockFriends: Friend[] = [
+const mockFriends: FriendEntry[] = [
   { id: "f1", username: "ShadowNinja", elo: 1380, status: "online", gamesPlayed: 12 },
   { id: "f2", username: "EliteSniper", elo: 1420, status: "in-game", gamesPlayed: 8 },
   { id: "f3", username: "DragonSlayer", elo: 1190, status: "online", gamesPlayed: 5 },
@@ -24,7 +17,7 @@ const mockFriends: Friend[] = [
 ];
 
 const statusConfig = {
-  online: { label: "Online", dot: "bg-green-500" },
+  online: { label: "Online", dot: "bg-success" },
   "in-game": { label: "In Game", dot: "bg-yellow-500" },
   offline: { label: "Offline", dot: "bg-muted-foreground/50" },
 };

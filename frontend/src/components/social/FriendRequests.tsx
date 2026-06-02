@@ -156,8 +156,8 @@ export function FriendRequestManager({
                     <span
                       className={
                         request.status === "accepted"
-                          ? "text-green-600"
-                          : "text-red-600"
+                          ? "text-success"
+                          : "text-destructive"
                       }
                     >
                       {request.status === "accepted" ? "Accepted" : "Declined"}
@@ -191,7 +191,7 @@ export function FriendRequestBadge({ count, onClick }: FriendRequestBadgeProps) 
       className="relative inline-flex items-center justify-center"
     >
       <AlertCircle className="h-5 w-5 text-muted-foreground" />
-      <span className="absolute -top-1 -right-1 h-4 min-w-[16px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1">
+      <span className="absolute -top-1 -right-1 h-4 min-w-[16px] flex items-center justify-center bg-destructive text-white text-[10px] font-bold rounded-full px-1">
         {count}
       </span>
     </button>

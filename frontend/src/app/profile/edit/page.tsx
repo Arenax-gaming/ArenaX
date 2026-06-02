@@ -332,7 +332,7 @@ function ProfileEditContent() {
               {username.length} / {USERNAME_MAX_LENGTH} characters
             </p>
             {username === originalValues.current.username && (
-              <span className="text-xs text-green-600 flex items-center gap-1">
+              <span className="text-xs text-success flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
                 Available
               </span>
@@ -455,7 +455,7 @@ function ProfileEditContent() {
 
       {/* Success Message */}
       {saved && (
-        <div className="flex items-center gap-2 p-4 bg-green-600 text-white rounded-md">
+        <div className="flex items-center gap-2 p-4 bg-success/90 text-white rounded-md">
           <CheckCircle className="h-5 w-5" />
           <p className="text-sm font-medium">Profile saved successfully!</p>
         </div>

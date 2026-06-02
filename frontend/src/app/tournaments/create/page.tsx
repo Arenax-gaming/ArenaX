@@ -22,33 +22,14 @@ import {
   DollarSign,
   Gamepad2
 } from "lucide-react";
-import { TournamentType, TournamentVisibility } from "@/types/tournament";
+import {
+  CreateCreateTournamentFormData,
+  CreateTournamentWizardStep,
+  TournamentType,
+  TournamentVisibility,
+} from "@/types/tournament";
 
-type Step = 1 | 2 | 3 | 4 | "preview" | "success";
-
-interface TournamentFormData {
-  // Step 1: Basic Info
-  name: string;
-  gameType: string;
-  description: string;
-  // Step 2: Format & Rules
-  tournamentType: TournamentType;
-  matchFormat: string;
-  rules: string;
-  // Step 3: Entry & Prizes
-  entryFee: number;
-  prizePool: number;
-  prizeDistribution: string;
-  // Step 4: Schedule & Registration
-  visibility: TournamentVisibility;
-  maxParticipants: number;
-  registrationOpenDate: string;
-  registrationCloseDate: string;
-  startDate: string;
-  endDate: string;
-}
-
-const initialFormData: TournamentFormData = {
+const initialFormData: CreateCreateTournamentFormData = {
   name: "",
   gameType: "",
   description: "",
@@ -95,8 +76,8 @@ const tournamentTypes: { value: TournamentType; label: string; description: stri
 ];
 
 export default function CreateTournamentPage() {
-  const [currentStep, setCurrentStep] = useState<Step>(1);
-  const [formData, setFormData] = useState<TournamentFormData>(initialFormData);
+  const [currentStep, setCurrentStep] = useState<CreateTournamentWizardStep>(1);
+  const [formData, setFormData] = useState<CreateTournamentFormData>(initialFormData);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -136,7 +117,7 @@ export default function CreateTournamentPage() {
     return () => clearTimeout(timer);
   }, [formData, saveDraft]);
 
-  const validateStep = (step: Step): boolean => {
+  const validateStep = (step: CreateTournamentWizardStep): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (step === 1) {
@@ -183,15 +164,15 @@ export default function CreateTournamentPage() {
 
   const handleNext = () => {
     if (validateStep(currentStep)) {
-      setCurrentStep((prev) => (prev === 4 ? "preview" : (prev as Step) + 1) as Step);
+      setCurrentStep((prev) => (prev === 4 ? "preview" : (prev as CreateTournamentWizardStep) + 1) as CreateTournamentWizardStep);
     }
   };
 
   const handleBack = () => {
-    setCurrentStep((prev) => (prev === "preview" ? 4 : (prev as Step) - 1) as Step);
+    setCurrentStep((prev) => (prev === "preview" ? 4 : (prev as CreateTournamentWizardStep) - 1) as CreateTournamentWizardStep);
   };
 
-  const handleFieldChange = (field: keyof TournamentFormData, value: string | number) => {
+  const handleFieldChange = (field: keyof CreateTournamentFormData, value: string | number) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error for this field
     if (errors[field]) {
@@ -262,10 +243,10 @@ export default function CreateTournamentPage() {
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
                           isActive
-                            ? "border-blue-600 bg-blue-600 text-white"
+                            ? "border-blue-600 bg-primary/90 text-white"
                             : isCompleted
-                            ? "border-green-600 bg-green-600 text-white"
-                            : "border-gray-300 bg-background text-muted-foreground"
+                            ? "border-green-600 bg-success/90 text-white"
+                            : "border-border bg-background text-muted-foreground"
                         }`}
                       >
                         {isCompleted ? (
@@ -285,7 +266,7 @@ export default function CreateTournamentPage() {
                     {index < steps.length - 1 && (
                       <div
                         className={`flex-1 h-0.5 mx-2 transition-all ${
-                          isCompleted ? "bg-green-600" : "bg-gray-300"
+                          isCompleted ? "bg-success/90" : "bg-gray-300"
                         }`}
                       />
                     )}
@@ -324,7 +305,7 @@ export default function CreateTournamentPage() {
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
                     <label htmlFor="name" className="text-sm font-medium">
-                      Tournament Name <span className="text-red-500">*</span>
+                      Tournament Name <span className="text-destructive">*</span>
                     </label>
                     <Input
                       id="name"
@@ -333,12 +314,12 @@ export default function CreateTournamentPage() {
                       onChange={(e) => handleFieldChange("name", e.target.value)}
                       error={!!errors.name}
                     />
-                    {errors.name && <p className="text-sm text-red-500">{errors.name}</p>}
+                    {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
                   </div>
 
                   <div className="space-y-2">
                     <label htmlFor="gameType" className="text-sm font-medium">
-                      Game <span className="text-red-500">*</span>
+                      Game <span className="text-destructive">*</span>
                     </label>
                     <select
                       id="gameType"
@@ -353,12 +334,12 @@ export default function CreateTournamentPage() {
                         </option>
                       ))}
                     </select>
-                    {errors.gameType && <p className="text-sm text-red-500">{errors.gameType}</p>}
+                    {errors.gameType && <p className="text-sm text-destructive">{errors.gameType}</p>}
                   </div>
 
                   <div className="space-y-2">
                     <label htmlFor="description" className="text-sm font-medium">
-                      Description <span className="text-red-500">*</span>
+                      Description <span className="text-destructive">*</span>
                     </label>
                     <textarea
                       id="description"
@@ -367,7 +348,7 @@ export default function CreateTournamentPage() {
                       value={formData.description}
                       onChange={(e) => handleFieldChange("description", e.target.value)}
                     />
-                    {errors.description && <p className="text-sm text-red-500">{errors.description}</p>}
+                    {errors.description && <p className="text-sm text-destructive">{errors.description}</p>}
                   </div>
                 </CardContent>
               </Card>
@@ -402,8 +383,8 @@ export default function CreateTournamentPage() {
                           onClick={() => handleFieldChange("tournamentType", type.value)}
                           className={`p-4 rounded-lg border-2 text-left transition-all ${
                             formData.tournamentType === type.value
-                              ? "border-blue-600 bg-blue-50 dark:bg-blue-950/20"
-                              : "border-gray-300 hover:border-gray-400"
+                              ? "border-blue-600 bg-info-muted dark:bg-info-muted/20"
+                              : "border-border hover:border-gray-400"
                           }`}
                         >
                           <div className="font-medium text-foreground">{type.label}</div>
@@ -415,7 +396,7 @@ export default function CreateTournamentPage() {
 
                   <div className="space-y-2">
                     <label htmlFor="matchFormat" className="text-sm font-medium">
-                      Match Format <span className="text-red-500">*</span>
+                      Match Format <span className="text-destructive">*</span>
                     </label>
                     <select
                       id="matchFormat"
@@ -429,12 +410,12 @@ export default function CreateTournamentPage() {
                         </option>
                       ))}
                     </select>
-                    {errors.matchFormat && <p className="text-sm text-red-500">{errors.matchFormat}</p>}
+                    {errors.matchFormat && <p className="text-sm text-destructive">{errors.matchFormat}</p>}
                   </div>
 
                   <div className="space-y-2">
                     <label htmlFor="rules" className="text-sm font-medium">
-                      Tournament Rules <span className="text-red-500">*</span>
+                      Tournament Rules <span className="text-destructive">*</span>
                     </label>
                     <textarea
                       id="rules"
@@ -443,7 +424,7 @@ export default function CreateTournamentPage() {
                       value={formData.rules}
                       onChange={(e) => handleFieldChange("rules", e.target.value)}
                     />
-                    {errors.rules && <p className="text-sm text-red-500">{errors.rules}</p>}
+                    {errors.rules && <p className="text-sm text-destructive">{errors.rules}</p>}
                   </div>
                 </CardContent>
               </Card>
@@ -484,7 +465,7 @@ export default function CreateTournamentPage() {
                         error={!!errors.entryFee}
                       />
                     </div>
-                    {errors.entryFee && <p className="text-sm text-red-500">{errors.entryFee}</p>}
+                    {errors.entryFee && <p className="text-sm text-destructive">{errors.entryFee}</p>}
                     <p className="text-xs text-muted-foreground">Set to 0 for free tournaments</p>
                   </div>
 
@@ -506,13 +487,13 @@ export default function CreateTournamentPage() {
                         error={!!errors.prizePool}
                       />
                     </div>
-                    {errors.prizePool && <p className="text-sm text-red-500">{errors.prizePool}</p>}
+                    {errors.prizePool && <p className="text-sm text-destructive">{errors.prizePool}</p>}
                   </div>
 
                   <div className="space-y-2">
                     <label htmlFor="prizeDistribution" className="text-sm font-medium">
                       Prize Distribution
-                      {formData.prizePool > 0 && <span className="text-red-500">*</span>}
+                      {formData.prizePool > 0 && <span className="text-destructive">*</span>}
                     </label>
                     <textarea
                       id="prizeDistribution"
@@ -521,7 +502,7 @@ export default function CreateTournamentPage() {
                       value={formData.prizeDistribution}
                       onChange={(e) => handleFieldChange("prizeDistribution", e.target.value)}
                     />
-                    {errors.prizeDistribution && <p className="text-sm text-red-500">{errors.prizeDistribution}</p>}
+                    {errors.prizeDistribution && <p className="text-sm text-destructive">{errors.prizeDistribution}</p>}
                   </div>
                 </CardContent>
               </Card>
@@ -562,7 +543,7 @@ export default function CreateTournamentPage() {
 
                   <div className="space-y-2">
                     <label htmlFor="maxParticipants" className="text-sm font-medium">
-                      Maximum Participants <span className="text-red-500">*</span>
+                      Maximum Participants <span className="text-destructive">*</span>
                     </label>
                     <div className="relative">
                       <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -577,13 +558,13 @@ export default function CreateTournamentPage() {
                         error={!!errors.maxParticipants}
                       />
                     </div>
-                    {errors.maxParticipants && <p className="text-sm text-red-500">{errors.maxParticipants}</p>}
+                    {errors.maxParticipants && <p className="text-sm text-destructive">{errors.maxParticipants}</p>}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label htmlFor="registrationOpenDate" className="text-sm font-medium">
-                        Registration Opens <span className="text-red-500">*</span>
+                        Registration Opens <span className="text-destructive">*</span>
                       </label>
                       <Input
                         id="registrationOpenDate"
@@ -592,12 +573,12 @@ export default function CreateTournamentPage() {
                         onChange={(e) => handleFieldChange("registrationOpenDate", e.target.value)}
                         error={!!errors.registrationOpenDate}
                       />
-                      {errors.registrationOpenDate && <p className="text-sm text-red-500">{errors.registrationOpenDate}</p>}
+                      {errors.registrationOpenDate && <p className="text-sm text-destructive">{errors.registrationOpenDate}</p>}
                     </div>
 
                     <div className="space-y-2">
                       <label htmlFor="registrationCloseDate" className="text-sm font-medium">
-                        Registration Closes <span className="text-red-500">*</span>
+                        Registration Closes <span className="text-destructive">*</span>
                       </label>
                       <Input
                         id="registrationCloseDate"
@@ -606,14 +587,14 @@ export default function CreateTournamentPage() {
                         onChange={(e) => handleFieldChange("registrationCloseDate", e.target.value)}
                         error={!!errors.registrationCloseDate}
                       />
-                      {errors.registrationCloseDate && <p className="text-sm text-red-500">{errors.registrationCloseDate}</p>}
+                      {errors.registrationCloseDate && <p className="text-sm text-destructive">{errors.registrationCloseDate}</p>}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label htmlFor="startDate" className="text-sm font-medium">
-                        Tournament Start <span className="text-red-500">*</span>
+                        Tournament Start <span className="text-destructive">*</span>
                       </label>
                       <Input
                         id="startDate"
@@ -622,7 +603,7 @@ export default function CreateTournamentPage() {
                         onChange={(e) => handleFieldChange("startDate", e.target.value)}
                         error={!!errors.startDate}
                       />
-                      {errors.startDate && <p className="text-sm text-red-500">{errors.startDate}</p>}
+                      {errors.startDate && <p className="text-sm text-destructive">{errors.startDate}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -726,8 +707,8 @@ export default function CreateTournamentPage() {
             >
               <Card>
                 <CardContent className="pt-12 pb-12 text-center">
-                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 dark:bg-green-900 mb-6">
-                    <Check className="h-10 w-10 text-green-600 dark:text-green-400" />
+                  <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-success-muted dark:bg-success-muted mb-6">
+                    <Check className="h-10 w-10 text-success dark:text-success/80" />
                   </div>
                   <h2 className="text-2xl font-bold text-foreground mb-2">
                     Tournament Created!

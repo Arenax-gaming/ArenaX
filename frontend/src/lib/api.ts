@@ -80,9 +80,17 @@ class ApiClient {
     );
   }
 
-  async checkUsernameAvailability(username: string): Promise<{ available: boolean }> {
-    return this.request<{ available: boolean }>(
-      `/auth/username-check?username=${encodeURIComponent(username)}`
+  async verifyEmail(token: string) {
+    return this.authRequest<{ message: string }>(
+      "/auth/verify-email",
+      { method: "POST", body: JSON.stringify({ token }) }
+    );
+  }
+
+  async resendVerificationEmail(email: string) {
+    return this.authRequest<{ message: string }>(
+      "/auth/resend-verification-email",
+      { method: "POST", body: JSON.stringify({ email }) }
     );
   }
 

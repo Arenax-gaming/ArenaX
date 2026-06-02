@@ -22,8 +22,8 @@ export function TournamentBracket({ bracketData, currentUserId }: TournamentBrac
     <div className="space-y-6">
       {/* Live indicator */}
       {liveMatchCount > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 dark:border-green-900 dark:bg-green-950/20">
-          <RadioTower className="h-4 w-4 animate-pulse text-green-500" />
+        <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success-muted px-4 py-2 dark:border-success/30 dark:bg-success-muted/20">
+          <RadioTower className="h-4 w-4 animate-pulse text-success" />
           <span className="text-sm font-medium text-green-700 dark:text-green-300">
             {liveMatchCount} match{liveMatchCount > 1 ? "es" : ""} live
           </span>
@@ -39,7 +39,7 @@ export function TournamentBracket({ bracketData, currentUserId }: TournamentBrac
               onClick={() => setActiveSection(section.id)}
               className={`whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 activeSection === section.id
-                  ? "bg-blue-600 text-white"
+                  ? "bg-primary/90 text-white"
                   : "bg-muted text-muted-foreground hover:text-foreground"
               }`}
             >
