@@ -18,7 +18,6 @@ async fn test_authorize_user_channel_success() {
         device_id: None,
         session_id: Uuid::new_v4().to_string(),
         roles: vec!["user".to_string()],
-        is_admin: false,
     };
 
     let channel = format!("user:{}", user_id);
@@ -42,7 +41,6 @@ async fn test_authorize_user_channel_denied() {
         device_id: None,
         session_id: Uuid::new_v4().to_string(),
         roles: vec!["user".to_string()],
-        is_admin: false,
     };
 
     let channel = format!("user:{}", other_user_id);

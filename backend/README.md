@@ -171,25 +171,20 @@ REDIS_URL=redis://localhost:6379
 # Storage
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
-# [REQUIRED SECRET] Generate with: openssl rand -hex 32
-S3_SECRET_KEY=<generate-with-openssl-rand-hex-32>
+S3_SECRET_KEY=secret
 
 # Payments
-# [REQUIRED SECRET] Use your Paystack live/test key
-PAYSTACK_SECRET=<your-paystack-secret-key>
-# [REQUIRED SECRET] Use your Flutterwave live/test key
-FLUTTERWAVE_SECRET=<your-flutterwave-secret-key>
+PAYSTACK_SECRET=sk_test_xxx
+FLUTTERWAVE_SECRET=FLWSECK_TEST-xxx
 
 # Authentication
-# [REQUIRED SECRET] Minimum 32 chars. Generate with: openssl rand -hex 32
-JWT_SECRET=<generate-with-openssl-rand-hex-32>
+JWT_SECRET=supersecretkey
 
 # Stellar Configuration
 STELLAR_NETWORK_URL=https://horizon-testnet.stellar.org
-# [REQUIRED SECRET] Your Stellar admin account secret key (starts with S)
-STELLAR_ADMIN_SECRET=<your-stellar-admin-secret-key>
-SOROBAN_CONTRACT_PRIZE=<your-prize-contract-id>
-SOROBAN_CONTRACT_REPUTATION=<your-reputation-contract-id>
+STELLAR_ADMIN_SECRET=SBXXX...
+SOROBAN_CONTRACT_PRIZE=CAXXX...
+SOROBAN_CONTRACT_REPUTATION=CBXXX...
 
 # AI
 AI_MODEL_PATH=./models/anti_cheat.tflite
