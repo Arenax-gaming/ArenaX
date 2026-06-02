@@ -4,19 +4,44 @@ import { useEffect, useState, useRef } from "react";
 import { motion, useMotionValue, useTransform, PanInfo } from "framer-motion";
 import { X, CheckCircle, Info, AlertTriangle, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ToastNotification, NotificationType, ToastPosition } from "@/types/notification";
+import {
+  ToastNotification,
+  NotificationType,
+  ToastPosition,
+} from "@/types/notification";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { Button } from "@/components/ui/Button";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 const typeConfig: Record<
   NotificationType,
   { icon: React.ComponentType<{ className?: string }>; className: string }
 > = {
-  info: { icon: Info, className: "bg-primary/10 text-primary dark:text-primary/80 border-primary/20" },
-  success: { icon: CheckCircle, className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" },
-  warning: { icon: AlertTriangle, className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" },
-  error: { icon: AlertCircle, className: "bg-destructive/10 text-destructive dark:text-destructive/80 border-red-500/20" },
-  match: { icon: CheckCircle, className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20" },
+  info: {
+    icon: Info,
+    className:
+      "bg-primary/10 text-primary dark:text-primary/80 border-primary/20",
+  },
+  success: {
+    icon: CheckCircle,
+    className:
+      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  },
+  warning: {
+    icon: AlertTriangle,
+    className:
+      "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  },
+  error: {
+    icon: AlertCircle,
+    className:
+      "bg-destructive/10 text-destructive dark:text-destructive/80 border-red-500/20",
+  },
+  match: {
+    icon: CheckCircle,
+    className:
+      "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+  },
 };
 
 const positionClasses: Record<ToastPosition, string> = {
@@ -41,6 +66,7 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
   const x = useMotionValue(0);
   const opacity = useTransform(x, [-200, 0, 200], [0, 1, 0]);
   const rotate = useTransform(x, [-200, 0, 200], [-15, 0, 15]);
+  const prefersReducedMotion = useReducedMotion();
 
   progressRef.current = progress;
 
@@ -73,22 +99,42 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
 
   const position = toast.position ?? "bottom-right";
 
+  const motionProps = prefersReducedMotion
+    ? {
+        initial: { opacity: 1 },
+        animate: { opacity: 1 },
+        exit: { opacity: 1 },
+        transition: { duration: 0 },
+      }
+    : {};
+
   return (
     <motion.div
       role="alert"
-      initial={{ opacity: 0, y: position.startsWith("top") ? -50 : 50, scale: 0.9 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-      drag="x"
-      dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.7}
-      onDragEnd={handleDragEnd}
+      {...motionProps}
+      initial={
+        prefersReducedMotion
+          ? undefined
+          : { opacity: 0, y: position.startsWith("top") ? -50 : 50, scale: 0.9 }
+      }
+      animate={
+        prefersReducedMotion ? undefined : { opacity: 1, y: 0, scale: 1 }
+      }
+      exit={
+        prefersReducedMotion
+          ? undefined
+          : { opacity: 0, scale: 0.9, transition: { duration: 0.2 } }
+      }
+      drag={prefersReducedMotion ? false : "x"}
+      dragConstraints={prefersReducedMotion ? undefined : { left: 0, right: 0 }}
+      dragElastic={prefersReducedMotion ? 0 : 0.7}
+      onDragEnd={prefersReducedMotion ? undefined : handleDragEnd}
       style={{ x, opacity, rotate }}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       className={cn(
         "relative flex items-start gap-3 rounded-lg border p-4 shadow-lg backdrop-blur-sm pointer-events-auto select-none touch-pan-y",
-        config.className
+        config.className,
       )}
     >
       <Icon className="h-5 w-5 shrink-0 mt-0.5" />
@@ -123,7 +169,9 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
             className="h-full bg-current"
             initial={{ width: "100%" }}
             animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.016 }}
+            transition={
+              prefersReducedMotion ? { duration: 0 } : { duration: 0.016 }
+            }
           />
         </div>
       )}
@@ -136,14 +184,17 @@ export function ToastContainer() {
 
   if (toasts.length === 0) return null;
 
-  const groupedToasts = toasts.reduce((acc, toast) => {
-    const position = toast.position ?? "bottom-right";
-    if (!acc[position]) {
-      acc[position] = [];
-    }
-    acc[position].push(toast);
-    return acc;
-  }, {} as Record<ToastPosition, ToastNotification[]>);
+  const groupedToasts = toasts.reduce(
+    (acc, toast) => {
+      const position = toast.position ?? "bottom-right";
+      if (!acc[position]) {
+        acc[position] = [];
+      }
+      acc[position].push(toast);
+      return acc;
+    },
+    {} as Record<ToastPosition, ToastNotification[]>,
+  );
 
   return (
     <>
@@ -152,7 +203,7 @@ export function ToastContainer() {
           key={position}
           className={cn(
             "fixed z-[100] flex flex-col gap-3 max-w-sm w-full pointer-events-none",
-            positionClasses[position as ToastPosition]
+            positionClasses[position as ToastPosition],
           )}
           aria-live="polite"
           aria-label="Notifications"
