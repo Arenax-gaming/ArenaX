@@ -1,6 +1,7 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::soroban_service::{SorobanService, TxStatus};
 use chrono::{DateTime, Utc};
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,9 @@ use uuid::Uuid;
 pub struct TournamentService {
     db_pool: DbPool,
     redis_client: Option<Arc<RedisClient>>,
+    soroban_service: Option<Arc<SorobanService>>,
+    prize_contract_id: Option<String>,
+    admin_secret: Option<String>,
 }
 
 impl TournamentService {
@@ -19,11 +23,28 @@ impl TournamentService {
         Self {
             db_pool,
             redis_client: None,
+            soroban_service: None,
+            prize_contract_id: None,
+            admin_secret: None,
         }
     }
 
     pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
         self.redis_client = Some(redis_client);
+        self
+    }
+
+    /// Attach a Soroban service and prize contract configuration so that
+    /// `distribute_prizes` can execute real on-chain transfers.
+    pub fn with_soroban(
+        mut self,
+        soroban_service: Arc<SorobanService>,
+        prize_contract_id: String,
+        admin_secret: String,
+    ) -> Self {
+        self.soroban_service = Some(soroban_service);
+        self.prize_contract_id = Some(prize_contract_id);
+        self.admin_secret = Some(admin_secret);
         self
     }
 
@@ -795,7 +816,7 @@ impl TournamentService {
     // Additional helper methods would be implemented here...
     // For brevity, I'll include the essential ones and mark others as TODO
 
-    pub async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
+    async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
         sqlx::query_as!(
             Tournament,
             "SELECT * FROM tournaments WHERE id = $1",
@@ -1062,15 +1083,36 @@ impl TournamentService {
                 ApiError::internal_error(format!("Invalid distribution percentages: {}", e))
             })?;
 
+        // Resolve Soroban dependencies once — if not configured we fall back to
+        // recording-only mode so existing tests and deployments without a contract
+        // address still work.
+        let soroban = self.soroban_service.as_ref();
+        let contract_id = self.prize_contract_id.as_deref();
+        let admin_secret = self.admin_secret.as_deref();
+
         // Distribute prizes
         for (index, participant) in participants.iter().enumerate() {
             if index < percentages.len() && participant.final_rank.unwrap_or(0) <= 3 {
                 let percentage = percentages[index];
                 let prize_amount = (prize_pool.total_amount as f64 * percentage / 100.0) as i64;
 
-                // Update participant with prize amount
+                // Idempotency guard: skip if this participant already has a prize
+                // recorded (handles retries after partial failures).
+                if participant.prize_amount.is_some() {
+                    tracing::info!(
+                        tournament_id = %tournament_id,
+                        user_id = %participant.user_id,
+                        "Prize already recorded for participant, skipping"
+                    );
+                    continue;
+                }
+
+                // Record the prize amount in the database first so it is never
+                // lost even if the on-chain call fails.
                 sqlx::query!(
-                    "UPDATE tournament_participants SET prize_amount = $1, prize_currency = $2 WHERE id = $3",
+                    "UPDATE tournament_participants \
+                     SET prize_amount = $1, prize_currency = $2 \
+                     WHERE id = $3",
                     prize_amount,
                     prize_pool.currency,
                     participant.id
@@ -1079,18 +1121,160 @@ impl TournamentService {
                 .await
                 .map_err(|e| ApiError::database_error(e))?;
 
-                // TODO: In a real implementation, initiate Stellar transaction to send prize
-                // For now, we'll just record the prize amount
-                tracing::info!(
-                    "Prize distributed: {} {} to user {}",
-                    prize_amount,
-                    prize_pool.currency,
-                    participant.user_id
-                );
+                // Attempt the on-chain transfer via the Soroban prize contract.
+                match (soroban, contract_id, admin_secret) {
+                    (Some(svc), Some(cid), Some(secret)) => {
+                        let args = serde_json::json!({
+                            "tournament_id": tournament_id.to_string(),
+                            "recipient":     participant.user_id.to_string(),
+                            "amount":        prize_amount,
+                            "currency":      prize_pool.currency,
+                        });
+
+                        match svc.invoke(cid, "distribute", &args, secret).await {
+                            Ok(result) if result.status == TxStatus::Success => {
+                                tracing::info!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    tx_hash       = %result.hash,
+                                    prize_amount  = prize_amount,
+                                    currency      = %prize_pool.currency,
+                                    "Prize transfer confirmed on-chain"
+                                );
+
+                                // Persist the transaction hash alongside the prize record
+                                // so it is auditable and visible in the admin dashboard.
+                                if let Err(db_err) = sqlx::query!(
+                                    "UPDATE tournament_participants \
+                                     SET prize_tx_hash = $1 \
+                                     WHERE id = $2",
+                                    result.hash,
+                                    participant.id
+                                )
+                                .execute(&self.db_pool)
+                                .await
+                                {
+                                    // Non-fatal: the transfer succeeded on-chain; only the
+                                    // hash column update failed.  Log and continue.
+                                    tracing::warn!(
+                                        user_id  = %participant.user_id,
+                                        tx_hash  = %result.hash,
+                                        error    = %db_err,
+                                        "Prize confirmed on-chain but failed to persist tx_hash"
+                                    );
+                                }
+                            }
+                            Ok(result) => {
+                                // Transaction was submitted but ended in a non-success
+                                // status (Failed or still Pending after retries).
+                                let error_detail = result
+                                    .error
+                                    .as_deref()
+                                    .unwrap_or("unknown error")
+                                    .to_string();
+
+                                tracing::error!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    tx_hash       = %result.hash,
+                                    status        = ?result.status,
+                                    error         = %error_detail,
+                                    "Prize transfer did not succeed — recorded for admin review"
+                                );
+
+                                self.record_prize_failure(
+                                    tournament_id,
+                                    participant.user_id,
+                                    prize_amount,
+                                    &prize_pool.currency,
+                                    &format!(
+                                        "tx {} ended with status {:?}: {}",
+                                        result.hash, result.status, error_detail
+                                    ),
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                // The Soroban service exhausted its retries or hit a
+                                // hard error.  Surface to the admin dashboard and
+                                // continue distributing to other winners.
+                                tracing::error!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    error         = %e,
+                                    "Soroban prize contract call failed — recorded for admin review"
+                                );
+
+                                self.record_prize_failure(
+                                    tournament_id,
+                                    participant.user_id,
+                                    prize_amount,
+                                    &prize_pool.currency,
+                                    &e.to_string(),
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Soroban not configured — recording-only mode.
+                        tracing::warn!(
+                            tournament_id = %tournament_id,
+                            user_id       = %participant.user_id,
+                            prize_amount  = prize_amount,
+                            currency      = %prize_pool.currency,
+                            "Soroban prize contract not configured; prize recorded in DB only"
+                        );
+                    }
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Persist a prize distribution failure so it appears in the admin dashboard.
+    ///
+    /// Failures are written to `prize_distribution_failures`.  The insert is
+    /// best-effort: if the table does not yet exist the error is logged but does
+    /// not propagate, keeping the main distribution loop alive.
+    async fn record_prize_failure(
+        &self,
+        tournament_id: Uuid,
+        user_id: Uuid,
+        amount: i64,
+        currency: &str,
+        reason: &str,
+    ) {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO prize_distribution_failures
+                (id, tournament_id, user_id, amount, currency, reason, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (tournament_id, user_id) DO UPDATE
+                SET reason     = EXCLUDED.reason,
+                    retry_count = prize_distribution_failures.retry_count + 1,
+                    updated_at  = EXCLUDED.created_at
+            "#,
+            Uuid::new_v4(),
+            tournament_id,
+            user_id,
+            amount,
+            currency,
+            reason,
+            Utc::now(),
+        )
+        .execute(&self.db_pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::error!(
+                tournament_id = %tournament_id,
+                user_id       = %user_id,
+                db_error      = %e,
+                "Failed to record prize distribution failure in DB"
+            );
+        }
     }
 
     // Additional bracket generation methods

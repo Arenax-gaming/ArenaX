@@ -3,7 +3,6 @@ pub mod achievement_service;
 pub mod analytics_service;
 pub mod governance_service;
 pub mod idempotency_service;
-pub mod key_encryption;
 pub mod leaderboard_service;
 pub mod match_authority_service;
 pub mod match_service;

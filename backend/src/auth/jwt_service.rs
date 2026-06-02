@@ -61,14 +61,6 @@ pub struct Claims {
     pub device_id: Option<String>,
     pub session_id: String,
     pub roles: Vec<String>,
-    pub is_admin: bool,
-}
-
-impl Claims {
-    /// Returns true if the caller has admin privileges.
-    pub fn is_admin(&self) -> bool {
-        self.is_admin || self.roles.iter().any(|r| r == "admin")
-    }
 }
 
 /// Token type enumeration
@@ -199,7 +191,6 @@ impl JwtService {
         device_id: Option<String>,
     ) -> Result<String, JwtError> {
         let session_id = Uuid::new_v4().to_string();
-        let is_admin = roles.iter().any(|r| r == "admin");
 
         let claims = Claims {
             sub: user_id.to_string(),
@@ -210,7 +201,6 @@ impl JwtService {
             device_id: device_id.clone(),
             session_id: session_id.clone(),
             roles: roles.clone(),
-            is_admin,
         };
 
         let key_rotation = self.key_rotation.read().await;
@@ -235,7 +225,6 @@ impl JwtService {
         device_id: Option<String>,
     ) -> Result<String, JwtError> {
         let session_id = Uuid::new_v4().to_string();
-        let is_admin = roles.iter().any(|r| r == "admin");
 
         let claims = Claims {
             sub: user_id.to_string(),
@@ -246,7 +235,6 @@ impl JwtService {
             device_id: device_id.clone(),
             session_id: session_id.clone(),
             roles,
-            is_admin,
         };
 
         let key_rotation = self.key_rotation.read().await;
@@ -698,9 +686,7 @@ mod tests {
 
     #[test]
     fn test_jwt_config_default() {
-        // JwtConfig::default() now requires JWT_SECRET to be set.
-        // Test the expected field values using create_test_config() instead.
-        let config = create_test_config();
+        let config = JwtConfig::default();
         assert_eq!(config.algorithm, Algorithm::HS256);
         assert_eq!(config.access_token_expiry.num_minutes(), 15);
         assert_eq!(config.refresh_token_expiry.num_days(), 7);
@@ -842,7 +828,6 @@ mod tests {
             device_id: Some("device-123".to_string()),
             session_id: Uuid::new_v4().to_string(),
             roles: vec!["user".to_string()],
-            is_admin: false,
         };
 
         let json = serde_json::to_string(&claims).unwrap();
@@ -850,6 +835,5 @@ mod tests {
 
         assert_eq!(deserialized.sub, claims.sub);
         assert_eq!(deserialized.token_type, claims.token_type);
-        assert!(!deserialized.is_admin);
     }
 }
