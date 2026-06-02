@@ -4,6 +4,7 @@ pub mod idempotency_examples;
 pub mod achievement_handler;
 pub mod leaderboard_handler;
 pub mod match_authority_handler;
+pub mod matches;
 pub mod matchmaking;
 #[deprecated(note = "Use realtime::user_ws instead for authenticated WebSocket connections")]
 pub mod match_ws_handler;
@@ -13,4 +14,5 @@ pub mod social_handler;
 pub mod staking_handler;
 pub mod analytics_handler;
 pub mod tournament_handler;
+pub mod tournaments;
 pub mod wallet;

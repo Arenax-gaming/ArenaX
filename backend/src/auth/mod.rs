@@ -1,4 +1,5 @@
 pub mod device_service;
+pub mod extractor;
 pub mod jwt_service;
 pub mod middleware;
 

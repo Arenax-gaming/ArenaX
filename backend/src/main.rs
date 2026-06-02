@@ -226,10 +226,20 @@ async fn main() -> io::Result<()> {
                             .route("/platform", web::get().to(crate::http::analytics_handler::get_platform_metrics))
                             .route("/player/{user_id}", web::get().to(crate::http::analytics_handler::get_player_insights))
                     )
-                    // Tournament endpoints
+                    // Tournament endpoints (list, get, join require JWT via Claims extractor)
                     .service(
                         web::scope("/tournaments")
+                            .route("", web::get().to(crate::http::tournaments::list_tournaments))
+                            .route("/{id}", web::get().to(crate::http::tournaments::get_tournament))
+                            .route("/{id}/join", web::post().to(crate::http::tournaments::join_tournament))
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
+                    )
+                    // Match endpoints (report, dispute, get require JWT via Claims extractor)
+                    .service(
+                        web::scope("/matches")
+                            .route("/{id}", web::get().to(crate::http::matches::get_match))
+                            .route("/{id}/report", web::post().to(crate::http::matches::report_score))
+                            .route("/{id}/dispute", web::post().to(crate::http::matches::dispute_match))
                     )
                     // User endpoints
                     .service(
