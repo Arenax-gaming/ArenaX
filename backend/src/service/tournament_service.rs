@@ -2,7 +2,10 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::*;
 use crate::service::soroban_service::{SorobanService, TxStatus};
+use crate::service::stellar_service::stellar_strkey_encode;
 use chrono::{DateTime, Utc};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -983,23 +986,86 @@ impl TournamentService {
         Ok(())
     }
 
+    /// Create a real Stellar prize-pool account.
+    ///
+    /// Steps:
+    /// 1. Generate a fresh ed25519 keypair and encode it as Stellar StrKeys.
+    /// 2. On testnet (Friendbot available): fund via Friendbot — no admin key needed.
+    ///    On mainnet: require `STELLAR_ADMIN_SECRET` to be set (funding via
+    ///    CreateAccount + Payment ops is noted as a TODO for the XDR builder).
+    /// 3. Return the public key (StrKey starting with `G`) for storage in the
+    ///    `prize_pools.stellar_account` column.
+    ///
+    /// The secret key is intentionally NOT stored here because `prize_pools` has
+    /// no encrypted-secret column.  If you need to sign outgoing prize payments
+    /// from this account, persist the secret via `stellar_accounts` through
+    /// `StellarService::create_stellar_account` and link it by public key.
     async fn create_stellar_prize_pool_account(&self) -> Result<String, ApiError> {
-        // Generate a new Stellar account for the prize pool
-        // In a real implementation, this would:
-        // 1. Generate a new keypair
-        // 2. Create the account on Stellar network
-        // 3. Fund it with XLM
-        // 4. Return the public key
+        // ----------------------------------------------------------------
+        // 1. Generate a real Stellar keypair
+        // ----------------------------------------------------------------
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
 
-        // For now, generate a realistic-looking Stellar public key
-        let account_id = format!(
-            "G{}",
-            uuid::Uuid::new_v4()
-                .to_string()
-                .replace('-', "")
-                .to_uppercase()
+        let public_key = stellar_strkey_encode(6 << 3, verifying_key.as_bytes())
+            .map_err(|e| ApiError::internal_server_error(e))?;
+
+        tracing::info!(
+            public_key = %public_key,
+            "Generated Stellar prize-pool keypair"
         );
-        Ok(account_id)
+
+        // ----------------------------------------------------------------
+        // 2. Fund the account
+        // ----------------------------------------------------------------
+        let friendbot_url = self
+            .soroban_service
+            .as_ref()
+            .and_then(|svc| svc.network().friendbot_url.clone());
+
+        if let Some(base_url) = friendbot_url {
+            // Testnet: use Friendbot
+            let url = format!("{}?addr={}", base_url, public_key);
+            let client = reqwest::Client::new();
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| ApiError::internal_server_error(format!("Friendbot request failed: {}", e)))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(ApiError::internal_server_error(format!(
+                    "Friendbot funding failed ({}): {}",
+                    status, body
+                )));
+            }
+
+            tracing::info!(
+                public_key = %public_key,
+                "Prize-pool account funded via Friendbot"
+            );
+        } else {
+            // Mainnet: admin must fund via CreateAccount operation.
+            // Building and signing a full XDR transaction envelope requires
+            // the XDR builder (tracked separately). For now, verify the admin
+            // secret is configured so the failure is actionable at startup.
+            if self.admin_secret.is_none() {
+                return Err(ApiError::internal_server_error(
+                    "STELLAR_ADMIN_SECRET is required to fund prize-pool accounts on mainnet"
+                        .to_string(),
+                ));
+            }
+
+            tracing::warn!(
+                public_key = %public_key,
+                "Mainnet prize-pool account created but NOT yet funded — \
+                 implement XDR CreateAccount op to fund from admin account"
+            );
+        }
+
+        Ok(public_key)
     }
 
     async fn update_tournament_status_if_needed(
