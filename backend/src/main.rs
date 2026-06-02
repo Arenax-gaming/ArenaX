@@ -19,6 +19,7 @@ use crate::config::Config;
 use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -133,6 +134,9 @@ async fn main() -> io::Result<()> {
         config.server.port
     );
 
+    // Snapshot the rate limit config so it can be moved into the HttpServer closure.
+    let rate_limit_config = config.rate_limit.clone();
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
@@ -145,12 +149,15 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
             .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    // Auth endpoints (login, register, refresh are rate-limited strictly)
+                    .configure(crate::http::auth_handler::configure_routes)
                     .route(
                         "/notifications",
                         web::get().to(crate::http::notification_handler::get_notifications),
@@ -215,6 +222,8 @@ async fn main() -> io::Result<()> {
                         web::scope("/tournaments")
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
                     )
+                    // Match authority endpoints (create match, score reporting, disputes)
+                    .configure(crate::http::match_authority_handler::configure_routes)
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
