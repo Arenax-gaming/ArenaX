@@ -241,6 +241,11 @@ impl SorobanService {
         }
     }
 
+    /// Return the network configuration (e.g., to inspect the friendbot URL).
+    pub fn network(&self) -> &NetworkConfig {
+        &self.network
+    }
+
     /// Generic invoke method for calling Soroban contract functions
     ///
     /// # Arguments
@@ -567,21 +572,10 @@ impl SorobanService {
         Ok(general_purpose::STANDARD.encode(serde_json::to_string(&envelope)?))
     }
 
-    /// Extract public key from secret key
+    /// Extract public key from secret key using real ed25519 derivation.
     fn secret_to_public_key(&self, secret: &str) -> Result<String, SorobanError> {
-        // In production, use stellar-sdk or ed25519-dalek to derive public key
-        // This is a simplified placeholder
-        if secret.starts_with('S') && secret.len() == 56 {
-            // Stellar secret keys start with 'S' and are 56 chars
-            // Public key would start with 'G' and be derived from secret
-            // For now, return a placeholder
-            Ok(format!("G{}", &secret[1..]))
-        } else {
-            Err(SorobanError::InvalidAccount(format!(
-                "Invalid secret key format: {}",
-                secret
-            )))
-        }
+        crate::service::stellar_service::stellar_public_from_secret(secret)
+            .map_err(|e| SorobanError::InvalidAccount(e))
     }
 
     /// Sign a transaction with a secret key
