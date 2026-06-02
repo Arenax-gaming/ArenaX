@@ -1,5 +1,7 @@
 import { PrismaClient, TournamentFormat, TournamentStatus, TournamentRound } from '@prisma/client';
 import { logger } from './logger.service';
+import { verifyPayment, PaymentProvider } from './payment-verification.service';
+import { HttpError } from '../utils/http-error';
 
 const prisma = new PrismaClient();
 
@@ -96,9 +98,22 @@ export class TournamentService {
   }
 
   /**
-   * Register a player for a tournament
+   * Register a player for a tournament.
+   *
+   * For paid tournaments the caller must supply `paymentProvider` and
+   * `paymentReference`. The reference is verified server-side against the
+   * provider API before registration is confirmed.  Client-supplied amounts
+   * are never trusted — the expected amount is always read from the tournament
+   * record.
    */
-  async registerPlayer(tournamentId: string, playerId: string) {
+  async registerPlayer(
+    tournamentId: string,
+    playerId: string,
+    payment?: {
+      provider: PaymentProvider;
+      reference: string;
+    },
+  ) {
     try {
       // Get tournament
       const tournament = await prisma.tournament.findUnique({
@@ -112,24 +127,93 @@ export class TournamentService {
       });
 
       if (!tournament) {
-        throw new Error('Tournament not found');
+        throw new HttpError(404, 'Tournament not found');
       }
 
       // Check if registration is open
       const now = new Date();
       if (now < tournament.registrationStart) {
-        throw new Error('Registration has not started yet');
+        throw new HttpError(400, 'Registration has not started yet');
       }
       if (now > tournament.registrationEnd) {
-        throw new Error('Registration is closed');
+        throw new HttpError(400, 'Registration is closed');
       }
 
       // Check if already registered
       if (tournament.registrations.length > 0) {
-        throw new Error('Already registered for this tournament');
+        throw new HttpError(409, 'Already registered for this tournament');
       }
 
-      // Check capacity
+      // ── Payment verification ──────────────────────────────────────────────
+
+      let paymentStatus = 'PAID';
+      let paymentTxHash: string | null = null;
+      let paymentMetadata: Record<string, unknown> = {};
+
+      if (tournament.entryFee) {
+        if (!payment?.provider || !payment?.reference) {
+          throw new HttpError(400, 'Payment provider and reference are required for paid tournaments');
+        }
+
+        // Convert entry fee (stored as NGN decimal) to kobo for comparison.
+        // entryFee is stored as a Decimal; multiply by 100 and round to kobo.
+        const expectedAmountKobo = Math.round(Number(tournament.entryFee) * 100);
+
+        // Check for duplicate reference (prevent replay attacks)
+        const existingPayment = await prisma.tournamentRegistration.findFirst({
+          where: {
+            paymentTxHash: payment.reference,
+            paymentStatus: 'PAID',
+          },
+        });
+
+        if (existingPayment) {
+          throw new HttpError(409, 'Payment reference has already been used');
+        }
+
+        const result = await verifyPayment({
+          provider: payment.provider,
+          reference: payment.reference,
+          expectedAmountKobo,
+        });
+
+        if (!result.verified) {
+          logger.warn('Payment verification failed', {
+            tournamentId,
+            playerId,
+            provider: payment.provider,
+            reference: payment.reference,
+            status: result.status,
+            amountKobo: result.amountKobo,
+            expectedAmountKobo,
+          });
+
+          const statusMessages: Record<string, string> = {
+            amount_mismatch: `Payment amount does not match the tournament entry fee`,
+            failed: 'Payment was not successful',
+            abandoned: 'Payment was abandoned',
+            reversed: 'Payment has been reversed',
+            refunded: 'Payment has been refunded',
+          };
+
+          const msg = statusMessages[result.status] ?? `Payment verification failed (status: ${result.status})`;
+          throw new HttpError(402, msg);
+        }
+
+        paymentStatus = 'PAID';
+        paymentTxHash = payment.reference;
+        paymentMetadata = {
+          provider: result.provider,
+          verifiedAt: new Date().toISOString(),
+          currency: result.currency,
+          amountKobo: result.amountKobo,
+          paidAt: result.paidAt,
+          providerData: result.providerData,
+        };
+      }
+
+      // ── Check capacity ───────────────────────────────────────────────────
+
       const participantCount = tournament.participants.filter(
         (p) => p.status !== 'DISQUALIFIED'
       ).length;
@@ -145,12 +229,15 @@ export class TournamentService {
           waitlistPosition: isFull
             ? (await this.getNextWaitlistPosition(tournamentId))
             : null,
-          paymentStatus: tournament.entryFee ? 'PENDING' : 'PAID',
+          paymentStatus: tournament.entryFee ? paymentStatus : 'PAID',
+          paymentTxHash,
+          metadata: paymentMetadata,
+          confirmedAt: tournament.entryFee && !isFull ? new Date() : null,
         },
       });
 
-      // If not full and no entry fee, create participant directly
-      if (!isFull && !tournament.entryFee) {
+      // If not full and no entry fee (or payment confirmed), create participant directly
+      if (!isFull && (!tournament.entryFee || paymentStatus === 'PAID')) {
         await this.createParticipant(tournamentId, playerId, registration.id);
       }
 
@@ -159,6 +246,7 @@ export class TournamentService {
         playerId,
         status: registration.status,
         isWaitlist: isFull,
+        paymentVerified: !!tournament.entryFee,
       });
 
       return registration;

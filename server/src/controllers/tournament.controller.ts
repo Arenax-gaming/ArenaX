@@ -151,7 +151,14 @@ export class TournamentController {
         return;
       }
 
-      const registration = await tournamentService.registerPlayer(id, playerId);
+      const { paymentProvider, paymentReference } = req.body;
+
+      const payment =
+        paymentProvider && paymentReference
+          ? { provider: paymentProvider as 'paystack' | 'flutterwave', reference: String(paymentReference) }
+          : undefined;
+
+      const registration = await tournamentService.registerPlayer(id, playerId, payment);
 
       res.status(201).json({
         success: true,

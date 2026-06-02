@@ -4,9 +4,11 @@ use crate::models::{
 use anyhow::Result;
 use chrono::Utc;
 // EventBus is used via crate::realtime::event_bus::EventBus
+use reqwest::{Client, Url};
 use rust_decimal::Decimal;
+use serde::{de::DeserializeOwned, Deserialize};
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::{env, sync::Arc, time::Duration};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -29,6 +31,50 @@ pub enum WalletError {
 }
 
 pub type DbPool = Arc<PgPool>;
+
+const PAYSTACK_BASE_URL: &str = "https://api.paystack.co";
+const FLUTTERWAVE_BASE_URL: &str = "https://api.flutterwave.com/v3";
+const PAYMENT_PROVIDER_TIMEOUT_SECS: u64 = 5;
+
+#[derive(Debug, Deserialize)]
+struct PaystackVerificationResponse {
+    status: bool,
+    message: Option<String>,
+    data: Option<PaystackTransactionData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaystackTransactionData {
+    status: String,
+    reference: Option<String>,
+    amount: i64,
+    currency: Option<String>,
+    paid_at: Option<String>,
+    gateway_response: Option<String>,
+    refund_status: Option<String>,
+    amount_refunded: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlutterwaveVerificationResponse {
+    status: String,
+    message: Option<String>,
+    data: Option<FlutterwaveTransactionData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlutterwaveTransactionData {
+    tx_ref: Option<String>,
+    flw_ref: Option<String>,
+    amount: Option<f64>,
+    charged_amount: Option<f64>,
+    currency: Option<String>,
+    status: Option<String>,
+    created_at: Option<String>,
+    charge_response_message: Option<String>,
+    refund_status: Option<String>,
+    amount_refunded: Option<f64>,
+}
 
 #[derive(Clone)]
 pub struct WalletService {
@@ -436,36 +482,154 @@ impl WalletService {
     // PAYMENT VERIFICATION
     // ========================================================================
 
+    fn paystack_base_url() -> String {
+        env::var("PAYSTACK_BASE_URL").unwrap_or_else(|_| PAYSTACK_BASE_URL.to_string())
+    }
+
+    fn flutterwave_base_url() -> String {
+        env::var("FLUTTERWAVE_BASE_URL").unwrap_or_else(|_| FLUTTERWAVE_BASE_URL.to_string())
+    }
+
+    fn validate_paystack_reference(reference: &str) -> Result<(), WalletError> {
+        let sanitized = reference.trim();
+        if sanitized.is_empty() {
+            return Err(WalletError::PaymentVerificationFailed);
+        }
+        if !sanitized
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/'))
+        {
+            return Err(WalletError::PaymentVerificationFailed);
+        }
+        Ok(())
+    }
+
+    fn validate_flutterwave_reference(reference: &str) -> Result<(), WalletError> {
+        let sanitized = reference.trim();
+        if sanitized.is_empty() || !sanitized.chars().all(|c| c.is_ascii_digit()) {
+            return Err(WalletError::PaymentVerificationFailed);
+        }
+        Ok(())
+    }
+
+    async fn fetch_provider_json<T>(&self, url: Url, secret_key: &str) -> Result<T, WalletError>
+    where
+        T: DeserializeOwned,
+    {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(PAYMENT_PROVIDER_TIMEOUT_SECS))
+            .build()
+            .map_err(|_| WalletError::PaymentVerificationFailed)?;
+
+        let response = client
+            .get(url)
+            .bearer_auth(secret_key)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|err| {
+                tracing::warn!("Payment provider request failed", ?err);
+                WalletError::PaymentVerificationFailed
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            tracing::warn!(
+                "Payment provider returned non-success status",
+                ?status,
+                body = body.as_str()
+            );
+            return Err(WalletError::PaymentVerificationFailed);
+        }
+
+        response.json::<T>().await.map_err(|err| {
+            tracing::warn!("Failed to parse payment provider response", ?err);
+            WalletError::PaymentVerificationFailed
+        })
+    }
+
     /// Verify payment with Paystack
     pub async fn verify_paystack_payment(
         &self,
         reference: &str,
         expected_amount: i64,
     ) -> Result<bool, WalletError> {
-        // TODO: Implement actual Paystack API call
-        // For now, this is a placeholder
+        Self::validate_paystack_reference(reference)?;
 
-        // let client = reqwest::Client::new();
-        // let paystack_secret = std::env::var("PAYSTACK_SECRET_KEY")
-        //     .expect("PAYSTACK_SECRET_KEY must be set");
+        let secret = env::var("PAYSTACK_SECRET")
+            .map_err(|_| WalletError::PaymentVerificationFailed)?;
+        let base_url = Self::paystack_base_url();
 
-        // let response = client
-        //     .get(&format!("https://api.paystack.co/transaction/verify/{}", reference))
-        //     .header("Authorization", format!("Bearer {}", paystack_secret))
-        //     .send()
-        //     .await
-        //     .map_err(|e| WalletError::PaymentVerificationFailed)?;
+        let mut url = Url::parse(&base_url).map_err(|_| WalletError::PaymentVerificationFailed)?;
+        url.path_segments_mut()
+            .map_err(|_| WalletError::PaymentVerificationFailed)?
+            .pop_if_empty()
+            .push("transaction")
+            .push("verify")
+            .push(reference);
 
-        // if !response.status().is_success() {
-        //     return Err(WalletError::PaymentVerificationFailed);
-        // }
+        tracing::info!("Verifying Paystack transaction", reference = reference);
 
-        // let data: PaystackResponse = response.json().await
-        //     .map_err(|e| WalletError::PaymentVerificationFailed)?;
+        let response: PaystackVerificationResponse = self
+            .fetch_provider_json(url, &secret)
+            .await?;
 
-        // Ok(data.data.status == "success" && data.data.amount == expected_amount)
+        if !response.status {
+            tracing::warn!(
+                "Paystack verification response reported failure",
+                message = response.message.as_deref()
+            );
+            return Ok(false);
+        }
 
-        tracing::warn!("Paystack verification not implemented, returning true for testing");
+        let data = match response.data {
+            Some(data) => data,
+            None => {
+                tracing::warn!("Paystack verification response missing data");
+                return Ok(false);
+            }
+        };
+
+        let tx_status = data.status.to_lowercase();
+        if tx_status != "success" {
+            tracing::warn!("Paystack transaction status invalid", status = %tx_status);
+            return Ok(false);
+        }
+
+        if data.amount != expected_amount {
+            tracing::warn!(
+                "Paystack amount mismatch",
+                amount = data.amount,
+                expected_amount = expected_amount
+            );
+            return Ok(false);
+        }
+
+        if let Some(refund_status) = data.refund_status.as_deref() {
+            let refund_status = refund_status.to_lowercase();
+            if refund_status.contains("refund") || refund_status.contains("reverse") {
+                tracing::warn!("Paystack transaction refunded or reversed", refund_status = %refund_status);
+                return Ok(false);
+            }
+        }
+
+        if data.amount_refunded.unwrap_or(0) > 0 {
+            tracing::warn!("Paystack transaction has refunded amount", refunded = data.amount_refunded.unwrap_or(0));
+            return Ok(false);
+        }
+
+        if let Some(gateway_response) = data.gateway_response.as_deref() {
+            let gateway_response = gateway_response.to_lowercase();
+            if gateway_response.contains("failed") || gateway_response.contains("declined") {
+                tracing::warn!(
+                    "Paystack gateway response indicates failure",
+                    gateway_response = %gateway_response
+                );
+                return Ok(false);
+            }
+        }
+
         Ok(true)
     }
 
@@ -475,8 +639,95 @@ impl WalletService {
         transaction_id: &str,
         expected_amount: i64,
     ) -> Result<bool, WalletError> {
-        // TODO: Implement actual Flutterwave API call
-        tracing::warn!("Flutterwave verification not implemented, returning true for testing");
+        Self::validate_flutterwave_reference(transaction_id)?;
+
+        let secret = env::var("FLUTTERWAVE_SECRET")
+            .map_err(|_| WalletError::PaymentVerificationFailed)?;
+        let base_url = Self::flutterwave_base_url();
+
+        let mut url = Url::parse(&base_url).map_err(|_| WalletError::PaymentVerificationFailed)?;
+        url.path_segments_mut()
+            .map_err(|_| WalletError::PaymentVerificationFailed)?
+            .pop_if_empty()
+            .push("transactions")
+            .push(transaction_id)
+            .push("verify");
+
+        tracing::info!("Verifying Flutterwave transaction", transaction_id = transaction_id);
+
+        let response: FlutterwaveVerificationResponse = self
+            .fetch_provider_json(url, &secret)
+            .await?;
+
+        if response.status.to_lowercase() != "success" {
+            tracing::warn!(
+                "Flutterwave verification response reported failure",
+                status = response.status.as_str(),
+                message = response.message.as_deref()
+            );
+            return Ok(false);
+        }
+
+        let data = match response.data {
+            Some(data) => data,
+            None => {
+                tracing::warn!("Flutterwave verification response missing data");
+                return Ok(false);
+            }
+        };
+
+        let tx_status = data.status.unwrap_or_default().to_lowercase();
+        if tx_status != "successful" {
+            tracing::warn!("Flutterwave transaction status invalid", status = %tx_status);
+            return Ok(false);
+        }
+
+        let amount = data
+            .amount
+            .or(data.charged_amount)
+            .unwrap_or_default();
+        let amount_kobo = (amount * 100.0).round() as i64;
+
+        if amount_kobo != expected_amount {
+            tracing::warn!(
+                "Flutterwave amount mismatch",
+                amount_kobo = amount_kobo,
+                expected_amount = expected_amount
+            );
+            return Ok(false);
+        }
+
+        if let Some(currency) = data.currency.as_deref() {
+            if currency.to_uppercase() != "NGN" {
+                tracing::warn!("Flutterwave currency mismatch", currency = currency);
+                return Ok(false);
+            }
+        }
+
+        if let Some(refund_status) = data.refund_status.as_deref() {
+            let refund_status = refund_status.to_lowercase();
+            if refund_status.contains("refund") || refund_status.contains("reverse") {
+                tracing::warn!("Flutterwave transaction refunded or reversed", refund_status = %refund_status);
+                return Ok(false);
+            }
+        }
+
+        if data.amount_refunded.unwrap_or(0.0) > 0.0 {
+            tracing::warn!("Flutterwave transaction has refunded amount", refunded = data.amount_refunded.unwrap_or(0.0));
+            return Ok(false);
+        }
+
+        if let Some(gateway_message) = data.charge_response_message.as_deref() {
+            let gateway_message = gateway_message.to_lowercase();
+            if gateway_message.contains("failed") || gateway_message.contains("declined") {
+                tracing::warn!(
+                    "Flutterwave gateway response indicates failure",
+                    gateway_message = %gateway_message
+                );
+                return Ok(false);
+            }
+        }
+
         Ok(true)
     }
 
