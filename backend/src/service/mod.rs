@@ -16,6 +16,7 @@ pub mod soroban_service;
 pub mod staking_service;
 pub mod stellar_service;
 pub mod tournament_service;
+pub mod user_service;
 pub mod wallet_service;
 
 pub use governance_service::{
@@ -37,5 +38,6 @@ pub use soroban_service::{
 };
 pub use stellar_service::StellarService;
 pub use tournament_service::TournamentService;
+pub use user_service::UserService;
 pub use wallet_service::WalletService;
 pub use crate::realtime::event_bus::EventBus;

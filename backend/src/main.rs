@@ -222,8 +222,14 @@ async fn main() -> io::Result<()> {
                         web::scope("/tournaments")
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
                     )
-                    // Match authority endpoints (create match, score reporting, disputes)
-                    .configure(crate::http::match_authority_handler::configure_routes)
+                    // User endpoints
+                    .service(
+                        web::scope("/users")
+                            .route("/{id}", web::get().to(crate::http::users::get_user_profile))
+                            .route("/me", web::get().to(crate::http::users::get_current_user_profile))
+                            .route("/me", web::put().to(crate::http::users::update_user_profile))
+                            .route("/{id}/stats", web::get().to(crate::http::users::get_user_stats))
+                    )
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
@@ -278,3 +284,7 @@ async fn main() -> io::Result<()> {
 
     server.await
 }
+
+
+
+
