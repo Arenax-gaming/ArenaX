@@ -11,6 +11,7 @@ import tournamentRoutes from './tournament.routes';
 import analyticsRoutes from './analytics.routes';
 import metricsRoutes from './metrics.routes';
 import dashboardRoutes from './dashboard.routes';
+import searchRoutes from './search.routes';
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
@@ -42,5 +43,6 @@ router.use('/v1/tournaments', tournamentRoutes);
 router.use('/api/v1/analytics', analyticsRoutes);
 router.use('/metrics', metricsRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/v1/search', searchRoutes);
 
 export default router;
