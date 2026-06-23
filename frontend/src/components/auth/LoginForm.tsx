@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -9,6 +10,7 @@ import { Input } from '@/components/ui/Input';
 import { SocialLogin } from './SocialLogin';
 import { AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { loginSchema, type LoginFormInput, type LoginFormData } from '@/lib/validations/auth';
 
 interface LoginFormProps {
   className?: string;
@@ -17,49 +19,25 @@ interface LoginFormProps {
 export function LoginForm({ className }: LoginFormProps) {
   const { login, loading, error, clearError } = useAuth();
   const router = useRouter();
-  
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    rememberMe: false,
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginFormInput, unknown, LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '', rememberMe: false },
   });
-  
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Clear errors when form changes
-  useEffect(() => {
+  const onSubmit = async (values: LoginFormData) => {
     clearError();
-    setErrors({});
-  }, [formData, clearError]);
 
-  const validate = () => {
-    const newErrors: Record<string, string> = {};
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Invalid email address';
-    }
-    
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validate()) return;
-    
     await login({
-      email: formData.email,
-      password: formData.password,
-      rememberMe: formData.rememberMe,
+      email: values.email,
+      password: values.password,
+      rememberMe: values.rememberMe,
     });
-    
+
     if (!error) {
       router.push('/');
     }
@@ -72,7 +50,7 @@ export function LoginForm({ className }: LoginFormProps) {
 
   return (
     <div className={cn('space-y-6', className)}>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div className="space-y-1">
           <label htmlFor="email" className="block text-sm font-medium text-foreground">
             Email address
@@ -82,8 +60,7 @@ export function LoginForm({ className }: LoginFormProps) {
             type="email"
             autoComplete="email"
             placeholder="you@example.com"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            {...register('email')}
             error={!!errors.email || !!error}
             aria-describedby={errors.email ? "email-error" : undefined}
             aria-invalid={!!errors.email || !!error}
@@ -91,7 +68,7 @@ export function LoginForm({ className }: LoginFormProps) {
           {errors.email && (
             <p id="email-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.email}
+              {errors.email.message}
             </p>
           )}
         </div>
@@ -110,8 +87,7 @@ export function LoginForm({ className }: LoginFormProps) {
             type="password"
             autoComplete="current-password"
             placeholder="••••••••"
-            value={formData.password}
-            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            {...register('password')}
             error={!!errors.password || !!error}
             aria-describedby={errors.password ? "password-error" : undefined}
             aria-invalid={!!errors.password || !!error}
@@ -119,7 +95,7 @@ export function LoginForm({ className }: LoginFormProps) {
           {errors.password && (
             <p id="password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.password}
+              {errors.password.message}
             </p>
           )}
         </div>
@@ -135,8 +111,7 @@ export function LoginForm({ className }: LoginFormProps) {
           <input
             id="remember-me"
             type="checkbox"
-            checked={formData.rememberMe}
-            onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
+            {...register('rememberMe')}
             className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
           />
           <label htmlFor="remember-me" className="ml-2 block text-sm text-muted-foreground">

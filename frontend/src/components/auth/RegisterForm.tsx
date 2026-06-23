@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import { useUsernameAvailability } from '@/hooks/useUsernameAvailability';
-import { registerSchema } from '@/lib/validations/auth';
+import { registerSchema, type RegisterFormData } from '@/lib/validations/auth';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SocialLogin } from './SocialLogin';
@@ -17,19 +19,25 @@ interface RegisterFormProps {
 }
 
 export function RegisterForm({ className }: RegisterFormProps) {
-  const { register, loading, error, clearError, user } = useAuth();
+  const { register: registerUser, loading, error, clearError, user } = useAuth();
   const router = useRouter();
 
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    agreeToTerms: false,
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm<RegisterFormData>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { username: '', email: '', password: '', confirmPassword: '' },
   });
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const usernameStatus = useUsernameAvailability(formData.username);
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const [termsError, setTermsError] = useState<string | null>(null);
+
+  const usernameValue = watch('username');
+  const passwordValue = watch('password');
+  const usernameStatus = useUsernameAvailability(usernameValue);
 
   useEffect(() => {
     if (user) {
@@ -37,53 +45,23 @@ export function RegisterForm({ className }: RegisterFormProps) {
     }
   }, [user, router]);
 
-  useEffect(() => {
+  const onSubmit = async (values: RegisterFormData) => {
+    if (!agreeToTerms) {
+      setTermsError('You must agree to the terms');
+      return;
+    }
+    setTermsError(null);
+
+    if (usernameStatus === 'unavailable' || usernameStatus === 'checking') {
+      return;
+    }
+
     clearError();
-    setErrors({});
-  }, [formData, clearError]);
-
-  const validate = (): boolean => {
-    const result = registerSchema.safeParse({
-      username: formData.username,
-      email: formData.email,
-      password: formData.password,
-      confirmPassword: formData.confirmPassword,
-    });
-
-    const newErrors: Record<string, string> = {};
-
-    if (!result.success) {
-      result.error.issues.forEach((issue) => {
-        const path = String(issue.path[0]);
-        if (path && !newErrors[path]) newErrors[path] = issue.message;
-      });
-    }
-
-    if (!formData.agreeToTerms) {
-      newErrors.agreeToTerms = 'You must agree to the terms';
-    }
-
-    if (usernameStatus === 'unavailable') {
-      newErrors.username = 'This username is already taken';
-    } else if (usernameStatus === 'checking') {
-      newErrors.username = 'Please wait while we check username availability';
-    } else if (usernameStatus === 'error') {
-      newErrors.username = 'Could not verify username availability. Please try again.';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    await register({
-      username: formData.username,
-      email: formData.email,
-      password: formData.password,
-      confirmPassword: formData.confirmPassword,
+    await registerUser({
+      username: values.username,
+      email: values.email,
+      password: values.password,
+      confirmPassword: values.confirmPassword,
     });
 
     if (!error) {
@@ -98,7 +76,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
 
   return (
     <div className={cn('space-y-6', className)}>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* Username */}
         <div className="space-y-1">
           <label htmlFor="username" className="block text-sm font-medium text-foreground">
@@ -110,8 +88,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
               type="text"
               autoComplete="username"
               placeholder="yourusername"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+              {...register('username')}
               error={!!errors.username || usernameStatus === 'unavailable'}
               aria-describedby="rf-username-hint rf-username-status"
               aria-invalid={!!errors.username || usernameStatus === 'unavailable'}
@@ -158,7 +135,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
           {errors.username && (
             <p id="username-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.username}
+              {errors.username.message}
             </p>
           )}
         </div>
@@ -173,8 +150,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
             type="email"
             autoComplete="email"
             placeholder="you@example.com"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            {...register('email')}
             error={!!errors.email || !!error}
             aria-describedby={errors.email ? 'rf-email-error' : undefined}
             aria-invalid={!!errors.email || !!error}
@@ -182,7 +158,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
           {errors.email && (
             <p id="register-email-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.email}
+              {errors.email.message}
             </p>
           )}
         </div>
@@ -197,17 +173,16 @@ export function RegisterForm({ className }: RegisterFormProps) {
             type="password"
             autoComplete="new-password"
             placeholder="••••••••"
-            value={formData.password}
-            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            {...register('password')}
             error={!!errors.password}
             aria-describedby={errors.password ? 'rf-password-error' : undefined}
             aria-invalid={!!errors.password}
           />
-          <PasswordStrengthIndicator password={formData.password} />
+          <PasswordStrengthIndicator password={passwordValue} />
           {errors.password && (
             <p id="register-password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.password}
+              {errors.password.message}
             </p>
           )}
         </div>
@@ -222,8 +197,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
             type="password"
             autoComplete="new-password"
             placeholder="••••••••"
-            value={formData.confirmPassword}
-            onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+            {...register('confirmPassword')}
             error={!!errors.confirmPassword}
             aria-describedby={errors.confirmPassword ? 'rf-confirm-error' : undefined}
             aria-invalid={!!errors.confirmPassword}
@@ -231,7 +205,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
           {errors.confirmPassword && (
             <p id="confirm-password-error" className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.confirmPassword}
+              {errors.confirmPassword.message}
             </p>
           )}
         </div>
@@ -249,8 +223,11 @@ export function RegisterForm({ className }: RegisterFormProps) {
             <input
               id="agree-terms"
               type="checkbox"
-              checked={formData.agreeToTerms}
-              onChange={(e) => setFormData({ ...formData, agreeToTerms: e.target.checked })}
+              checked={agreeToTerms}
+              onChange={(e) => {
+                setAgreeToTerms(e.target.checked);
+                if (e.target.checked) setTermsError(null);
+              }}
               className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
           </div>
@@ -265,10 +242,10 @@ export function RegisterForm({ className }: RegisterFormProps) {
                 Privacy Policy
               </a>
             </label>
-            {errors.agreeToTerms && (
+            {termsError && (
               <p className="flex items-center gap-1 mt-1 text-xs text-destructive">
                 <AlertCircle className="h-3 w-3" />
-                {errors.agreeToTerms}
+                {termsError}
               </p>
             )}
           </div>
