@@ -31,10 +31,9 @@ members = [
     "tournament-manager",
     "virtual-economy",
     "governance",
-    "prize-distribution",
-    "random-generation",
-    "merkle",
-    "upgrade-proxy",
+    "access-control",
+    "emergency-pause",
+    "time-lock",
 ]
 resolver = "2"
 
