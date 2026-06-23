@@ -28,6 +28,9 @@ members = [
     "player-reputation",
     "tournament-manager",
     "governance",
+    "access-control",
+    "emergency-pause",
+    "time-lock",
 ]
 resolver = "2"
 

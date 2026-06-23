@@ -185,6 +185,11 @@ async fn main() -> io::Result<()> {
                         web::scope("/tournaments")
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
                     )
+                    // Gas endpoints
+                    .service(
+                        web::scope("/gas")
+                            .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
+                    )
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")

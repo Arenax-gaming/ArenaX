@@ -17,3 +17,6 @@ pub mod reputation_index;
 pub mod slashing;
 pub mod staking;
 pub mod tournament;
+pub mod access_control;
+pub mod emergency_pause;
+pub mod time_lock;

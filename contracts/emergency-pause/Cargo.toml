@@ -1,0 +1,18 @@
+[package]
+name = "emergency-pause"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ArenaX unified emergency pause contract"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk.workspace = true
+arenax-events = { path = "../arenax-events" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
