@@ -33,6 +33,7 @@ members = [
     "governance",
     "prize-distribution",
     "random-generation",
+    "merkle",
 ]
 resolver = "2"
 

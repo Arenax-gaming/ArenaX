@@ -60,3 +60,29 @@ The namespace and version are combined in the first topic using `_v` as separato
 **v1** (versioned): Topics `["ArenaXReputation_v1", "REPUTATION_UPDATED"]`, data adds `source: u32` field.
 
 Server parser: v0 returns `source: null`, v1 returns `source` as-is. Consumer checks `event.version` to know which shape to expect.
+
+## Programmatic registry (issue #490)
+
+The shared event crate now exposes a machine-readable registry of every
+namespace it ships under `arenax_events::events_registry::NAMESPACES`. Each
+entry is a `NamespaceEntry { namespace, version }` constant, alphabetised by
+namespace. Off-chain indexers can call `events_registry::lookup(ns)` to
+resolve a topic prefix back to its current version, or iterate `NAMESPACES`
+to know which `(ns, version)` pairs to subscribe to.
+
+Test coverage in `contracts/arenax-events/src/registry_tests.rs` guards:
+
+- No empty `NAMESPACE` or `VERSION` constants.
+- `VERSION` follows the `vN` convention (ASCII digit suffix).
+- No duplicate `NAMESPACE` across modules (catches accidental collisions
+  if two domains pick the same string).
+- `lookup()` round-trips every registered entry.
+
+Adding a new event module is therefore a four-step process:
+
+1. Create `contracts/arenax-events/src/<module>.rs` with `NAMESPACE` and
+   `VERSION` constants.
+2. Add the `pub mod <module>;` line to `lib.rs`.
+3. Append a `NamespaceEntry` line to `events_registry::NAMESPACES`.
+4. Run `cargo test -p arenax-events` — the uniqueness + format tests
+   confirm the wiring.
