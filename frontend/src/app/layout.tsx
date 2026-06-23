@@ -8,6 +8,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -48,6 +49,7 @@ export default function RootLayout({
                 <WalletProvider>
                   <TxStatusProvider>
                     <NotificationProvider>
+                      <WebVitalsInit />
                       <AppLayout>{children}</AppLayout>
                     </NotificationProvider>
                   </TxStatusProvider>
