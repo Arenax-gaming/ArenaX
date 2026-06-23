@@ -3,6 +3,9 @@ const withPWA = require("next-pwa")({
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === "development",
+  // Use our handcrafted service worker instead of the Workbox auto-generated one
+  swSrc: "public/sw.js",
+  swDest: "public/sw.js",
 });
 
 /** @type {import('next').NextConfig} */

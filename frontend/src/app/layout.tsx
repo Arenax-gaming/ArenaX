@@ -9,6 +9,8 @@ import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
+import { OfflineProvider } from "@/contexts/OfflineContext";
+import { OfflineBanner } from "@/components/offline/OfflineBanner";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -49,8 +51,11 @@ export default function RootLayout({
                 <WalletProvider>
                   <TxStatusProvider>
                     <NotificationProvider>
-                      <WebVitalsInit />
-                      <AppLayout>{children}</AppLayout>
+                      <OfflineProvider>
+                        <OfflineBanner />
+                        <WebVitalsInit />
+                        <AppLayout>{children}</AppLayout>
+                      </OfflineProvider>
                     </NotificationProvider>
                   </TxStatusProvider>
                 </WalletProvider>
