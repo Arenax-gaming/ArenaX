@@ -2,12 +2,20 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import os from 'node:os';
 import express, { Express, Request, Response } from 'express';
-import compression from 'compression';
+import {
+  createCompressionMiddleware,
+  resolveCompressionConfigFromEnv,
+} from './middleware/compression.middleware';
 import { createApp } from './app';
 import { logger } from './services/logger.service';
 import { createAdminService, getAdminService } from './services/admin.service';
 import { initEnv } from './config/env';
 import { initializeTelemetry } from './services/telemetry.service';
+import {
+  initTracing,
+  shutdownTracing,
+  traceparentResponseMiddleware,
+} from './services/tracing.service';
 import { registerAchievementIntegration } from './services/achievement.service';
 import { startHealthMonitor } from './services/health.service';
 import { Server as SocketIOServer } from 'socket.io';
@@ -25,6 +33,10 @@ dotenv.config({ path: path.join(root, `.env.${nodeEnv}`) });
 dotenv.config({ path: path.join(root, `.env.${nodeEnv}.local`) });
 
 const env = initEnv();
+// Tracing must initialise *before* createApp() so the OTel SDK can
+// wrap the imported express/http modules before any routes are
+// registered.
+initTracing();
 initializeTelemetry();
 registerAchievementIntegration();
 
@@ -65,7 +77,8 @@ app.get('/health', async (_req: Request, res: Response) => {
     }
 });
 
-app.use(compression());
+app.use(createCompressionMiddleware(resolveCompressionConfigFromEnv()));
+app.use(traceparentResponseMiddleware());
 
 let memoryWarningInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -93,6 +106,8 @@ const gracefulShutdown = (signal: string) => {
 
     stopMemoryMonitor();
     eventMonitoringService.stop();
+    // Best-effort: flush in-flight spans before we exit.
+    shutdownTracing().catch(() => {});
 
     if (!server) {
         logger.info('No server running, exiting');

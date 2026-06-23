@@ -1,3 +1,23 @@
+//! Shared, versioned event definitions for ArenaX contracts.
+//!
+//! ## Standardisation rules (issue #490)
+//!
+//! Every contract domain exposes its events from its own module here, and
+//! every module must declare the two associated constants:
+//!
+//! - `NAMESPACE: &str` — domain name (e.g. `"ArenaXMatch"`).
+//! - `VERSION: &str` — schema version (e.g. `"v1"`); bump only on a
+//!   breaking change to any event in the module.
+//!
+//! Topics use the convention `["{NAMESPACE_abbrev}_{VERSION}", "{ACTION}"]`
+//! (see existing modules). Off-chain indexers split on `_` to pick up the
+//! namespace + version without parsing the action.
+//!
+//! The [`registry`] module exposes a single machine-readable list of
+//! every `(NAMESPACE, VERSION)` shipped by this crate, and the test
+//! suite enforces uniqueness so a future PR can't accidentally collide
+//! two domains on the same namespace.
+
 #![no_std]
 
 pub mod anti_cheat;
@@ -19,4 +39,9 @@ pub mod staking;
 pub mod tournament;
 pub mod virtual_economy;
 pub mod prize_distribution;
+
+pub mod events_registry;
+
+#[cfg(test)]
+mod registry_tests;
 

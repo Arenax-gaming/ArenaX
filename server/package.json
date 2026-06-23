@@ -16,6 +16,13 @@
         "lint": "tsc --noEmit"
     },
     "dependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+        "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+        "@opentelemetry/resources": "^1.30.0",
+        "@opentelemetry/sdk-node": "^0.57.0",
+        "@opentelemetry/sdk-trace-base": "^1.30.0",
+        "@opentelemetry/semantic-conventions": "^1.30.0",
         "@prisma/client": "^5.10.2",
         "@sentry/node": "^9.18.0",
         "@stellar/stellar-sdk": "^11.3.0",
