@@ -10,8 +10,10 @@ pub enum DataKey {
     Achievement(Address, u32),             // (player, achievement_id)
     SportsmanshipReview(Address, Address), // (player, reviewer)
     PrivacySettings(Address),
-    ReputationDispute(BytesN<32>), // dispute_id
+    ReputationDispute(BytesN<32>),          // dispute_id
     Config,
+    Snapshot(Address, u32),                 // (player, index) - circular buffer
+    SnapshotCount(Address),                 // player -> u32 (count of snapshots)
 }
 
 /// Multi-dimensional reputation profile for a player
@@ -41,6 +43,16 @@ pub struct PlayerProfile {
     pub last_active_ts: u64,
     /// Whether this player's detailed stats are private
     pub is_private: bool,
+    /// Category-specific scores
+    pub gaming_score: i128,
+    pub social_score: i128,
+    pub achievement_score: i128,
+    /// Streak tracking
+    pub consecutive_active_days: u32,
+    /// Recovery tracking
+    pub last_recovery_ts: u64,
+    /// Decay exemption
+    pub decay_exempt_until: u64,
 }
 
 impl PlayerProfile {
@@ -59,6 +71,12 @@ impl PlayerProfile {
             draws: 0,
             last_active_ts: ts,
             is_private: false,
+            gaming_score: base_skill,
+            social_score: 50,
+            achievement_score: 0,
+            consecutive_active_days: 0,
+            last_recovery_ts: 0,
+            decay_exempt_until: 0,
         }
     }
 }
@@ -81,6 +99,17 @@ pub struct ReputationConfig {
     pub sportsmanship_weight: i128,
     /// Weight of achievements in composite score (out of 100)
     pub achievement_weight: i128,
+    /// Category-specific decay rates
+    pub gaming_decay_per_day: i128,
+    pub social_decay_per_day: i128,
+    /// Recovery mechanism
+    pub base_recovery_rate: i128,
+    pub max_recovery_per_day: i128,
+    /// Streak bonuses
+    pub streak_bonus_threshold: u32,
+    pub streak_bonus_amount: i128,
+    /// Snapshot management
+    pub max_snapshots: u32,
 }
 
 /// Reputation snapshot for historical tracking
