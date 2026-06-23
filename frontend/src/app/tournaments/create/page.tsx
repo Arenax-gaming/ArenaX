@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, Trophy } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -8,113 +11,188 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/Card";
-import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
-import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { useAuth } from "@/hooks/useAuth";
+import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 
-const faqs = [
-  {
-    question: "How do I create an account?",
-    answer:
-      "Simply click the 'Register' button on our homepage and fill in your email and desired password. You can also sign up using your Google or Discord account for faster registration.",
-  },
-  {
-    question: "How do I join a tournament?",
-    answer:
-      "Navigate to the Tournaments page, browse available events, and click 'Join Tournament' on any event with open registration. You'll need to pay the entry fee (if any) to secure your spot.",
-  },
-  {
-    question: "How are match results verified?",
-    answer:
-      "We use a combination of AI-powered anti-cheat systems and on-chain verification. All match results are recorded on the Stellar blockchain for complete transparency.",
-  },
-  {
-    question: "How do I withdraw my winnings?",
-    answer:
-      "Go to your Wallet page, click 'Withdraw', and enter your Stellar wallet address or select a supported payment method. Withdrawals are processed instantly thanks to Stellar's fast transaction finality.",
-  },
-  {
-    question: "What games are supported?",
-    answer:
-      "We currently support major titles including Counter-Strike 2, Valorant, League of Legends, Dota 2, Fortnite, Overwatch 2, and many more. We're constantly adding new games based on community demand.",
-  },
-  {
-    question: "How do I report a cheater?",
-    answer:
-      "If you suspect another player of cheating, you can report them directly from the match results page or contact our support team with evidence. We take all reports seriously and investigate promptly.",
-  },
-  {
-    question: "Is ArenaX available in my country?",
-    answer:
-      "ArenaX is available in over 150 countries worldwide. Some features may be restricted based on local regulations. Check our Terms of Service for more information about regional availability.",
-  },
-  {
-    question: "How can I partner with ArenaX?",
-    answer:
-      "We're always looking for brand partnerships, tournament organizers, and content creators. Contact our partnerships team through this form by selecting 'Partnership' as the category.",
-  },
-];
+export default function CreateTournamentPage() {
+  const router = useRouter();
+  const { user } = useAuth();
 
-export function FAQSection() {
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const prefersReducedMotion = useReducedMotion();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [maxParticipants, setMaxParticipants] = useState(16);
+  const [entryFee, setEntryFee] = useState(0);
+  const [prizePool, setPrizePool] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError("Tournament name is required.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      // Placeholder — replace with api.createTournament(...)
+      await new Promise((r) => setTimeout(r, 500));
+      router.push("/tournaments");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create tournament.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <HelpCircle className="h-5 w-5" />
-          Frequently Asked Questions
-        </CardTitle>
-        <CardDescription>
-          Find quick answers to common questions about ArenaX.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {faqs.map((faq, index) => (
-          <div key={index} className="border rounded-lg overflow-hidden">
-            <button
-              onClick={() => setOpenFaq(openFaq === index ? null : index)}
-              className="flex items-center justify-between w-full p-4 text-left hover:bg-muted/50 transition-colors"
-            >
-              <span className="font-medium text-sm">{faq.question}</span>
-              {openFaq === index ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              )}
-            </button>
-            <AnimatePresence>
-              {openFaq === index && (
-                <motion.div
-                  initial={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  animate={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: "auto", opacity: 1 }
-                  }
-                  exit={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  transition={
-                    prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }
-                  }
-                >
-                  <div className="px-4 pb-4 text-sm text-muted-foreground">
-                    {faq.answer}
+    <ProtectedPage>
+      <div className="min-h-screen bg-background px-4 py-8">
+        <div className="max-w-2xl mx-auto space-y-6">
+          {/* Back link */}
+          <Link
+            href="/tournaments"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to tournaments
+          </Link>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-2xl">
+                <Trophy className="h-6 w-6 text-yellow-500" />
+                Create Tournament
+              </CardTitle>
+              <CardDescription>
+                Set up your tournament details below. You can edit these after
+                creation until registration opens.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-5">
+                {/* Name */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="tournament-name"
+                    className="text-sm font-medium"
+                  >
+                    Tournament name <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    id="tournament-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Weekly Ranked Cup"
+                    required
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="tournament-description"
+                    className="text-sm font-medium"
+                  >
+                    Description
+                  </label>
+                  <textarea
+                    id="tournament-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                    placeholder="Brief description of rules and format…"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  />
+                </div>
+
+                {/* Number grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="max-participants"
+                      className="text-sm font-medium"
+                    >
+                      Max participants
+                    </label>
+                    <Input
+                      id="max-participants"
+                      type="number"
+                      min={2}
+                      max={256}
+                      value={maxParticipants}
+                      onChange={(e) =>
+                        setMaxParticipants(Number(e.target.value))
+                      }
+                    />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="entry-fee"
+                      className="text-sm font-medium"
+                    >
+                      Entry fee ($)
+                    </label>
+                    <Input
+                      id="entry-fee"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={entryFee}
+                      onChange={(e) => setEntryFee(Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="prize-pool"
+                      className="text-sm font-medium"
+                    >
+                      Prize pool ($)
+                    </label>
+                    <Input
+                      id="prize-pool"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={prizePool}
+                      onChange={(e) => setPrizePool(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* Error */}
+                {error && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {error}
+                  </p>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    type="submit"
+                    loading={isSubmitting}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  >
+                    Create tournament
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => router.back()}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </ProtectedPage>
   );
 }

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
+import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
 
 export default function TournamentDetailsPage() {
   const params = useParams();
@@ -74,13 +75,7 @@ export default function TournamentDetailsPage() {
   }, [currentUserId, tournament]);
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="text-center">
-          <p className="text-lg font-medium text-foreground">Loading tournament details...</p>
-        </div>
-      </div>
-    );
+    return <TournamentDetailSkeleton />;
   }
 
   if (fetchError) {

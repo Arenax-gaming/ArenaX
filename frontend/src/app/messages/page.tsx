@@ -5,6 +5,7 @@ import { MessageSquare } from "lucide-react";
 import { ChatInterface } from "@/components/social/ChatInterface";
 import { useConversations, useSendMessage } from "@/hooks/useSocial";
 import { useAuth } from "@/hooks/useAuth";
+import { AvatarSkeleton, Skeleton } from "@/components/common/PageSkeleton";
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -58,8 +59,17 @@ export default function MessagesPage() {
             </div>
             <div className="flex-1 overflow-y-auto">
               {conversationsLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div className="divide-y divide-border/50" aria-label="Loading conversations" aria-live="polite">
+                  <span className="sr-only">Loading conversations…</span>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 p-4">
+                      <AvatarSkeleton size="md" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-40" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : conversations && conversations.length > 0 ? (
                 conversations.map((conv) => (

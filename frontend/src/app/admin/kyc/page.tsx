@@ -8,6 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import type { KycDocument, KycReview, KycStatus } from "@/types/admin";
+import { PageHeaderSkeleton, ListItemSkeleton, Skeleton } from "@/components/common/PageSkeleton";
+import { PageError } from "@/components/common/PageError";
+import { EmptyState } from "@/components/common/EmptyState";
+import { FileText } from "lucide-react";
 
 export default function KycDashboard() {
   const [reviews, setReviews] = useState<KycReview[]>([]);
