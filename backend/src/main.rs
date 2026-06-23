@@ -16,15 +16,18 @@ mod orchestrator;
 mod telemetry;
 
 use crate::config::Config;
-use crate::db::create_pool;
+use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
 use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
+use crate::service::soroban_service::{NetworkConfig, SorobanService};
+use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
 #[tokio::main]
@@ -39,6 +42,10 @@ async fn main() -> io::Result<()> {
     let db_pool = create_pool(&config)
         .await
         .expect("Failed to create database pool");
+
+    run_startup_migrations(&config, &db_pool)
+        .await
+        .expect("Failed to run database migrations");
 
     // Spawn the Reaper — forfeits players who miss the reporting deadline
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));
@@ -60,14 +67,15 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
-    // Initialize matchmaking service
+    // Initialize matchmaking service — pass the shared ConnectionManager so
+    // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
     let matchmaker_service = Arc::new(MatchmakerService::new(
         db_pool.clone(),
-        redis_client.clone(),
+        redis_conn.clone(),
         matchmaking_config,
     ));
-    
+
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
     tokio::spawn(async move {
@@ -79,6 +87,28 @@ async fn main() -> io::Result<()> {
 
     // Initialize ELO engine
     let elo_engine = Arc::new(EloEngine::new(32.0)); // K-Factor 32
+
+    // Build the shared Soroban service used for on-chain prize distribution.
+    // The network URL from config drives testnet vs mainnet selection.
+    let soroban_network = NetworkConfig::custom(
+        config.stellar.network_url.clone(),
+        if config.stellar.network_url.contains("testnet") {
+            "Test SDF Network ; September 2015".to_string()
+        } else {
+            "Public Global Stellar Network ; September 2015".to_string()
+        },
+    );
+    let soroban_service = Arc::new(SorobanService::new(soroban_network));
+
+    // Shared TournamentService wired with Soroban so distribute_prizes can
+    // execute real on-chain transfers via the prize contract.
+    let tournament_service = Arc::new(
+        TournamentService::new(db_pool.clone()).with_soroban(
+            soroban_service.clone(),
+            config.stellar.soroban_contract_prize.clone(),
+            config.stellar.admin_secret.clone(),
+        ),
+    );
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
@@ -104,6 +134,9 @@ async fn main() -> io::Result<()> {
         config.server.port
     );
 
+    // Snapshot the rate limit config so it can be moved into the HttpServer closure.
+    let rate_limit_config = config.rate_limit.clone();
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
@@ -114,13 +147,17 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(auth_guard.clone()))
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
+            .app_data(web::Data::new(tournament_service.clone()))
             .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    // Auth endpoints (login, register, refresh are rate-limited strictly)
+                    .configure(crate::http::auth_handler::configure_routes)
                     .route(
                         "/notifications",
                         web::get().to(crate::http::notification_handler::get_notifications),
@@ -140,6 +177,15 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/notifications/{id}",
                         web::delete().to(crate::http::notification_handler::delete_notification),
+                    )
+                    // Wallet endpoints
+                    .service(
+                        web::scope("/wallet")
+                            .route("", web::get().to(crate::http::wallet::get_wallet))
+                            .route("/transactions", web::get().to(crate::http::wallet::get_transaction_history))
+                            .route("/deposit", web::post().to(crate::http::wallet::initiate_deposit))
+                            .route("/deposit/verify", web::post().to(crate::http::wallet::verify_deposit))
+                            .route("/withdraw", web::post().to(crate::http::wallet::initiate_withdrawal))
                     )
                     // Reputation endpoints
                     .route(

@@ -4,7 +4,13 @@ import {
     loginUser,
     logoutUser,
     refreshSession,
-    registerUser
+    registerUser,
+    authenticateSocial,
+    createGuestSession,
+    verifyEmail,
+    resendVerificationEmail,
+    forgotPassword,
+    resetPassword
 } from '../services/auth.service';
 import { HttpError } from '../utils/http-error';
 
@@ -31,6 +37,28 @@ const loginSchema = z.object({
 
 const refreshSchema = z.object({
     refreshToken: z.string().min(1)
+});
+
+const socialAuthSchema = z.object({
+    provider: z.enum(['google', 'discord', 'twitch']),
+    accessToken: z.string().min(1)
+});
+
+const verifyEmailSchema = z.object({
+    token: z.string().min(1)
+});
+
+const resendVerificationEmailSchema = z.object({
+    email: z.string().email()
+});
+
+const forgotPasswordSchema = z.object({
+    email: z.string().email()
+});
+
+const resetPasswordSchema = z.object({
+    token: z.string().min(1),
+    newPassword: z.string().min(8).max(128)
 });
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
@@ -68,6 +96,66 @@ export const logout = async (req: Request, res: Response, next: NextFunction) =>
         const payload = parseBody(refreshSchema, req.body);
         await logoutUser(payload);
         res.status(204).send();
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const socialAuth = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { provider } = req.params;
+        const payload = parseBody(socialAuthSchema, { ...req.body, provider });
+        const result = await authenticateSocial(payload);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const guestSession = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const result = await createGuestSession();
+        res.status(201).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const verifyEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(verifyEmailSchema, req.body);
+        await verifyEmail(payload);
+        res.status(200).json({ message: 'Email verified successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const resendVerificationEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(resendVerificationEmailSchema, req.body);
+        const result = await resendVerificationEmail(payload);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const forgotPasswordHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(forgotPasswordSchema, req.body);
+        const result = await forgotPassword(payload);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const resetPasswordHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(resetPasswordSchema, req.body);
+        await resetPassword(payload);
+        res.status(200).json({ message: 'Password reset successfully' });
     } catch (error) {
         next(error);
     }

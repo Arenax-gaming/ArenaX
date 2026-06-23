@@ -4,10 +4,12 @@ mod error;
 mod storage;
 
 use arenax_events::player_reputation as events;
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 use storage::{
-    DataKey, PlayerProfile, ReputationConfig, ACHIEVEMENT_BONUS, ACTION_BONUS, ACTION_DRAW,
-    ACTION_LOSS, ACTION_PENALTY, ACTION_WIN, ELO_K, MAX_SPORT_RATING, SECS_PER_DAY,
+    CommunityStanding, CommunityTrust, DataKey, DisputeStatus, LeaderboardEntry, PlayerPrivileges,
+    PlayerProfile, ReputationConfig, ReputationDispute, ReputationSnapshot, SkillProgression,
+    TournamentResult, ACHIEVEMENT_BONUS, ACTION_BONUS, ACTION_DRAW, ACTION_LOSS, ACTION_PENALTY,
+    ACTION_WIN, ELO_K, MAX_SPORT_RATING, SECS_PER_DAY,
 };
 
 pub use error::PlayerReputationError;
@@ -352,6 +354,335 @@ impl PlayerReputationContract {
             .set(&DataKey::PlayerProfile(player), &profile);
 
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Advanced Reputation Features
+    // -------------------------------------------------------------------------
+
+    /// Get player reputation history over time
+    pub fn get_reputation_history(
+        env: Env,
+        player: Address,
+        days: u32,
+    ) -> Result<Vec<ReputationSnapshot>, PlayerReputationError> {
+        let mut history = Vec::new(&env);
+
+        // In a real implementation, this would query historical snapshots
+        // For now, return current state as single snapshot
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        let snapshot = ReputationSnapshot {
+            timestamp: now,
+            reputation_score: profile.reputation_score,
+            skill_rating: profile.skill_rating,
+            sportsmanship_score: profile.sportsmanship_score,
+            achievement_count: profile.achievement_count,
+        };
+
+        history.push_back(snapshot);
+        Ok(history)
+    }
+
+    /// Calculate skill progression rate
+    pub fn calculate_skill_progression(
+        env: Env,
+        player: Address,
+        time_period_days: u32,
+    ) -> Result<SkillProgression, PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        // Simplified calculation - in practice, would use historical data
+        let games_played = profile.wins + profile.losses + profile.draws;
+        let win_rate = if games_played > 0 {
+            (profile.wins * 100) / games_played
+        } else {
+            0
+        };
+
+        let progression = SkillProgression {
+            current_rating: profile.skill_rating,
+            rating_change: 0, // Would calculate from historical data
+            games_played,
+            win_rate,
+            improvement_rate: 0, // Would calculate trend
+            consistency_score: Self::calculate_consistency(&profile),
+        };
+
+        Ok(progression)
+    }
+
+    /// Get community trust metrics
+    pub fn get_community_trust(
+        env: Env,
+        player: Address,
+    ) -> Result<CommunityTrust, PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        let trust = CommunityTrust {
+            sportsmanship_rating: profile.sportsmanship_score,
+            review_count: profile.review_count,
+            trust_score: Self::calculate_trust_score(&profile),
+            reliability_index: Self::calculate_reliability(&profile),
+            community_standing: Self::get_community_standing(&profile),
+        };
+
+        Ok(trust)
+    }
+
+    /// Batch update reputations for tournament results
+    pub fn batch_update_tournament_results(
+        env: Env,
+        tournament_results: Vec<TournamentResult>,
+    ) -> Result<(), PlayerReputationError> {
+        Self::require_authorized_updater(&env)?;
+
+        for result in tournament_results.iter() {
+            // Calculate reputation change based on placement
+            let impact = Self::calculate_tournament_impact(
+                result.placement,
+                result.total_participants,
+                result.tournament_tier,
+            );
+
+            let action_type = if result.placement == 1 {
+                ACTION_WIN
+            } else if result.placement <= 3 {
+                ACTION_BONUS // Top 3 get bonus
+            } else {
+                ACTION_DRAW // Participation reward
+            };
+
+            Self::update_reputation(env.clone(), result.player.clone(), action_type, impact)?;
+        }
+
+        Ok(())
+    }
+
+    /// Update multiple achievements at once
+    pub fn batch_unlock_achievements(
+        env: Env,
+        player: Address,
+        achievement_ids: Vec<u32>,
+    ) -> Result<u32, PlayerReputationError> {
+        Self::require_authorized_updater(&env)?;
+
+        let mut unlocked_count = 0u32;
+
+        for achievement_id in achievement_ids.iter() {
+            if achievement_id < 64 {
+                match Self::unlock_achievement(env.clone(), player.clone(), achievement_id) {
+                    Ok(_) => unlocked_count += 1,
+                    Err(PlayerReputationError::AchievementAlreadyUnlocked) => {
+                        // Skip already unlocked achievements
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        Ok(unlocked_count)
+    }
+
+    /// Get leaderboard rankings
+    pub fn get_leaderboard(env: Env, leaderboard_type: u32, limit: u32) -> Vec<LeaderboardEntry> {
+        let mut leaderboard = Vec::new(&env);
+
+        // In a real implementation, this would query and sort all players
+        // For now, return empty leaderboard as placeholder
+        // Types: 0=Overall, 1=Skill, 2=Sportsmanship, 3=Achievements
+
+        leaderboard
+    }
+
+    /// Calculate reputation-based privileges
+    pub fn get_player_privileges(
+        env: Env,
+        player: Address,
+    ) -> Result<PlayerPrivileges, PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+        let composite_score = Self::compute_composite_score(&profile, &config);
+
+        let privileges = PlayerPrivileges {
+            can_create_tournaments: composite_score >= 1500,
+            can_moderate_disputes: composite_score >= 2000 && profile.sportsmanship_score >= 80,
+            tournament_entry_discount: Self::calculate_entry_discount(composite_score),
+            priority_matchmaking: composite_score >= 1800,
+            beta_features_access: composite_score >= 2500,
+            max_tournament_size: Self::calculate_max_tournament_size(composite_score),
+        };
+
+        Ok(privileges)
+    }
+
+    /// Dispute reputation changes
+    pub fn dispute_reputation_change(
+        env: Env,
+        player: Address,
+        disputed_action: String,
+        evidence: String,
+    ) -> Result<BytesN<32>, PlayerReputationError> {
+        player.require_auth();
+
+        // Generate dispute ID
+        let mut dispute_bytes = [0u8; 32];
+        let timestamp = env.ledger().timestamp();
+        dispute_bytes[0..8].copy_from_slice(&timestamp.to_be_bytes());
+        let dispute_id = BytesN::from_array(&env, &dispute_bytes);
+
+        let dispute = ReputationDispute {
+            dispute_id: dispute_id.clone(),
+            player: player.clone(),
+            disputed_action,
+            evidence,
+            status: DisputeStatus::Pending,
+            created_at: timestamp,
+            resolved_at: None,
+            resolution: None,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReputationDispute(dispute_id.clone()), &dispute);
+
+        events::emit_reputation_disputed(&env, &player, &dispute_id, timestamp);
+
+        Ok(dispute_id)
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal Helper Functions (Enhanced)
+    // -------------------------------------------------------------------------
+
+    fn calculate_tournament_impact(
+        placement: u32,
+        total_participants: u32,
+        tournament_tier: u32,
+    ) -> i128 {
+        let base_impact = match tournament_tier {
+            1 => 50,  // Casual
+            2 => 100, // Competitive
+            3 => 200, // Professional
+            4 => 500, // Championship
+            _ => 25,  // Default
+        };
+
+        let placement_multiplier = match placement {
+            1 => 300,     // 1st place: 3x
+            2 => 200,     // 2nd place: 2x
+            3 => 150,     // 3rd place: 1.5x
+            4..=8 => 125, // Top 8: 1.25x
+            _ => 100,     // Participation: 1x
+        };
+
+        let size_bonus = if total_participants >= 64 {
+            150 // Large tournament bonus
+        } else if total_participants >= 32 {
+            125 // Medium tournament bonus
+        } else {
+            100 // Small tournament
+        };
+
+        (base_impact * placement_multiplier * size_bonus) / 10000
+    }
+
+    fn calculate_consistency(profile: &PlayerProfile) -> i128 {
+        let total_games = profile.wins + profile.losses + profile.draws;
+        if total_games == 0 {
+            return 0;
+        }
+
+        // Simple consistency metric based on win rate stability
+        let win_rate = (profile.wins * 100) / total_games;
+
+        // More consistent players have win rates closer to their skill level
+        let expected_win_rate = (profile.skill_rating - 1000) / 20; // Rough conversion
+        let consistency = 100 - (win_rate as i128 - expected_win_rate).abs();
+
+        consistency.max(0)
+    }
+
+    fn calculate_trust_score(profile: &PlayerProfile) -> i128 {
+        let mut trust = profile.sportsmanship_score;
+
+        // Bonus for having many reviews (shows community engagement)
+        if profile.review_count >= 50 {
+            trust += 10;
+        } else if profile.review_count >= 20 {
+            trust += 5;
+        }
+
+        // Penalty for very low activity
+        let total_games = profile.wins + profile.losses + profile.draws;
+        if total_games < 5 {
+            trust = trust.saturating_sub(20);
+        }
+
+        trust
+    }
+
+    fn calculate_reliability(profile: &PlayerProfile) -> i128 {
+        // Reliability based on completion rate and consistency
+        let total_games = profile.wins + profile.losses + profile.draws;
+        if total_games == 0 {
+            return 50; // Neutral for new players
+        }
+
+        // Assume most games are completed (in real system, track abandonment)
+        let completion_rate = 95; // Placeholder
+        let consistency = Self::calculate_consistency(profile);
+
+        (completion_rate + consistency) / 2
+    }
+
+    fn get_community_standing(profile: &PlayerProfile) -> CommunityStanding {
+        let composite = profile.reputation_score + profile.sportsmanship_score;
+
+        if composite >= 2500 {
+            CommunityStanding::Exemplary
+        } else if composite >= 2000 {
+            CommunityStanding::Respected
+        } else if composite >= 1500 {
+            CommunityStanding::GoodStanding
+        } else if composite >= 1000 {
+            CommunityStanding::Average
+        } else {
+            CommunityStanding::Probation
+        }
+    }
+
+    fn calculate_entry_discount(reputation_score: i128) -> u32 {
+        // Discount percentage based on reputation
+        if reputation_score >= 2500 {
+            25 // 25% discount for top players
+        } else if reputation_score >= 2000 {
+            15 // 15% discount for high reputation
+        } else if reputation_score >= 1500 {
+            10 // 10% discount for good reputation
+        } else {
+            0 // No discount
+        }
+    }
+
+    fn calculate_max_tournament_size(reputation_score: i128) -> u32 {
+        // Maximum tournament size player can organize
+        if reputation_score >= 2500 {
+            128 // Large tournaments
+        } else if reputation_score >= 2000 {
+            64 // Medium tournaments
+        } else if reputation_score >= 1500 {
+            32 // Small tournaments
+        } else {
+            16 // Micro tournaments
+        }
     }
 
     // -------------------------------------------------------------------------

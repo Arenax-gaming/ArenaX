@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 /// Storage keys for all contract data
 #[derive(Clone)]
@@ -10,6 +10,7 @@ pub enum DataKey {
     Achievement(Address, u32),             // (player, achievement_id)
     SportsmanshipReview(Address, Address), // (player, reviewer)
     PrivacySettings(Address),
+    ReputationDispute(BytesN<32>), // dispute_id
     Config,
 }
 
@@ -80,6 +81,108 @@ pub struct ReputationConfig {
     pub sportsmanship_weight: i128,
     /// Weight of achievements in composite score (out of 100)
     pub achievement_weight: i128,
+}
+
+/// Reputation snapshot for historical tracking
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationSnapshot {
+    pub timestamp: u64,
+    pub reputation_score: i128,
+    pub skill_rating: i128,
+    pub sportsmanship_score: i128,
+    pub achievement_count: u32,
+}
+
+/// Skill progression metrics
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillProgression {
+    pub current_rating: i128,
+    pub rating_change: i128,
+    pub games_played: u32,
+    pub win_rate: u32,
+    pub improvement_rate: i128,
+    pub consistency_score: i128,
+}
+
+/// Community trust metrics
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommunityTrust {
+    pub sportsmanship_rating: i128,
+    pub review_count: u32,
+    pub trust_score: i128,
+    pub reliability_index: i128,
+    pub community_standing: CommunityStanding,
+}
+
+/// Tournament result for batch processing
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TournamentResult {
+    pub player: Address,
+    pub placement: u32,
+    pub total_participants: u32,
+    pub tournament_tier: u32,
+}
+
+/// Leaderboard entry
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeaderboardEntry {
+    pub player: Address,
+    pub score: i128,
+    pub rank: u32,
+}
+
+/// Player privileges based on reputation
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayerPrivileges {
+    pub can_create_tournaments: bool,
+    pub can_moderate_disputes: bool,
+    pub tournament_entry_discount: u32,
+    pub priority_matchmaking: bool,
+    pub beta_features_access: bool,
+    pub max_tournament_size: u32,
+}
+
+/// Reputation dispute
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationDispute {
+    pub dispute_id: BytesN<32>,
+    pub player: Address,
+    pub disputed_action: String,
+    pub evidence: String,
+    pub status: DisputeStatus,
+    pub created_at: u64,
+    pub resolved_at: Option<u64>,
+    pub resolution: Option<String>,
+}
+
+/// Community standing levels
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum CommunityStanding {
+    Probation = 0,
+    Average = 1,
+    GoodStanding = 2,
+    Respected = 3,
+    Exemplary = 4,
+}
+
+/// Dispute status
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum DisputeStatus {
+    Pending = 0,
+    UnderReview = 1,
+    Resolved = 2,
+    Rejected = 3,
 }
 
 /// Action types for update_reputation

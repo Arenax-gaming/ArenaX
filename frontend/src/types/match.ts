@@ -1,3 +1,5 @@
+import type { BracketMatch, ScoreReport } from "./bracket";
+
 // Match-related types
 export interface Match {
   id: string;
@@ -85,4 +87,47 @@ export interface MatchDetail extends MatchWithPlayers {
   replayUrl?: string;
   canDispute?: boolean;
   disputeDeadline?: string;
+}
+
+export interface MatchHubEvent {
+  id: string;
+  type: "status" | "score" | "alert" | "report";
+  message: string;
+  createdAt: string;
+}
+
+export interface MatchHubPlayerSnapshot {
+  id: string;
+  username: string;
+  avatar?: string;
+  elo: number;
+  region: string;
+  seed: number;
+  record: string;
+  stats: Array<{ label: string; value: string }>;
+}
+
+export interface MatchHubDetails {
+  id: string;
+  tournamentId: string;
+  tournamentName: string;
+  gameType: string;
+  bracketFormat: "single_elimination" | "double_elimination";
+  roundLabel: string;
+  arenaLabel: string;
+  status: BracketMatch["status"];
+  bestOf: number;
+  scheduledTime: string;
+  startedAt?: string;
+  streamTitle?: string;
+  prizePool: number;
+  player1: MatchHubPlayerSnapshot;
+  player2: MatchHubPlayerSnapshot;
+  scorePlayer1: number;
+  scorePlayer2: number;
+  winnerId?: string;
+  notes: string;
+  reports: ScoreReport[];
+  feed: MatchHubEvent[];
+  canDisputeUntil: string;
 }

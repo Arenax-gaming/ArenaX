@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 import type { UserStatus } from "@/types/social";
 
 const statusConfig: Record<UserStatus, { label: string; color: string; bgColor: string }> = {
-  online: { label: "Online", color: "bg-green-500", bgColor: "bg-green-500/20" },
+  online: { label: "Online", color: "bg-success", bgColor: "bg-success/20" },
   "in-game": { label: "In Game", color: "bg-yellow-500", bgColor: "bg-yellow-500/20" },
   away: { label: "Away", color: "bg-orange-500", bgColor: "bg-orange-500/20" },
-  busy: { label: "Busy", color: "bg-red-500", bgColor: "bg-red-500/20" },
+  busy: { label: "Busy", color: "bg-destructive", bgColor: "bg-destructive/20" },
   offline: { label: "Offline", color: "bg-gray-500", bgColor: "bg-gray-500/20" },
 };
 
@@ -81,7 +81,7 @@ export function StatusSelector({ currentStatus, onStatusChange, className }: Sta
               isActive
                 ? cn(config.bgColor, "ring-2", config.color.replace("bg-", "ring-"))
                 : "hover:bg-muted",
-              "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
             )}
             title={config.label}
           >
@@ -125,6 +125,9 @@ export function AvatarWithStatus({
     <div
       className={cn("relative inline-block", className)}
       onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
     >
       <div
         className={cn(

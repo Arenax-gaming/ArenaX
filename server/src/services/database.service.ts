@@ -10,6 +10,9 @@ export type DatabaseTransactionClient = Pick<
     | 'blockchainTransaction'
     | 'walletKeyAccessAudit'
     | 'walletRecoveryChallenge'
+    | 'ban'
+    | 'gameConfig'
+    | 'moderationItem'
     | 'proposal'
     | 'vote'
     | 'match'
@@ -31,6 +34,7 @@ export type DatabaseTransactionClient = Pick<
     | 'gameSessionPlayer'
     | 'gameSessionAction'
     | 'gameSessionEvent'
+    | 'blockchainEvent'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
@@ -38,6 +42,7 @@ export interface DatabaseClient extends DatabaseTransactionClient {
         fn: (tx: DatabaseTransactionClient) => Promise<T>
     ): Promise<T>;
     $disconnect(): Promise<void>;
+    $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: any[]): Promise<T>;
 }
 
 const prisma = new PrismaClient() as unknown as DatabaseClient;

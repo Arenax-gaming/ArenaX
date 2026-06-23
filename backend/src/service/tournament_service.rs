@@ -1,7 +1,11 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::soroban_service::{SorobanService, TxStatus};
+use crate::service::stellar_service::stellar_strkey_encode;
 use chrono::{DateTime, Utc};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -12,6 +16,9 @@ use uuid::Uuid;
 pub struct TournamentService {
     db_pool: DbPool,
     redis_client: Option<Arc<RedisClient>>,
+    soroban_service: Option<Arc<SorobanService>>,
+    prize_contract_id: Option<String>,
+    admin_secret: Option<String>,
 }
 
 impl TournamentService {
@@ -19,11 +26,28 @@ impl TournamentService {
         Self {
             db_pool,
             redis_client: None,
+            soroban_service: None,
+            prize_contract_id: None,
+            admin_secret: None,
         }
     }
 
     pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
         self.redis_client = Some(redis_client);
+        self
+    }
+
+    /// Attach a Soroban service and prize contract configuration so that
+    /// `distribute_prizes` can execute real on-chain transfers.
+    pub fn with_soroban(
+        mut self,
+        soroban_service: Arc<SorobanService>,
+        prize_contract_id: String,
+        admin_secret: String,
+    ) -> Self {
+        self.soroban_service = Some(soroban_service);
+        self.prize_contract_id = Some(prize_contract_id);
+        self.admin_secret = Some(admin_secret);
         self
     }
 
@@ -300,20 +324,57 @@ impl TournamentService {
         tournament_id: Uuid,
         request: JoinTournamentRequest,
     ) -> Result<TournamentParticipant, ApiError> {
-        // Validate tournament can be joined
+        // ── Pre-transaction reads & external verification ────────────────────
+        // These must run outside the transaction: reads are non-mutating, and
+        // the external payment-provider call must not hold a DB connection open.
+
         let tournament = self.get_tournament_by_id(tournament_id).await?;
         self.validate_tournament_join(&tournament, user_id).await?;
 
-        // Check if user is already a participant
         if self.is_user_participant(user_id, tournament_id).await? {
             return Err(ApiError::bad_request("User is already a participant"));
         }
 
-        // Process payment
-        self.process_entry_fee_payment(user_id, &tournament, &request)
+        // For ArenaX token payments, verify the wallet balance before we
+        // open a transaction so we fail fast without acquiring a connection.
+        if request.payment_method == "arenax_token" {
+            let wallet = self.get_user_wallet(user_id).await?;
+            let balance = wallet.balance_arenax_tokens.unwrap_or(0);
+            if balance < tournament.entry_fee {
+                return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
+            }
+        }
+
+        // For fiat payments, call the external provider API before the
+        // transaction so network latency never blocks a DB connection.
+        if request.payment_method == "fiat" {
+            let reference = request
+                .payment_reference
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("Payment reference is required for fiat payments"))?;
+
+            let payment_verified = self
+                .verify_payment_with_provider(reference, tournament.entry_fee)
+                .await?;
+
+            if !payment_verified {
+                return Err(ApiError::bad_request("Payment verification failed"));
+            }
+        }
+
+        // ── Atomic DB writes inside a transaction ────────────────────────────
+        // Begin transaction: all writes below succeed or all are rolled back.
+        let mut tx = self
+            .db_pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // Step 1: record the payment (wallet debit + transaction log)
+        self.process_entry_fee_payment_in_tx(user_id, &tournament, &request, &mut tx)
             .await?;
 
-        // Add participant
+        // Step 2: register the participant
         let participant = sqlx::query_as!(
             TournamentParticipant,
             r#"
@@ -330,33 +391,47 @@ impl TournamentService {
             true,
             ParticipantStatus::Paid as _
         )
-        .fetch_one(&self.db_pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Update prize pool
-        self.update_prize_pool(tournament_id, tournament.entry_fee)
+        // Step 3: add entry fee to prize pool
+        self.update_prize_pool_in_tx(tournament_id, tournament.entry_fee, &mut tx)
             .await?;
 
-        // Update tournament status if needed
-        self.update_tournament_status_if_needed(tournament_id)
+        // Step 4: close registration if the tournament is now full
+        self.update_tournament_status_if_needed_in_tx(tournament_id, &mut tx)
             .await?;
 
-        // Get username for event
+        // Commit — if anything above failed we already returned an Err and
+        // the transaction will be rolled back automatically on drop.
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // ── Post-commit side-effects (non-atomic, best-effort) ───────────────
+        // Events are published after the commit so we never emit an event for
+        // a registration that was rolled back.
         let username = self
             .get_user_username(user_id)
             .await
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // Publish participant joined event
-        self.publish_tournament_event(serde_json::json!({
-            "type": "participant_joined",
-            "tournament_id": tournament_id,
-            "user_id": user_id,
-            "username": username,
-            "participant_count": self.get_participant_count(tournament_id).await?,
-        }))
-        .await?;
+        let participant_count = self
+            .get_participant_count(tournament_id)
+            .await
+            .unwrap_or(0);
+
+        // Fire-and-forget: event publication failure must not un-register the player.
+        let _ = self
+            .publish_tournament_event(serde_json::json!({
+                "type": "participant_joined",
+                "tournament_id": tournament_id,
+                "user_id": user_id,
+                "username": username,
+                "participant_count": participant_count,
+            }))
+            .await;
 
         Ok(participant)
     }
@@ -651,6 +726,208 @@ impl TournamentService {
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(())
+    }
+
+    // ── Transaction-aware variants used by join_tournament ───────────────────
+    //
+    // Each `_in_tx` method mirrors its pool-based counterpart but accepts a
+    // `&mut sqlx::Transaction<'_, sqlx::Postgres>` so all writes participate
+    // in the same atomic unit. The original helpers are unchanged so any other
+    // caller continues to work without modification.
+
+    /// Record payment (wallet debit + transaction log) inside a transaction.
+    async fn process_entry_fee_payment_in_tx(
+        &self,
+        user_id: Uuid,
+        tournament: &Tournament,
+        request: &JoinTournamentRequest,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        match request.payment_method.as_str() {
+            "fiat" => {
+                // Payment was already verified outside the transaction.
+                // Only record the wallet credit and the transaction row here.
+                self.add_fiat_balance_in_tx(user_id, tournament.entry_fee, tx)
+                    .await?;
+                self.create_transaction_in_tx(
+                    user_id,
+                    TransactionType::EntryFee,
+                    tournament.entry_fee,
+                    tournament.entry_fee_currency.clone(),
+                    format!("Entry fee for tournament: {}", tournament.name),
+                    tx,
+                )
+                .await?;
+            }
+            "arenax_token" => {
+                // Balance was verified outside the transaction.
+                // Only perform the debit and log it here.
+                self.deduct_arenax_tokens_in_tx(user_id, tournament.entry_fee, tx)
+                    .await?;
+                self.create_transaction_in_tx(
+                    user_id,
+                    TransactionType::EntryFee,
+                    tournament.entry_fee,
+                    "ARENAX_TOKEN".to_string(),
+                    format!("Entry fee for tournament: {}", tournament.name),
+                    tx,
+                )
+                .await?;
+            }
+            _ => {
+                return Err(ApiError::bad_request("Invalid payment method"));
+            }
+        }
+        Ok(())
+    }
+
+    /// `UPDATE wallets SET balance_ngn = balance_ngn + $1` inside a transaction.
+    async fn add_fiat_balance_in_tx(
+        &self,
+        user_id: Uuid,
+        amount: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            "UPDATE wallets SET balance_ngn = balance_ngn + $1 WHERE user_id = $2",
+            amount,
+            user_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1`
+    /// inside a transaction.
+    async fn deduct_arenax_tokens_in_tx(
+        &self,
+        user_id: Uuid,
+        amount: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1 WHERE user_id = $2",
+            amount,
+            user_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `INSERT INTO transactions` inside a transaction.
+    async fn create_transaction_in_tx(
+        &self,
+        user_id: Uuid,
+        transaction_type: TransactionType,
+        amount: i64,
+        currency: String,
+        description: String,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO transactions (
+                id, user_id, transaction_type, amount, currency, status,
+                reference, description, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            )
+            "#,
+            Uuid::new_v4(),
+            user_id,
+            transaction_type as _,
+            amount,
+            currency,
+            TransactionStatus::Completed as _,
+            Uuid::new_v4().to_string(),
+            description,
+            Utc::now(),
+            Utc::now()
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// `UPDATE prize_pools SET total_amount = total_amount + $1` inside a
+    /// transaction.
+    async fn update_prize_pool_in_tx(
+        &self,
+        tournament_id: Uuid,
+        entry_fee: i64,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE prize_pools
+            SET total_amount = total_amount + $1, updated_at = $2
+            WHERE tournament_id = $3
+            "#,
+            entry_fee,
+            Utc::now(),
+            tournament_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
+
+    /// Close registration if the tournament is full — runs inside the
+    /// `join_tournament` transaction so the status update is atomic with the
+    /// participant INSERT.
+    async fn update_tournament_status_if_needed_in_tx(
+        &self,
+        tournament_id: Uuid,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), ApiError> {
+        // Read current state through the transaction so we see the participant
+        // row we just inserted (READ COMMITTED isolation still sees its own
+        // uncommitted writes in the same transaction).
+        let row = sqlx::query!(
+            "SELECT status, max_participants FROM tournaments WHERE id = $1",
+            tournament_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let count_row = sqlx::query!(
+            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
+            tournament_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let participant_count = count_row.count.unwrap_or(0) as i32;
+        let max_participants = row.max_participants;
+
+        // Only close if we just filled the last spot.
+        if participant_count >= max_participants {
+            sqlx::query!(
+                r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3"#,
+                TournamentStatus::RegistrationClosed as _,
+                Utc::now(),
+                tournament_id
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            tracing::info!(
+                tournament_id = %tournament_id,
+                participant_count = participant_count,
+                "Tournament registration closed — capacity reached"
+            );
+        }
 
         Ok(())
     }
@@ -962,23 +1239,86 @@ impl TournamentService {
         Ok(())
     }
 
+    /// Create a real Stellar prize-pool account.
+    ///
+    /// Steps:
+    /// 1. Generate a fresh ed25519 keypair and encode it as Stellar StrKeys.
+    /// 2. On testnet (Friendbot available): fund via Friendbot — no admin key needed.
+    ///    On mainnet: require `STELLAR_ADMIN_SECRET` to be set (funding via
+    ///    CreateAccount + Payment ops is noted as a TODO for the XDR builder).
+    /// 3. Return the public key (StrKey starting with `G`) for storage in the
+    ///    `prize_pools.stellar_account` column.
+    ///
+    /// The secret key is intentionally NOT stored here because `prize_pools` has
+    /// no encrypted-secret column.  If you need to sign outgoing prize payments
+    /// from this account, persist the secret via `stellar_accounts` through
+    /// `StellarService::create_stellar_account` and link it by public key.
     async fn create_stellar_prize_pool_account(&self) -> Result<String, ApiError> {
-        // Generate a new Stellar account for the prize pool
-        // In a real implementation, this would:
-        // 1. Generate a new keypair
-        // 2. Create the account on Stellar network
-        // 3. Fund it with XLM
-        // 4. Return the public key
+        // ----------------------------------------------------------------
+        // 1. Generate a real Stellar keypair
+        // ----------------------------------------------------------------
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
 
-        // For now, generate a realistic-looking Stellar public key
-        let account_id = format!(
-            "G{}",
-            uuid::Uuid::new_v4()
-                .to_string()
-                .replace('-', "")
-                .to_uppercase()
+        let public_key = stellar_strkey_encode(6 << 3, verifying_key.as_bytes())
+            .map_err(|e| ApiError::internal_server_error(e))?;
+
+        tracing::info!(
+            public_key = %public_key,
+            "Generated Stellar prize-pool keypair"
         );
-        Ok(account_id)
+
+        // ----------------------------------------------------------------
+        // 2. Fund the account
+        // ----------------------------------------------------------------
+        let friendbot_url = self
+            .soroban_service
+            .as_ref()
+            .and_then(|svc| svc.network().friendbot_url.clone());
+
+        if let Some(base_url) = friendbot_url {
+            // Testnet: use Friendbot
+            let url = format!("{}?addr={}", base_url, public_key);
+            let client = reqwest::Client::new();
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| ApiError::internal_server_error(format!("Friendbot request failed: {}", e)))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(ApiError::internal_server_error(format!(
+                    "Friendbot funding failed ({}): {}",
+                    status, body
+                )));
+            }
+
+            tracing::info!(
+                public_key = %public_key,
+                "Prize-pool account funded via Friendbot"
+            );
+        } else {
+            // Mainnet: admin must fund via CreateAccount operation.
+            // Building and signing a full XDR transaction envelope requires
+            // the XDR builder (tracked separately). For now, verify the admin
+            // secret is configured so the failure is actionable at startup.
+            if self.admin_secret.is_none() {
+                return Err(ApiError::internal_server_error(
+                    "STELLAR_ADMIN_SECRET is required to fund prize-pool accounts on mainnet"
+                        .to_string(),
+                ));
+            }
+
+            tracing::warn!(
+                public_key = %public_key,
+                "Mainnet prize-pool account created but NOT yet funded — \
+                 implement XDR CreateAccount op to fund from admin account"
+            );
+        }
+
+        Ok(public_key)
     }
 
     async fn update_tournament_status_if_needed(
@@ -1062,15 +1402,36 @@ impl TournamentService {
                 ApiError::internal_error(format!("Invalid distribution percentages: {}", e))
             })?;
 
+        // Resolve Soroban dependencies once — if not configured we fall back to
+        // recording-only mode so existing tests and deployments without a contract
+        // address still work.
+        let soroban = self.soroban_service.as_ref();
+        let contract_id = self.prize_contract_id.as_deref();
+        let admin_secret = self.admin_secret.as_deref();
+
         // Distribute prizes
         for (index, participant) in participants.iter().enumerate() {
             if index < percentages.len() && participant.final_rank.unwrap_or(0) <= 3 {
                 let percentage = percentages[index];
                 let prize_amount = (prize_pool.total_amount as f64 * percentage / 100.0) as i64;
 
-                // Update participant with prize amount
+                // Idempotency guard: skip if this participant already has a prize
+                // recorded (handles retries after partial failures).
+                if participant.prize_amount.is_some() {
+                    tracing::info!(
+                        tournament_id = %tournament_id,
+                        user_id = %participant.user_id,
+                        "Prize already recorded for participant, skipping"
+                    );
+                    continue;
+                }
+
+                // Record the prize amount in the database first so it is never
+                // lost even if the on-chain call fails.
                 sqlx::query!(
-                    "UPDATE tournament_participants SET prize_amount = $1, prize_currency = $2 WHERE id = $3",
+                    "UPDATE tournament_participants \
+                     SET prize_amount = $1, prize_currency = $2 \
+                     WHERE id = $3",
                     prize_amount,
                     prize_pool.currency,
                     participant.id
@@ -1079,18 +1440,160 @@ impl TournamentService {
                 .await
                 .map_err(|e| ApiError::database_error(e))?;
 
-                // TODO: In a real implementation, initiate Stellar transaction to send prize
-                // For now, we'll just record the prize amount
-                tracing::info!(
-                    "Prize distributed: {} {} to user {}",
-                    prize_amount,
-                    prize_pool.currency,
-                    participant.user_id
-                );
+                // Attempt the on-chain transfer via the Soroban prize contract.
+                match (soroban, contract_id, admin_secret) {
+                    (Some(svc), Some(cid), Some(secret)) => {
+                        let args = serde_json::json!({
+                            "tournament_id": tournament_id.to_string(),
+                            "recipient":     participant.user_id.to_string(),
+                            "amount":        prize_amount,
+                            "currency":      prize_pool.currency,
+                        });
+
+                        match svc.invoke(cid, "distribute", &args, secret).await {
+                            Ok(result) if result.status == TxStatus::Success => {
+                                tracing::info!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    tx_hash       = %result.hash,
+                                    prize_amount  = prize_amount,
+                                    currency      = %prize_pool.currency,
+                                    "Prize transfer confirmed on-chain"
+                                );
+
+                                // Persist the transaction hash alongside the prize record
+                                // so it is auditable and visible in the admin dashboard.
+                                if let Err(db_err) = sqlx::query!(
+                                    "UPDATE tournament_participants \
+                                     SET prize_tx_hash = $1 \
+                                     WHERE id = $2",
+                                    result.hash,
+                                    participant.id
+                                )
+                                .execute(&self.db_pool)
+                                .await
+                                {
+                                    // Non-fatal: the transfer succeeded on-chain; only the
+                                    // hash column update failed.  Log and continue.
+                                    tracing::warn!(
+                                        user_id  = %participant.user_id,
+                                        tx_hash  = %result.hash,
+                                        error    = %db_err,
+                                        "Prize confirmed on-chain but failed to persist tx_hash"
+                                    );
+                                }
+                            }
+                            Ok(result) => {
+                                // Transaction was submitted but ended in a non-success
+                                // status (Failed or still Pending after retries).
+                                let error_detail = result
+                                    .error
+                                    .as_deref()
+                                    .unwrap_or("unknown error")
+                                    .to_string();
+
+                                tracing::error!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    tx_hash       = %result.hash,
+                                    status        = ?result.status,
+                                    error         = %error_detail,
+                                    "Prize transfer did not succeed — recorded for admin review"
+                                );
+
+                                self.record_prize_failure(
+                                    tournament_id,
+                                    participant.user_id,
+                                    prize_amount,
+                                    &prize_pool.currency,
+                                    &format!(
+                                        "tx {} ended with status {:?}: {}",
+                                        result.hash, result.status, error_detail
+                                    ),
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                // The Soroban service exhausted its retries or hit a
+                                // hard error.  Surface to the admin dashboard and
+                                // continue distributing to other winners.
+                                tracing::error!(
+                                    tournament_id = %tournament_id,
+                                    user_id       = %participant.user_id,
+                                    error         = %e,
+                                    "Soroban prize contract call failed — recorded for admin review"
+                                );
+
+                                self.record_prize_failure(
+                                    tournament_id,
+                                    participant.user_id,
+                                    prize_amount,
+                                    &prize_pool.currency,
+                                    &e.to_string(),
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Soroban not configured — recording-only mode.
+                        tracing::warn!(
+                            tournament_id = %tournament_id,
+                            user_id       = %participant.user_id,
+                            prize_amount  = prize_amount,
+                            currency      = %prize_pool.currency,
+                            "Soroban prize contract not configured; prize recorded in DB only"
+                        );
+                    }
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Persist a prize distribution failure so it appears in the admin dashboard.
+    ///
+    /// Failures are written to `prize_distribution_failures`.  The insert is
+    /// best-effort: if the table does not yet exist the error is logged but does
+    /// not propagate, keeping the main distribution loop alive.
+    async fn record_prize_failure(
+        &self,
+        tournament_id: Uuid,
+        user_id: Uuid,
+        amount: i64,
+        currency: &str,
+        reason: &str,
+    ) {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO prize_distribution_failures
+                (id, tournament_id, user_id, amount, currency, reason, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (tournament_id, user_id) DO UPDATE
+                SET reason     = EXCLUDED.reason,
+                    retry_count = prize_distribution_failures.retry_count + 1,
+                    updated_at  = EXCLUDED.created_at
+            "#,
+            Uuid::new_v4(),
+            tournament_id,
+            user_id,
+            amount,
+            currency,
+            reason,
+            Utc::now(),
+        )
+        .execute(&self.db_pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::error!(
+                tournament_id = %tournament_id,
+                user_id       = %user_id,
+                db_error      = %e,
+                "Failed to record prize distribution failure in DB"
+            );
+        }
     }
 
     // Additional bracket generation methods
@@ -1609,6 +2112,7 @@ impl TournamentService {
         Ok(user.username)
     }
 
+    /// Get tournament analytics dashboard data (Issue #291)
     /// Get tournament leaderboard (Issue #286)
     pub async fn get_tournament_leaderboard(
         &self,
@@ -1915,6 +2419,25 @@ pub struct TournamentLeaderboardEntry {
         &self,
         tournament_id: Uuid,
     ) -> Result<TournamentAnalyticsResponse, ApiError> {
+        let total_participants = self.get_participant_count(tournament_id).await?;
+        
+        let matches_stats = sqlx::query!(
+            r#"
+            SELECT 
+                COUNT(*) as total_matches,
+                SUM(CASE WHEN status = $2 THEN 1 ELSE 0 END) as matches_completed
+            FROM tournament_matches
+            WHERE tournament_id = $1
+            "#,
+            tournament_id,
+            MatchStatus::Completed as _
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let prize_pool = sqlx::query!(
+            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
         // Get basic tournament info
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
@@ -1957,6 +2480,25 @@ pub struct TournamentLeaderboardEntry {
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
+        .map(|p| p.total_amount)
+        .unwrap_or(0);
+
+        Ok(TournamentAnalyticsResponse {
+            total_participants,
+            total_matches: matches_stats.total_matches.unwrap_or(0) as i32,
+            matches_completed: matches_stats.matches_completed.unwrap_or(0) as i32,
+            current_prize_pool: prize_pool,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub total_participants: i32,
+    pub total_matches: i32,
+    pub matches_completed: i32,
+    pub current_prize_pool: i64,
+}
         .unwrap_or_else(|| {
             sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
                 .fetch_one(&self.db_pool)

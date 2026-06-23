@@ -168,3 +168,82 @@ fn test_match_exists() {
     assert!(client.match_exists(&match_id));
     assert!(!client.match_exists(&other_id));
 }
+
+#[test]
+fn test_raise_dispute_during_in_progress() {
+    let env = Env::default();
+    let (client, stake_asset, players, match_id) = setup(&env);
+    let player_a = players.get(0).unwrap();
+    let player_b = players.get(1).unwrap();
+
+    client.create_match(&match_id, &players, &stake_asset, &1000);
+    client.submit_result(&match_id, &player_a, &0);
+
+    client.raise_dispute(&match_id, &player_b);
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::Disputed as u32);
+}
+
+#[test]
+fn test_raise_dispute_during_pending_result() {
+    let env = Env::default();
+    let (client, stake_asset, players, match_id) = setup(&env);
+    let player_a = players.get(0).unwrap();
+    let player_b = players.get(1).unwrap();
+
+    client.create_match(&match_id, &players, &stake_asset, &1000);
+    client.submit_result(&match_id, &player_a, &0);
+    client.submit_result(&match_id, &player_b, &0);
+
+    client.raise_dispute(&match_id, &player_a);
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::Disputed as u32);
+}
+
+#[test]
+fn test_full_match_lifecycle_flow() {
+    let env = Env::default();
+    let (client, stake_asset, players, match_id) = setup(&env);
+    let player_a = players.get(0).unwrap();
+    let player_b = players.get(1).unwrap();
+
+    // Step 1: Create match with stake requirement
+    client.create_match(&match_id, &players, &stake_asset, &5000);
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::Created as u32);
+    assert_eq!(data.stake_amount, 5000);
+    assert_eq!(data.stake_asset, stake_asset);
+
+    // Step 2: Players submit matching results
+    client.submit_result(&match_id, &player_a, &0); // player_a wins
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::InProgress as u32);
+    assert_eq!(data.report1_score, Some(0));
+
+    client.submit_result(&match_id, &player_b, &0); // agrees on player_a win
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::PendingResult as u32);
+    assert_eq!(data.report2_score, Some(0));
+
+    // Step 3: Finalize the match (winner = player_a)
+    client.finalize_match(&match_id, &player_a);
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::Finalized as u32);
+    assert_eq!(data.winner, Some(player_a.clone()));
+    assert!(data.finalized_at.is_some());
+}
+
+#[test]
+fn test_dispute_prevents_finalization() {
+    let env = Env::default();
+    let (client, stake_asset, players, match_id) = setup(&env);
+    let player_a = players.get(0).unwrap();
+    let player_b = players.get(1).unwrap();
+
+    client.create_match(&match_id, &players, &stake_asset, &1000);
+    client.submit_result(&match_id, &player_a, &0);
+    client.submit_result(&match_id, &player_b, &1); // different score -> Disputed
+
+    let data = client.get_match(&match_id);
+    assert_eq!(data.state, MatchState::Disputed as u32);
+}

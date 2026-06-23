@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
+import Image from 'next/image'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 
 export interface LeaderboardEntry {
@@ -86,15 +87,15 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
       <table className="w-full">
         <thead>
-          <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+          <tr className="bg-muted dark:bg-background border-b border-gray-200 dark:border-gray-800">
+            <th className="px-4 py-3 text-left text-sm font-semibold text-foreground/70 dark:text-foreground/80">
               Rank
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300">
+            <th className="px-4 py-3 text-left text-sm font-semibold text-foreground/70 dark:text-foreground/80">
               Player
             </th>
             <th
-              className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="px-4 py-3 text-right text-sm font-semibold text-foreground/70 dark:text-foreground/80 cursor-pointer hover:bg-muted dark:hover:bg-surface"
               onClick={() => handleSort('points')}
             >
               <div className="flex items-center justify-end gap-2">
@@ -103,7 +104,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
               </div>
             </th>
             <th
-              className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="px-4 py-3 text-right text-sm font-semibold text-foreground/70 dark:text-foreground/80 cursor-pointer hover:bg-muted dark:hover:bg-surface"
               onClick={() => handleSort('wins')}
             >
               <div className="flex items-center justify-end gap-2">
@@ -112,7 +113,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
               </div>
             </th>
             <th
-              className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="px-4 py-3 text-right text-sm font-semibold text-foreground/70 dark:text-foreground/80 cursor-pointer hover:bg-muted dark:hover:bg-surface"
               onClick={() => handleSort('winRate')}
             >
               <div className="flex items-center justify-end gap-2">
@@ -120,7 +121,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                 <SortIcon column="winRate" />
               </div>
             </th>
-            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">
+            <th className="px-4 py-3 text-center text-sm font-semibold text-foreground/70 dark:text-foreground/80">
               Trend
             </th>
           </tr>
@@ -129,45 +130,47 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
           {sortedEntries.map((entry, index) => (
             <tr
               key={entry.userId}
-              className={`border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 ${
-                index % 2 === 0 ? 'bg-white dark:bg-gray-950' : 'bg-gray-50 dark:bg-gray-900/20'
+              className={`border-b border-gray-200 dark:border-gray-800 hover:bg-muted dark:hover:bg-background/50 ${
+                index % 2 === 0 ? 'bg-white dark:bg-gray-950' : 'bg-muted dark:bg-background/20'
               }`}
             >
-              <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+              <td className="px-4 py-3 text-sm font-semibold text-foreground dark:text-foreground">
                 #{entry.rank}
               </td>
               <td className="px-4 py-3 text-sm">
                 <div className="flex items-center gap-3">
                   {entry.avatar && (
-                    <img
+                    <Image
                       src={entry.avatar}
                       alt={entry.username}
+                      width={32}
+                      height={32}
                       className="w-8 h-8 rounded-full"
                     />
                   )}
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                  <span className="font-medium text-foreground dark:text-foreground">
                     {entry.username}
                   </span>
                 </div>
               </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+              <td className="px-4 py-3 text-sm text-right font-semibold text-foreground dark:text-foreground">
                 {entry.points.toLocaleString()}
               </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+              <td className="px-4 py-3 text-sm text-right font-semibold text-foreground dark:text-foreground">
                 {entry.wins}
               </td>
-              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
+              <td className="px-4 py-3 text-sm text-right font-semibold text-foreground dark:text-foreground">
                 {(entry.winRate * 100).toFixed(1)}%
               </td>
               <td className="px-4 py-3 text-center">
                 {entry.trend === 'up' && (
-                  <ChevronUp className="w-5 h-5 text-green-500 mx-auto" />
+                  <ChevronUp className="w-5 h-5 text-success mx-auto" />
                 )}
                 {entry.trend === 'down' && (
-                  <ChevronDown className="w-5 h-5 text-red-500 mx-auto" />
+                  <ChevronDown className="w-5 h-5 text-destructive mx-auto" />
                 )}
                 {entry.trend === 'stable' && (
-                  <div className="w-5 h-5 mx-auto text-gray-400">—</div>
+                  <div className="w-5 h-5 mx-auto text-muted-foreground">—</div>
                 )}
               </td>
             </tr>
@@ -176,7 +179,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
       </table>
 
       {sortedEntries.length === 0 && !isLoading && (
-        <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+        <div className="py-8 text-center text-muted-foreground dark:text-muted-foreground">
           No leaderboard entries found
         </div>
       )}

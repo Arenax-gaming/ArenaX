@@ -1,45 +1,27 @@
-'use client'
+"use client";
 
-import React, { useState, useEffect } from 'react'
-import { LeaderboardTable, type LeaderboardEntry } from '@/components/leaderboard/LeaderboardTable'
-import { CategorySelector } from '@/components/leaderboard/CategorySelector'
-import { SeasonSelector } from '@/components/leaderboard/SeasonSelector'
-import { PersonalRank } from '@/components/leaderboard/PersonalRank'
+import React, { useState } from "react";
+import { LeaderboardTable } from "@/components/leaderboard/LeaderboardTable";
+import { CategorySelector } from "@/components/leaderboard/CategorySelector";
+import { SeasonSelector } from "@/components/leaderboard/SeasonSelector";
+import { PersonalRank } from "@/components/leaderboard/PersonalRank";
+import { LeaderboardFilters } from "@/components/leaderboard/LeaderboardFilters";
+import { useLeaderboard, useLeaderboardStats } from "@/hooks/useLeaderboard";
+import type { LeaderboardCategory } from "@/types/leaderboard";
 
 export default function LeaderboardsPage() {
-  const [isLoading, setIsLoading] = useState(true)
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([])
-  const [category, setCategory] = useState<'global' | 'tournaments' | 'casual'>('global')
-  const [season, setSeason] = useState('current')
-  const [sortBy, setSortBy] = useState<'points' | 'wins' | 'winRate'>('points')
+  const [category, setCategory] = useState<LeaderboardCategory>("global");
+  const [season, setSeason] = useState("current");
+  const [sortBy, setSortBy] = useState<"points" | "wins" | "winRate">("points");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    // Fetch leaderboard data
-    const fetchLeaderboard = async () => {
-      setIsLoading(true)
-      try {
-        // Simulate API call
-        const mockData: LeaderboardEntry[] = Array.from({ length: 100 }, (_, i) => ({
-          rank: i + 1,
-          userId: `user-${i}`,
-          username: `Player${i + 1}`,
-          points: Math.max(0, 10000 - i * 100 + Math.random() * 500),
-          wins: Math.floor(Math.random() * 500),
-          winRate: 0.4 + Math.random() * 0.4,
-          lastUpdated: new Date(),
-          trend: Math.random() > 0.5 ? 'up' : Math.random() > 0.5 ? 'down' : 'stable',
-        }))
+  const { data: leaderboardData, isLoading } = useLeaderboard(category, 100, 0);
+  const { data: statsData } = useLeaderboardStats(category);
 
-        setEntries(mockData)
-      } catch (error) {
-        console.error('Failed to fetch leaderboard:', error)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchLeaderboard()
-  }, [category, season])
+  const entries = leaderboardData?.entries || [];
+  const filteredEntries = entries.filter((entry) =>
+    entry.username.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">
@@ -47,57 +29,76 @@ export default function LeaderboardsPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Leaderboards</h1>
-          <p className="text-gray-400">Compete and climb the ranks</p>
+          <p className="text-muted-foreground">Compete and climb the ranks</p>
         </div>
 
+        {/* Stats */}
+        {statsData && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Total Players</p>
+              <p className="text-2xl font-bold text-white">
+                {statsData.totalPlayers}
+              </p>
+            </div>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Average Elo</p>
+              <p className="text-2xl font-bold text-white">
+                {Math.round(statsData.averageElo)}
+              </p>
+            </div>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Median Elo</p>
+              <p className="text-2xl font-bold text-white">
+                {statsData.medianElo}
+              </p>
+            </div>
+            <div className="bg-surface/50 rounded-lg p-4 border border-border">
+              <p className="text-muted-foreground text-sm mb-1">Top Player Elo</p>
+              <p className="text-2xl font-bold text-white">
+                {statsData.topPlayerElo}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          <CategorySelector
-            category={category}
-            onChange={setCategory}
-          />
-          <SeasonSelector
-            season={season}
-            onChange={setSeason}
-          />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <CategorySelector category={category} onChange={setCategory} />
+          <SeasonSelector season={season} onChange={setSeason} />
+          <div className="md:col-span-1">
+            <LeaderboardFilters onSearch={setSearchQuery} />
+          </div>
         </div>
 
         {/* Personal Rank */}
-        <PersonalRank
-          category={category}
-          season={season}
-        />
+        <PersonalRank category={category} season={season} />
 
         {/* Leaderboard Table */}
-        <div className="bg-gray-800/50 rounded-lg p-6 backdrop-blur border border-gray-700">
+        <div className="bg-surface/50 rounded-lg p-6 backdrop-blur border border-border">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-white">
-              {category === 'global'
-                ? 'Global Rankings'
-                : category === 'tournaments'
-                  ? 'Tournament Rankings'
-                  : 'Casual Rankings'}
+              {category === "global"
+                ? "Global Rankings"
+                : category === "tournaments"
+                  ? "Tournament Rankings"
+                  : category === "casual"
+                    ? "Casual Rankings"
+                    : "Ranked Rankings"}
             </h2>
-            <div className="text-sm text-gray-400">
-              Season: {season === 'current' ? 'Current' : `Season ${season}`}
+            <div className="text-sm text-muted-foreground">
+              {filteredEntries.length} players
             </div>
           </div>
 
           <LeaderboardTable
-            entries={entries}
+            entries={filteredEntries}
             isLoading={isLoading}
             sortBy={sortBy}
             onSortChange={(col) => setSortBy(col as any)}
           />
         </div>
-
-        {/* Loading State */}
-        {isLoading && (
-          <div className="mt-8 text-center text-gray-400">
-            Loading leaderboard data...
-          </div>
-        )}
       </div>
     </div>
-  )
+  );
 }

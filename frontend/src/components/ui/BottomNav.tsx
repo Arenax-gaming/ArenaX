@@ -1,88 +1,50 @@
 // filepath: frontend/src/components/ui/BottomNav.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useDevice } from "@/hooks/useMobile";
+import { Gamepad2, Trophy, User, Home } from "lucide-react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 // Navigation items with icons
 const NAV_ITEMS = [
   {
+    label: "Home",
+    href: "/",
+    icon: (active: boolean) => (
+      <Home className={cn("w-6 h-6", active && "fill-primary")} />
+    ),
+  },
+  {
     label: "Play",
     href: "/play",
     icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
+      <Gamepad2 className={cn("w-6 h-6", active && "fill-primary")} />
     ),
   },
   {
     label: "Tournaments",
     href: "/tournaments",
     icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
-    ),
-  },
-  {
-    label: "Matches",
-    href: "/matches",
-    icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
+      <Trophy className={cn("w-6 h-6", active && "fill-primary")} />
     ),
   },
   {
     label: "Leaderboard",
     href: "/leaderboard",
     icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
+      <Trophy className={cn("w-6 h-6", active && "fill-primary")} />
     ),
   },
   {
     label: "Profile",
     href: "/profile",
     icon: (active: boolean) => (
-      <svg
-        className={cn("w-6 h-6", active && "fill-current")}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 0 : 2}
-      >
-        <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
+      <User className={cn("w-6 h-6", active && "fill-primary")} />
     ),
   },
 ];
@@ -95,27 +57,28 @@ export function BottomNav({ className }: BottomNavProps) {
   const pathname = usePathname();
   const { isMobile, safeAreaInsets } = useDevice();
   const [isVisible, setIsVisible] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const lastScrollY = useRef(0);
+  const prefersReducedMotion = useReducedMotion();
 
   // Hide on scroll down, show on scroll up
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      
-      if (currentScrollY > lastScrollY && currentScrollY > 100) {
+
+      if (currentScrollY > lastScrollY.current && currentScrollY > 100) {
         // Scrolling down - hide
         setIsVisible(false);
       } else {
         // Scrolling up - show
         setIsVisible(true);
       }
-      
-      setLastScrollY(currentScrollY);
+
+      lastScrollY.current = currentScrollY;
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [lastScrollY]);
+  }, []);
 
   // Don't render on desktop
   if (!isMobile) {
@@ -130,22 +93,26 @@ export function BottomNav({ className }: BottomNavProps) {
             "fixed bottom-0 left-0 right-0 z-40",
             "bg-background/95 backdrop-blur-lg",
             "border-t border-border",
-            "safe-area-pb",
-            className
+            className,
           )}
-          initial={{ y: "100%" }}
-          animate={{ y: 0 }}
-          exit={{ y: "100%" }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          initial={prefersReducedMotion ? { y: 0 } : { y: "100%" }}
+          animate={prefersReducedMotion ? { y: 0 } : { y: 0 }}
+          exit={prefersReducedMotion ? { y: 0 } : { y: "100%" }}
+          transition={
+            prefersReducedMotion
+              ? { duration: 0 }
+              : { type: "spring", damping: 25, stiffness: 300 }
+          }
           style={{
             paddingBottom: `${safeAreaInsets.bottom}px`,
           }}
         >
           <div className="flex items-center justify-around h-16">
             {NAV_ITEMS.map((item) => {
-              const isActive = pathname === item.href || 
+              const isActive =
+                pathname === item.href ||
                 (item.href !== "/" && pathname.startsWith(item.href));
-              
+
               return (
                 <Link
                   key={item.href}
@@ -156,22 +123,20 @@ export function BottomNav({ className }: BottomNavProps) {
                     "transition-colors duration-200",
                     isActive
                       ? "text-primary"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                   aria-current={isActive ? "page" : undefined}
                 >
                   <div className="relative">
                     {item.icon(isActive)}
-                    {isActive && (
+                    {isActive && !prefersReducedMotion && (
                       <motion.div
                         className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary"
                         layoutId="activeIndicator"
                       />
                     )}
                   </div>
-                  <span className="text-xs mt-1 font-medium">
-                    {item.label}
-                  </span>
+                  <span className="text-xs mt-1 font-medium">{item.label}</span>
                 </Link>
               );
             })}

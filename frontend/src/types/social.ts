@@ -1,169 +1,97 @@
-// Social-related types for ArenaX social features
-
-// User status types
-export type UserStatus = "online" | "in-game" | "away" | "busy" | "offline";
-
-export interface SocialUser {
-  id: string;
-  username: string;
-  avatar?: string;
-  elo: number;
-  status: UserStatus;
-  lastSeen?: string;
-  currentActivity?: string;
-}
-
-// Friend types
-export interface Friend extends SocialUser {
-  friendSince: string;
-  isFavorite?: boolean;
-  mutualFriends?: number;
+export interface Friend {
+  id: string
+  username: string
+  avatarUrl?: string
+  isOnline: boolean
+  lastSeen?: string
+  addedAt: string
 }
 
 export interface FriendRequest {
-  id: string;
-  fromUser: SocialUser;
-  message?: string;
-  createdAt: string;
-  status: "pending" | "accepted" | "declined" | "blocked";
+  id: string
+  fromUserId: string
+  fromUsername: string
+  fromAvatar?: string
+  toUserId: string
+  status: 'pending' | 'accepted' | 'rejected'
+  createdAt: string
 }
 
-// Messaging types
 export interface Message {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  content: string;
-  timestamp: string;
-  status: "sent" | "delivered" | "read";
-  type: "text" | "image" | "system" | "invite";
-  metadata?: {
-    imageUrl?: string;
-    matchId?: string;
-    partyId?: string;
-  };
+  id: string
+  fromUserId: string
+  fromUsername: string
+  toUserId: string
+  content: string
+  isRead: boolean
+  createdAt: string
 }
 
 export interface Conversation {
-  id: string;
-  type: "direct" | "party" | "community";
-  participants: SocialUser[];
-  lastMessage?: Message;
-  unreadCount: number;
-  updatedAt: string;
-  // For party conversations
-  partyId?: string;
-  // For community conversations
-  communityId?: string;
+  id: string
+  participantId: string
+  participantUsername: string
+  participantAvatar?: string
+  lastMessage?: string
+  lastMessageAt?: string
+  unreadCount: number
 }
 
-// Party types
 export interface Party {
-  id: string;
-  name: string;
-  leaderId: string;
-  members: PartyMember[];
-  maxMembers: number;
-  isPrivate: boolean;
-  createdAt: string;
-  voiceChatEnabled: boolean;
-  region?: string;
+  id: string
+  leaderId: string
+  leaderUsername: string
+  name: string
+  description?: string
+  maxMembers: number
+  currentMembers: number
+  members: PartyMember[]
+  createdAt: string
 }
 
 export interface PartyMember {
-  user: SocialUser;
-  role: "leader" | "member";
-  joinedAt: string;
-  isReady: boolean;
-  isSpeaking?: boolean;
+  userId: string
+  username: string
+  avatarUrl?: string
+  role: 'leader' | 'member'
+  joinedAt: string
 }
 
-export interface PartyInvite {
-  id: string;
-  partyId: string;
-  partyName: string;
-  inviter: SocialUser;
-  invitedUser: SocialUser;
-  createdAt: string;
-  status: "pending" | "accepted" | "declined" | "expired";
-}
-
-// Community types
 export interface CommunityPost {
-  id: string;
-  author: SocialUser;
-  content: string;
-  media?: {
-    type: "image" | "video";
-    url: string;
-    thumbnail?: string;
-  }[];
-  tags: string[];
-  likes: number;
-  comments: number;
-  shares: number;
-  createdAt: string;
-  isLiked?: boolean;
-  isPinned?: boolean;
+  id: string
+  authorId: string
+  authorUsername: string
+  authorAvatar?: string
+  title: string
+  content: string
+  category: string
+  likes: number
+  comments: number
+  isLiked: boolean
+  createdAt: string
 }
 
-export interface CommunityComment {
-  id: string;
-  postId: string;
-  author: SocialUser;
-  content: string;
-  likes: number;
-  createdAt: string;
-  isLiked?: boolean;
+export interface OnlineStatus {
+  userId: string
+  username: string
+  isOnline: boolean
+  lastSeen?: string
+  statusMessage?: string
 }
 
-export interface Community {
-  id: string;
-  name: string;
-  description: string;
-  avatar?: string;
-  banner?: string;
-  memberCount: number;
-  isPrivate: boolean;
-  tags: string[];
-  createdAt: string;
-  rules?: string[];
-}
-
-// Notification types
 export interface SocialNotification {
-  id: string;
-  type: "friend_request" | "message" | "party_invite" | "party_update" | "mention" | "like" | "comment";
-  title: string;
-  message: string;
-  fromUser?: SocialUser;
-  relatedId?: string; // conversationId, partyId, postId, etc.
-  read: boolean;
-  createdAt: string;
+  id: string
+  userId: string
+  notificationType: 'friend_request' | 'message' | 'party_invite' | 'post_like' | 'post_comment'
+  fromUserId?: string
+  fromUsername?: string
+  content: string
+  isRead: boolean
+  createdAt: string
 }
 
-// Privacy settings
-export interface SocialPrivacySettings {
-  allowFriendRequests: boolean;
-  showOnlineStatus: boolean;
-  showGameActivity: boolean;
-  allowPartyInvites: boolean;
-  allowMessages: "everyone" | "friends" | "none";
-  showProfile: boolean;
-  blockList: string[];
-}
-
-// Social analytics
-export interface SocialStats {
-  totalFriends: number;
-  onlineFriends: number;
-  totalMessages: number;
-  partiesJoined: number;
-  communityPosts: number;
-  totalLikes: number;
-  weeklyActivity: {
-    messagesSent: number;
-    gamesPlayed: number;
-    timeOnline: number; // in minutes
-  };
+export interface FriendsListResponse {
+  friends: Friend[]
+  totalCount: number
+  onlineCount: number
 }

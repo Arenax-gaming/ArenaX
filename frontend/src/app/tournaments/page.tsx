@@ -1,49 +1,66 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
 import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
-import { TournamentStatus, Tournament, TournamentFilters } from "@/types/tournament";
-import { Button } from "@/components/ui/Button";
-import { mockTournaments } from "@/data/mockTournaments";
-import { useAuth } from "@/hooks/useAuth";
-import { Trophy, Users } from "lucide-react";
 import { EmptyState } from "@/components/common/EmptyState";
-import { TournamentStatus, Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
+import {
+  TournamentStatus,
+  Tournament,
+  TournamentFilters,
+  TournamentPageStatus,
+  TOURNAMENT_PAGE_STATUS_COLORS,
+  TOURNAMENT_PAGE_STATUSES,
+  toTournamentPageStatus,
+} from "@/types/tournament";
 import { mockTournaments } from "@/data/mockTournaments";
 import { useAuth } from "@/hooks/useAuth";
-import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
+import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
 
-export default function TournamentsPage() {
+const statusColors = TOURNAMENT_PAGE_STATUS_COLORS;
+
+function getStatusStyles(pageStatus: TournamentPageStatus) {
+  return statusColors[pageStatus];
+}
+
+function TournamentsContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabType>("available");
+  const [isLoading, setIsLoading] = useState(true);
   const [filters, setFilters] = useState<TournamentFilters>({
     search: searchParams.get("search") || undefined,
     status: (searchParams.get("status") as TournamentStatus) || undefined,
     gameType: searchParams.get("gameType") || undefined,
     tournamentType: (searchParams.get("tournamentType") as any) || undefined,
-    minEntryFee: searchParams.get("minEntryFee") ? Number(searchParams.get("minEntryFee")) : undefined,
-    maxEntryFee: searchParams.get("maxEntryFee") ? Number(searchParams.get("maxEntryFee")) : undefined,
-    minPrizePool: searchParams.get("minPrizePool") ? Number(searchParams.get("minPrizePool")) : undefined,
-    maxPrizePool: searchParams.get("maxPrizePool") ? Number(searchParams.get("maxPrizePool")) : undefined,
-    sortBy: (searchParams.get("sortBy") as TournamentFilters['sortBy']) || "date",
-    sortOrder: (searchParams.get("sortOrder") as 'asc' | 'desc') || "desc",
+    minEntryFee: searchParams.get("minEntryFee")
+      ? Number(searchParams.get("minEntryFee"))
+      : undefined,
+    maxEntryFee: searchParams.get("maxEntryFee")
+      ? Number(searchParams.get("maxEntryFee"))
+      : undefined,
+    minPrizePool: searchParams.get("minPrizePool")
+      ? Number(searchParams.get("minPrizePool"))
+      : undefined,
+    maxPrizePool: searchParams.get("maxPrizePool")
+      ? Number(searchParams.get("maxPrizePool"))
+      : undefined,
+    sortBy:
+      (searchParams.get("sortBy") as TournamentFilters["sortBy"]) || "date",
+    sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
   });
 
-  // Track joined tournaments (simulated - in real app this would come from API)
   const [joinedTournamentIds, setJoinedTournamentIds] = useState<Set<string>>(
-    new Set(["2"]) // Mock: user has joined tournament ID 2
+    new Set(["2"]),
   );
 
-  // Simulate data fetching
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
@@ -52,15 +69,12 @@ export default function TournamentsPage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Get available game types from tournaments
   const availableGameTypes = useMemo(() => {
     const types = new Set(mockTournaments.map((t) => t.gameType));
     return Array.from(types).sort();
   }, []);
 
-  // Filter tournaments based on all criteria
   const filteredTournaments = useMemo(() => {
-    // First, filter based on joined/available tabs
     let tournaments = mockTournaments.filter((tournament) => {
       const isJoined = joinedTournamentIds.has(tournament.id);
 
@@ -71,69 +85,71 @@ export default function TournamentsPage() {
       }
     });
 
-    // Apply search filter
     if (filters.search) {
       const searchLower = filters.search.toLowerCase();
       tournaments = tournaments.filter(
         (tournament) =>
           tournament.name.toLowerCase().includes(searchLower) ||
           tournament.gameType.toLowerCase().includes(searchLower) ||
-          (tournament.description?.toLowerCase().includes(searchLower) ?? false)
+          (tournament.description?.toLowerCase().includes(searchLower) ??
+            false),
       );
     }
 
-    // Apply status filter
     if (filters.status) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.status === filters.status
+        (tournament) => tournament.status === filters.status,
       );
     }
 
-    // Apply game type filter
+    if (filters.pageStatus) {
+      tournaments = tournaments.filter(
+        (tournament) =>
+          toTournamentPageStatus(tournament.status) === filters.pageStatus,
+      );
+    }
+
     if (filters.gameType) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.gameType === filters.gameType
+        (tournament) => tournament.gameType === filters.gameType,
       );
     }
 
-    // Apply tournament type filter
     if (filters.tournamentType) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.tournamentType === filters.tournamentType
+        (tournament) => tournament.tournamentType === filters.tournamentType,
       );
     }
 
-    // Apply entry fee range filter
     if (filters.minEntryFee !== undefined) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.entryFee >= filters.minEntryFee!
+        (tournament) => tournament.entryFee >= filters.minEntryFee!,
       );
     }
     if (filters.maxEntryFee !== undefined) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.entryFee <= filters.maxEntryFee!
+        (tournament) => tournament.entryFee <= filters.maxEntryFee!,
       );
     }
 
-    // Apply prize pool range filter
     if (filters.minPrizePool !== undefined) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.prizePool >= filters.minPrizePool!
+        (tournament) => tournament.prizePool >= filters.minPrizePool!,
       );
     }
     if (filters.maxPrizePool !== undefined) {
       tournaments = tournaments.filter(
-        (tournament) => tournament.prizePool <= filters.maxPrizePool!
+        (tournament) => tournament.prizePool <= filters.maxPrizePool!,
       );
     }
 
-    // Apply sorting
     tournaments = [...tournaments].sort((a, b) => {
       let comparison = 0;
 
       switch (filters.sortBy) {
         case "date":
-          comparison = new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+          comparison =
+            new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
           break;
         case "prize_pool":
           comparison = a.prizePool - b.prizePool;
@@ -142,7 +158,8 @@ export default function TournamentsPage() {
           comparison = a.currentParticipants - b.currentParticipants;
           break;
         default:
-          comparison = new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+          comparison =
+            new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
       }
 
       return filters.sortOrder === "asc" ? comparison : -comparison;
@@ -159,18 +176,15 @@ export default function TournamentsPage() {
     });
   }, []);
 
-  // Handle filter changes from TournamentFilter component
   const handleFiltersChange = useCallback((newFilters: TournamentFilters) => {
     setFilters(newFilters);
   }, []);
 
-  // Stats for the dashboard header
   const joinedCount = joinedTournamentIds.size;
   const availableCount = mockTournaments.length - joinedCount;
 
   return (
     <div className="min-h-screen px-4 py-8 bg-background">
-      {/* Header */}
       <div className="space-y-2 mb-8 text-center">
         <h1 className="text-3xl md:text-4xl font-bold text-foreground">
           Tournament Dashboard
@@ -180,15 +194,15 @@ export default function TournamentsPage() {
         </p>
       </div>
 
-      {/* Tab Navigation */}
       <div className="flex justify-center mb-8">
         <div className="inline-flex rounded-lg border bg-muted p-1">
           <button
             onClick={() => setActiveTab("available")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${activeTab === "available"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
+            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
+              activeTab === "available"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
           >
             <Trophy className="h-4 w-4" />
             Available
@@ -198,10 +212,11 @@ export default function TournamentsPage() {
           </button>
           <button
             onClick={() => setActiveTab("joined")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${activeTab === "joined"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
+            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
+              activeTab === "joined"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
           >
             <Users className="h-4 w-4" />
             Joined
@@ -212,7 +227,6 @@ export default function TournamentsPage() {
         </div>
       </div>
 
-      {/* Filters Section */}
       <div className="bg-card border rounded-lg p-6 mb-6">
         <TournamentFilter
           availableGameTypes={availableGameTypes}
@@ -220,16 +234,27 @@ export default function TournamentsPage() {
         />
       </div>
 
-      {/* Results Count */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <p className="text-sm text-muted-foreground">
           {filteredTournaments.length} tournament
           {filteredTournaments.length !== 1 ? "s" : ""} found
           {activeTab === "joined" ? " (joined)" : " (available)"}
         </p>
+        <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
+          {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
+            const { badgeClass, label } = getStatusStyles(pageStatus);
+            return (
+              <span
+                key={pageStatus}
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClass}`}
+              >
+                {label}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Tournament Grid or Empty State */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: 6 }).map((_, index) => (
@@ -244,6 +269,7 @@ export default function TournamentsPage() {
               tournament={tournament}
               isJoined={joinedTournamentIds.has(tournament.id)}
               onJoinSuccess={handleJoinSuccess}
+              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
             />
           ))}
         </div>
@@ -254,10 +280,18 @@ export default function TournamentsPage() {
           description={
             activeTab === "joined"
               ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
-              : filters.search || filters.status || filters.gameType || filters.tournamentType || filters.minEntryFee || filters.maxEntryFee || filters.minPrizePool || filters.maxPrizePool
+              : filters.search ||
+                  filters.status ||
+                  filters.gameType ||
+                  filters.tournamentType ||
+                  filters.minEntryFee ||
+                  filters.maxEntryFee ||
+                  filters.minPrizePool ||
+                  filters.maxPrizePool
                 ? "Try adjusting your search or filters"
-                : "No tournaments are currently available"}
-          </p>
+                : "No tournaments are currently available"
+          }
+        >
           {activeTab === "joined" && (
             <Button
               onClick={() => setActiveTab("available")}
@@ -268,8 +302,24 @@ export default function TournamentsPage() {
               Browse Available Tournaments
             </Button>
           )}
-        </div>
+        </EmptyState>
       )}
     </div>
+  );
+}
+
+export default function TournamentsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen px-4 py-8 bg-background">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TournamentCardSkeleton key={i} />
+          ))}
+        </div>
+      </div>
+    }>
+      <TournamentsContent />
+    </Suspense>
   );
 }

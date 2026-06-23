@@ -5,6 +5,7 @@ import { useEffect, useRef, useCallback, ReactNode } from "react";
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -26,27 +27,31 @@ export function BottomSheet({
   const sheetRef = useRef<HTMLDivElement>(null);
   const startY = useRef(0);
   const currentSnap = useRef(0);
+  const prefersReducedMotion = useReducedMotion();
 
   // Handle touch gestures for snapping
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     startY.current = e.touches[0].clientY;
   }, []);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!sheetRef.current) return;
-    
-    const deltaY = e.touches[0].clientY - startY.current;
-    const currentHeight = sheetRef.current.offsetHeight;
-    
-    // Calculate snap point based on drag
-    if (deltaY > 0) {
-      // Dragging down - could close or snap down
-      const progress = deltaY / currentHeight;
-      if (progress > 0.3) {
-        onClose();
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!sheetRef.current) return;
+
+      const deltaY = e.touches[0].clientY - startY.current;
+      const currentHeight = sheetRef.current.offsetHeight;
+
+      // Calculate snap point based on drag
+      if (deltaY > 0) {
+        // Dragging down - could close or snap down
+        const progress = deltaY / currentHeight;
+        if (progress > 0.3) {
+          onClose();
+        }
       }
-    }
-  }, [onClose]);
+    },
+    [onClose],
+  );
 
   // Prevent body scroll when sheet is open
   useEffect(() => {
@@ -78,9 +83,10 @@ export function BottomSheet({
           {/* Backdrop */}
           <motion.div
             className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm md:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+            animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 1 } : { opacity: 0 }}
+            transition={prefersReducedMotion ? { duration: 0 } : undefined}
             onClick={onClose}
           />
 
@@ -89,14 +95,18 @@ export function BottomSheet({
             ref={sheetRef}
             className={cn(
               "fixed left-0 right-0 z-50 rounded-t-2xl bg-background border-t border-border shadow-lg md:hidden",
-              className
+              className,
             )}
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
+            initial={prefersReducedMotion ? { y: 0 } : { y: "100%" }}
+            animate={prefersReducedMotion ? { y: 0 } : { y: 0 }}
+            exit={prefersReducedMotion ? { y: 0 } : { y: "100%" }}
+            transition={
+              prefersReducedMotion
+                ? { duration: 0 }
+                : { type: "spring", damping: 25, stiffness: 300 }
+            }
+            onTouchStart={prefersReducedMotion ? undefined : handleTouchStart}
+            onTouchMove={prefersReducedMotion ? undefined : handleTouchMove}
             role="dialog"
             aria-modal="true"
             aria-label={title}

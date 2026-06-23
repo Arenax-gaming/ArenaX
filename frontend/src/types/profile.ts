@@ -3,7 +3,7 @@ export interface PublicProfile {
   username: string;
   avatar?: string;
   bio?: string;
-  socialLinks?: { twitter?: string; discord?: string; twitch?: string };
+  socialLinks?: { twitter?: string; discord?: string; twitch?: string; github?: string };
   elo: number;
   globalRank: number;
   createdAt: string;
@@ -19,6 +19,14 @@ export interface PlayerStats {
   losses: number;
   winRate: number;
   currentStreak: number;
+  longestStreak?: number;
+  averageMatchDuration?: number;
+  favoriteGameType?: string;
+  totalPlayTime?: number;
+  recentPerformance?: {
+    trend: 'up' | 'down' | 'stable';
+    change: number;
+  };
 }
 
 export interface Achievement {
@@ -30,6 +38,9 @@ export interface Achievement {
   total: number;
   unlocked: boolean;
   unlockedAt?: string;
+  category?: 'combat' | 'social' | 'progression' | 'special';
+  rarity?: 'common' | 'rare' | 'epic' | 'legendary';
+  points?: number;
 }
 
 export interface FriendEntry {
@@ -38,6 +49,10 @@ export interface FriendEntry {
   avatar?: string;
   elo: number;
   status: 'online' | 'in-game' | 'offline';
+  gamesPlayed?: number;
+  lastSeen?: string;
+  currentActivity?: string;
+  mutualFriends?: number;
 }
 
 export type ActivityEventType =
@@ -45,7 +60,9 @@ export type ActivityEventType =
   | 'achievement_unlocked'
   | 'tournament_joined'
   | 'tournament_completed'
-  | 'friend_added';
+  | 'friend_added'
+  | 'rank_changed'
+  | 'streak_achieved';
 
 export interface ActivityEvent {
   id: string;
@@ -60,6 +77,15 @@ export interface ProfileCustomization {
 }
 
 export type PrivacySetting = 'everyone' | 'friends' | 'only_me';
+
+export interface PublicProfileViewProps {
+  profile: PublicProfile;
+  stats: PlayerStats;
+  achievements: Achievement[];
+  friends: FriendEntry[];
+  activities: ActivityEvent[];
+  eloHistory: EloPoint[];
+}
 
 export interface PrivacySettings {
   stats: PrivacySetting;
@@ -80,10 +106,37 @@ export interface MatchWithPlayers {
   score: string;
   date: string;
   tournamentName?: string;
+  duration?: number;
+  eloChange?: number;
 }
 
 export interface MatchHistoryFilters {
   gameType?: string;
   result?: 'win' | 'loss';
   opponentSearch?: string;
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+}
+
+// Enhanced types for profile editing
+export interface UserProfileUpdate {
+  username?: string;
+  bio?: string;
+  avatar?: string;
+  socialLinks?: {
+    twitter?: string;
+    discord?: string;
+    twitch?: string;
+    github?: string;
+  };
+  customization?: ProfileCustomization;
+}
+
+// ELO history for charts
+export interface EloPoint {
+  date: string;
+  elo: number;
+  change?: number;
 }

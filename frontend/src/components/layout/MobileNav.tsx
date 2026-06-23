@@ -11,47 +11,45 @@ import { ProtectedLink } from "@/components/navigation/ProtectedLink";
 import { useAuth } from "@/hooks/useAuth";
 import { Logo } from "@/components/common/Logo";
 import { motion, AnimatePresence } from "framer-motion";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 const isActiveRoute = (pathname: string, href: string) =>
   pathname === href || (href !== "/" && pathname.startsWith(href));
-
-// Animation variants for drawer slide-in from left
-const drawerVariants = {
-  hidden: {
-    x: "-100%",
-    opacity: 0,
-  },
-  visible: {
-    x: 0,
-    opacity: 1,
-    transition: {
-      type: "spring",
-      damping: 25,
-      stiffness: 300,
-      mass: 0.8,
-    },
-  },
-  exit: {
-    x: "-100%",
-    opacity: 0,
-    transition: {
-      duration: 0.2,
-      ease: "easeIn",
-    },
-  },
-};
-
-// Backdrop animation variants
-const backdropVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 },
-  exit: { opacity: 0 },
-};
 
 export function MobileNav() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
   const { user, loading, logout } = useAuth();
+  const prefersReducedMotion = useReducedMotion();
+
+  const drawerVariants = prefersReducedMotion
+    ? {
+        hidden: { x: 0, opacity: 1 },
+        visible: { x: 0, opacity: 1 },
+        exit: { x: 0, opacity: 1 },
+      }
+    : {
+        hidden: { x: "-100%", opacity: 0 },
+        visible: {
+          x: 0,
+          opacity: 1,
+          transition: {
+            type: "spring",
+            damping: 25,
+            stiffness: 300,
+            mass: 0.8,
+          },
+        },
+        exit: {
+          x: "-100%",
+          opacity: 0,
+          transition: { duration: 0.2, ease: "easeIn" },
+        },
+      };
+
+  const backdropVariants = prefersReducedMotion
+    ? { hidden: { opacity: 1 }, visible: { opacity: 1 }, exit: { opacity: 1 } }
+    : { hidden: { opacity: 0 }, visible: { opacity: 1 }, exit: { opacity: 0 } };
 
   // Close drawer on route change
   useEffect(() => {
@@ -98,11 +96,7 @@ export function MobileNav() {
         aria-expanded={isOpen}
         aria-controls="mobile-navigation-drawer"
       >
-        {isOpen ? (
-          <X className="h-6 w-6" />
-        ) : (
-          <Menu className="h-6 w-6" />
-        )}
+        {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
       </Button>
 
       <AnimatePresence>
@@ -115,7 +109,9 @@ export function MobileNav() {
               animate="visible"
               exit="exit"
               variants={backdropVariants}
-              transition={{ duration: 0.2 }}
+              transition={
+                prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }
+              }
               onClick={() => setIsOpen(false)}
               aria-hidden="true"
             />
@@ -155,7 +151,9 @@ export function MobileNav() {
                     {walletBalance && (
                       <div className="mt-3 flex items-center gap-2 rounded-md bg-muted/50 p-2">
                         <Wallet className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">{walletBalance}</span>
+                        <span className="text-sm font-medium">
+                          {walletBalance}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -170,7 +168,7 @@ export function MobileNav() {
                         "flex w-full items-center justify-between rounded-md p-3 text-sm font-medium transition-colors",
                         isActive
                           ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       );
 
                       if (item.href === "/wallet") {
@@ -190,13 +188,14 @@ export function MobileNav() {
                               </Link>
                             }
                           >
-                            <span
+                            <button
+                              type="button"
                               className="flex items-center justify-between w-full"
                               onClick={() => setIsOpen(false)}
                             >
                               {item.label}
                               <ChevronRight className="h-4 w-4 opacity-50" />
-                            </span>
+                            </button>
                           </ProtectedLink>
                         );
                       }
@@ -227,7 +226,7 @@ export function MobileNav() {
                           "flex w-full items-center justify-between rounded-md p-3 text-sm font-medium transition-colors",
                           isActiveRoute(pathname, "/profile")
                             ? "bg-primary/10 text-primary"
-                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                         )}
                         onClick={() => setIsOpen(false)}
                       >
@@ -243,7 +242,7 @@ export function MobileNav() {
                           "flex w-full items-center justify-between rounded-md p-3 text-sm font-medium transition-colors",
                           isActiveRoute(pathname, "/wallet")
                             ? "bg-primary/10 text-primary"
-                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                         )}
                         onClick={() => setIsOpen(false)}
                       >
@@ -269,7 +268,10 @@ export function MobileNav() {
                     <div className="grid gap-2">
                       {authItems.map((item) => {
                         const isActive = isActiveRoute(pathname, item.href);
-                        const isRegister = item.label === "Register";
+                        // #326: match by route — the CTA copy may
+                        // change ("Register" → "Get Started") but the
+                        // primary affordance is the signup route.
+                        const isRegister = item.href === "/register";
 
                         return (
                           <Link
@@ -282,7 +284,7 @@ export function MobileNav() {
                               variant={isRegister ? "primary" : "outline"}
                               className={cn(
                                 "w-full justify-start",
-                                isActive && "ring-2 ring-primary/30"
+                                isActive && "ring-2 ring-primary/30",
                               )}
                             >
                               {item.label}

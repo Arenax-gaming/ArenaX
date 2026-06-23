@@ -23,7 +23,7 @@ const mockNews: NewsItem[] = [
 const tagColors: Record<string, string> = {
   Season: "bg-purple-500/10 text-purple-500",
   Tournament: "bg-yellow-500/10 text-yellow-600",
-  Update: "bg-blue-500/10 text-blue-500",
+  Update: "bg-primary/10 text-primary",
   Notice: "bg-muted text-muted-foreground",
 };
 

@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import axios from 'axios';
 import { authConfig } from '../config/auth.config';
 import {
     DatabaseTransactionClient,
@@ -8,6 +9,8 @@ import {
 } from './database.service';
 import { HttpError } from '../utils/http-error';
 import stellarWalletService from './stellar-wallet.service';
+import emailService from './email.service';
+import { logger } from './logger.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -99,6 +102,7 @@ const mapUserToSafeUser = (user: {
     socials: unknown;
     createdAt: Date;
     updatedAt: Date;
+    isVerified: boolean;
 }) => ({
     id: user.id,
     email: user.email,
@@ -107,7 +111,8 @@ const mapUserToSafeUser = (user: {
     bio: user.bio,
     socials: user.socials,
     createdAt: user.createdAt,
-    updatedAt: user.updatedAt
+    updatedAt: user.updatedAt,
+    isVerified: user.isVerified
 });
 
 const createAccessToken = (user: {
@@ -259,7 +264,9 @@ export const registerUser = async (input: RegisterInput) => {
                     data: {
                         email: normalizedEmail,
                         username: candidate,
-                        passwordHash
+                        passwordHash,
+                        provider: 'EMAIL',
+                        isVerified: false
                     }
                 });
 
@@ -267,7 +274,37 @@ export const registerUser = async (input: RegisterInput) => {
                 return user;
             });
 
+            // Generate and send verification email
+            const verificationToken = crypto.randomBytes(32).toString('hex');
+            const verificationTokenHash = toTokenHash(verificationToken);
+            const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+            await prisma.user.update({
+                where: { id: createdUser.id },
+                data: {
+                    verificationToken: verificationTokenHash,
+                    verificationTokenExpires
+                }
+            });
+
+            try {
+                await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
+            } catch (emailError) {
+                logger.warn('Failed to send verification email', {
+                    userId: createdUser.id,
+                    email: normalizedEmail,
+                    error: emailError
+                });
+                // Don't fail registration if email fails
+            }
+
             const tokens = await issueSessionTokens(createdUser);
+
+            logger.info('User registered', {
+                userId: createdUser.id,
+                username: createdUser.username,
+                provider: 'EMAIL'
+            });
 
             return {
                 user: mapUserToSafeUser(createdUser),
@@ -307,10 +344,13 @@ export const loginUser = async (input: LoginInput) => {
 
     const isPasswordValid = await bcrypt.compare(input.password, user.passwordHash);
     if (!isPasswordValid) {
+        logger.warn('Failed login attempt', { email: normalizedEmail });
         throw new HttpError(401, 'Invalid credentials');
     }
 
     const tokens = await issueSessionTokens(user);
+
+    logger.info('User logged in', { userId: user.id, username: user.username });
 
     return {
         user: mapUserToSafeUser(user),
@@ -344,6 +384,10 @@ export const refreshSession = async (input: RefreshInput) => {
     if (storedToken.revokedAt) {
         if (storedToken.replacedByTokenId) {
             await revokeTokenFamily(storedToken.familyId);
+            logger.warn('Refresh token reuse detected — token family revoked', {
+                userId: storedToken.userId,
+                familyId: storedToken.familyId
+            });
             throw new HttpError(
                 401,
                 'Refresh token reuse detected, please login again'
@@ -396,5 +440,363 @@ export const logoutUser = async (input: LogoutInput): Promise<void> => {
             where: { id: storedToken.id },
             data: { revokedAt: new Date() }
         });
+        logger.info('User logged out', { userId: storedToken.userId });
     }
+};
+
+export interface SocialAuthInput {
+    provider: 'google' | 'discord' | 'twitch';
+    accessToken: string;
+}
+
+export const authenticateSocial = async (input: SocialAuthInput) => {
+    const prisma = getDatabaseClient();
+
+    let userProfile: { email: string; username: string; providerId: string };
+    switch (input.provider) {
+        case 'google':
+            userProfile = await validateGoogleToken(input.accessToken);
+            break;
+        case 'discord':
+            userProfile = await validateDiscordToken(input.accessToken);
+            break;
+        case 'twitch':
+            userProfile = await validateTwitchToken(input.accessToken);
+            break;
+        default:
+            throw new HttpError(400, 'Unsupported provider');
+    }
+
+    const normalizedEmail = normalizeEmail(userProfile.email);
+
+    // Try to find user by provider id first
+    let user = await prisma.user.findFirst({
+        where: {
+            provider: input.provider.toUpperCase(),
+            providerId: userProfile.providerId
+        }
+    });
+
+    if (!user) {
+        // Try to find by email to link accounts
+        user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+        if (user) {
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    provider: input.provider.toUpperCase(),
+                    providerId: userProfile.providerId,
+                    isVerified: true
+                }
+            });
+        } else {
+            const usernameBase = buildUsernameBase(normalizedEmail, userProfile.username);
+
+            for (let attempt = 0; attempt < MAX_USERNAME_ATTEMPTS; attempt += 1) {
+                const candidate = buildCandidateUsername(usernameBase, attempt);
+                try {
+                    user = await prisma.$transaction(async (tx) => {
+                        const newUser = await tx.user.create({
+                            data: {
+                                email: normalizedEmail,
+                                username: candidate,
+                                passwordHash: '',
+                                isVerified: true,
+                                provider: input.provider.toUpperCase(),
+                                providerId: userProfile.providerId
+                            }
+                        });
+
+                        await stellarWalletService.registerUserWallet(newUser.id, tx);
+                        return newUser;
+                    });
+                    break;
+                } catch (error) {
+                    if (isUniqueConstraintError(error, 'email')) {
+                        throw new HttpError(409, 'Email already in use');
+                    }
+                    if (isUniqueConstraintError(error, 'username')) {
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+        }
+    }
+
+    if (!user) {
+        throw new HttpError(500, 'Unable to create user from social login');
+    }
+
+    const tokens = await issueSessionTokens(user);
+
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        }
+    };
+};
+
+// OAuth validation functions
+async function validateGoogleToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    const { email, sub, name } = response.data;
+    return {
+        email,
+        username: name || email.split('@')[0],
+        providerId: sub
+    };
+}
+
+async function validateDiscordToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://discord.com/api/users/@me', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    
+    const { email, id, username: discordUsername, global_name } = response.data;
+    return {
+        email: email || `${id}@discord.local`,
+        username: global_name || discordUsername || `discord_${id}`,
+        providerId: id
+    };
+}
+
+async function validateTwitchToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
+    const response = await axios.get('https://api.twitch.tv/helix/users', {
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID || ''
+        }
+    });
+    
+    const { email, id, login } = response.data.data[0];
+    return {
+        email: email || `${id}@twitch.local`,
+        username: login || `twitch_${id}`,
+        providerId: id
+    };
+}
+
+export const createGuestSession = async () => {
+    const prisma = getDatabaseClient();
+    
+    const guestId = crypto.randomUUID();
+    const guestEmail = `guest_${guestId}@arenax.gg`;
+    const guestUsername = `guest_${guestId.slice(0, 8)}`;
+    
+    const user = await prisma.$transaction(async (tx) => {
+        const guestUser = await tx.user.create({
+            data: {
+                email: guestEmail,
+                username: guestUsername,
+                passwordHash: '', // No password for guests
+                isVerified: false,
+                role: 'GUEST'
+            }
+        });
+        
+        await stellarWalletService.registerUserWallet(guestUser.id, tx);
+        return guestUser;
+    });
+    
+    const tokens = await issueSessionTokens(user);
+    
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        },
+        isGuest: true
+    };
+};
+
+export interface VerifyEmailInput {
+    token: string;
+}
+
+export const verifyEmail = async (input: VerifyEmailInput) => {
+    const prisma = getDatabaseClient();
+    const tokenHash = toTokenHash(input.token);
+    
+    const user = await prisma.user.findFirst({
+        where: {
+            verificationToken: tokenHash
+        }
+    });
+    
+    if (!user) {
+        throw new HttpError(400, 'Invalid verification token');
+    }
+    
+    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Verification token has expired');
+    }
+    
+    if (user.isVerified) {
+        throw new HttpError(400, 'Email already verified');
+    }
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            isVerified: true,
+            verificationToken: null,
+            verificationTokenExpires: null
+        }
+    });
+    
+    try {
+        await emailService.sendWelcomeEmail(user.email, user.username);
+    } catch (emailError) {
+        logger.warn('Failed to send welcome email', {
+            userId: user.id,
+            email: user.email,
+            error: emailError
+        });
+        // Don't fail verification if welcome email fails
+    }
+
+    logger.info('Email verified', { userId: user.id });
+    
+    return { message: 'Email verified successfully' };
+};
+
+export interface ResendVerificationEmailInput {
+    email: string;
+}
+
+export const resendVerificationEmail = async (input: ResendVerificationEmailInput) => {
+    const prisma = getDatabaseClient();
+    const normalizedEmail = normalizeEmail(input.email);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    // Always return success to prevent email enumeration
+    if (!user) {
+        return { message: 'If the email exists, a verification link has been sent' };
+    }
+    
+    if (user.isVerified) {
+        return { message: 'Email already verified' };
+    }
+    
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenHash = toTokenHash(verificationToken);
+    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            verificationToken: verificationTokenHash,
+            verificationTokenExpires
+        }
+    });
+    
+    // Send verification email
+    try {
+        await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
+    } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Don't fail if email fails
+    }
+    
+    return { message: 'If the email exists, a verification link has been sent' };
+};
+
+export interface ForgotPasswordInput {
+    email: string;
+}
+
+export const forgotPassword = async (input: ForgotPasswordInput) => {
+    const prisma = getDatabaseClient();
+    const normalizedEmail = normalizeEmail(input.email);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail }
+    });
+    
+    // Always return success to prevent email enumeration
+    if (!user) {
+        return { message: 'If the email exists, a reset link has been sent' };
+    }
+    
+    // Generate password reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = toTokenHash(resetToken);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            passwordResetToken: resetTokenHash,
+            passwordResetExpires: expiresAt
+        }
+    });
+    
+    // Send password reset email
+    try {
+        await emailService.sendPasswordResetEmail(normalizedEmail, resetToken);
+    } catch (emailError) {
+        logger.warn('Failed to send password reset email', {
+            userId: user.id,
+            email: normalizedEmail,
+            error: emailError
+        });
+        // Don't fail if email fails
+    }
+
+    logger.info('Password reset requested', { userId: user.id });
+    
+    return { message: 'If the email exists, a reset link has been sent' };
+};
+
+export interface ResetPasswordInput {
+    token: string;
+    newPassword: string;
+}
+
+export const resetPassword = async (input: ResetPasswordInput) => {
+    const prisma = getDatabaseClient();
+    const tokenHash = toTokenHash(input.token);
+    
+    const user = await prisma.user.findFirst({
+        where: {
+            passwordResetToken: tokenHash
+        }
+    });
+    
+    if (!user) {
+        throw new HttpError(400, 'Invalid reset token');
+    }
+    
+    if (!user.passwordResetExpires || user.passwordResetExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Reset token has expired');
+    }
+    
+    const passwordHash = await bcrypt.hash(input.newPassword, BCRYPT_ROUNDS);
+    
+    await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            passwordHash,
+            passwordResetToken: null,
+            passwordResetExpires: null
+        }
+    });
+    
+    return { message: 'Password reset successfully' };
 };

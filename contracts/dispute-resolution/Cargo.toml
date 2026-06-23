@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Dispute Resolution Module: handles dispute open/close, evidence references, adjudication and timeouts"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk.workspace = true

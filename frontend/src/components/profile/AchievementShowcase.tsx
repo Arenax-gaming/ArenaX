@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Achievement } from "@/types/profile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Trophy } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Trophy, Filter, Star, Award, Target, Users, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AchievementShowcaseProps {
@@ -16,8 +17,72 @@ function isRecentUnlock(unlockedAt: string): boolean {
   return new Date(unlockedAt).getTime() > Date.now() - THIRTY_DAYS_MS;
 }
 
+type AchievementCategory = 'all' | 'combat' | 'social' | 'progression' | 'special';
+type AchievementRarity = 'common' | 'rare' | 'epic' | 'legendary';
+
+const CATEGORY_ICONS: Record<AchievementCategory, React.ReactNode> = {
+  all: <Trophy className="h-4 w-4" />,
+  combat: <Zap className="h-4 w-4" />,
+  social: <Users className="h-4 w-4" />,
+  progression: <Target className="h-4 w-4" />,
+  special: <Star className="h-4 w-4" />,
+};
+
+const RARITY_COLORS: Record<AchievementRarity, string> = {
+  common: "border-gray-400 bg-muted dark:bg-background/50",
+  rare: "border-primary/70 bg-info-muted dark:bg-info-muted/20",
+  epic: "border-purple-400 bg-purple-50 dark:bg-purple-900/20",
+  legendary: "border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20",
+};
+
+const RARITY_TEXT_COLORS: Record<AchievementRarity, string> = {
+  common: "text-gray-600 dark:text-muted-foreground",
+  rare: "text-primary dark:text-primary/80",
+  epic: "text-purple-600 dark:text-purple-400",
+  legendary: "text-yellow-600 dark:text-yellow-400",
+};
+
+// Enhanced Achievement interface (extending the base type)
+interface EnhancedAchievement extends Achievement {
+  category?: AchievementCategory;
+  rarity?: AchievementRarity;
+  points?: number;
+}
+
 export function AchievementShowcase({ achievements }: AchievementShowcaseProps) {
-  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const [selectedCategory, setSelectedCategory] = useState<AchievementCategory>('all');
+  const [showOnlyUnlocked, setShowOnlyUnlocked] = useState(false);
+
+  // Convert achievements to enhanced format with defaults
+  const enhancedAchievements: EnhancedAchievement[] = achievements.map(achievement => ({
+    ...achievement,
+    category: (achievement as any).category || 'progression',
+    rarity: (achievement as any).rarity || 'common',
+    points: (achievement as any).points || 10,
+  }));
+
+  const filteredAchievements = enhancedAchievements.filter(achievement => {
+    if (selectedCategory !== 'all' && achievement.category !== selectedCategory) {
+      return false;
+    }
+    if (showOnlyUnlocked && !achievement.unlocked) {
+      return false;
+    }
+    return true;
+  });
+
+  const unlockedCount = enhancedAchievements.filter((a) => a.unlocked).length;
+  const totalPoints = enhancedAchievements
+    .filter(a => a.unlocked)
+    .reduce((sum, a) => sum + (a.points || 0), 0);
+
+  const categories: { key: AchievementCategory; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'combat', label: 'Combat' },
+    { key: 'social', label: 'Social' },
+    { key: 'progression', label: 'Progress' },
+    { key: 'special', label: 'Special' },
+  ];
 
   return (
     <Card>
@@ -27,19 +92,53 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
             <Trophy className="h-5 w-5" />
             Achievements
           </span>
-          <span className="text-sm font-normal text-muted-foreground">
-            {unlockedCount} / {achievements.length} Unlocked
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="text-sm font-normal text-muted-foreground">
+              {unlockedCount} / {enhancedAchievements.length} Unlocked
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {totalPoints} Points
+            </span>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <div className="flex gap-1">
+            {categories.map((category) => (
+              <Button
+                key={category.key}
+                variant={selectedCategory === category.key ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSelectedCategory(category.key)}
+                className="h-8 px-3 text-xs"
+              >
+                {CATEGORY_ICONS[category.key]}
+                <span className="ml-1">{category.label}</span>
+              </Button>
+            ))}
+          </div>
+          <Button
+            variant={showOnlyUnlocked ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowOnlyUnlocked(!showOnlyUnlocked)}
+            className="h-8 px-3 text-xs"
+          >
+            <Filter className="h-3 w-3 mr-1" />
+            Unlocked Only
+          </Button>
+        </div>
+
+        {/* Achievement Grid */}
         <div className="space-y-3">
-          {achievements.map((achievement) => (
+          {filteredAchievements.map((achievement) => (
             <div
               key={achievement.id}
               className={cn(
-                "flex items-start gap-3 p-3 rounded-lg border bg-muted/30",
-                !achievement.unlocked && "opacity-50"
+                "flex items-start gap-3 p-3 rounded-lg border transition-all",
+                RARITY_COLORS[achievement.rarity!],
+                !achievement.unlocked && "opacity-60"
               )}
             >
               {/* Icon */}
@@ -49,12 +148,27 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
 
               {/* Content */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="font-semibold text-sm">{achievement.title}</span>
+
+                  {/* Rarity Badge */}
+                  <span className={cn(
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium capitalize",
+                    RARITY_TEXT_COLORS[achievement.rarity!],
+                    "bg-current/10"
+                  )}>
+                    <Award className="h-3 w-3" />
+                    {achievement.rarity}
+                  </span>
+
+                  {/* Points */}
+                  <span className="text-xs text-muted-foreground">
+                    {achievement.points} pts
+                  </span>
 
                   {/* Unlocked indicator */}
                   {achievement.unlocked && (
-                    <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400 font-medium">
+                    <span className="inline-flex items-center gap-1 text-xs text-success dark:text-success/80 font-medium">
                       <span>✓</span> Unlocked
                     </span>
                   )}
@@ -65,33 +179,40 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
                     isRecentUnlock(achievement.unlockedAt) && (
                       <span
                         data-testid="new-badge"
-                        className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-info dark:bg-info-muted/40 dark:text-blue-300"
                       >
                         New
                       </span>
                     )}
                 </div>
 
-                <p className="text-xs text-muted-foreground mt-0.5">{achievement.description}</p>
+                <p className="text-xs text-muted-foreground mb-2">{achievement.description}</p>
 
                 {/* Progress bar for locked achievements */}
                 {!achievement.unlocked && (
                   <div className="mt-2">
                     <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                      <span>Progress</span>
                       <span>
                         {achievement.progress} / {achievement.total}
                       </span>
                     </div>
                     <div
                       data-testid="progress-bar"
-                      className="h-1.5 w-full bg-muted rounded-full overflow-hidden"
+                      className="h-2 w-full bg-muted rounded-full overflow-hidden"
                       role="progressbar"
                       aria-valuenow={achievement.progress}
                       aria-valuemin={0}
                       aria-valuemax={achievement.total}
                     >
                       <div
-                        className="h-full bg-primary rounded-full transition-all"
+                        className={cn(
+                          "h-full rounded-full transition-all",
+                          achievement.rarity === 'legendary' ? "bg-gradient-to-r from-yellow-400 to-orange-500" :
+                          achievement.rarity === 'epic' ? "bg-gradient-to-r from-purple-400 to-pink-500" :
+                          achievement.rarity === 'rare' ? "bg-gradient-to-r from-blue-400 to-cyan-500" :
+                          "bg-primary"
+                        )}
                         style={{
                           width: `${achievement.total > 0 ? Math.min(100, (achievement.progress / achievement.total) * 100) : 0}%`,
                         }}
@@ -99,11 +220,24 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
                     </div>
                   </div>
                 )}
+
+                {/* Unlock date for completed achievements */}
+                {achievement.unlocked && achievement.unlockedAt && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Unlocked {new Date(achievement.unlockedAt).toLocaleDateString()}
+                  </div>
+                )}
               </div>
             </div>
           ))}
 
-          {achievements.length === 0 && (
+          {filteredAchievements.length === 0 && (
+            <div className="text-center text-muted-foreground py-8">
+              {showOnlyUnlocked ? "No unlocked achievements in this category" : "No achievements in this category"}
+            </div>
+          )}
+
+          {enhancedAchievements.length === 0 && (
             <p className="text-center text-muted-foreground py-8">No achievements yet</p>
           )}
         </div>

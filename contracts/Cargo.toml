@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "arenax-events",
+    "cross-contract-utils",
+    "oracle-integration",
     "analytics",
     "game-state",
     "cross-game-assets",
@@ -27,6 +29,7 @@ members = [
     "upgrade-system",
     "player-reputation",
     "tournament-manager",
+    "virtual-economy",
     "governance",
     "access-control",
     "emergency-pause",

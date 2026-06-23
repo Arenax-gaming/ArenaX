@@ -373,6 +373,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cross-contract-utils"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "cross-game-assets"
 version = "0.1.0"
 dependencies = [
@@ -1026,6 +1033,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
+name = "merkle"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1075,6 +1089,13 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "oracle-integration"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 
 [[package]]
 name = "p256"
@@ -1139,6 +1160,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prize-distribution"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "dispute-resolution",
+ "match-contract",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1191,6 +1222,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "random-generation"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1834,6 +1873,14 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "virtual-economy"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "visibility"

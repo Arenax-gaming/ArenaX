@@ -68,12 +68,15 @@ impl StakingRewardsContract {
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::RewardPool, &0i128);
         env.storage().instance().set(&DataKey::TotalStaked, &0i128);
-        env.storage().instance().set(&DataKey::Params, &RewardParams {
-            annual_rate_bps: 1200,
-            min_lock_period: 0,
-            max_lock_period: 31_536_000,
-            early_unstake_penalty_bps: 500,
-        });
+        env.storage().instance().set(
+            &DataKey::Params,
+            &RewardParams {
+                annual_rate_bps: 1200,
+                min_lock_period: 0,
+                max_lock_period: 31_536_000,
+                early_unstake_penalty_bps: 500,
+            },
+        );
     }
 
     pub fn stake_tokens(env: Env, user: Address, amount: i128, lock_period: u64) {
@@ -83,7 +86,11 @@ impl StakingRewardsContract {
             panic!("amount must be positive");
         }
 
-        let params: RewardParams = env.storage().instance().get(&DataKey::Params).expect("params missing");
+        let params: RewardParams = env
+            .storage()
+            .instance()
+            .get(&DataKey::Params)
+            .expect("params missing");
         if lock_period < params.min_lock_period || lock_period > params.max_lock_period {
             panic!("invalid lock period");
         }
@@ -93,12 +100,17 @@ impl StakingRewardsContract {
 
         let now = env.ledger().timestamp();
         let key = DataKey::Stake(user.clone());
-        let position = if let Some(mut current) = env.storage().persistent().get::<DataKey, StakingPosition>(&key) {
+        let position = if let Some(mut current) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, StakingPosition>(&key)
+        {
             current.pending_rewards += Self::calculate_position_rewards(&current, &params, now);
             current.amount += amount;
             current.lock_period = current.lock_period.max(lock_period);
             current.last_reward_at = now;
-            current.governance_weight = Self::governance_weight(current.amount, current.lock_period);
+            current.governance_weight =
+                Self::governance_weight(current.amount, current.lock_period);
             current
         } else {
             StakingPosition {
@@ -113,9 +125,18 @@ impl StakingRewardsContract {
         };
 
         env.storage().persistent().set(&key, &position);
-        let total = env.storage().instance().get::<DataKey, i128>(&DataKey::TotalStaked).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalStaked, &(total + amount));
-        env.events().publish((soroban_sdk::symbol_short!("STAKED"), user), (amount, lock_period));
+        let total = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::TotalStaked)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalStaked, &(total + amount));
+        env.events().publish(
+            (soroban_sdk::symbol_short!("STAKED"), user),
+            (amount, lock_period),
+        );
     }
 
     pub fn unstake_tokens(env: Env, user: Address, amount: i128) {
@@ -125,9 +146,17 @@ impl StakingRewardsContract {
             panic!("amount must be positive");
         }
 
-        let params: RewardParams = env.storage().instance().get(&DataKey::Params).expect("params missing");
+        let params: RewardParams = env
+            .storage()
+            .instance()
+            .get(&DataKey::Params)
+            .expect("params missing");
         let key = DataKey::Stake(user.clone());
-        let mut position: StakingPosition = env.storage().persistent().get(&key).expect("stake not found");
+        let mut position: StakingPosition = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("stake not found");
         if amount > position.amount {
             panic!("insufficient staked amount");
         }
@@ -151,22 +180,46 @@ impl StakingRewardsContract {
             env.storage().persistent().set(&key, &position);
         }
 
-        let total = env.storage().instance().get::<DataKey, i128>(&DataKey::TotalStaked).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalStaked, &(total - amount).max(0));
+        let total = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::TotalStaked)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalStaked, &(total - amount).max(0));
         let token = Self::token(&env);
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &user, &payout);
         if penalty > 0 {
-            let pool = env.storage().instance().get::<DataKey, i128>(&DataKey::RewardPool).unwrap_or(0);
-            env.storage().instance().set(&DataKey::RewardPool, &(pool + penalty));
+            let pool = env
+                .storage()
+                .instance()
+                .get::<DataKey, i128>(&DataKey::RewardPool)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::RewardPool, &(pool + penalty));
         }
-        env.events().publish((soroban_sdk::symbol_short!("UNSTAKED"), user), (amount, payout));
+        env.events().publish(
+            (soroban_sdk::symbol_short!("UNSTAKED"), user),
+            (amount, payout),
+        );
     }
 
     pub fn calculate_rewards(env: Env, user: Address, period: u64) -> i128 {
-        let params: RewardParams = env.storage().instance().get(&DataKey::Params).expect("params missing");
-        if let Some(position) = env.storage().persistent().get::<DataKey, StakingPosition>(&DataKey::Stake(user)) {
+        let params: RewardParams = env
+            .storage()
+            .instance()
+            .get(&DataKey::Params)
+            .expect("params missing");
+        if let Some(position) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, StakingPosition>(&DataKey::Stake(user))
+        {
             let synthetic_now = position.last_reward_at + period;
-            Self::calculate_position_rewards(&position, &params, synthetic_now) + position.pending_rewards
+            Self::calculate_position_rewards(&position, &params, synthetic_now)
+                + position.pending_rewards
         } else {
             0
         }
@@ -174,31 +227,61 @@ impl StakingRewardsContract {
 
     pub fn distribute_rewards(env: Env, epoch: u64) {
         Self::require_admin(&env);
-        if env.storage().persistent().has(&DataKey::EpochDistributed(epoch)) {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::EpochDistributed(epoch))
+        {
             panic!("epoch already distributed");
         }
 
-        let total = env.storage().instance().get::<DataKey, i128>(&DataKey::TotalStaked).unwrap_or(0);
-        let pool = env.storage().instance().get::<DataKey, i128>(&DataKey::RewardPool).unwrap_or(0);
+        let total = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::TotalStaked)
+            .unwrap_or(0);
+        let pool = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::RewardPool)
+            .unwrap_or(0);
         let distribution = pool.min(total / 100);
-        env.storage().instance().set(&DataKey::RewardPool, &(pool - distribution));
-        env.storage().persistent().set(&DataKey::EpochDistributed(epoch), &distribution);
-        env.events().publish((soroban_sdk::symbol_short!("REWARD"), epoch), distribution);
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardPool, &(pool - distribution));
+        env.storage()
+            .persistent()
+            .set(&DataKey::EpochDistributed(epoch), &distribution);
+        env.events()
+            .publish((soroban_sdk::symbol_short!("REWARD"), epoch), distribution);
     }
 
     pub fn claim_rewards(env: Env, user: Address) -> i128 {
         Self::require_not_paused(&env);
         user.require_auth();
-        let params: RewardParams = env.storage().instance().get(&DataKey::Params).expect("params missing");
+        let params: RewardParams = env
+            .storage()
+            .instance()
+            .get(&DataKey::Params)
+            .expect("params missing");
         let key = DataKey::Stake(user.clone());
-        let mut position: StakingPosition = env.storage().persistent().get(&key).expect("stake not found");
+        let mut position: StakingPosition = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("stake not found");
         let now = env.ledger().timestamp();
-        let rewards = position.pending_rewards + Self::calculate_position_rewards(&position, &params, now);
+        let rewards =
+            position.pending_rewards + Self::calculate_position_rewards(&position, &params, now);
         if rewards <= 0 {
             panic!("no rewards");
         }
 
-        let pool = env.storage().instance().get::<DataKey, i128>(&DataKey::RewardPool).unwrap_or(0);
+        let pool = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::RewardPool)
+            .unwrap_or(0);
         let payout = rewards.min(pool);
         if payout <= 0 {
             panic!("reward pool empty");
@@ -207,7 +290,9 @@ impl StakingRewardsContract {
         position.pending_rewards = rewards - payout;
         position.last_reward_at = now;
         env.storage().persistent().set(&key, &position);
-        env.storage().instance().set(&DataKey::RewardPool, &(pool - payout));
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardPool, &(pool - payout));
         let token = Self::token(&env);
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &user, &payout);
         payout
@@ -219,8 +304,13 @@ impl StakingRewardsContract {
         let total_staked = env.storage().instance().get::<DataKey, i128>(&DataKey::TotalStaked).unwrap_or(0);
         let claimable_rewards = position_opt.clone()
             .map(|p| {
-                let params: RewardParams = env.storage().instance().get(&DataKey::Params).expect("params missing");
-                Self::calculate_position_rewards(&p, &params, env.ledger().timestamp()) + p.pending_rewards
+                let params: RewardParams = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Params)
+                    .expect("params missing");
+                Self::calculate_position_rewards(&p, &params, env.ledger().timestamp())
+                    + p.pending_rewards
             })
             .unwrap_or(0);
 
@@ -246,7 +336,10 @@ impl StakingRewardsContract {
             panic!("invalid lock range");
         }
         env.storage().instance().set(&DataKey::Params, &new_params);
-        env.events().publish((soroban_sdk::symbol_short!("PARAMS"),), new_params.annual_rate_bps);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("PARAMS"),),
+            new_params.annual_rate_bps,
+        );
     }
 
     pub fn fund_reward_pool(env: Env, funder: Address, amount: i128) {
@@ -256,13 +349,24 @@ impl StakingRewardsContract {
             panic!("amount must be positive");
         }
         let token = Self::token(&env);
-        token::Client::new(&env, &token).transfer(&funder, &env.current_contract_address(), &amount);
-        let pool = env.storage().instance().get::<DataKey, i128>(&DataKey::RewardPool).unwrap_or(0);
-        env.storage().instance().set(&DataKey::RewardPool, &(pool + amount));
+        token::Client::new(&env, &token).transfer(
+            &funder,
+            &env.current_contract_address(),
+            &amount,
+        );
+        let pool = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::RewardPool)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::RewardPool, &(pool + amount));
     }
 
     pub fn get_governance_weight(env: Env, user: Address) -> i128 {
-        env.storage().persistent()
+        env.storage()
+            .persistent()
             .get::<DataKey, StakingPosition>(&DataKey::Stake(user))
             .map(|p| p.governance_weight)
             .unwrap_or(0)
@@ -273,7 +377,12 @@ impl StakingRewardsContract {
         let mut i = 0;
         while i < epochs.len() {
             let epoch = epochs.get(i).expect("epoch");
-            values.push_back(env.storage().persistent().get::<DataKey, i128>(&DataKey::EpochDistributed(epoch)).unwrap_or(0));
+            values.push_back(
+                env.storage()
+                    .persistent()
+                    .get::<DataKey, i128>(&DataKey::EpochDistributed(epoch))
+                    .unwrap_or(0),
+            );
             i += 1;
         }
         values
@@ -291,7 +400,8 @@ impl StakingRewardsContract {
 
     fn calculate_position_rewards(position: &StakingPosition, params: &RewardParams, now: u64) -> i128 {
         let elapsed = now.saturating_sub(position.last_reward_at) as i128;
-        let lock_multiplier_bps = 10_000 + (position.lock_period.min(31_536_000) as i128 * 5_000 / 31_536_000);
+        let lock_multiplier_bps =
+            10_000 + (position.lock_period.min(31_536_000) as i128 * 5_000 / 31_536_000);
         position.amount * params.annual_rate_bps as i128 * lock_multiplier_bps * elapsed
             / (31_536_000i128 * 10_000 * 10_000)
     }
@@ -302,12 +412,21 @@ impl StakingRewardsContract {
     }
 
     fn require_admin(env: &Env) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
     }
 
     fn require_not_paused(env: &Env) {
-        if env.storage().instance().get::<DataKey, bool>(&DataKey::Paused).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
             panic!("contract is paused");
         }
         if let Some(global_pause) = env.storage().instance().get::<DataKey, Address>(&DataKey::GlobalPauseContract) {
@@ -324,6 +443,9 @@ impl StakingRewardsContract {
     }
 
     fn token(env: &Env) -> Address {
-        env.storage().instance().get(&DataKey::Token).expect("token not set")
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token not set")
     }
 }

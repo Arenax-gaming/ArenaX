@@ -1,21 +1,74 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { mockTournaments } from "@/data/mockTournaments";
 import { RegistrationForm } from "@/components/tournaments/RegistrationForm";
 import { Button } from "@/components/ui/Button";
 import { ArrowLeft, AlertCircle } from "lucide-react";
+import { api } from "@/lib/api";
+import type { Tournament } from "@/types/tournament";
 
 export default function TournamentRegisterPage() {
   const params = useParams();
   const router = useRouter();
   const tournamentId = params.id as string;
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const tournament = useMemo(
-    () => mockTournaments.find((t) => t.id === tournamentId),
-    [tournamentId],
-  );
+  useEffect(() => {
+    let active = true;
+
+    const loadTournament = async () => {
+      setIsLoading(true);
+      setFetchError(null);
+
+      try {
+        const data = await api.getTournament(tournamentId);
+        if (active) {
+          setTournament(data);
+        }
+      } catch (error) {
+        if (active) {
+          setFetchError(
+            error instanceof Error ? error.message : "Unable to load tournament.",
+          );
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadTournament();
+
+    return () => {
+      active = false;
+    };
+  }, [tournamentId]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <p className="text-lg font-medium text-foreground">Loading tournament details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <h1 className="mb-2 text-2xl font-bold text-foreground">Unable to load tournament</h1>
+          <p className="mb-6 text-muted-foreground">{fetchError}</p>
+          <Button onClick={() => router.push("/tournaments")}>Back to Tournaments</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!tournament) {
     return (

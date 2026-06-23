@@ -13,17 +13,56 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { useSocial } from "@/hooks/useSocial";
 import { CommunityFeed } from "@/components/social";
 import { currentUser } from "@/data/user";
+import type { CommunityPost } from "@/types/social";
 
 export default function CommunityPage() {
-  const {
-    posts,
-    likePost,
-    addComment,
-    createPost,
-  } = useSocial();
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [activeFilter, setActiveFilter] = useState<"all" | "trending" | "recent">("all");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+
+  const likePost = (postId: string) => {
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, likes: p.isLiked ? p.likes - 1 : p.likes + 1, isLiked: !p.isLiked }
+          : p,
+      ),
+    );
+  };
+
+  const addComment = (postId: string, content: string) => {
+    // Optimistic comment count bump — full comment stored server-side
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId ? { ...p, comments: p.comments + 1 } : p,
+      ),
+    );
+  };
+
+  const createPost = (content: string, tags: string[]) => {
+    const newPost: CommunityPost = {
+      id: `local-${Date.now()}`,
+      content,
+      tags,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      isLiked: false,
+      isPinned: false,
+      createdAt: new Date().toISOString(),
+      author: {
+        id: currentUser.id,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+        elo: 0,
+        status: "online",
+      },
+      media: [],
+    };
+    setPosts((prev) => [newPost, ...prev]);
+  };
 
   const [activeFilter, setActiveFilter] = useState<"all" | "trending" | "recent">("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");

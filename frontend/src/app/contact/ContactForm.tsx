@@ -1,12 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { FormError } from "@/components/ui/FormError";
 import { motion } from "framer-motion";
 import { Send } from "lucide-react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 export function ContactForm() {
   const [formData, setFormData] = useState({
@@ -17,6 +24,7 @@ export function ContactForm() {
   });
   const [formError, setFormError] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,22 +57,29 @@ export function ContactForm() {
           Send us a Message
         </CardTitle>
         <CardDescription>
-          Fill out the form below and we&apos;ll get back to you within 24 hours.
+          Fill out the form below and we&apos;ll get back to you within 24
+          hours.
         </CardDescription>
       </CardHeader>
       <CardContent>
         {submitted ? (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={
+              prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 20 }
+            }
+            animate={
+              prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0 }
+            }
+            transition={prefersReducedMotion ? { duration: 0 } : undefined}
             className="text-center py-8"
           >
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900 mb-4">
-              <Send className="h-8 w-8 text-green-600 dark:text-green-400" />
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-success-muted dark:bg-success-muted mb-4">
+              <Send className="h-8 w-8 text-success dark:text-success/80" />
             </div>
             <h3 className="text-xl font-bold mb-2">Message Sent!</h3>
             <p className="text-muted-foreground">
-              Thank you for reaching out. We&apos;ll respond to your inquiry soon.
+              Thank you for reaching out. We&apos;ll respond to your inquiry
+              soon.
             </p>
           </motion.div>
         ) : (

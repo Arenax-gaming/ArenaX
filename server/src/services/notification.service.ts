@@ -1,3 +1,6 @@
+import fetch from 'node-fetch';
+
+const WEBHOOK_URL = process.env.ADMIN_WEBHOOK_URL;
 export type NotificationType =
   | 'match_started'
   | 'match_ended'
@@ -34,6 +37,30 @@ export interface NotificationFilter {
 }
 
 export class NotificationService {
+  static async notifyWebhook(event: { type: string; payload: any }) {
+    if (!WEBHOOK_URL) {
+      console.log('[Notification] no webhook configured; skipping notification', event.type);
+      return false;
+    }
+
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ event: event.type, payload: event.payload, timestamp: new Date().toISOString() })
+      });
+
+      if (!res.ok) {
+        console.warn('[Notification] webhook responded with', res.status);
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error('[Notification] webhook failed', err);
+      return false;
+    }
+  }
   private notifications = new Map<string, Notification[]>()
   private preferences = new Map<string, NotificationPreferences>()
   private messageQueue: Notification[] = []

@@ -1,4 +1,5 @@
 "use client";
+import { Switch } from "@/components/ui/Switch";
 
 import React, { useState } from "react";
 import { Eye, EyeOff, Shield, Mail, User, Lock, Check, AlertCircle } from "lucide-react";
@@ -51,8 +52,8 @@ export function AccountSettings({
     <Card>
       <CardHeader>
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-500/10 rounded-lg">
-            <User className="h-5 w-5 text-blue-500" />
+          <div className="p-2 bg-primary/10 rounded-lg">
+            <User className="h-5 w-5 text-primary" />
           </div>
           <div>
             <CardTitle>Account Settings</CardTitle>
@@ -63,22 +64,23 @@ export function AccountSettings({
       <CardContent className="space-y-6">
         {/* Email */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label htmlFor="account-email" className="text-sm font-medium flex items-center gap-2">
             <Mail className="h-4 w-4 text-muted-foreground" />
             Email Address
           </label>
           <div className="relative">
             <input
+              id="account-email"
               type="email"
               value={settings.email}
               onChange={(e) => onUpdate({ email: e.target.value })}
-              className="w-full pl-10 pr-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               placeholder="your@email.com"
             />
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           </div>
           {getFieldError("email") && (
-            <p className="text-sm text-red-500 flex items-center gap-1">
+            <p className="text-sm text-destructive flex items-center gap-1">
               <AlertCircle className="h-3 w-3" />
               {getFieldError("email")}
             </p>
@@ -87,16 +89,17 @@ export function AccountSettings({
 
         {/* Username */}
         <div className="space-y-2">
-          <label className="text-sm font-medium flex items-center gap-2">
+          <label htmlFor="account-username" className="text-sm font-medium flex items-center gap-2">
             <User className="h-4 w-4 text-muted-foreground" />
             Username
           </label>
           <div className="relative">
             <input
+              id="account-username"
               type="text"
               value={settings.username}
               onChange={(e) => onUpdate({ username: e.target.value })}
-              className="w-full pl-10 pr-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               placeholder="Your username"
             />
             <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -128,13 +131,14 @@ export function AccountSettings({
             <div className="space-y-4 pl-4 border-l-2 border-muted">
               {/* Current Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Current Password</label>
+                <label htmlFor="current-password" className="text-sm font-medium">Current Password</label>
                 <div className="relative">
                   <input
+                    id="current-password"
                     type={showPasswords.current ? "text" : "password"}
                     value={settings.currentPassword}
                     onChange={(e) => onUpdate({ currentPassword: e.target.value })}
-                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     placeholder="Enter current password"
                   />
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -154,13 +158,14 @@ export function AccountSettings({
 
               {/* New Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">New Password</label>
+                <label htmlFor="new-password" className="text-sm font-medium">New Password</label>
                 <div className="relative">
                   <input
+                    id="new-password"
                     type={showPasswords.new ? "text" : "password"}
                     value={settings.newPassword || ""}
                     onChange={(e) => onUpdate({ newPassword: e.target.value })}
-                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     placeholder="Enter new password"
                   />
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -173,7 +178,7 @@ export function AccountSettings({
                   </button>
                 </div>
                 {getFieldError("newPassword") && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
+                  <p className="text-sm text-destructive flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
                     {getFieldError("newPassword")}
                   </p>
@@ -182,13 +187,14 @@ export function AccountSettings({
 
               {/* Confirm New Password */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Confirm New Password</label>
+                <label htmlFor="confirm-new-password" className="text-sm font-medium">Confirm New Password</label>
                 <div className="relative">
                   <input
+                    id="confirm-new-password"
                     type={showPasswords.confirm ? "text" : "password"}
                     value={settings.confirmNewPassword || ""}
                     onChange={(e) => onUpdate({ confirmNewPassword: e.target.value })}
-                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full pl-10 pr-10 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                     placeholder="Confirm new password"
                   />
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -201,7 +207,7 @@ export function AccountSettings({
                   </button>
                 </div>
                 {getFieldError("confirmNewPassword") && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
+                  <p className="text-sm text-destructive flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
                     {getFieldError("confirmNewPassword")}
                   </p>
@@ -214,8 +220,8 @@ export function AccountSettings({
         {/* Two-Factor Authentication */}
         <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${settings.twoFactorEnabled ? "bg-green-500/10" : "bg-muted"}`}>
-              <Shield className={`h-5 w-5 ${settings.twoFactorEnabled ? "text-green-500" : "text-muted-foreground"}`} />
+            <div className={`p-2 rounded-lg ${settings.twoFactorEnabled ? "bg-success/10" : "bg-muted"}`}>
+              <Shield className={`h-5 w-5 ${settings.twoFactorEnabled ? "text-success" : "text-muted-foreground"}`} />
             </div>
             <div>
               <p className="text-sm font-medium">Two-Factor Authentication</p>
@@ -224,21 +230,13 @@ export function AccountSettings({
               </p>
             </div>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.twoFactorEnabled}
-              onChange={(e) => onUpdate({ twoFactorEnabled: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-          </label>
+          <Switch checked={settings.twoFactorEnabled} onCheckedChange={(checked) => onUpdate({ twoFactorEnabled: checked })} />
         </div>
 
         {/* Save Button */}
         <div className="flex items-center justify-end gap-3 pt-4 border-t">
           {saveSuccess && (
-            <span className="text-sm text-green-500 flex items-center gap-1">
+            <span className="text-sm text-success flex items-center gap-1">
               <Check className="h-4 w-4" />
               Settings saved successfully
             </span>

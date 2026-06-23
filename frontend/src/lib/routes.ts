@@ -15,8 +15,12 @@ export const authNav = {
     { label: "Profile", href: "/profile" },
     { label: "Wallet", href: "/wallet" },
   ],
+  // #326: Use the same CTA labels on desktop and mobile so the call
+  // to action doesn't jump between "Register" / "Get Started" depending
+  // on viewport. The primary CTA reads as "Get Started"; the route
+  // stays /register because /signup doesn't exist yet.
   unauthenticated: [
     { label: "Login", href: "/login" },
-    { label: "Register", href: "/register" },
+    { label: "Get Started", href: "/register" },
   ],
 };

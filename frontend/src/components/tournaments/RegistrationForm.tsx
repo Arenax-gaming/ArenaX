@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { api } from "@/lib/api";
 
 interface RegistrationFormProps {
   tournament: Tournament;
@@ -30,6 +31,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
   });
   const [errors, setErrors] = useState<Partial<FormState & { submit: string }>>({});
   const [status, setStatus] = useState<"idle" | "submitting" | "success">("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const validate = (): boolean => {
     const next: typeof errors = {};
@@ -43,37 +45,47 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validate()) return;
 
     setStatus("submitting");
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1500));
-    setStatus("success");
 
-    notify({
-      type: "match",
-      title: "Registration Confirmed",
-      message: `You're registered for ${tournament.name}. Check your email for details.`,
-      link: `/tournaments/${tournament.id}`,
-      linkLabel: "View Tournament",
-      persistent: true,
-      toast: true,
-      toastDuration: 6000,
-    });
+    try {
+      await api.joinTournament(tournament.id);
+      setStatus("success");
 
-    onSuccess?.();
+      notify({
+        type: "match",
+        title: "Registration Confirmed",
+        message: `You're registered for ${tournament.name}. Check your email for details.`,
+        link: `/tournaments/${tournament.id}`,
+        linkLabel: "View Tournament",
+        persistent: true,
+        toast: true,
+        toastDuration: 6000,
+      });
+
+      onSuccess?.();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to complete registration. Please try again.";
+      setSubmitError(message);
+      setStatus("idle");
+    }
   };
 
   if (status === "success") {
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
-        <CheckCircle className="h-16 w-16 text-green-500" />
+        <CheckCircle className="h-16 w-16 text-success" />
         <h3 className="text-xl font-bold text-foreground">Registration Confirmed</h3>
         <p className="text-muted-foreground">
           You&apos;re registered for <span className="font-semibold">{tournament.name}</span>.
           We&apos;ll notify you when your first match is ready.
         </p>
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/20 dark:text-green-200">
+        <div className="rounded-lg border border-success/30 bg-success-muted p-4 text-sm text-green-800 dark:border-success/30 dark:bg-success-muted/20 dark:text-green-200">
           Tournament starts on{" "}
           <span className="font-semibold">
             {new Date(tournament.startTime).toLocaleDateString("en-US", {
@@ -113,7 +125,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
       <div className="space-y-4">
         <div className="space-y-1">
           <label htmlFor="reg-username" className="text-sm font-medium text-foreground">
-            In-game Username <span className="text-red-500">*</span>
+            In-game Username <span className="text-destructive">*</span>
           </label>
           <Input
             id="reg-username"
@@ -123,7 +135,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
             aria-invalid={!!errors.username}
           />
           {errors.username && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
+            <p className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" /> {errors.username}
             </p>
           )}
@@ -131,7 +143,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
 
         <div className="space-y-1">
           <label htmlFor="reg-email" className="text-sm font-medium text-foreground">
-            Email <span className="text-red-500">*</span>
+            Email <span className="text-destructive">*</span>
           </label>
           <Input
             id="reg-email"
@@ -142,7 +154,7 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
             aria-invalid={!!errors.email}
           />
           {errors.email && (
-            <p className="flex items-center gap-1 text-xs text-red-500">
+            <p className="flex items-center gap-1 text-xs text-destructive">
               <AlertCircle className="h-3 w-3" /> {errors.email}
             </p>
           )}
@@ -161,11 +173,18 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
         </div>
       </div>
 
+      {submitError ? (
+        <div className="rounded-lg border border-red-200 bg-destructive/5 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-destructive/10/20 dark:text-destructive-foreground">
+          <p className="font-semibold">Registration failed</p>
+          <p className="mt-1">{submitError}</p>
+        </div>
+      ) : null}
+
       {/* Rules agreement */}
       <label className="flex cursor-pointer items-start gap-3">
         <input
           type="checkbox"
-          className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-blue-600"
+          className="mt-0.5 h-4 w-4 rounded border-border accent-blue-600"
           checked={form.agreedToRules}
           onChange={(e) => setForm((f) => ({ ...f, agreedToRules: e.target.checked }))}
         />
@@ -176,15 +195,15 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
         </span>
       </label>
       {errors.agreedToRules === false && (
-        <p className="flex items-center gap-1 text-xs text-red-500">
+        <p className="flex items-center gap-1 text-xs text-destructive">
           <AlertCircle className="h-3 w-3" /> You must agree to the rules
         </p>
       )}
 
       {/* Entry fee notice */}
       {tournament.entryFee > 0 && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/20">
-          <p className="text-xs text-blue-900 dark:text-blue-100">
+        <div className="rounded-lg border border-blue-200 bg-info-muted p-3 dark:border-info/30 dark:bg-info-muted/20">
+          <p className="text-xs text-info dark:text-info-muted-foreground">
             <span className="font-semibold">Payment:</span> Your wallet will be charged{" "}
             <span className="font-semibold">${tournament.entryFee}</span> upon confirmation.
           </p>

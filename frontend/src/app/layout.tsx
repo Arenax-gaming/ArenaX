@@ -1,16 +1,32 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "../styles/globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
+import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 
 export const metadata: Metadata = {
   title: "ArenaX",
   description: "Competitive Gaming Platform",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ArenaX",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#111827",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -27,17 +43,20 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <QueryProvider>
-            <AuthProvider>
-              <WalletProvider>
-                <TxStatusProvider>
-                  <NotificationProvider>
-                    <AppLayout>{children}</AppLayout>
-                  </NotificationProvider>
-                </TxStatusProvider>
-              </WalletProvider>
-            </AuthProvider>
-          </QueryProvider>
+          <AccessibilityProvider>
+            <QueryProvider>
+              <AuthProvider>
+                <WalletProvider>
+                  <TxStatusProvider>
+                    <NotificationProvider>
+                      <WebVitalsInit />
+                      <AppLayout>{children}</AppLayout>
+                    </NotificationProvider>
+                  </TxStatusProvider>
+                </WalletProvider>
+              </AuthProvider>
+            </QueryProvider>
+          </AccessibilityProvider>
         </ThemeProvider>
       </body>
     </html>
