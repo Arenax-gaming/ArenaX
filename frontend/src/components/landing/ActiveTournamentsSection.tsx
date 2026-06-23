@@ -1,120 +1,99 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/Card";
-import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
-import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Trophy, Users, Clock, ArrowRight } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { mockTournaments } from "@/data/mockTournaments";
+import type { Tournament } from "@/types/tournament";
 
-const faqs = [
-  {
-    question: "How do I create an account?",
-    answer:
-      "Simply click the 'Register' button on our homepage and fill in your email and desired password. You can also sign up using your Google or Discord account for faster registration.",
-  },
-  {
-    question: "How do I join a tournament?",
-    answer:
-      "Navigate to the Tournaments page, browse available events, and click 'Join Tournament' on any event with open registration. You'll need to pay the entry fee (if any) to secure your spot.",
-  },
-  {
-    question: "How are match results verified?",
-    answer:
-      "We use a combination of AI-powered anti-cheat systems and on-chain verification. All match results are recorded on the Stellar blockchain for complete transparency.",
-  },
-  {
-    question: "How do I withdraw my winnings?",
-    answer:
-      "Go to your Wallet page, click 'Withdraw', and enter your Stellar wallet address or select a supported payment method. Withdrawals are processed instantly thanks to Stellar's fast transaction finality.",
-  },
-  {
-    question: "What games are supported?",
-    answer:
-      "We currently support major titles including Counter-Strike 2, Valorant, League of Legends, Dota 2, Fortnite, Overwatch 2, and many more. We're constantly adding new games based on community demand.",
-  },
-  {
-    question: "How do I report a cheater?",
-    answer:
-      "If you suspect another player of cheating, you can report them directly from the match results page or contact our support team with evidence. We take all reports seriously and investigate promptly.",
-  },
-  {
-    question: "Is ArenaX available in my country?",
-    answer:
-      "ArenaX is available in over 150 countries worldwide. Some features may be restricted based on local regulations. Check our Terms of Service for more information about regional availability.",
-  },
-  {
-    question: "How can I partner with ArenaX?",
-    answer:
-      "We're always looking for brand partnerships, tournament organizers, and content creators. Contact our partnerships team through this form by selecting 'Partnership' as the category.",
-  },
-];
+export function ActiveTournamentsSection() {
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
 
-export function FAQSection() {
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const prefersReducedMotion = useReducedMotion();
+  useEffect(() => {
+    // Show a few active / registration-open tournaments on the landing page.
+    const active = mockTournaments
+      .filter(
+        (t) =>
+          t.status === "registration_open" || t.status === "in_progress",
+      )
+      .slice(0, 3);
+    setTournaments(active);
+  }, []);
+
+  if (tournaments.length === 0) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <HelpCircle className="h-5 w-5" />
-          Frequently Asked Questions
-        </CardTitle>
-        <CardDescription>
-          Find quick answers to common questions about ArenaX.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {faqs.map((faq, index) => (
-          <div key={index} className="border rounded-lg overflow-hidden">
-            <button
-              onClick={() => setOpenFaq(openFaq === index ? null : index)}
-              className="flex items-center justify-between w-full p-4 text-left hover:bg-muted/50 transition-colors"
-            >
-              <span className="font-medium text-sm">{faq.question}</span>
-              {openFaq === index ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              )}
-            </button>
-            <AnimatePresence>
-              {openFaq === index && (
-                <motion.div
-                  initial={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  animate={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: "auto", opacity: 1 }
-                  }
-                  exit={
-                    prefersReducedMotion
-                      ? { height: "auto", opacity: 1 }
-                      : { height: 0, opacity: 0 }
-                  }
-                  transition={
-                    prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }
+    <section className="space-y-6">
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Trophy className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+            Active Tournaments
+          </h2>
+          <p className="text-muted-foreground text-sm">
+            Jump in — registration is open now.
+          </p>
+        </div>
+        <Link href="/tournaments">
+          <Button variant="ghost" size="sm" className="gap-1">
+            View all
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </Link>
+      </div>
+
+      {/* Tournament cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {tournaments.map((t) => (
+          <Card key={t.id} className="hover:shadow-md transition-shadow">
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="text-base font-semibold leading-tight line-clamp-2">
+                  {t.name}
+                </CardTitle>
+                <Badge
+                  variant="outline"
+                  className={
+                    t.status === "in_progress"
+                      ? "border-green-500 text-green-600 shrink-0"
+                      : "border-blue-500 text-blue-600 shrink-0"
                   }
                 >
-                  <div className="px-4 pb-4 text-sm text-muted-foreground">
-                    {faq.answer}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                  {t.status === "in_progress" ? "Live" : "Open"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Stats row */}
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.currentParticipants}/{t.maxParticipants}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Trophy className="h-3.5 w-3.5 text-yellow-500" aria-hidden="true" />
+                  ${t.prizePool.toLocaleString()}
+                </span>
+                {t.entryFee === 0 ? (
+                  <span className="text-green-600 font-medium">Free</span>
+                ) : (
+                  <span>${t.entryFee} entry</span>
+                )}
+              </div>
+
+              <Link href={`/tournaments/${t.id}`} className="block">
+                <Button size="sm" className="w-full">
+                  {t.status === "in_progress" ? "Watch" : "Join"}
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

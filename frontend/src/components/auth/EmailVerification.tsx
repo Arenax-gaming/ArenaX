@@ -75,7 +75,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
       <div className="text-center">
         <Mail className="h-12 w-12 text-primary mx-auto mb-4" />
         <p className="text-muted-foreground mb-2">
-          We've sent a verification link to your email
+          We&apos;ve sent a verification link to your email
         </p>
         {pendingEmail && (
           <p className="text-sm font-medium text-foreground">{pendingEmail}</p>
@@ -111,7 +111,7 @@ export function EmailVerification({ className }: EmailVerificationProps) {
 
       <div className="text-center">
         <p className="text-sm text-muted-foreground">
-          Didn't receive the email?{' '}
+          Didn&apos;t receive the email?{' '}
           <button
             type="button"
             onClick={handleResend}

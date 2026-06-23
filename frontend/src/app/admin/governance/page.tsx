@@ -6,6 +6,10 @@ import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import type { GovernanceProposal } from "@/types/admin";
+import { PageHeaderSkeleton, CardSkeleton } from "@/components/common/PageSkeleton";
+import { PageError } from "@/components/common/PageError";
+import { EmptyState } from "@/components/common/EmptyState";
+import { FileText } from "lucide-react";
 
 export default function GovernanceDashboard() {
   const [proposals, setProposals] = useState<GovernanceProposal[]>([]);

@@ -9,6 +9,7 @@ import {
   usePlayerAchievements,
 } from "@/hooks/useAchievements";
 import { useAuth } from "@/hooks/useAuth";
+import { AchievementCardSkeleton, Skeleton } from "@/components/common/PageSkeleton";
 
 export default function AchievementsPage() {
   const { user } = useAuth();
@@ -21,8 +22,23 @@ export default function AchievementsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="min-h-screen px-4 py-8 space-y-8" aria-live="polite" aria-label="Loading achievements">
+        <span className="sr-only">Loading achievements…</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Trophy className="h-8 w-8 text-yellow-400 opacity-30" aria-hidden="true" />
+              <Skeleton className="h-9 w-40" />
+            </div>
+            <Skeleton className="h-4 w-48" />
+          </div>
+          <Skeleton className="h-9 w-36 rounded-md self-start" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <AchievementCardSkeleton key={i} />
+          ))}
+        </div>
       </div>
     );
   }

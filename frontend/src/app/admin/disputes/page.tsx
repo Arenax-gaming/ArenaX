@@ -6,6 +6,10 @@ import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import type { Dispute } from "@/types/admin";
+import { PageHeaderSkeleton, ListItemSkeleton } from "@/components/common/PageSkeleton";
+import { PageError } from "@/components/common/PageError";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ShieldAlert } from "lucide-react";
 
 export default function DisputeDashboard() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
