@@ -18,6 +18,15 @@ import {
     disableMaintenance,
     getMaintenanceStatus
 } from '../controllers/admin.controller';
+import {
+    searchAuditLogs,
+    exportAuditLogs,
+    verifyAuditIntegrity,
+    replayAuditEvents,
+    auditComplianceReport,
+    redactUserAuditData,
+    anchorAuditLogs,
+} from '../controllers/audit.controller';
 import { confirmationService } from '../services/confirmation.service';
 import {
     listKycReviews,
@@ -62,7 +71,17 @@ router.post('/moderation/review', restrictToScope('MODERATION:REVIEW'), reviewCo
 router.get('/system/health', getSystemHealth);
 router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
-router.get('/audit-logs', listAuditLogs);
+
+// ── Audit Trail ──────────────────────────────────────────────────────────────
+router.get('/audit-logs', listAuditLogs);               // backward-compat
+router.get('/audit/search', searchAuditLogs);           // advanced search
+router.get('/audit/export', exportAuditLogs);           // CSV / JSON export
+router.get('/audit/verify', verifyAuditIntegrity);      // chain integrity check
+router.get('/audit/replay', replayAuditEvents);         // event replay
+router.get('/audit/compliance-report', auditComplianceReport);
+router.post('/audit/anchor', anchorAuditLogs);          // blockchain anchoring
+router.post('/audit/redact/:userId', redactUserAuditData); // GDPR right-to-forget
+
 router.post('/payments/:id/replay', replayPayment);
 
 // KYC Management
