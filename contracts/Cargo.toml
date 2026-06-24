@@ -34,6 +34,11 @@ members = [
     "access-control",
     "emergency-pause",
     "time-lock",
+    "zk-proof",
+    "contract-standards",
+    "contract-utils",
+    "composable-example",
+    "token-manager",
 ]
 resolver = "2"
 

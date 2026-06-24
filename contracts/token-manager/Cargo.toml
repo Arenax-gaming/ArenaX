@@ -1,0 +1,13 @@
+[package]
+name = "token-manager"
+version = "0.1.0"
+edition = "2021"
+authors = ["ArenaX Team <dev@arenax.gg>"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "23.5.2"
+contract-standards = { path = "../contract-standards" }
+arenax-events = { path = "../arenax-events" }
