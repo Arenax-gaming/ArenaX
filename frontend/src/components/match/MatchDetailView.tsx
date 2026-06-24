@@ -22,6 +22,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 interface MatchDetailViewProps {
   match: MatchDetail;
   currentUserId?: string;
@@ -36,6 +45,9 @@ export function MatchDetailView({
   const isWinner = match.winnerId === currentUserId;
   const player1Won = match.winnerId === match.player1Id;
   const player2Won = match.winnerId === match.player2Id;
+
+  const replayUrl = match.replayUrl?.trim() ?? "";
+  const hasReplay = replayUrl.length > 0 && isValidHttpUrl(replayUrl);
 
   return (
     <div className="space-y-6">
@@ -52,12 +64,17 @@ export function MatchDetailView({
               </p>
             </div>
             <div className="flex gap-2">
-              {match.replayUrl && (
+              {hasReplay && (
                 <Button variant="outline" size="sm" asChild>
-                  <Link href={match.replayUrl}>
-                    <Play className="h-4 w-4 mr-2" />
+                  <a
+                    href={replayUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Watch match replay (opens in new tab)"
+                  >
+                    <Play className="h-4 w-4 mr-2" aria-hidden="true" />
                     Watch Replay
-                  </Link>
+                  </a>
                 </Button>
               )}
               {match.canDispute && (
