@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "batch-operations",
     "arenax-events",
     "cross-contract-utils",
     "oracle-integration",
