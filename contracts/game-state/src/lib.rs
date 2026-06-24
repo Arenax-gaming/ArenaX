@@ -13,6 +13,35 @@ pub enum GameStatus {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompressionConfig {
+    pub max_history_entries: u32,
+    pub archive_after_completed_secs: u64,
+    pub compression_enabled: bool,
+    pub archive_enabled: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArchivedGame {
+    pub game_id: BytesN<32>,
+    pub final_state_hash: BytesN<32>,
+    pub archived_at: u64,
+    pub history_entry_count: u32,
+    pub history_checksum: BytesN<32>,
+    pub result_count: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompressionStats {
+    pub total_games_archived: u32,
+    pub total_history_entries_pruned: u64,
+    pub last_compression_ts: u64,
+    pub bytes_saved_estimate: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GameConfig {
     pub max_players: u32,
     pub min_action_interval: u64,
@@ -73,10 +102,18 @@ pub enum DataKey {
     History(BytesN<32>),
     Results(BytesN<32>),
     LastAction(BytesN<32>, Address),
+    CompressionConfig,
+    CompressionStats,
+    ArchivedGame(BytesN<32>),
+    HistoryChecksum(BytesN<32>),
 }
 
 #[contract]
 pub struct GameStateContract;
+
+const PERSISTENT_LIFETIME_THRESHOLD: u32 = 100_000;
+const PERSISTENT_BUMP_AMOUNT: u32 = 500_000;
+const SECS_PER_DAY: u64 = 86_400;
 
 #[contractimpl]
 impl GameStateContract {
@@ -89,6 +126,26 @@ impl GameStateContract {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::GameCounter, &0u32);
+
+        let default_config = CompressionConfig {
+            max_history_entries: 100,
+            archive_after_completed_secs: 7 * SECS_PER_DAY,
+            compression_enabled: true,
+            archive_enabled: true,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::CompressionConfig, &default_config);
+
+        let default_stats = CompressionStats {
+            total_games_archived: 0,
+            total_history_entries_pruned: 0,
+            last_compression_ts: 0,
+            bytes_saved_estimate: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::CompressionStats, &default_stats);
     }
 
     pub fn configure_game_mode(env: Env, admin: Address, game_mode: String, config: GameConfig) {
@@ -172,6 +229,18 @@ impl GameStateContract {
         env.storage()
             .persistent()
             .set(&DataKey::History(game_id.clone()), &history);
+
+        env.storage().persistent().extend_ttl(
+            &DataKey::Game(game_id.clone()),
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::History(game_id.clone()),
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+
         env.events().publish(
             (soroban_sdk::symbol_short!("GAME_NEW"), game_id.clone()),
             game_mode,
@@ -214,6 +283,18 @@ impl GameStateContract {
         env.storage()
             .persistent()
             .set(&DataKey::Game(game_id.clone()), &game);
+
+        env.storage().persistent().extend_ttl(
+            &DataKey::Game(game_id.clone()),
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::History(game_id.clone()),
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
+
         env.events().publish(
             (soroban_sdk::symbol_short!("STATE_UPD"), game_id),
             (game.version, signer),
@@ -357,6 +438,229 @@ impl GameStateContract {
     pub fn set_paused(env: Env, admin: Address, paused: bool) {
         Self::require_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Paused, &paused);
+    }
+
+    pub fn configure_compression(
+        env: Env,
+        admin: Address,
+        config: CompressionConfig,
+    ) {
+        Self::require_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::CompressionConfig, &config);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("COMP_CFG"),),
+            config.max_history_entries,
+        );
+    }
+
+    pub fn compress_game_history(env: Env, game_id: BytesN<32>) {
+        let config: CompressionConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::CompressionConfig)
+            .unwrap_or(CompressionConfig {
+                max_history_entries: 100,
+                archive_after_completed_secs: 7 * SECS_PER_DAY,
+                compression_enabled: true,
+                archive_enabled: true,
+            });
+
+        if !config.compression_enabled {
+            return;
+        }
+
+        let mut history: Vec<GameHistoryEntry> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::History(game_id.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        if history.len() <= config.max_history_entries as u32 {
+            return;
+        }
+
+        let keep_count = config.max_history_entries as u32;
+        let prune_count = history.len() - keep_count;
+
+        let mut checksum = [0u8; 32];
+        for i in 0..(history.len() - keep_count as u32) {
+            let entry = history.get(i).expect("history entry");
+            let entry_hash = entry.state_hash.clone();
+            for j in 0..32 {
+                checksum[j] ^= entry_hash.as_ref().get(j as u32).expect("byte");
+            }
+        }
+
+        let checksum_bytes = BytesN::from_array(&env, &checksum);
+        env.storage()
+            .persistent()
+            .set(&DataKey::HistoryChecksum(game_id.clone()), &checksum_bytes);
+
+        let mut new_history: Vec<GameHistoryEntry> = Vec::new(&env);
+        for i in prune_count..(history.len()) {
+            let entry = history.get(i).expect("history entry");
+            new_history.push_back(entry);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::History(game_id.clone()), &new_history);
+
+        let mut stats: CompressionStats = env
+            .storage()
+            .instance()
+            .get(&DataKey::CompressionStats)
+            .unwrap_or(CompressionStats {
+                total_games_archived: 0,
+                total_history_entries_pruned: 0,
+                last_compression_ts: 0,
+                bytes_saved_estimate: 0,
+            });
+
+        stats.total_history_entries_pruned += prune_count as u64;
+        stats.last_compression_ts = env.ledger().timestamp();
+        stats.bytes_saved_estimate += (prune_count as u64) * 96;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CompressionStats, &stats);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("COMPRESS"), game_id),
+            prune_count,
+        );
+    }
+
+    pub fn archive_game(env: Env, game_id: BytesN<32>) {
+        let game: Game = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Game(game_id.clone()))
+            .expect("game not found");
+
+        if game.status != GameStatus::Completed {
+            panic!("game not completed");
+        }
+
+        let config: CompressionConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::CompressionConfig)
+            .unwrap_or(CompressionConfig {
+                max_history_entries: 100,
+                archive_after_completed_secs: 7 * SECS_PER_DAY,
+                compression_enabled: true,
+                archive_enabled: true,
+            });
+
+        if !config.archive_enabled {
+            return;
+        }
+
+        let completed_at = game.completed_at.expect("completed_at required");
+        let now = env.ledger().timestamp();
+        if now.saturating_sub(completed_at) < config.archive_after_completed_secs {
+            panic!("game not ready for archival");
+        }
+
+        let history: Vec<GameHistoryEntry> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::History(game_id.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let results: Vec<GameResult> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Results(game_id.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let checksum = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HistoryChecksum(game_id.clone()))
+            .unwrap_or(BytesN::from_array(&env, &[0u8; 32]));
+
+        let archived = ArchivedGame {
+            game_id: game_id.clone(),
+            final_state_hash: game.state_hash.clone(),
+            archived_at: now,
+            history_entry_count: history.len(),
+            history_checksum: checksum,
+            result_count: results.len(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::ArchivedGame(game_id.clone()), &archived);
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::History(game_id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Results(game_id.clone()));
+
+        let mut stats: CompressionStats = env
+            .storage()
+            .instance()
+            .get(&DataKey::CompressionStats)
+            .unwrap_or(CompressionStats {
+                total_games_archived: 0,
+                total_history_entries_pruned: 0,
+                last_compression_ts: 0,
+                bytes_saved_estimate: 0,
+            });
+
+        stats.total_games_archived += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::CompressionStats, &stats);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("ARCHIVE"), game_id),
+            archived.history_entry_count,
+        );
+    }
+
+    pub fn restore_game_state(env: Env, game_id: BytesN<32>) -> ArchivedGame {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ArchivedGame(game_id))
+            .expect("archived game not found")
+    }
+
+    pub fn get_compression_stats(env: Env) -> CompressionStats {
+        env.storage()
+            .instance()
+            .get(&DataKey::CompressionStats)
+            .unwrap_or(CompressionStats {
+                total_games_archived: 0,
+                total_history_entries_pruned: 0,
+                last_compression_ts: 0,
+                bytes_saved_estimate: 0,
+            })
+    }
+
+    pub fn get_archived_game(env: Env, game_id: BytesN<32>) -> ArchivedGame {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ArchivedGame(game_id))
+            .expect("archived game not found")
+    }
+
+    pub fn get_compression_config(env: Env) -> CompressionConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::CompressionConfig)
+            .unwrap_or(CompressionConfig {
+                max_history_entries: 100,
+                archive_after_completed_secs: 7 * SECS_PER_DAY,
+                compression_enabled: true,
+                archive_enabled: true,
+            })
     }
 
     fn append_history(

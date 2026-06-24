@@ -55,6 +55,8 @@ impl RewardManager {
 
     /// Calculate achievement rewards based on rarity and difficulty
     pub fn calculate_achievement_rewards(
+        env: &Env,
+        creator: &Address,
         achievement_type: AchievementType,
         difficulty: u32, // 1-5 scale
     ) -> RewardType {
@@ -68,15 +70,17 @@ impl RewardManager {
                 if difficulty >= 4 {
                     // High difficulty tournaments give NFT rewards
                     RewardType::NFT(NFTMetadata {
-                        name: String::from_str(&env, "Tournament Champion"),
+                        name: String::from_str(env, "Tournament Champion"),
                         description: String::from_str(
-                            &env,
+                            env,
                             "Awarded for winning a high-level tournament",
                         ),
-                        image_url: String::from_str(&env, "https://assets.arenax.gg/champion.png"),
-                        attributes: Vec::new(&env),
+                        image_url: String::from_str(env, "https://assets.arenax.gg/champion.png"),
+                        attributes: Vec::new(env),
                         rarity: difficulty,
-                        category: String::from_str(&env, "Achievement"),
+                        category: String::from_str(env, "Achievement"),
+                        creator: creator.clone(),
+                        royalty_bps: 0, // Achievement NFTs don't have royalties
                     })
                 } else {
                     RewardType::Currency(500 * difficulty as i128)
