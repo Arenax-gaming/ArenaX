@@ -9,6 +9,8 @@ import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
+import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
+import { PwaAnalytics } from "@/components/pwa/PwaAnalytics";
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -18,6 +20,9 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "ArenaX",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
   },
 };
 
@@ -36,6 +41,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512x512.png" />
+      </head>
       <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
@@ -50,7 +60,9 @@ export default function RootLayout({
                   <TxStatusProvider>
                     <NotificationProvider>
                       <WebVitalsInit />
+                      <PwaAnalytics />
                       <AppLayout>{children}</AppLayout>
+                      <PwaInstallPrompt />
                     </NotificationProvider>
                   </TxStatusProvider>
                 </WalletProvider>

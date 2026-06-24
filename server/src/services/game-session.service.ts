@@ -58,12 +58,12 @@ export class GameSessionService {
       actions: [],
       startedAt: Date.now(),
     };
-    GameSessionService.sessions.set(id, session);
+    sessionStore.set(id, session);
     return session;
   }
 
   getSession(id: string): GameSession | undefined {
-    return GameSessionService.sessions.get(id);
+    return sessionStore.get(id);
   }
 
   async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
@@ -124,7 +124,7 @@ export class GameSessionService {
 
   /** Get all active sessions. */
   getActiveSessions(): GameSession[] {
-    return Array.from(GameSessionService.sessions.values()).filter(s => !s.finishedAt);
+    return Array.from(sessionStore.values()).filter((s): s is GameSession => !s.finishedAt);
   }
 
   /** Forcefully/safely close all active sessions. */
