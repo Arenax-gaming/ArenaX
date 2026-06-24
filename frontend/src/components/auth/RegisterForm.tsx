@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import { useUsernameAvailability } from '@/hooks/useUsernameAvailability';
 import { registerSchema } from '@/lib/validations/auth';
+import { AuthApiError, REGISTER_ERROR_MAP } from '@/lib/authErrors';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { SocialLogin } from './SocialLogin';
@@ -79,15 +81,23 @@ export function RegisterForm({ className }: RegisterFormProps) {
     e.preventDefault();
     if (!validate()) return;
 
-    await register({
-      username: formData.username,
-      email: formData.email,
-      password: formData.password,
-      confirmPassword: formData.confirmPassword,
-    });
-
-    if (!error) {
+    try {
+      await register({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+        confirmPassword: formData.confirmPassword,
+      });
       router.push('/auth/verify-email');
+    } catch (err) {
+      if (err instanceof AuthApiError) {
+        const mapped = REGISTER_ERROR_MAP[err.code];
+        if (mapped) {
+          setErrors((prev) => ({ ...prev, [mapped.field]: mapped.message }));
+          return;
+        }
+      }
+      // Unknown errors land in context `error` via useAuth — generic banner shows them
     }
   };
 
@@ -181,8 +191,21 @@ export function RegisterForm({ className }: RegisterFormProps) {
           />
           {errors.email && (
             <p id="register-email-error" className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.email}
+              <AlertCircle className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+              <span>
+                {errors.email}
+                {errors.email === REGISTER_ERROR_MAP.EMAIL_ALREADY_EXISTS.message && (
+                  <>
+                    {' '}
+                    <Link
+                      href="/auth/login"
+                      className="underline underline-offset-2 hover:text-destructive/80 font-medium"
+                    >
+                      Log in instead
+                    </Link>
+                  </>
+                )}
+              </span>
             </p>
           )}
         </div>
