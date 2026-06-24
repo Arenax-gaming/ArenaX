@@ -9,6 +9,12 @@ soroban-sdk = "23.5.2"
 proptest = "1.4"
 quickcheck = "1.0"
 arbitrary = "1.3"
+match_contract = { path = "../match_contract" }
+staking-manager = { path = "../staking-manager" }
+arenax-events = { path = "../arenax-events" }
+composable-example = { path = "../composable-example" }
+access-control = { path = "../access-control" }
+token-manager = { path = "../token-manager" }
 
 [dev-dependencies]
 soroban-sdk = { version = "23.5.2", features = ["testutils"] }
