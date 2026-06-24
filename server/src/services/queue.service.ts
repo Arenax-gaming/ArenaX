@@ -1,5 +1,5 @@
 import Redis, { Redis as RedisClient } from 'ioredis'
-import { env } from '../config/env'
+import { getEnv } from '../config/env'
 
 /**
  * Foundation for the background-job processing system tracked in #475.
@@ -123,6 +123,7 @@ export class RedisListQueueAdapter implements QueueAdapter {
     private running = true
 
     constructor(redis?: RedisClient) {
+        const env = getEnv()
         if (!redis && !env.REDIS_URL) {
             throw new Error(
                 'queue.service: REDIS_URL must be configured before instantiating the queue adapter.',

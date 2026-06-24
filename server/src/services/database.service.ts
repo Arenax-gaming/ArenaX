@@ -35,6 +35,9 @@ export type DatabaseTransactionClient = Pick<
     | 'gameSessionAction'
     | 'gameSessionEvent'
     | 'blockchainEvent'
+    | 'featureFlag'
+    | 'featureFlagAuditLog'
+    | 'apiKey'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {
