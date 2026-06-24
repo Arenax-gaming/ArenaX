@@ -9,8 +9,7 @@ import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
-import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
-import { PwaAnalytics } from "@/components/pwa/PwaAnalytics";
+
 
 export const metadata: Metadata = {
   title: "ArenaX",
@@ -59,10 +58,7 @@ export default function RootLayout({
                 <WalletProvider>
                   <TxStatusProvider>
                     <NotificationProvider>
-                      <WebVitalsInit />
-                      <PwaAnalytics />
-                      <AppLayout>{children}</AppLayout>
-                      <PwaInstallPrompt />
+
                     </NotificationProvider>
                   </TxStatusProvider>
                 </WalletProvider>

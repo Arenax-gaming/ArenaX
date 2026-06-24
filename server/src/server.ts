@@ -186,9 +186,7 @@ if (env.NODE_ENV !== 'test') {
                 intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
             });
 
-            process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-            process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-        });
+
 }
 
 export default server;

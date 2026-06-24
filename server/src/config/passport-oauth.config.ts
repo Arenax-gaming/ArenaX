@@ -133,8 +133,8 @@ export const configureOAuthStrategies = (): void => {
         passport.use(
             new TwitchStrategy(
                 {
-                    clientID: process.env.TWITCH_CLIENT_ID,
-                    clientSecret: process.env.TWITCH_CLIENT_SECRET,
+                    clientID: process.env.TWITCH_CLIENT_ID as string,
+                    clientSecret: process.env.TWITCH_CLIENT_SECRET as string,
                     callbackURL: `${process.env.BACKEND_URL}/api/v1/auth/twitch/callback`,
                     scope: ['user:read:email']
                 },

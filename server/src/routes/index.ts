@@ -12,14 +12,14 @@ import analyticsRoutes from './analytics.routes';
 import metricsRoutes from './metrics.routes';
 import dashboardRoutes from './dashboard.routes';
 import searchRoutes from './search.routes';
-import queryAnalyticsRoutes from './query-analytics.routes';
+
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
 import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
 import { MaintenanceService } from '../services/maintenance.service';
 
-const router = Router();
+const router: Router = Router();
 
 router.use(publicRateLimiter);
 router.use(auditMiddleware);
@@ -45,6 +45,6 @@ router.use('/api/v1/analytics', analyticsRoutes);
 router.use('/metrics', metricsRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/v1/search', searchRoutes);
-router.use('/v1/query-analytics', queryAnalyticsRoutes);
+
 
 export default router;
