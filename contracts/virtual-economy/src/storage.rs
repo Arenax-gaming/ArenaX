@@ -28,6 +28,11 @@ pub enum DataKey {
     // Marketplace
     MarketplaceOrder(BytesN<32>),
 
+    // Royalty & Licensing
+    NFTLicense(BytesN<32>),
+    RoyaltyAnalytics,
+    RoyaltyExempt(Address),
+
     // Analytics
     EconomyAnalytics,
 }
@@ -58,6 +63,8 @@ pub struct NFTMetadata {
     pub attributes: Vec<NFTAttribute>,
     pub rarity: u32, // 1-5 scale
     pub category: String,
+    pub creator: Address,
+    pub royalty_bps: u32, // basis points, max 2000 (20%)
 }
 
 #[contracttype]
@@ -122,4 +129,21 @@ pub struct EconomyAnalytics {
     pub total_fees_collected: i128,
     pub active_orders: u32,
     pub unique_traders: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LicenseConfig {
+    pub license_type: u32, // 0=All Rights Reserved, 1=CC, 2=Commercial, 3=Personal
+    pub license_uri: String,
+    pub sublicensing_allowed: bool,
+    pub commercial_use_allowed: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoyaltyAnalytics {
+    pub total_royalties_paid: i128,
+    pub total_royalty_transactions: u64,
+    pub total_exemptions_applied: u32,
 }
