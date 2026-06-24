@@ -1033,13 +1033,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
-name = "merkle"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1160,16 +1153,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prize-distribution"
-version = "0.1.0"
-dependencies = [
- "arenax-events",
- "dispute-resolution",
- "match-contract",
- "soroban-sdk",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1222,14 +1205,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "random-generation"
-version = "0.1.0"
-dependencies = [
- "arenax-events",
- "soroban-sdk",
 ]
 
 [[package]]
