@@ -173,22 +173,20 @@ if (env.NODE_ENV !== 'test') {
                 startMemoryMonitor();
             });
 
-    const io = new SocketIOServer(server, {
-        cors: {
-            origin: "*",
-            credentials: true
-        }
-    });
-    initGameSocket(io);
-    MaintenanceService.getInstance().setSocketServer(io);
+            const io = new SocketIOServer(server, {
+                cors: {
+                    origin: "*",
+                    credentials: true
+                }
+            });
+            initGameSocket(io);
+            MaintenanceService.getInstance().setSocketServer(io);
 
-    startHealthMonitor({ 
-        intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
-    });
+            startHealthMonitor({ 
+                intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
+            });
 
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-    });
+
 }
 
 export default server;
