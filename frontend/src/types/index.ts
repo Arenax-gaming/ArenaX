@@ -2,6 +2,7 @@
 export * from './achievement';
 export * from './admin';
 export * from './bracket';
+export * from './collaboration';
 export * from './leaderboard';
 export * from './match';
 export * from './notification';

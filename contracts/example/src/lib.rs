@@ -36,7 +36,7 @@ impl ExampleContract {
         env.storage()
             .persistent()
             .get(&user)
-            .unwrap_or(Symbol::new(&env, "Hello!"))
+            .unwrap_or_else(|| soroban_sdk::symbol_short!("Hello"))
     }
 
     /// Add a number to the counter
@@ -61,3 +61,6 @@ impl ExampleContract {
         Symbol::new(&env, "1.0.0")
     }
 }
+
+#[cfg(test)]
+mod benchmark;

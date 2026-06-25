@@ -37,11 +37,7 @@ pub mod reputation_index;
 pub mod slashing;
 pub mod staking;
 pub mod tournament;
-pub mod virtual_economy;
-pub mod prize_distribution;
-
-pub mod events_registry;
-
-#[cfg(test)]
-mod registry_tests;
-
+pub mod access_control;
+pub mod emergency_pause;
+pub mod time_lock;
+pub mod zk_proof;
