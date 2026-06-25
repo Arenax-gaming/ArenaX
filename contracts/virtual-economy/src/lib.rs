@@ -62,6 +62,16 @@ impl VirtualEconomyContract {
             .instance()
             .set(&DataKey::EconomyAnalytics, &analytics);
 
+        // Initialize royalty analytics
+        let royalty_stats = RoyaltyAnalytics {
+            total_royalties_paid: 0,
+            total_royalty_transactions: 0,
+            total_exemptions_applied: 0,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::RoyaltyAnalytics, &royalty_stats);
+
         events::emit_economy_initialized(&env, &admin);
         Ok(())
     }
@@ -484,7 +494,30 @@ impl VirtualEconomyContract {
 
         let config = Self::get_marketplace_config(&env);
         let fee = (order.price * config.fee_percentage as i128) / 10000; // basis points
-        let seller_amount = order.price - fee;
+
+        // Calculate royalty for NFT trades
+        let mut royalty_amount = 0i128;
+        let mut creator = None;
+
+        if let MarketplaceAsset::NFT(token_id) = &order.asset {
+            if let Some(metadata) = env.storage().persistent().get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone())) {
+                creator = Some(metadata.creator.clone());
+
+                // Only pay royalty if seller != creator (not a primary sale)
+                let is_primary_sale = metadata.creator == order.seller;
+                let is_exempt = env
+                    .storage()
+                    .persistent()
+                    .get::<_, bool>(&DataKey::RoyaltyExempt(buyer.clone()))
+                    .unwrap_or(false);
+
+                if !is_primary_sale && !is_exempt && metadata.royalty_bps > 0 {
+                    royalty_amount = (order.price * metadata.royalty_bps as i128) / 10000;
+                }
+            }
+        }
+
+        let seller_amount = order.price - fee - royalty_amount;
 
         // Transfer payment
         env.storage().persistent().set(
@@ -505,6 +538,35 @@ impl VirtualEconomyContract {
             &DataKey::CurrencyBalance(config.fee_collector.clone()),
             &(fee_collector_balance + fee),
         );
+
+        // Pay royalty to creator if applicable
+        if royalty_amount > 0 {
+            if let Some(creator_addr) = creator {
+                let creator_balance = Self::get_currency_balance(env.clone(), creator_addr.clone());
+                env.storage().persistent().set(
+                    &DataKey::CurrencyBalance(creator_addr),
+                    &(creator_balance + royalty_amount),
+                );
+
+                // Update royalty analytics
+                let mut royalty_stats: RoyaltyAnalytics = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::RoyaltyAnalytics)
+                    .unwrap_or(RoyaltyAnalytics {
+                        total_royalties_paid: 0,
+                        total_royalty_transactions: 0,
+                        total_exemptions_applied: 0,
+                    });
+
+                royalty_stats.total_royalties_paid += royalty_amount;
+                royalty_stats.total_royalty_transactions += 1;
+
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::RoyaltyAnalytics, &royalty_stats);
+            }
+        }
 
         // Transfer asset
         match &order.asset {
@@ -733,5 +795,132 @@ impl VirtualEconomyContract {
                 min_price: 1,
                 max_price: 1_000_000_000,
             })
+    }
+
+    // -------------------------------------------------------------------------
+    // Royalty & Licensing Functions
+    // -------------------------------------------------------------------------
+
+    pub fn set_nft_license(
+        env: Env,
+        token_id: BytesN<32>,
+        caller: Address,
+        license: LicenseConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        caller.require_auth();
+
+        let metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+
+        if metadata.creator != caller {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        if license.license_type > 3 {
+            return Err(VirtualEconomyError::InvalidLicenseType);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::NFTLicense(token_id), &license);
+
+        Ok(())
+    }
+
+    pub fn get_nft_license(env: Env, token_id: BytesN<32>) -> Result<LicenseConfig, VirtualEconomyError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NFTLicense(token_id))
+            .ok_or(VirtualEconomyError::TokenNotFound)
+    }
+
+    pub fn update_royalty_bps(
+        env: Env,
+        token_id: BytesN<32>,
+        caller: Address,
+        new_bps: u32,
+    ) -> Result<(), VirtualEconomyError> {
+        caller.require_auth();
+
+        let mut metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+
+        if metadata.creator != caller {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        if new_bps > 2000 {
+            return Err(VirtualEconomyError::RoyaltyTooHigh);
+        }
+
+        metadata.royalty_bps = new_bps;
+        env.storage()
+            .persistent()
+            .set(&DataKey::NFTMetadata(token_id), &metadata);
+
+        Ok(())
+    }
+
+    pub fn set_royalty_exempt(
+        env: Env,
+        address: Address,
+        exempt: bool,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+
+        if exempt {
+            env.storage()
+                .persistent()
+                .set(&DataKey::RoyaltyExempt(address.clone()), &true);
+
+            let mut stats: RoyaltyAnalytics = env
+                .storage()
+                .persistent()
+                .get(&DataKey::RoyaltyAnalytics)
+                .unwrap_or(RoyaltyAnalytics {
+                    total_royalties_paid: 0,
+                    total_royalty_transactions: 0,
+                    total_exemptions_applied: 0,
+                });
+
+            stats.total_exemptions_applied += 1;
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::RoyaltyAnalytics, &stats);
+        } else {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::RoyaltyExempt(address));
+        }
+
+        Ok(())
+    }
+
+    pub fn get_royalty_analytics(env: Env) -> RoyaltyAnalytics {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RoyaltyAnalytics)
+            .unwrap_or(RoyaltyAnalytics {
+                total_royalties_paid: 0,
+                total_royalty_transactions: 0,
+                total_exemptions_applied: 0,
+            })
+    }
+
+    pub fn get_nft_creator(env: Env, token_id: BytesN<32>) -> Result<Address, VirtualEconomyError> {
+        let metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+
+        Ok(metadata.creator)
     }
 }

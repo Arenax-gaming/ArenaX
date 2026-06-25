@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { metricsService } from '../services/metrics.service';
 import { logger } from '../services/logger.service';
 
-const router = Router();
+const router: Router = Router();
 
 // Serve the metrics dashboard HTML
 router.get('/', (_req: Request, res: Response) => {

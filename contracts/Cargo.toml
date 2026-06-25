@@ -31,10 +31,14 @@ members = [
     "tournament-manager",
     "virtual-economy",
     "governance",
-    "prize-distribution",
-    "random-generation",
-    "merkle",
-    "upgrade-proxy",
+    "access-control",
+    "emergency-pause",
+    "time-lock",
+    "zk-proof",
+    "contract-standards",
+    "contract-utils",
+    "composable-example",
+    "token-manager",
 ]
 resolver = "2"
 

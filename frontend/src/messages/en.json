@@ -1,0 +1,30 @@
+{
+  "common": {
+    "home": "Home",
+    "about": "About",
+    "login": "Login",
+    "register": "Register",
+    "logout": "Logout",
+    "dashboard": "Dashboard",
+    "profile": "Profile",
+    "settings": "Settings",
+    "save": "Save",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "tryAgain": "Try Again",
+    "retry": "Retry"
+  },
+  "error": {
+    "title": "Something went wrong",
+    "network": "Connection Lost",
+    "networkMessage": "Please check your internet connection and try again.",
+    "generic": "An unexpected error occurred. Please try again."
+  },
+  "date": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  }
+}
