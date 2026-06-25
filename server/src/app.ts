@@ -12,6 +12,7 @@ import { getGraphQLExecutor } from './graphql/server';
 import rateLimit from 'express-rate-limit';
 import xss from 'xss-clean';
 import hpp from 'hpp';
+import { setupSwagger } from './openapi/swagger';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -102,6 +103,9 @@ export const createApp = (): Express => {
 
     const graphql = getGraphQLExecutor();
     graphql.mount(app);
+
+    // Mount Swagger UI
+    setupSwagger(app);
 
     app.use(errorHandler);
 
