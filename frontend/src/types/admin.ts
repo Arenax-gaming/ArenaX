@@ -21,14 +21,28 @@ export interface KycReview {
 }
 
 export interface DisputeReporter {
+  id?: string;
   username: string;
 }
 
+export interface DisputeScoreReport {
+  playerId: string;
+  username: string;
+  reportedScore: number;
+  reportedAt: string;
+}
+
 export interface DisputeMatch {
+  id?: string;
   onChainId: string;
   playerAId: string;
   playerBId: string;
+  playerAUsername?: string;
+  playerBUsername?: string;
   winnerId: string;
+  gameType?: string;
+  scoreReports?: DisputeScoreReport[];
+  createdAt?: string;
 }
 
 export interface Dispute {
@@ -38,6 +52,14 @@ export interface Dispute {
   evidenceUrls: string[];
   reporter: DisputeReporter;
   match: DisputeMatch;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ResolveDisputePayload {
+  status: "RESOLVED" | "DISMISSED" | "VOIDED";
+  resolution: string;
+  winnerOverrideId?: string;
 }
 
 export interface GovernanceProposal {
