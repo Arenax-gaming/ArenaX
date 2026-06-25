@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import passport from 'passport';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
-import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { correlationMiddleware } from './middleware/correlation.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
@@ -77,7 +77,7 @@ export const createApp = (): Express => {
         })
     );
     app.use(express.json());
-    app.use(requestIdMiddleware);
+    app.use(correlationMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);
