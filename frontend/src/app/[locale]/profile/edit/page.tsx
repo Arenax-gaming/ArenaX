@@ -13,8 +13,8 @@ import { X, Camera, Upload, CheckCircle, AlertTriangle, Twitter, Github, Twitch 
 import { cn } from '@/lib/utils';
 import type { ProfileCustomization } from '@/types/profile';
 import type { UserProfileUpdate } from '@/types/user';
+import { MAX_BIO_LENGTH } from '@/lib/validations/profile';
 
-const MAX_BIO_LENGTH = 500;
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 20;
 
@@ -141,7 +141,7 @@ function ProfileEditContent() {
     const value = e.target.value;
     setBio(value);
     if (value.length > MAX_BIO_LENGTH) {
-      setBioError('Bio must be 500 characters or less');
+      setBioError(`Bio must be ${MAX_BIO_LENGTH} characters or less`);
     } else {
       setBioError(null);
     }
@@ -353,7 +353,10 @@ function ProfileEditContent() {
           <CardTitle>Bio</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
+          <label htmlFor="profile-bio" className="sr-only">Bio</label>
           <textarea
+            id="profile-bio"
+            aria-label="Bio"
             value={bio}
             onChange={handleBioChange}
             rows={4}
