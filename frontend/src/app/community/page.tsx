@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import {
   Hash,
   TrendingUp,
@@ -44,6 +45,9 @@ export default function CommunityPage() {
   const createPost = (content: string, tags: string[]) => {
     const newPost: CommunityPost = {
       id: `local-${Date.now()}`,
+      authorId: currentUser.id,
+      authorUsername: currentUser.username,
+      authorAvatar: currentUser.avatar,
       content,
       tags,
       likes: 0,
@@ -52,6 +56,7 @@ export default function CommunityPage() {
       isLiked: false,
       isPinned: false,
       createdAt: new Date().toISOString(),
+      category: "general",
       author: {
         id: currentUser.id,
         username: currentUser.username,
@@ -63,9 +68,6 @@ export default function CommunityPage() {
     };
     setPosts((prev) => [newPost, ...prev]);
   };
-
-  const [activeFilter, setActiveFilter] = useState<"all" | "trending" | "recent">("all");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
 
   const filteredPosts = posts
     .sort((a, b) => {
@@ -304,11 +306,13 @@ export default function CommunityPage() {
                   <span className="text-xs font-bold text-muted-foreground w-5 text-center">
                     {index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}
                   </span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Image
                     src={user.avatar}
                     alt={user.username}
+                    width={32}
+                    height={32}
                     className="h-8 w-8 rounded-full"
+                    loading="lazy"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">

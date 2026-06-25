@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import { api } from "@/lib/api";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -126,9 +127,15 @@ export default function DisputeDashboard() {
                       <h4 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">Evidence</h4>
                       <div className="grid grid-cols-3 gap-2">
                         {dispute.evidenceUrls.map((url: string, index: number) => (
-                          <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt={`Evidence ${index + 1}`} className="w-full h-full object-cover" />
+                          <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border relative">
+                            <Image
+                              src={url}
+                              alt={`Evidence ${index + 1}`}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 768px) 33vw, 25vw"
+                              loading="lazy"
+                            />
                           </div>
                         ))}
                       </div>
