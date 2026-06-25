@@ -9,6 +9,7 @@ import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
+import { setupSwagger } from './openapi/swagger';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -85,6 +86,9 @@ export const createApp = (): Express => {
 
     const graphql = getGraphQLExecutor();
     graphql.mount(app);
+
+    // Mount Swagger UI
+    setupSwagger(app);
 
     app.use(errorHandler);
 
