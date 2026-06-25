@@ -9,6 +9,9 @@ import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
+import rateLimit from 'express-rate-limit';
+import xss from 'xss-clean';
+import hpp from 'hpp';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -78,6 +81,20 @@ export const createApp = (): Express => {
         })
     );
     app.use(express.json());
+
+    // OWASP Top 10 Protections
+    app.use(xss()); // Prevent XSS attacks
+    app.use(hpp()); // Prevent HTTP Parameter Pollution
+
+    const apiLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        limit: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+        message: 'Too many requests from this IP, please try again after 15 minutes',
+        standardHeaders: 'draft-7', // draft-6: `RateLimit-*` headers; draft-7: combined `RateLimit` header
+        legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    });
+    app.use('/api', apiLimiter); // Apply rate limiter to all /api routes
+
     app.use(requestIdMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
