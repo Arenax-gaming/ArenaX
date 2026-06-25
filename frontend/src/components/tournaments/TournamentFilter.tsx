@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { X, ChevronDown, Filter, ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDebounce } from "@/hooks/useSearch";
 
 const statuses: Array<{ value: TournamentStatus; label: string }> = [
   { value: "registration_open", label: "Registration Open" },
@@ -63,15 +64,8 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
   const [formatOpen, setFormatOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
 
-  // Debounced search
-  const [debouncedSearch, setDebouncedSearch] = useState(search);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
+  // Debounced search using custom hook
+  const debouncedSearch = useDebounce(search, 300);
 
   // Update URL params when filters change
   const updateURL = useCallback(() => {
@@ -160,12 +154,12 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
 
   const activeFilters = [
     ...(debouncedSearch ? [{ key: "search", label: `Search: "${debouncedSearch}"` }] : []),
-    ...(status ? [{ key: "status", label: `Status: ${statuses.find(s => s.value === status)?.label}` }] : []),
+    ...(status ? [{ key: "status", label: `Status: ${statuses.find(s => s.value === status)?.label || status}` }] : []),
     ...(gameType ? [{ key: "gameType", label: `Game: ${gameType}` }] : []),
-    ...(tournamentType ? [{ key: "tournamentType", label: `Format: ${tournamentFormats.find(f => f.value === tournamentType)?.label}` }] : []),
+    ...(tournamentType ? [{ key: "tournamentType", label: `Format: ${tournamentFormats.find(f => f.value === tournamentType)?.label || tournamentType}` }] : []),
     ...(minEntryFee || maxEntryFee ? [{ key: "entryFee", label: `Entry Fee: ${minEntryFee || "0"}-${maxEntryFee || "∞"}` }] : []),
     ...(minPrizePool || maxPrizePool ? [{ key: "prizePool", label: `Prize Pool: ${minPrizePool || "0"}-${maxPrizePool || "∞"}` }] : []),
-    ...((sortBy !== "date" || sortOrder !== "desc") ? [{ key: "sort", label: `Sort: ${sortOptions.find(s => s.value === sortBy)?.label} (${sortOrder})` }] : []),
+    ...((sortBy !== "date" || sortOrder !== "desc") ? [{ key: "sort", label: `Sort: ${sortOptions.find(s => s.value === sortBy)?.label || sortBy} (${sortOrder})` }] : []),
   ];
 
   return (
@@ -220,7 +214,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
           label="Status"
           isOpen={statusOpen}
           onOpenChange={setStatusOpen}
-          value={status ? statuses.find(s => s.value === status)?.label : "All"}
+          value={status ? statuses.find(s => s.value === status)?.label || "All" : "All"}
         >
           <button
             onClick={() => { setStatus(null); setStatusOpen(false); }}
@@ -268,7 +262,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
           label="Format"
           isOpen={formatOpen}
           onOpenChange={setFormatOpen}
-          value={tournamentType ? tournamentFormats.find(f => f.value === tournamentType)?.label : "All"}
+          value={tournamentType ? tournamentFormats.find(f => f.value === tournamentType)?.label || "All" : "All"}
         >
           <button
             onClick={() => { setTournamentType(null); setFormatOpen(false); }}
@@ -338,7 +332,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
           label="Sort"
           isOpen={sortOpen}
           onOpenChange={setSortOpen}
-          value={`${sortOptions.find(s => s.value === sortBy)?.label} (${sortOrder})`}
+          value={`${sortOptions.find(s => s.value === sortBy)?.label || sortBy} (${sortOrder})`}
           icon={<ArrowUpDown className="h-4 w-4" />}
         >
           {sortOptions.map((option) => (

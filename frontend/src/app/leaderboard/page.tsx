@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -459,12 +460,14 @@ export default function LeaderboardPage() {
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-2">
                                 {player.avatarUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
+                                  <Image
                                     src={player.avatarUrl}
                                     alt=""
+                                    width={28}
+                                    height={28}
                                     className="w-7 h-7 rounded-full object-cover shrink-0"
                                     aria-hidden="true"
+                                    loading="lazy"
                                   />
                                 ) : (
                                   <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shrink-0">

@@ -12,6 +12,7 @@ import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { AnalyticsProvider } from "@/components/providers/AnalyticsProvider";
 import { ConsentBanner } from "@/components/providers/ConsentBanner";
 
+
 export const metadata: Metadata = {
   title: "ArenaX",
   description: "Competitive Gaming Platform",
@@ -20,6 +21,9 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "ArenaX",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
   },
 };
 
@@ -38,6 +42,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512x512.png" />
+      </head>
       <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
@@ -51,11 +60,7 @@ export default function RootLayout({
                 <WalletProvider>
                   <TxStatusProvider>
                     <NotificationProvider>
-                      <AnalyticsProvider>
-                        <WebVitalsInit />
-                        <AppLayout>{children}</AppLayout>
-                        <ConsentBanner />
-                      </AnalyticsProvider>
+
                     </NotificationProvider>
                   </TxStatusProvider>
                 </WalletProvider>
