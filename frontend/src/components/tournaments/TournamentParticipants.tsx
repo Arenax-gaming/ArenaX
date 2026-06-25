@@ -1,14 +1,93 @@
-import React, { useMemo } from "react";
+"use client";
+
+import React, { useMemo, useState } from "react";
 import { Tournament } from "@/types/tournament";
 import { Card } from "@/components/ui/Card";
 import { Users, Trophy, Zap } from "lucide-react";
 
-interface TournamentParticipantsProps {
-  tournament: Tournament;
+// Fixed palette — full class names kept as literals so Tailwind JIT includes them.
+export const AVATAR_COLORS = [
+  "bg-red-500",
+  "bg-orange-500",
+  "bg-amber-500",
+  "bg-yellow-500",
+  "bg-lime-500",
+  "bg-green-500",
+  "bg-emerald-500",
+  "bg-teal-500",
+  "bg-cyan-500",
+  "bg-blue-500",
+  "bg-indigo-500",
+  "bg-violet-500",
+  "bg-purple-500",
+  "bg-fuchsia-500",
+  "bg-pink-500",
+  "bg-rose-500",
+] as const;
+
+export type AvatarColor = (typeof AVATAR_COLORS)[number];
+
+// djb2-style hash — unsigned 32-bit, deterministic, no floating-point drift.
+export function hashUsername(username: string): number {
+  let h = 5381;
+  for (let i = 0; i < username.length; i++) {
+    h = (Math.imul(h, 31) + username.charCodeAt(i)) >>> 0;
+  }
+  return h;
 }
 
-// Mock participant data
-const generateMockParticipants = (gameType: string, count: number) => {
+export function getAvatarColor(username: string): AvatarColor {
+  return AVATAR_COLORS[hashUsername(username) % AVATAR_COLORS.length];
+}
+
+// ─── ParticipantAvatar ────────────────────────────────────────────────────────
+
+interface ParticipantAvatarProps {
+  username: string;
+  avatarUrl: string | null | undefined;
+}
+
+export function ParticipantAvatar({ username, avatarUrl }: ParticipantAvatarProps) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  const hasUrl = Boolean(avatarUrl);
+  const colorClass = getAvatarColor(username);
+  const initial = username.charAt(0).toUpperCase();
+
+  if (hasUrl && !imgFailed) {
+    return (
+      <img
+        src={avatarUrl!}
+        alt={username}
+        className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div
+      role="img"
+      aria-label={username}
+      className={`h-8 w-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold ${colorClass}`}
+    >
+      {initial}
+    </div>
+  );
+}
+
+// ─── Mock participant data ────────────────────────────────────────────────────
+
+interface MockParticipant {
+  id: string;
+  username: string;
+  rank: number;
+  joinedAt: string;
+  avatar: string;
+  rating: number;
+}
+
+const generateMockParticipants = (gameType: string, count: number): MockParticipant[] => {
   const firstNames = [
     "Alex",
     "Jordan",
@@ -36,7 +115,7 @@ const generateMockParticipants = (gameType: string, count: number) => {
     "Void",
   ];
 
-  const participants = [];
+  const participants: MockParticipant[] = [];
   for (let i = 0; i < count; i++) {
     const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
     const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
@@ -56,6 +135,12 @@ const generateMockParticipants = (gameType: string, count: number) => {
 
   return participants;
 };
+
+// ─── TournamentParticipants ───────────────────────────────────────────────────
+
+interface TournamentParticipantsProps {
+  tournament: Tournament;
+}
 
 export function TournamentParticipants({
   tournament,
@@ -137,7 +222,7 @@ export function TournamentParticipants({
               >
                 {/* Rank and User */}
                 <div className="col-span-6 flex items-center gap-3">
-                  {/* Rank */}
+                  {/* Rank badge */}
                   <div className="flex items-center justify-center h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex-shrink-0">
                     <span className="text-white text-xs font-bold">
                       {index + 1}
@@ -146,10 +231,10 @@ export function TournamentParticipants({
 
                   {/* Avatar and Username */}
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    {/* Avatar Placeholder */}
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-bold">
-                      {participant.username.charAt(0).toUpperCase()}
-                    </div>
+                    <ParticipantAvatar
+                      username={participant.username}
+                      avatarUrl={participant.avatar}
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-foreground truncate">
                         {participant.username}
