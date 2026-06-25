@@ -131,6 +131,96 @@ pub fn emit_reputation_disputed(
     .publish(env);
 }
 
+#[contractevent(topics = ["ArenaXPlayerRep_v1", "REPUTATION_RECOVERED"])]
+pub struct ReputationRecovered {
+    pub player: Address,
+    pub amount_recovered: i128,
+    pub timestamp: u64,
+}
+
+pub fn emit_reputation_recovered(
+    env: &Env,
+    player: &Address,
+    amount_recovered: i128,
+    timestamp: u64,
+) {
+    ReputationRecovered {
+        player: player.clone(),
+        amount_recovered,
+        timestamp,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["ArenaXPlayerRep_v1", "CATEGORY_SCORE_UPDATED"])]
+pub struct CategoryScoreUpdated {
+    pub player: Address,
+    pub category: u32,
+    pub old_score: i128,
+    pub new_score: i128,
+    pub timestamp: u64,
+}
+
+pub fn emit_category_score_updated(
+    env: &Env,
+    player: &Address,
+    category: u32,
+    old_score: i128,
+    new_score: i128,
+    timestamp: u64,
+) {
+    CategoryScoreUpdated {
+        player: player.clone(),
+        category,
+        old_score,
+        new_score,
+        timestamp,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["ArenaXPlayerRep_v1", "STREAK_BONUS_AWARDED"])]
+pub struct StreakBonusAwarded {
+    pub player: Address,
+    pub streak_days: u32,
+    pub bonus_amount: i128,
+    pub timestamp: u64,
+}
+
+pub fn emit_streak_bonus_awarded(
+    env: &Env,
+    player: &Address,
+    streak_days: u32,
+    bonus_amount: i128,
+    timestamp: u64,
+) {
+    StreakBonusAwarded {
+        player: player.clone(),
+        streak_days,
+        bonus_amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+#[contractevent(topics = ["ArenaXPlayerRep_v1", "DECAY_CONFIG_UPDATED"])]
+pub struct DecayConfigUpdated {
+    pub new_decay_per_day: i128,
+    pub timestamp: u64,
+}
+
+pub fn emit_decay_config_updated(
+    env: &Env,
+    new_decay_per_day: i128,
+    timestamp: u64,
+) {
+    DecayConfigUpdated {
+        new_decay_per_day,
+        timestamp,
+    }
+    .publish(env);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

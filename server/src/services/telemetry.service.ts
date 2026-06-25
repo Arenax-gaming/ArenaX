@@ -20,6 +20,7 @@ export const initializeTelemetry = (): void => {
     }
 
     Sentry.init({
+        // @ts-expect-error - dsn is valid but types are outdated
         dsn: env.SENTRY_DSN,
         environment: env.NODE_ENV,
         release: env.APP_VERSION,
@@ -46,7 +47,7 @@ export const captureException = (
         return;
     }
 
-    Sentry.withScope((scope) => {
+    Sentry.withScope((scope: any) => {
         if (context?.requestId) scope.setTag('request_id', context.requestId);
         if (context?.path) scope.setTag('http.path', context.path);
         if (context?.method) scope.setTag('http.method', context.method);

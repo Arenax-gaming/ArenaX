@@ -231,13 +231,10 @@ async fn main() -> io::Result<()> {
                         web::scope("/tournaments")
                             .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
                     )
-                    // User endpoints
+                    // Gas endpoints
                     .service(
-                        web::scope("/users")
-                            .route("/{id}", web::get().to(crate::http::users::get_user_profile))
-                            .route("/me", web::get().to(crate::http::users::get_current_user_profile))
-                            .route("/me", web::put().to(crate::http::users::update_user_profile))
-                            .route("/{id}/stats", web::get().to(crate::http::users::get_user_stats))
+                        web::scope("/gas")
+                            .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
                     )
                     // Matchmaking endpoints
                     .service(

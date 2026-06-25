@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import {
   Heart,
   MessageCircle,
@@ -152,14 +153,14 @@ export function CommunityFeed({
           <div className="flex items-start justify-between mb-3">
             <div className="flex items-center gap-3">
               <AvatarWithStatus
-                avatar={post.author.avatar}
-                username={post.author.username}
-                status={post.author.status}
+                avatar={post.author?.avatar}
+                username={post.author?.username || post.authorUsername}
+                status={post.author?.status as any}
                 size="md"
               />
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{post.author.username}</span>
+                  <span className="font-medium">{post.author?.username || post.authorUsername}</span>
                   {isPinned && (
                     <span className="flex items-center gap-1 text-xs text-primary">
                       <Pin className="h-3 w-3" />
@@ -170,7 +171,7 @@ export function CommunityFeed({
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{formatTime(post.createdAt)}</span>
                   <span>·</span>
-                  <span>ELO {post.author.elo}</span>
+                  <span>ELO {post.author?.elo || 0}</span>
                 </div>
               </div>
             </div>
@@ -212,7 +213,7 @@ export function CommunityFeed({
                     <Flag className="h-4 w-4" />
                     Report
                   </button>
-                  {post.author.id === currentUser.id && (
+                  {(post.author?.id || post.authorId) === currentUser.id && (
                     <>
                       <div className="border-t my-1" />
                       <button
@@ -233,7 +234,7 @@ export function CommunityFeed({
           <p className="text-sm mb-3 whitespace-pre-wrap">{post.content}</p>
 
           {/* Tags */}
-          {post.tags.length > 0 && (
+          {post.tags && post.tags.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
               {post.tags.map((tag) => (
                 <span
@@ -251,13 +252,17 @@ export function CommunityFeed({
           {post.media && post.media.length > 0 && (
             <div className="mb-3 rounded-lg overflow-hidden">
               {post.media.map((media, index) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={index}
-                  src={media.url}
-                  alt={post.content.slice(0, 50) || "Post media"}
-                  className="w-full h-auto max-h-[400px] object-cover"
-                />
+                <div key={index} className="relative w-full h-auto max-h-[400px]">
+                  <Image
+                    src={media.url}
+                    alt={post.content.slice(0, 50) || "Post media"}
+                    width={800}
+                    height={400}
+                    className="w-full h-auto object-cover"
+                    loading="lazy"
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
+                  />
+                </div>
               ))}
             </div>
           )}

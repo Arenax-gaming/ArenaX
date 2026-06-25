@@ -29,4 +29,10 @@ pub enum VirtualEconomyError {
     // Validation errors
     InvalidMetadata = 40,
     InvalidConfig = 41,
+
+    // Royalty & Licensing errors
+    RoyaltyTooHigh = 50,
+    CreatorNotFound = 51,
+    LicenseViolation = 52,
+    InvalidLicenseType = 53,
 }

@@ -8,6 +8,7 @@ import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
+import { getGraphQLExecutor } from './graphql/server';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -81,6 +82,10 @@ export const createApp = (): Express => {
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);
+
+    const graphql = getGraphQLExecutor();
+    graphql.mount(app);
+
     app.use(errorHandler);
 
     return app;

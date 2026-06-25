@@ -15,4 +15,7 @@ pub enum PlayerReputationError {
     InvalidActionType = 9,
     ScoreBelowMinimum = 10,
     InvalidImpact = 11,
+    CategoryNotFound = 12,
+    RecoveryCapExceeded = 13,
+    SnapshotLimitReached = 14,
 }

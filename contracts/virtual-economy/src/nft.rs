@@ -20,23 +20,30 @@ impl NFTManager {
             return Err(VirtualEconomyError::InvalidMetadata);
         }
 
+        if metadata.royalty_bps > 2000 {
+            return Err(VirtualEconomyError::RoyaltyTooHigh);
+        }
+
         Ok(())
     }
 
     /// Calculate NFT rarity score based on attributes
-    pub fn calculate_rarity_score(metadata: &NFTMetadata) -> u32 {
+    pub fn calculate_rarity_score(env: &Env, metadata: &NFTMetadata) -> u32 {
         let mut score = metadata.rarity * 20; // Base score from rarity level
 
         // Add bonus for number of attributes
         score += metadata.attributes.len() as u32 * 5;
 
         // Add bonus for special categories
-        let category_str = metadata.category.to_string();
-        if category_str == "legendary" {
+        let legendary = String::from_str(env, "legendary");
+        let epic = String::from_str(env, "epic");
+        let rare = String::from_str(env, "rare");
+
+        if metadata.category == legendary {
             score += 50;
-        } else if category_str == "epic" {
+        } else if metadata.category == epic {
             score += 30;
-        } else if category_str == "rare" {
+        } else if metadata.category == rare {
             score += 15;
         }
 

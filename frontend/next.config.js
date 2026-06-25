@@ -24,7 +24,13 @@ const nextConfig = {
         hostname: "api.dicebear.com",
         pathname: "/**",
       },
+      {
+        protocol: "https",
+        hostname: "**",
+      },
     ],
+    loader: "custom",
+    loaderFile: "./src/lib/imageLoader.ts",
   },
   
   // Enable compression
