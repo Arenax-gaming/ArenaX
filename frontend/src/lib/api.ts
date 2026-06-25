@@ -94,6 +94,17 @@ class ApiClient {
     );
   }
 
+  async getProfile() {
+    return this.request<{
+      id: string;
+      username: string;
+      email: string | null;
+      is_verified: boolean;
+      created_at: string;
+      elo?: number;
+    }>("/users/me");
+  }
+
   // Tournament endpoints
   async getTournaments(params?: Record<string, any>) {
     const queryString = params ? "?" + new URLSearchParams(params) : "";
