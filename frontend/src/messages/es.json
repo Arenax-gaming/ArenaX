@@ -1,0 +1,30 @@
+{
+  "common": {
+    "home": "Inicio",
+    "about": "Acerca de",
+    "login": "Iniciar sesión",
+    "register": "Registrarse",
+    "logout": "Cerrar sesión",
+    "dashboard": "Panel",
+    "profile": "Perfil",
+    "settings": "Configuración",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "submit": "Enviar",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "tryAgain": "Intentar de nuevo",
+    "retry": "Reintentar"
+  },
+  "error": {
+    "title": "Algo salió mal",
+    "network": "Conexión perdida",
+    "networkMessage": "Por favor revisa tu conexión a internet e inténtalo de nuevo.",
+    "generic": "Ocurrió un error inesperado. Por favor inténtalo de nuevo."
+  },
+  "date": {
+    "today": "Hoy",
+    "yesterday": "Ayer"
+  }
+}
