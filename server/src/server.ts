@@ -185,8 +185,7 @@ if (env.NODE_ENV !== 'test') {
             startHealthMonitor({ 
                 intervalMs: env.HEALTH_CHECK_INTERVAL_MS 
             });
-
-
-}
+        });
+    }
 
 export default server;
