@@ -82,6 +82,14 @@ pub struct DecodedEvent {
     pub value: serde_json::Value,
 }
 
+/// Result of gas estimation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GasEstimationResult {
+    pub cpu_instructions: u64,
+    pub memory_bytes: u64,
+    pub min_resource_fee: String,
+}
+
 /// Retry configuration
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
@@ -241,6 +249,11 @@ impl SorobanService {
         }
     }
 
+    /// Return the network configuration (e.g., to inspect the friendbot URL).
+    pub fn network(&self) -> &NetworkConfig {
+        &self.network
+    }
+
     /// Generic invoke method for calling Soroban contract functions
     ///
     /// # Arguments
@@ -298,6 +311,45 @@ impl SorobanService {
             });
 
         Ok(result)
+    }
+
+    /// Estimate gas costs for a transaction pre-execution
+    pub async fn estimate_gas(
+        &self,
+        contract_id: &str,
+        function_name: &str,
+        args: &serde_json::Value,
+        signer_secret: &str,
+    ) -> Result<GasEstimationResult, SorobanError> {
+        let simulate_result = self
+            .simulate_transaction(contract_id, function_name, args, signer_secret)
+            .await?;
+
+        let mut cpu_instructions = 0;
+        let mut memory_bytes = 0;
+
+        if let Some(cost) = simulate_result.cost {
+            if let Some(cpu) = cost.get("cpuInsns") {
+                if let Some(cpu_val) = cpu.as_str() {
+                    cpu_instructions = cpu_val.parse().unwrap_or(0);
+                } else if let Some(cpu_val) = cpu.as_u64() {
+                    cpu_instructions = cpu_val;
+                }
+            }
+            if let Some(mem) = cost.get("memBytes") {
+                if let Some(mem_val) = mem.as_str() {
+                    memory_bytes = mem_val.parse().unwrap_or(0);
+                } else if let Some(mem_val) = mem.as_u64() {
+                    memory_bytes = mem_val;
+                }
+            }
+        }
+
+        Ok(GasEstimationResult {
+            cpu_instructions,
+            memory_bytes,
+            min_resource_fee: simulate_result.min_resource_fee,
+        })
     }
 
     /// Simulate a transaction to get transaction data and resource fees
@@ -567,21 +619,10 @@ impl SorobanService {
         Ok(general_purpose::STANDARD.encode(serde_json::to_string(&envelope)?))
     }
 
-    /// Extract public key from secret key
+    /// Extract public key from secret key using real ed25519 derivation.
     fn secret_to_public_key(&self, secret: &str) -> Result<String, SorobanError> {
-        // In production, use stellar-sdk or ed25519-dalek to derive public key
-        // This is a simplified placeholder
-        if secret.starts_with('S') && secret.len() == 56 {
-            // Stellar secret keys start with 'S' and are 56 chars
-            // Public key would start with 'G' and be derived from secret
-            // For now, return a placeholder
-            Ok(format!("G{}", &secret[1..]))
-        } else {
-            Err(SorobanError::InvalidAccount(format!(
-                "Invalid secret key format: {}",
-                secret
-            )))
-        }
+        crate::service::stellar_service::stellar_public_from_secret(secret)
+            .map_err(|e| SorobanError::InvalidAccount(e))
     }
 
     /// Sign a transaction with a secret key
@@ -820,5 +861,24 @@ mod tests {
         assert!(result.is_ok());
         let signature = result.unwrap();
         assert!(signature.starts_with("sig_"));
+    }
+
+    #[test]
+    fn test_gas_estimation_result_serialization() {
+        let estimation = GasEstimationResult {
+            cpu_instructions: 1500000,
+            memory_bytes: 45000,
+            min_resource_fee: "100".to_string(),
+        };
+
+        let json = serde_json::to_string(&estimation).unwrap();
+        assert!(json.contains("cpu_instructions"));
+        assert!(json.contains("memory_bytes"));
+        assert!(json.contains("min_resource_fee"));
+
+        let deserialized: GasEstimationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.cpu_instructions, 1500000);
+        assert_eq!(deserialized.memory_bytes, 45000);
+        assert_eq!(deserialized.min_resource_fee, "100");
     }
 }

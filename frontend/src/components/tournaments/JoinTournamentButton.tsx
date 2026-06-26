@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
@@ -16,13 +16,24 @@ export function JoinTournamentButton({
   tournament,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
-  const { notify } = useNotifications();
+  const { notify, addToast } = useNotifications();
   const [showModal, setShowModal] = useState(false);
   const [joinStatus, setJoinStatus] = useState<
     "idle" | "confirming" | "success" | "error"
   >("idle");
   const [isJoined, setIsJoined] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Prevents state updates after unmount and guards against duplicate submissions
+  const mountedRef = useRef(true);
+  const isRequestInFlight = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Determine button state
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
@@ -33,11 +44,20 @@ export function JoinTournamentButton({
     tournament.status === "registration_open" && !isFull && !isJoined;
 
   const getButtonState = () => {
+    if (joinLoading) {
+      return {
+        label: "Joining…",
+        disabled: true,
+        variant: "primary" as const,
+        loading: true,
+      };
+    }
     if (isJoined) {
       return {
-        label: "✓ Already Joined",
+        label: "Registered ✓",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isFull) {
@@ -45,6 +65,7 @@ export function JoinTournamentButton({
         label: "Tournament Full",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isOngoing) {
@@ -52,6 +73,7 @@ export function JoinTournamentButton({
         label: "Tournament Ongoing",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isCompleted) {
@@ -59,6 +81,7 @@ export function JoinTournamentButton({
         label: "Tournament Completed",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isClosed) {
@@ -66,12 +89,14 @@ export function JoinTournamentButton({
         label: "Registration Closed",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     return {
       label: "Join Tournament",
       disabled: false,
       variant: "primary" as const,
+      loading: false,
     };
   };
 
@@ -97,13 +122,21 @@ export function JoinTournamentButton({
   };
 
   const handleConfirmJoin = async () => {
+    // Prevent duplicate submissions from rapid clicks
+    if (isRequestInFlight.current) return;
+    isRequestInFlight.current = true;
+
     setJoinStatus("confirming");
+    setJoinLoading(true);
     setErrorMessage(null);
 
     try {
       await api.joinTournament(tournament.id);
+      if (!mountedRef.current) return;
+
       setJoinStatus("success");
       setIsJoined(true);
+      setJoinLoading(false);
       localStorage.setItem(`tournament-joined-${tournament.id}`, "true");
 
       notify({
@@ -118,16 +151,31 @@ export function JoinTournamentButton({
       });
 
       setTimeout(() => {
-        setShowModal(false);
-        setJoinStatus("idle");
+        if (mountedRef.current) {
+          setShowModal(false);
+          setJoinStatus("idle");
+        }
       }, 2000);
     } catch (error) {
+      if (!mountedRef.current) return;
+
       const message =
         error instanceof Error
           ? error.message
           : "Unable to join tournament. Please try again.";
+
       setErrorMessage(message);
       setJoinStatus("error");
+      setJoinLoading(false);
+
+      addToast({
+        type: "error",
+        title: "Failed to Join Tournament",
+        message,
+        duration: 5000,
+      });
+    } finally {
+      isRequestInFlight.current = false;
     }
   };
 
@@ -142,6 +190,7 @@ export function JoinTournamentButton({
           onClick={handleJoinClick}
           disabled={buttonState.disabled}
           variant={buttonState.variant}
+          loading={buttonState.loading}
           size="lg"
           className="w-full"
         >
@@ -152,18 +201,18 @@ export function JoinTournamentButton({
         {canJoin && (
           <>
             {tournament.entryFee > 0 && (
-              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
-                <p className="text-xs text-blue-900 dark:text-blue-100">
+              <div className="bg-info-muted dark:bg-info-muted/20 border border-blue-200 dark:border-info/30 rounded-lg p-3">
+                <p className="text-xs text-info dark:text-info-muted-foreground">
                   <span className="font-semibold">Entry Fee:</span> You will be
                   charged ${tournament.entryFee} upon joining.
                 </p>
               </div>
             )}
 
-            <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-3">
+            <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-3">
               <div className="flex gap-2">
-                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-green-900 dark:text-green-100">
+                <CheckCircle className="h-4 w-4 text-success dark:text-success/80 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-green-900 dark:text-success-muted-foreground">
                   Tournament starts on{" "}
                   <span className="font-semibold">
                     {new Date(tournament.startTime).toLocaleDateString()}
@@ -175,10 +224,10 @@ export function JoinTournamentButton({
         )}
 
         {isJoined && (
-          <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-3">
+          <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-3">
             <div className="flex gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-green-900 dark:text-green-100">
+              <CheckCircle className="h-4 w-4 text-success dark:text-success/80 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-green-900 dark:text-success-muted-foreground">
                 You are registered for this tournament!
               </p>
             </div>
@@ -186,10 +235,10 @@ export function JoinTournamentButton({
         )}
 
         {isFull && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
+          <div className="bg-destructive/5 dark:bg-destructive/10/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
             <div className="flex gap-2">
-              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-red-900 dark:text-red-100">
+              <AlertCircle className="h-4 w-4 text-destructive dark:text-destructive/80 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-red-900 dark:text-destructive-foreground">
                 All slots are filled. Join the waitlist.
               </p>
             </div>
@@ -197,10 +246,10 @@ export function JoinTournamentButton({
         )}
 
         {isOngoing && (
-          <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
+          <div className="bg-info-muted dark:bg-info-muted/20 border border-blue-200 dark:border-info/30 rounded-lg p-3">
             <div className="flex gap-2">
-              <Clock className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-blue-900 dark:text-blue-100">
+              <Clock className="h-4 w-4 text-primary dark:text-primary/80 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-info dark:text-info-muted-foreground">
                 This tournament is currently in progress.
               </p>
             </div>
@@ -208,8 +257,8 @@ export function JoinTournamentButton({
         )}
 
         {isCompleted && (
-          <div className="bg-gray-50 dark:bg-gray-950/20 border border-gray-200 dark:border-gray-900 rounded-lg p-3">
-            <p className="text-xs text-gray-900 dark:text-gray-100">
+          <div className="bg-muted dark:bg-gray-950/20 border border-gray-200 dark:border-gray-900 rounded-lg p-3">
+            <p className="text-xs text-foreground dark:text-foreground">
               This tournament has already concluded.
             </p>
           </div>
@@ -224,13 +273,13 @@ export function JoinTournamentButton({
             <div className="flex items-center justify-between p-6 border-b">
               <div className="flex items-center gap-3">
                 {joinStatus === "success" && (
-                  <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <CheckCircle className="h-5 w-5 text-success dark:text-success/80" />
                 )}
                 {joinStatus === "confirming" && (
-                  <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin" />
+                  <Clock className="h-5 w-5 text-primary dark:text-primary/80 animate-spin" />
                 )}
                 {joinStatus === "idle" && (
-                  <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <Users className="h-5 w-5 text-primary dark:text-primary/80" />
                 )}
                 <h2 className="font-semibold text-foreground">
                   {joinStatus === "idle" && !localStorage.getItem("auth_token")
@@ -257,8 +306,8 @@ export function JoinTournamentButton({
                     You need to be signed in to join a tournament. Create an
                     account or log in to continue.
                   </p>
-                  <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
-                    <p className="text-xs text-blue-900 dark:text-blue-100">
+                  <div className="bg-info-muted dark:bg-info-muted/20 border border-blue-200 dark:border-info/30 rounded-lg p-3">
+                    <p className="text-xs text-info dark:text-info-muted-foreground">
                       <span className="font-semibold">Entry Fee:</span> You will
                       be charged ${tournament.entryFee} upon joining.
                     </p>
@@ -292,7 +341,7 @@ export function JoinTournamentButton({
               )}
 
               {joinStatus === "error" && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/20 dark:text-red-100">
+                <div className="rounded-lg border border-red-200 bg-destructive/5 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-destructive/10/20 dark:text-destructive-foreground">
                   <p className="font-semibold">Unable to join tournament</p>
                   <p className="mt-2">{errorMessage}</p>
                 </div>
@@ -305,8 +354,8 @@ export function JoinTournamentButton({
                     Congratulations! You have successfully joined the
                     tournament. Check your email for confirmation details.
                   </p>
-                  <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-3">
-                    <p className="text-sm text-green-900 dark:text-green-100">
+                  <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-3">
+                    <p className="text-sm text-green-900 dark:text-success-muted-foreground">
                       Tournament starts on{" "}
                       <span className="font-semibold">
                         {new Date(tournament.startTime).toLocaleDateString()}

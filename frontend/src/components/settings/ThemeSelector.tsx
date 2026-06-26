@@ -55,11 +55,11 @@ export function ThemeSelector({
 
   const getAccentColorPreview = (color: AccentColor) => {
     const colorMap: Record<AccentColor, string> = {
-      blue: "bg-blue-500",
+      blue: "bg-primary",
       purple: "bg-purple-500",
-      green: "bg-green-500",
+      green: "bg-success",
       orange: "bg-orange-500",
-      red: "bg-red-500",
+      red: "bg-destructive",
       pink: "bg-pink-500",
     };
     return colorMap[color];
@@ -71,8 +71,8 @@ export function ThemeSelector({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Monitor className="h-5 w-5 text-blue-500" />
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Monitor className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle>Theme Mode</CardTitle>
@@ -88,13 +88,13 @@ export function ThemeSelector({
                 onClick={() => onUpdate({ mode })}
                 className={`flex flex-col items-center gap-3 p-6 rounded-xl border-2 transition-all ${
                   settings.mode === mode
-                    ? "border-blue-500 bg-blue-500/10"
+                    ? "border-primary bg-primary/10"
                     : "border-muted hover:border-muted-foreground/50"
                 }`}
               >
                 <div
                   className={`p-3 rounded-full ${
-                    settings.mode === mode ? "bg-blue-500 text-white" : "bg-muted"
+                    settings.mode === mode ? "bg-primary text-white" : "bg-muted"
                   }`}
                 >
                   {getThemeModeIcon(mode)}
@@ -102,7 +102,7 @@ export function ThemeSelector({
                 <span className="text-sm font-medium">{getThemeModeLabel(mode)}</span>
                 {settings.mode === mode && (
                   <div className="absolute top-3 right-3">
-                    <Check className="h-4 w-4 text-blue-500" />
+                    <Check className="h-4 w-4 text-primary" />
                   </div>
                 )}
               </button>
@@ -132,18 +132,18 @@ export function ThemeSelector({
                 onClick={() => onUpdate({ accentColor: color.value as AccentColor })}
                 className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
                   settings.accentColor === color.value
-                    ? "border-blue-500 bg-blue-500/10"
+                    ? "border-primary bg-primary/10"
                     : "border-muted hover:border-muted-foreground/50"
                 }`}
               >
                 <div
                   className={`w-10 h-10 rounded-full ${color.hex} shadow-lg ${
-                    settings.accentColor === color.value ? "ring-2 ring-blue-500 ring-offset-2" : ""
+                    settings.accentColor === color.value ? "ring-2 ring-primary ring-offset-2" : ""
                   }`}
                 />
                 <span className="text-xs font-medium">{color.label}</span>
                 {settings.accentColor === color.value && (
-                  <Check className="absolute top-2 right-2 h-4 w-4 text-blue-500" />
+                  <Check className="absolute top-2 right-2 h-4 w-4 text-primary" />
                 )}
               </button>
             ))}
@@ -155,8 +155,8 @@ export function ThemeSelector({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Layout className="h-5 w-5 text-green-500" />
+            <div className="p-2 bg-success/10 rounded-lg">
+              <Layout className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>Display Options</CardTitle>
@@ -206,9 +206,9 @@ export function ThemeSelector({
           <div
             className={`p-6 rounded-lg border-2 ${
               settings.mode === "dark"
-                ? "bg-gray-900 border-gray-700"
+                ? "bg-background border-border"
                 : settings.mode === "light"
-                ? "bg-gray-100 border-gray-300"
+                ? "bg-muted border-border"
                 : "bg-gradient-to-br from-gray-100 to-gray-900 border-gray-400"
             }`}
           >
@@ -216,15 +216,15 @@ export function ThemeSelector({
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-full ${accentColors.find(c => c.value === settings.accentColor)?.hex}`} />
                 <div className="space-y-1">
-                  <div className={`h-3 w-32 rounded ${settings.mode === "dark" ? "bg-gray-700" : "bg-gray-300"}`} />
-                  <div className={`h-2 w-24 rounded ${settings.mode === "dark" ? "bg-gray-800" : "bg-gray-200"}`} />
+                  <div className={`h-3 w-32 rounded ${settings.mode === "dark" ? "bg-surface-raised" : "bg-gray-300"}`} />
+                  <div className={`h-2 w-24 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
                 </div>
               </div>
-              <div className={`h-2 w-full rounded ${settings.mode === "dark" ? "bg-gray-800" : "bg-gray-200"}`} />
-              <div className={`h-2 w-3/4 rounded ${settings.mode === "dark" ? "bg-gray-800" : "bg-gray-200"}`} />
+              <div className={`h-2 w-full rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
+              <div className={`h-2 w-3/4 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
               <div className="flex gap-2">
                 <div className={`h-8 w-24 rounded ${accentColors.find(c => c.value === settings.accentColor)?.hex}`} />
-                <div className={`h-8 w-20 rounded ${settings.mode === "dark" ? "bg-gray-800" : "bg-gray-200"}`} />
+                <div className={`h-8 w-20 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
               </div>
             </div>
           </div>
@@ -234,7 +234,7 @@ export function ThemeSelector({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

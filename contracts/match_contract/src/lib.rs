@@ -6,6 +6,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, In
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Match(BytesN<32>),
+    PauseContract,
 }
 
 #[contracttype]
@@ -35,7 +36,27 @@ pub struct MatchContract;
 
 #[contractimpl]
 impl MatchContract {
+    pub fn set_pause_contract(env: Env, admin: Address, pause_contract: Address) {
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::PauseContract, &pause_contract);
+    }
+
+    fn check_pause(env: &Env) {
+        if let Some(pause_contract) = env.storage().instance().get::<_, Address>(&DataKey::PauseContract) {
+            let is_paused: bool = env.invoke_contract(
+                &pause_contract,
+                &soroban_sdk::Symbol::new(env, "is_paused"),
+                (env.current_contract_address(), Option::<soroban_sdk::Symbol>::None).into_val(env),
+            );
+            if is_paused {
+                panic!("contract execution is paused");
+            }
+        }
+    }
+
     pub fn create_match(env: Env, match_id: BytesN<32>, player_a: Address, player_b: Address) {
+        Self::check_pause(&env);
+
         if env
             .storage()
             .persistent()
@@ -61,6 +82,7 @@ impl MatchContract {
     }
 
     pub fn start_match(env: Env, match_id: BytesN<32>) {
+        Self::check_pause(&env);
         let mut match_data: MatchData = env
             .storage()
             .persistent()
@@ -82,6 +104,7 @@ impl MatchContract {
     }
 
     pub fn complete_match(env: Env, match_id: BytesN<32>, winner: Address) {
+        Self::check_pause(&env);
         let mut match_data: MatchData = env
             .storage()
             .persistent()
@@ -108,6 +131,7 @@ impl MatchContract {
     }
 
     pub fn raise_dispute(env: Env, match_id: BytesN<32>) {
+        Self::check_pause(&env);
         let mut match_data: MatchData = env
             .storage()
             .persistent()
@@ -128,6 +152,7 @@ impl MatchContract {
     }
 
     pub fn cancel_match(env: Env, match_id: BytesN<32>) {
+        Self::check_pause(&env);
         let mut match_data: MatchData = env
             .storage()
             .persistent()
@@ -154,6 +179,7 @@ impl MatchContract {
         identity_contract: Address,
         resolver: Address,
     ) {
+        Self::check_pause(&env);
         resolver.require_auth();
 
         // Check if resolver is Referee (1) or Admin (2) via identity contract

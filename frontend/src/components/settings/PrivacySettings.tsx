@@ -79,8 +79,8 @@ export function PrivacySettings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Eye className="h-5 w-5 text-blue-500" />
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Eye className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle>Profile Visibility</CardTitle>
@@ -101,7 +101,7 @@ export function PrivacySettings({
                   }
                   className={`flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
                     settings.profileVisibility === option.value
-                      ? "border-blue-500 bg-blue-500/10"
+                      ? "border-primary bg-primary/10"
                       : "border-muted hover:border-muted-foreground/50"
                   }`}
                 >
@@ -197,8 +197,8 @@ export function PrivacySettings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <UserPlus className="h-5 w-5 text-green-500" />
+            <div className="p-2 bg-success/10 rounded-lg">
+              <UserPlus className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>Interaction Settings</CardTitle>
@@ -319,8 +319,8 @@ export function PrivacySettings({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-500/10 rounded-lg">
-              <Ban className="h-5 w-5 text-red-500" />
+            <div className="p-2 bg-destructive/10 rounded-lg">
+              <Ban className="h-5 w-5 text-destructive" />
             </div>
             <div>
               <CardTitle>Blocked Users</CardTitle>
@@ -336,7 +336,7 @@ export function PrivacySettings({
               onChange={(e) => setBlockedUserInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addBlockedUser()}
               placeholder="Enter username to block"
-              className="flex-1 px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <Button variant="primary" size="sm" onClick={addBlockedUser}>
               Block User
@@ -351,14 +351,14 @@ export function PrivacySettings({
                   className="flex items-center justify-between p-3 bg-muted/30 rounded-lg"
                 >
                   <div className="flex items-center gap-2">
-                    <Ban className="h-4 w-4 text-red-500" />
+                    <Ban className="h-4 w-4 text-destructive" />
                     <span className="text-sm font-medium">{username}</span>
                   </div>
                   <button
                     onClick={() => removeBlockedUser(username)}
                     className="p-1 hover:bg-muted rounded transition-colors"
                   >
-                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
                   </button>
                 </div>
               ))}
@@ -375,7 +375,7 @@ export function PrivacySettings({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

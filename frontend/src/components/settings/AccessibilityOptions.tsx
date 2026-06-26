@@ -57,8 +57,8 @@ export function AccessibilityOptions({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Eye className="h-5 w-5 text-blue-500" />
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Eye className="h-5 w-5 text-primary" />
             </div>
             <div>
               <CardTitle>Visual Settings</CardTitle>
@@ -97,7 +97,7 @@ export function AccessibilityOptions({
                   colorblindMode: e.target.value as AccessibilityOptionsType["colorblindMode"],
                 })
               }
-              className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {colorblindModes.map((mode) => (
                 <option key={mode.value} value={mode.value}>
@@ -165,8 +165,8 @@ export function AccessibilityOptions({
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Volume2 className="h-5 w-5 text-green-500" />
+            <div className="p-2 bg-success/10 rounded-lg">
+              <Volume2 className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>Audio & Captions</CardTitle>
@@ -202,7 +202,7 @@ export function AccessibilityOptions({
                       onClick={() => onUpdate({ subtitleSize: size })}
                       className={`px-3 py-2 rounded-md text-sm font-medium capitalize transition-colors ${
                         settings.subtitleSize === size
-                          ? "bg-blue-500 text-white"
+                          ? "bg-primary text-white"
                           : "bg-muted hover:bg-muted/80"
                       }`}
                     >
@@ -311,7 +311,7 @@ export function AccessibilityOptions({
       {/* Save Button */}
       <div className="flex items-center justify-end gap-3">
         {saveSuccess && (
-          <span className="text-sm text-green-500 flex items-center gap-1">
+          <span className="text-sm text-success flex items-center gap-1">
             <Check className="h-4 w-4" />
             Settings saved successfully
           </span>

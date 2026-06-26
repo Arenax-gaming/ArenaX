@@ -1,40 +1,11 @@
 "use client";
 
-import React from "react";
-import { ProfileCustomization } from "@/types/profile";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Palette } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-const AVAILABLE_BANNERS = [
-  { key: "default", label: "Default", color: "#1e293b" },
-  { key: "sunset", label: "Sunset", color: "#f97316" },
-  { key: "ocean", label: "Ocean", color: "#0ea5e9" },
-  { key: "forest", label: "Forest", color: "#22c55e" },
-  { key: "galaxy", label: "Galaxy", color: "#8b5cf6" },
-];
-
-const AVAILABLE_THEMES = [
-  { key: "blue", label: "Blue", color: "#3b82f6" },
-  { key: "purple", label: "Purple", color: "#8b5cf6" },
-  { key: "green", label: "Green", color: "#22c55e" },
-  { key: "orange", label: "Orange", color: "#f97316" },
-  { key: "red", label: "Red", color: "#ef4444" },
-];
-
-interface CustomizationOptionsProps {
-  current: ProfileCustomization;
-  onChange: (updated: ProfileCustomization) => void;
-}
-
-"use client";
-
 import React, { useState } from "react";
-import { ProfileCustomization } from "@/types/profile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Palette, Eye, RotateCcw, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ProfileCustomization } from "@/types/profile";
 
 const AVAILABLE_BANNERS = [
   { key: "default", label: "Default", color: "#1e293b", gradient: "linear-gradient(135deg, #1e293b 0%, #334155 100%)" },
@@ -65,11 +36,11 @@ interface CustomizationOptionsProps {
   onReset?: () => void;
 }
 
-export function CustomizationOptions({ 
-  current, 
-  onChange, 
-  onSave, 
-  onReset 
+export function CustomizationOptions({
+  current,
+  onChange,
+  onSave,
+  onReset,
 }: CustomizationOptionsProps) {
   const [previewMode, setPreviewMode] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -111,18 +82,11 @@ export function CustomizationOptions({
             </Button>
             {hasChanges && (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleReset}
-                >
+                <Button size="sm" variant="outline" onClick={handleReset}>
                   <RotateCcw className="h-4 w-4 mr-1" />
                   Reset
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                >
+                <Button size="sm" onClick={handleSave}>
                   <Save className="h-4 w-4 mr-1" />
                   Save
                 </Button>
@@ -135,20 +99,19 @@ export function CustomizationOptions({
         {/* Live Preview */}
         <div>
           <p className="text-sm font-medium mb-3">Live Preview</p>
-          <div className={cn(
-            "rounded-lg overflow-hidden border transition-all duration-300",
-            previewMode && "scale-105 shadow-lg"
-          )}>
+          <div
+            className={cn(
+              "rounded-lg overflow-hidden border transition-all duration-300",
+              previewMode && "scale-105 shadow-lg",
+            )}
+          >
             {/* Banner strip */}
             <div
               data-testid="preview-banner"
               className="h-20 w-full transition-all duration-300 relative overflow-hidden"
               style={{ background: selectedBanner.gradient }}
             >
-              {/* Overlay pattern for texture */}
               <div className="absolute inset-0 opacity-20 bg-gradient-to-br from-white/10 to-transparent" />
-              
-              {/* Sample profile elements */}
               <div className="absolute bottom-2 left-4 flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm border-2 border-white/30" />
                 <div className="text-white">
@@ -157,21 +120,21 @@ export function CustomizationOptions({
                 </div>
               </div>
             </div>
-            
+
             {/* Theme accent bar */}
             <div
               data-testid="preview-theme"
               className="h-3 w-full transition-all duration-300"
-              style={{ 
-                background: `linear-gradient(90deg, ${selectedTheme.color} 0%, ${selectedTheme.accent} 100%)` 
+              style={{
+                background: `linear-gradient(90deg, ${selectedTheme.color} 0%, ${selectedTheme.accent} 100%)`,
               }}
             />
-            
+
             {/* Content preview */}
             <div className="p-4 bg-muted/30">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-medium">Profile Stats</div>
-                <div 
+                <div
                   className="text-xs px-2 py-1 rounded-full text-white"
                   style={{ backgroundColor: selectedTheme.color }}
                 >
@@ -214,7 +177,7 @@ export function CustomizationOptions({
                   "flex flex-col items-center gap-2 p-2 rounded-lg border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:scale-105",
                   current.banner === banner.key
                     ? "border-primary ring-2 ring-primary/30 shadow-md"
-                    : "border-transparent hover:border-muted-foreground/30"
+                    : "border-transparent hover:border-muted-foreground/30",
                 )}
               >
                 <div
@@ -242,7 +205,7 @@ export function CustomizationOptions({
                 onClick={() => handleChange({ ...current, colorTheme: theme.key })}
                 className={cn(
                   "flex flex-col items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg p-2 transition-all hover:scale-110",
-                  current.colorTheme === theme.key && "scale-110"
+                  current.colorTheme === theme.key && "scale-110",
                 )}
               >
                 <div
@@ -250,10 +213,10 @@ export function CustomizationOptions({
                     "w-10 h-10 rounded-full border-4 transition-all relative overflow-hidden",
                     current.colorTheme === theme.key
                       ? "border-primary shadow-lg"
-                      : "border-transparent hover:border-muted-foreground/30"
+                      : "border-transparent hover:border-muted-foreground/30",
                   )}
-                  style={{ 
-                    background: `linear-gradient(135deg, ${theme.color} 0%, ${theme.accent} 100%)` 
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.color} 0%, ${theme.accent} 100%)`,
                   }}
                 >
                   {current.colorTheme === theme.key && (

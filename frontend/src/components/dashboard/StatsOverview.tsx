@@ -40,13 +40,13 @@ export function StatsOverview({ elo, wins, losses, winRate, rank, streak }: Stat
       value: `${winRate}%`,
       change: 2.5,
       icon: <Target className="h-5 w-5" />,
-      accent: "text-green-500",
+      accent: "text-success",
     },
     {
       label: "W / L",
       value: `${wins} / ${losses}`,
       icon: <Swords className="h-5 w-5" />,
-      accent: "text-blue-500",
+      accent: "text-primary",
     },
   ];
 
@@ -63,7 +63,7 @@ export function StatsOverview({ elo, wins, losses, winRate, rank, streak }: Stat
             </div>
             <p className="text-2xl font-black tracking-tight">{stat.value}</p>
             {stat.change !== undefined && (
-              <p className={`text-xs mt-1 flex items-center gap-1 ${stat.change >= 0 ? "text-green-500" : "text-red-500"}`}>
+              <p className={`text-xs mt-1 flex items-center gap-1 ${stat.change >= 0 ? "text-success" : "text-destructive"}`}>
                 {stat.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 {stat.change >= 0 ? "+" : ""}{stat.change} this week
               </p>

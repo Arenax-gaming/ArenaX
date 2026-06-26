@@ -38,6 +38,13 @@ impl PlayerReputationContract {
             skill_weight: 50,
             sportsmanship_weight: 30,
             achievement_weight: 20,
+            gaming_decay_per_day: 3,
+            social_decay_per_day: 1,
+            base_recovery_rate: 5,
+            max_recovery_per_day: 20,
+            streak_bonus_threshold: 7,
+            streak_bonus_amount: 50,
+            max_snapshots: 30,
         };
         env.storage().instance().set(&DataKey::Config, &config);
         Ok(())
@@ -728,6 +735,13 @@ impl PlayerReputationContract {
                 skill_weight: 50,
                 sportsmanship_weight: 30,
                 achievement_weight: 20,
+                gaming_decay_per_day: 3,
+                social_decay_per_day: 1,
+                base_recovery_rate: 5,
+                max_recovery_per_day: 20,
+                streak_bonus_threshold: 7,
+                streak_bonus_amount: 50,
+                max_snapshots: 30,
             })
     }
 
@@ -779,6 +793,131 @@ impl PlayerReputationContract {
 
         let _ = env; // env available for future use
         profile
+    }
+
+    /// Apply recovery for returning player (public)
+    pub fn apply_recovery(env: Env, player: Address) -> Result<i128, PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let mut profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        if profile.last_recovery_ts == 0 {
+            profile.last_recovery_ts = now;
+            env.storage()
+                .persistent()
+                .set(&DataKey::PlayerProfile(player.clone()), &profile);
+            return Ok(0);
+        }
+
+        let days_inactive = (now - profile.last_active_ts) / SECS_PER_DAY;
+        let recovery_days = core::cmp::min(days_inactive as u32, 14);
+
+        if recovery_days == 0 {
+            return Ok(0);
+        }
+
+        let base_recovery = (recovery_days as i128) * config.base_recovery_rate;
+        let recovery_amount = core::cmp::min(base_recovery, config.max_recovery_per_day * recovery_days as i128);
+
+        profile.reputation_score = profile.reputation_score.saturating_add(recovery_amount);
+        profile.last_recovery_ts = now;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PlayerProfile(player.clone()), &profile);
+
+        events::emit_reputation_recovered(&env, &player, recovery_amount, now);
+
+        Ok(recovery_amount)
+    }
+
+    /// Get category-specific score
+    pub fn get_category_score(
+        env: Env,
+        player: Address,
+        category: u32,
+    ) -> Result<i128, PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        match category {
+            0 => Ok(profile.gaming_score),
+            1 => Ok(profile.social_score),
+            2 => Ok(profile.achievement_score),
+            _ => Err(PlayerReputationError::CategoryNotFound),
+        }
+    }
+
+    /// Set decay exemption until timestamp
+    pub fn set_decay_exempt(env: Env, player: Address, until_ts: u64) -> Result<(), PlayerReputationError> {
+        Self::require_admin(&env)?;
+
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let mut profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        profile.decay_exempt_until = until_ts;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PlayerProfile(player), &profile);
+
+        Ok(())
+    }
+
+    /// Update configuration
+    pub fn update_config(env: Env, new_config: ReputationConfig) -> Result<(), PlayerReputationError> {
+        Self::require_admin(&env)?;
+
+        env.storage().instance().set(&DataKey::Config, &new_config);
+        events::emit_decay_config_updated(&env, new_config.gaming_decay_per_day, env.ledger().timestamp());
+
+        Ok(())
+    }
+
+    /// Get current decay schedule config
+    pub fn get_decay_schedule(env: Env) -> ReputationConfig {
+        Self::get_config(&env)
+    }
+
+    /// Get reputation analytics for a player
+    pub fn get_reputation_analytics(
+        env: Env,
+        player: Address,
+    ) -> Result<(SkillProgression, CommunityTrust, u32), PlayerReputationError> {
+        let config = Self::get_config(&env);
+        let now = env.ledger().timestamp();
+        let profile = Self::load_or_create_profile(&env, &player, &config, now);
+
+        let skill_prog = SkillProgression {
+            current_rating: profile.skill_rating,
+            rating_change: 0,
+            games_played: profile.wins + profile.losses + profile.draws,
+            win_rate: if profile.wins + profile.losses + profile.draws > 0 {
+                (profile.wins * 100) / (profile.wins + profile.losses + profile.draws)
+            } else {
+                0
+            },
+            improvement_rate: 0,
+            consistency_score: Self::calculate_consistency(&profile),
+        };
+
+        let trust = CommunityTrust {
+            sportsmanship_rating: profile.sportsmanship_score,
+            review_count: profile.review_count,
+            trust_score: Self::calculate_trust_score(&profile),
+            reliability_index: Self::calculate_reliability(&profile),
+            community_standing: Self::get_community_standing(&profile),
+        };
+
+        let snapshot_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SnapshotCount(player.clone()))
+            .unwrap_or(0);
+
+        Ok((skill_prog, trust, snapshot_count))
     }
 
     /// Compute composite score from multi-dimensional profile.

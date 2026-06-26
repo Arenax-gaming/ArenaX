@@ -52,14 +52,14 @@ export function BracketMatchModal({
             <h2 className="mt-1 text-2xl font-semibold">
               {match.label ?? `Match ${match.matchNumber}`}
             </h2>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted-foreground">
               {match.roundLabel ?? `Round ${match.round}`}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-white/10 p-2 text-slate-300 transition hover:border-white/30 hover:text-white"
+            className="rounded-full border border-white/10 p-2 text-foreground/80 transition hover:border-white/30 hover:text-white"
             aria-label="Close match details"
           >
             <X className="h-5 w-5" />
@@ -76,7 +76,7 @@ export function BracketMatchModal({
                   {match.status.replace("_", " ")}
                 </span>
                 {typeof match.bestOf === "number" && (
-                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-300">
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-foreground/80">
                     Best of {match.bestOf}
                   </span>
                 )}
@@ -105,7 +105,7 @@ export function BracketMatchModal({
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/5">
-                            <User className="h-5 w-5 text-slate-300" />
+                            <User className="h-5 w-5 text-foreground/80" />
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
@@ -121,7 +121,7 @@ export function BracketMatchModal({
                                 <ShieldCheck className="h-4 w-4 text-emerald-300" />
                               )}
                             </div>
-                            <p className="text-sm text-slate-400">
+                            <p className="text-sm text-muted-foreground">
                               {player
                                 ? `Seed ${player.seed ?? "-"} | ${player.region ?? "Global"} | ELO ${player.elo}`
                                 : "Awaiting previous match result"}
@@ -130,7 +130,7 @@ export function BracketMatchModal({
                         </div>
                         <div className="text-right">
                           <div className="text-3xl font-semibold">{score}</div>
-                          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                             Series
                           </p>
                         </div>
@@ -143,7 +143,7 @@ export function BracketMatchModal({
                               key={`${player.id}-${stat.label}`}
                               className="rounded-xl border border-white/8 bg-black/10 px-3 py-2"
                             >
-                              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                              <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
                                 {stat.label}
                               </p>
                               <p className="mt-1 text-sm font-medium text-slate-100">
@@ -161,11 +161,11 @@ export function BracketMatchModal({
 
             <div className="space-y-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-slate-300">
+                <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-foreground/80">
                   <Clock3 className="h-4 w-4 text-cyan-300" />
                   Schedule
                 </h3>
-                <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div className="mt-4 space-y-3 text-sm text-foreground/80">
                   <p>{match.scheduledTime ? formatDate(match.scheduledTime) : "TBD"}</p>
                   <p>{match.venue ?? "ArenaX Digital Stage"}</p>
                   {match.streamTitle ? <p>{match.streamTitle}</p> : null}
@@ -173,11 +173,11 @@ export function BracketMatchModal({
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-slate-300">
+                <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-foreground/80">
                   <Activity className="h-4 w-4 text-fuchsia-300" />
                   Match Notes
                 </h3>
-                <p className="mt-4 text-sm leading-6 text-slate-300">
+                <p className="mt-4 text-sm leading-6 text-foreground/80">
                   {match.notes ?? "No additional notes posted for this match yet."}
                 </p>
                 {match.conflictReason ? (
@@ -195,7 +195,7 @@ export function BracketMatchModal({
 
           <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-300">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-foreground/80">
                 Score Reports
               </h3>
               <div className="mt-4 space-y-3">
@@ -208,7 +208,7 @@ export function BracketMatchModal({
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="font-medium text-slate-100">{report.reporterName}</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-muted-foreground">
                             {formatDate(report.submittedAt)}
                           </p>
                         </div>
@@ -219,7 +219,7 @@ export function BracketMatchModal({
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-400">
+                  <p className="text-sm text-muted-foreground">
                     No score submissions recorded yet.
                   </p>
                 )}
@@ -227,7 +227,7 @@ export function BracketMatchModal({
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-slate-300">
+              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.25em] text-foreground/80">
                 <Medal className="h-4 w-4 text-amber-300" />
                 Prize Breakdown
               </h3>
@@ -242,7 +242,7 @@ export function BracketMatchModal({
                         <p className="font-medium text-slate-100">
                           {prize.label ?? `Top ${prize.position}`}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-muted-foreground">
                           Position {prize.position}
                         </p>
                       </div>
@@ -252,12 +252,12 @@ export function BracketMatchModal({
                             ? `$${prize.amount.toLocaleString()}`
                             : `${prize.percentage}%`}
                         </p>
-                        <p className="text-xs text-slate-500">{prize.percentage}% share</p>
+                        <p className="text-xs text-muted-foreground">{prize.percentage}% share</p>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-slate-400">
+                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-muted-foreground">
                     Prize tiers will appear once the event payout rules are published.
                   </div>
                 )}

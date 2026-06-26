@@ -101,7 +101,7 @@ describe('ProfileHeader', () => {
       <ProfileHeader user={{ ...baseUser, isOnline: true }} isOwner={false} friendshipStatus="none" />
     );
     const indicator = screen.getByTestId('online-indicator');
-    expect(indicator).toHaveClass('bg-green-500');
+    expect(indicator).toHaveClass('bg-success');
     expect(indicator).not.toHaveClass('bg-gray-400');
   });
 
@@ -111,6 +111,6 @@ describe('ProfileHeader', () => {
     );
     const indicator = screen.getByTestId('online-indicator');
     expect(indicator).toHaveClass('bg-gray-400');
-    expect(indicator).not.toHaveClass('bg-green-500');
+    expect(indicator).not.toHaveClass('bg-success');
   });
 });

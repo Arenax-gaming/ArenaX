@@ -76,7 +76,7 @@ export function ChatInterface({
       case "delivered":
         return <CheckCheck className="h-4 w-4 text-muted-foreground" />;
       case "read":
-        return <CheckCheck className="h-4 w-4 text-blue-500" />;
+        return <CheckCheck className="h-4 w-4 text-primary" />;
       default:
         return null;
     }
@@ -168,7 +168,7 @@ export function ChatInterface({
               type="text"
               placeholder="Search conversations..."
               onChange={(e) => onSearchConversations?.(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-4 py-2 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
         </div>
@@ -326,7 +326,7 @@ export function ChatInterface({
                   placeholder="Type a message..."
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  className="w-full px-4 py-2 bg-muted rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 bg-muted rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
               <Button

@@ -73,16 +73,16 @@ export function QuickJoinModal({
         <div className="flex items-center justify-between p-6 border-b">
           <div className="flex items-center gap-3">
             {joinStatus === "success" && (
-              <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
+              <CheckCircle className="h-5 w-5 text-success dark:text-success/80" />
             )}
             {joinStatus === "confirming" && (
-              <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin" />
+              <Clock className="h-5 w-5 text-primary dark:text-primary/80 animate-spin" />
             )}
             {joinStatus === "idle" && (
-              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              <Users className="h-5 w-5 text-primary dark:text-primary/80" />
             )}
             {joinStatus === "error" && (
-              <X className="h-5 w-5 text-red-600 dark:text-red-400" />
+              <X className="h-5 w-5 text-destructive dark:text-destructive/80" />
             )}
             <h2 className="font-semibold text-foreground">
               {joinStatus === "success"
@@ -136,8 +136,8 @@ export function QuickJoinModal({
                 </div>
               </div>
               {tournament.entryFee > 0 && (
-                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
-                  <p className="text-xs text-blue-900 dark:text-blue-100">
+                <div className="bg-info-muted dark:bg-info-muted/20 border border-blue-200 dark:border-info/30 rounded-lg p-3">
+                  <p className="text-xs text-info dark:text-info-muted-foreground">
                     <span className="font-semibold">Note:</span> You will be
                     charged ${tournament.entryFee} upon confirmation.
                   </p>
@@ -175,8 +175,8 @@ export function QuickJoinModal({
               <p className="text-sm text-muted-foreground">
                 Congratulations! You have successfully joined the tournament.
               </p>
-              <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg p-3">
-                <p className="text-sm text-green-900 dark:text-green-100">
+              <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-3">
+                <p className="text-sm text-green-900 dark:text-success-muted-foreground">
                   Tournament starts on{" "}
                   <span className="font-semibold">
                     {new Date(tournament.startTime).toLocaleDateString()}
@@ -190,8 +190,8 @@ export function QuickJoinModal({
           {joinStatus === "error" && (
             <>
               <p className="text-sm text-destructive">{error}</p>
-              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
-                <p className="text-sm text-red-900 dark:text-red-100">
+              <div className="bg-destructive/5 dark:bg-destructive/10/20 border border-red-200 dark:border-red-900 rounded-lg p-3">
+                <p className="text-sm text-red-900 dark:text-destructive-foreground">
                   There was an error joining the tournament. Please try again.
                 </p>
               </div>

@@ -231,10 +231,14 @@ pub async fn reconcile_match(
 // ROUTE CONFIGURATION
 // =============================================================================
 
-/// Configure Match Authority routes
+/// Configure Match Authority routes.
+///
+/// Intended to be called via `.configure(...)` inside an existing `/api`
+/// scope.  Opens a `/matches` sub-scope — **not** `/api/matches` — so paths
+/// resolve to `/api/matches/…` without a duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/matches")
+        web::scope("/matches")
             .route("", web::post().to(create_match))
             .route("/{id}", web::get().to(get_match))
             .route("/{id}/start", web::post().to(start_match))

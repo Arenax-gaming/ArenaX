@@ -36,7 +36,7 @@ function StatCard({ label, value, icon, accent, trend, description }: StatCardPr
         <div className="space-y-1">
           <p className="text-2xl font-black tracking-tight">{value}</p>
           {trend && (
-            <div className={`flex items-center gap-1 text-xs ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`flex items-center gap-1 text-xs ${trend.isPositive ? 'text-success' : 'text-destructive'}`}>
               {trend.isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
               <span>{Math.abs(trend.value)}</span>
             </div>
@@ -65,10 +65,10 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
   // Get performance rating
   const getPerformanceRating = (winRate: number) => {
     if (winRate >= 80) return { rating: 'Exceptional', color: 'text-purple-600' };
-    if (winRate >= 70) return { rating: 'Excellent', color: 'text-green-600' };
-    if (winRate >= 60) return { rating: 'Good', color: 'text-blue-600' };
+    if (winRate >= 70) return { rating: 'Excellent', color: 'text-success' };
+    if (winRate >= 60) return { rating: 'Good', color: 'text-primary' };
     if (winRate >= 50) return { rating: 'Average', color: 'text-yellow-600' };
-    return { rating: 'Below Average', color: 'text-red-600' };
+    return { rating: 'Below Average', color: 'text-destructive' };
   };
 
   const performance = getPerformanceRating(winRate);
@@ -100,21 +100,21 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
       label: "Win Rate",
       value: `${winRate.toFixed(1)}%`,
       icon: <Target className="h-5 w-5" />,
-      accent: "text-green-500",
+      accent: "text-success",
       description: performance.rating
     },
     {
       label: "Games Played",
       value: totalGames.toLocaleString(),
       icon: <Swords className="h-5 w-5" />,
-      accent: "text-blue-500",
+      accent: "text-primary",
       description: `${wins}W / ${losses}L`
     },
     {
       label: "Current Streak",
       value: currentStreak > 0 ? `+${currentStreak}` : `${currentStreak}`,
       icon: <Flame className="h-5 w-5" />,
-      accent: currentStreak > 0 ? "text-orange-500" : "text-red-500",
+      accent: currentStreak > 0 ? "text-orange-500" : "text-destructive",
       description: currentStreak > 0 ? "Win streak" : currentStreak < 0 ? "Loss streak" : "No streak"
     },
   ];
@@ -130,7 +130,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
     {
       title: "Games This Week",
       value: "12", // Mock data
-      color: "text-blue-600",
+      color: "text-primary",
       icon: <Calendar className="h-4 w-4" />
     },
     {
@@ -187,7 +187,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
           </CardHeader>
           <CardContent className="text-center text-muted-foreground py-8">
             <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>Play more games to see your ELO progression</p>
+            <p>Insufficient data for chart</p>
           </CardContent>
         </Card>
       ) : (
@@ -240,7 +240,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
                 </div>
                 <div className="flex justify-between">
                   <span>Online:</span>
-                  <span className="font-medium text-green-600">23</span>
+                  <span className="font-medium text-success">23</span>
                 </div>
               </div>
             </div>
