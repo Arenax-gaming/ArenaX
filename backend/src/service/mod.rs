@@ -1,12 +1,14 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
 pub mod analytics_service;
+pub mod bracket_generator;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod leaderboard_service;
 pub mod match_authority_service;
 pub mod match_service;
 pub mod reaper_service;
+pub mod tournament_service;
 pub mod matchmaker;
 pub mod reputation_service;
 pub mod reward_settlement_service;
@@ -14,7 +16,6 @@ pub mod social_service;
 pub mod soroban_service;
 pub mod staking_service;
 pub mod stellar_service;
-pub mod tournament_service;
 pub mod wallet_service;
 
 pub use governance_service::{
