@@ -92,10 +92,14 @@ pub async fn get_user_stats(
     })))
 }
 
-/// Configure user routes
+/// Configure user routes.
+///
+/// Intended to be called via `.configure(...)` inside an existing `/api`
+/// scope.  Opens a `/users` sub-scope — **not** `/api/users` — so paths
+/// resolve to `/api/users/…` without a duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/users")
+        web::scope("/users")
             .route("/{id}", web::get().to(get_user_profile))
             .route("/me", web::get().to(get_current_user_profile))
             .route("/me", web::put().to(update_user_profile))
