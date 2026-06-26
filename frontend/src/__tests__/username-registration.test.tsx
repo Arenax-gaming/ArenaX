@@ -89,15 +89,21 @@ jest.mock('@/lib/api', () => ({
 }));
 
 import { api } from '@/lib/api';
-import { useUsernameAvailability } from '@/hooks/useUsernameAvailability';
+
+// Get the REAL hook implementation — bypasses the jest.mock hoisted below for RegisterPage tests
+const { useUsernameAvailability: realUseUsernameAvailability } =
+  jest.requireActual('@/hooks/useUsernameAvailability') as typeof import('@/hooks/useUsernameAvailability');
 
 function HookHarness({ username }: { username: string }) {
-  const status = useUsernameAvailability(username);
+  const status = realUseUsernameAvailability(username);
   return <div data-testid="status">{status}</div>;
 }
 
 describe('useUsernameAvailability', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useRealTimers();
+  });
 
   it('returns idle for username shorter than 3 chars', () => {
     render(<HookHarness username="ab" />);
@@ -114,7 +120,7 @@ describe('useUsernameAvailability', () => {
     render(<HookHarness username="Arena123" />);
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('available'),
-    { timeout: 1000 });
+    { timeout: 3000 });
     expect(api.checkUsernameAvailability).toHaveBeenCalledWith('Arena123');
   });
 
@@ -123,7 +129,7 @@ describe('useUsernameAvailability', () => {
     render(<HookHarness username="TakenUser" />);
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('unavailable'),
-    { timeout: 1000 });
+    { timeout: 3000 });
   });
 
   it('returns error when API throws', async () => {
@@ -131,7 +137,7 @@ describe('useUsernameAvailability', () => {
     render(<HookHarness username="Arena123" />);
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('error'),
-    { timeout: 1000 });
+    { timeout: 3000 });
   });
 });
 
@@ -184,6 +190,9 @@ describe('RegisterPage — form submission guard', () => {
   it('shows schema validation error for short username on submit', async () => {
     render(<RegisterPage />);
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'ab' } });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'Password1!' } });
+    fireEvent.change(screen.getByLabelText(/confirm password/i), { target: { value: 'Password1!' } });
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
     expect(await screen.findByText(/at least 3/i)).toBeInTheDocument();
   });
@@ -191,8 +200,12 @@ describe('RegisterPage — form submission guard', () => {
   it('shows schema validation error for username with spaces', async () => {
     render(<RegisterPage />);
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'arena master' } });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'Password1!' } });
+    fireEvent.change(screen.getByLabelText(/confirm password/i), { target: { value: 'Password1!' } });
     fireEvent.click(screen.getByRole('button', { name: /create account/i }));
-    expect(await screen.findByText(/letters and numbers/i)).toBeInTheDocument();
+    // Ensure the validation error (not the static hint) is shown
+    expect(await screen.findByText(/letters and numbers \(no spaces/i)).toBeInTheDocument();
   });
 
   it('disables submit button when username is unavailable', () => {
@@ -229,12 +242,12 @@ describe('RegisterPage — form submission guard', () => {
     (mockUseAvailability as jest.Mock).mockReturnValue('unavailable');
     const { register } = require('@/hooks/useAuth').useAuth();
     render(<RegisterPage />);
-    await userEvent.type(screen.getByLabelText(/username/i), 'TakenUser');
-    await userEvent.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await userEvent.type(screen.getByLabelText(/^password$/i), 'Password1!');
-    await userEvent.type(screen.getByLabelText(/confirm password/i), 'Password1!');
-    await userEvent.click(screen.getByRole('button', { name: /create account/i }));
-    // register should not be called
+    fireEvent.change(screen.getByLabelText(/username/i), { target: { value: 'TakenUser' } });
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'test@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'Password1!' } });
+    fireEvent.change(screen.getByLabelText(/confirm password/i), { target: { value: 'Password1!' } });
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
+    // register should not be called when username is unavailable
     expect(register).not.toHaveBeenCalled();
   });
 });

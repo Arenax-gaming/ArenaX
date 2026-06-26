@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { TournamentStatus, TournamentType, TournamentFilters } from "@/types/tournament";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -37,6 +37,7 @@ interface TournamentFilterProps {
 export function TournamentFilter({ availableGameTypes, onFiltersChange }: TournamentFilterProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
 
   // State for URL params
   const [search, setSearch] = useState(searchParams.get("search") || "");
@@ -83,7 +84,9 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
     if (sortOrder) params.set("sortOrder", sortOrder);
 
     const queryString = params.toString();
-    router.push(`/tournaments${queryString ? `?${queryString}` : ""}`, { scroll: false });
+    // Use router.replace so filter changes don't add entries to the browser history
+    // Use pathname so locale prefix (/en, /fr, etc.) is preserved
+    router.replace(`${pathname}${queryString ? `?${queryString}` : ""}`, { scroll: false });
 
     // Notify parent of filter changes
     if (onFiltersChange) {
@@ -100,7 +103,7 @@ export function TournamentFilter({ availableGameTypes, onFiltersChange }: Tourna
         sortOrder,
       });
     }
-  }, [debouncedSearch, status, gameType, tournamentType, minEntryFee, maxEntryFee, minPrizePool, maxPrizePool, sortBy, sortOrder, router, onFiltersChange]);
+  }, [debouncedSearch, status, gameType, tournamentType, minEntryFee, maxEntryFee, minPrizePool, maxPrizePool, sortBy, sortOrder, router, pathname, onFiltersChange]);
 
   useEffect(() => {
     updateURL();
