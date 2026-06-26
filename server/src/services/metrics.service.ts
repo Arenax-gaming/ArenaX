@@ -89,6 +89,26 @@ const cacheMissesTotal = getOrCreateCounter({
   labelNames: ['namespace'],
 });
 
+// Compression metrics (issue #477)
+const compressionUncompressedBytes = getOrCreateCounter({
+  name: 'http_response_uncompressed_bytes_total',
+  help: 'Total number of uncompressed response bytes (what the app would have sent)',
+  labelNames: ['encoding'],
+});
+
+const compressionCompressedBytes = getOrCreateCounter({
+  name: 'http_response_compressed_bytes_total',
+  help: 'Total number of compressed (wire) response bytes',
+  labelNames: ['encoding'],
+});
+
+const compressionRatio = getOrCreateHistogram({
+  name: 'http_response_compression_ratio',
+  help: 'Distribution of per-response compression ratios (compressed/uncompressed)',
+  labelNames: ['encoding'],
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+});
+
 export class MetricsService {
   private static instance: MetricsService;
 
@@ -131,6 +151,16 @@ export class MetricsService {
 
   recordCacheMiss(namespace: string) {
     cacheMissesTotal.inc({ namespace });
+  }
+
+  // Compression metrics (issue #477)
+  recordCompression(
+    encoding: string,
+    payload: { uncompressedBytes: number; compressedBytes: number; ratio: number },
+  ) {
+    compressionUncompressedBytes.inc({ encoding }, payload.uncompressedBytes);
+    compressionCompressedBytes.inc({ encoding }, payload.compressedBytes);
+    compressionRatio.observe({ encoding }, payload.ratio);
   }
 
   // Connection metrics

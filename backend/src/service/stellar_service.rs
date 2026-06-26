@@ -1,6 +1,8 @@
 use crate::models::{StellarAccount, StellarTransaction};
 use anyhow::Result;
 use chrono::Utc;
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use rand::rngs::OsRng;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -140,27 +142,69 @@ impl StellarService {
         account.ok_or(StellarError::AccountNotFound)
     }
 
-    /// Fund a Stellar account (for testnet only)
+    /// Fund a Stellar account.
+    ///
+    /// On testnet (`horizon_url` contains "testnet"), uses Friendbot to fund
+    /// the account for free.  On mainnet, this method returns an error asking
+    /// the caller to fund the account from the admin key via Horizon — the
+    /// actual payment-operation submission is handled by the admin flow.
     pub async fn fund_account(
         &self,
         public_key: &str,
         amount: i64,
     ) -> Result<String, StellarError> {
-        // TODO: Implement actual Stellar funding
-        // For testnet, you can use the friendbot
-        // For mainnet, this would require transferring XLM from the admin account
-
         tracing::info!("Funding account {} with {} stroops", public_key, amount);
 
-        // Placeholder for actual implementation
-        // let client = reqwest::Client::new();
-        // let response = client
-        //     .get(&format!("https://friendbot.stellar.org?addr={}", public_key))
-        //     .send()
-        //     .await
-        //     .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+        let tx_hash = if self.horizon_url.contains("testnet") {
+            // ----------------------------------------------------------------
+            // Testnet: use Friendbot — no admin key required
+            // ----------------------------------------------------------------
+            let friendbot_url = format!(
+                "https://friendbot.stellar.org?addr={}",
+                urlencoding_encode(public_key)
+            );
+            let client = reqwest::Client::new();
+            let response = client
+                .get(&friendbot_url)
+                .send()
+                .await
+                .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
-        // Mark account as funded
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(StellarError::TransactionFailed(format!(
+                    "Friendbot returned {}: {}",
+                    status, body
+                )));
+            }
+
+            let body: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+
+            body["hash"]
+                .as_str()
+                .unwrap_or("friendbot-tx")
+                .to_string()
+        } else {
+            // ----------------------------------------------------------------
+            // Mainnet / custom network: the admin must fund the account.
+            // Full XDR-signed CreateAccount + Payment ops are outside the
+            // scope of this service stub — return an actionable error so the
+            // caller knows what to do.
+            // ----------------------------------------------------------------
+            return Err(StellarError::TransactionFailed(
+                "Mainnet account funding requires submitting a CreateAccount \
+                 operation from the admin account via Horizon. \
+                 Ensure STELLAR_ADMIN_SECRET is set and implement the \
+                 XDR transaction builder."
+                    .to_string(),
+            ));
+        };
+
+        // Mark account as funded in the database
         sqlx::query!(
             r#"
             UPDATE stellar_accounts
@@ -174,7 +218,7 @@ impl StellarService {
         .execute(&*self.db_pool)
         .await?;
 
-        Ok("testnet-funding-tx-hash".to_string())
+        Ok(tx_hash)
     }
 
     /// Update account balance
@@ -469,22 +513,18 @@ impl StellarService {
     // HELPER FUNCTIONS
     // ========================================================================
 
-    /// Generate a new Stellar keypair
+    /// Generate a new Stellar keypair using ed25519-dalek.
+    ///
+    /// Returns `(public_key_strkey, secret_key_strkey)` in standard Stellar
+    /// StrKey encoding (public key starts with `G`, secret key starts with `S`).
     fn generate_keypair(&self) -> Result<(String, String), StellarError> {
-        // TODO: Use stellar-sdk to generate actual keypair
-        // use stellar_sdk::Keypair;
-        // let keypair = Keypair::random();
-        // Ok((keypair.public_key(), keypair.secret_key()))
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key: VerifyingKey = signing_key.verifying_key();
 
-        // Placeholder implementation
-        let public_key = format!(
-            "G{}",
-            Uuid::new_v4().to_string().replace("-", "").to_uppercase()
-        );
-        let secret_key = format!(
-            "S{}",
-            Uuid::new_v4().to_string().replace("-", "").to_uppercase()
-        );
+        let public_key = stellar_strkey_encode(6 << 3, verifying_key.as_bytes())
+            .map_err(|e| StellarError::StellarSdkError(e))?;
+        let secret_key = stellar_strkey_encode(18 << 3, signing_key.as_bytes())
+            .map_err(|e| StellarError::StellarSdkError(e))?;
 
         Ok((public_key, secret_key))
     }
@@ -517,5 +557,212 @@ impl StellarService {
     /// Convert stroops to XLM
     pub fn stroops_to_xlm(stroops: i64) -> f64 {
         stroops as f64 / 10_000_000.0
+    }
+}
+
+// ============================================================================
+// Stellar StrKey encoding (RFC 4648 base32, no external dependency required)
+// ============================================================================
+
+/// Encode a raw 32-byte key as a Stellar StrKey.
+///
+/// `version_byte`:
+///   - `6 << 3`  (= 0x30)  → public key  → starts with `G`
+///   - `18 << 3` (= 0x90)  → secret key  → starts with `S`
+///
+/// The format is: base32( version_byte || payload || crc16(version_byte || payload) )
+pub fn stellar_strkey_encode(version_byte: u8, payload: &[u8]) -> Result<String, String> {
+    if payload.len() != 32 {
+        return Err(format!(
+            "stellar_strkey_encode: expected 32-byte payload, got {}",
+            payload.len()
+        ));
+    }
+
+    // Build the data to checksum: version_byte || payload
+    let mut data = Vec::with_capacity(1 + payload.len());
+    data.push(version_byte);
+    data.extend_from_slice(payload);
+
+    // CRC-16/XMODEM (initial value 0x0000, poly 0x1021, no reflection)
+    let checksum = crc16_xmodem(&data);
+    data.push((checksum & 0xFF) as u8);     // little-endian
+    data.push((checksum >> 8) as u8);
+
+    Ok(base32_encode(&data))
+}
+
+/// Decode a Stellar StrKey back to (version_byte, payload).
+/// Returns an error if the checksum does not match.
+pub fn stellar_strkey_decode(encoded: &str) -> Result<(u8, Vec<u8>), String> {
+    let data = base32_decode(encoded)?;
+    if data.len() < 3 {
+        return Err("stellar_strkey_decode: encoded value too short".to_string());
+    }
+
+    let (payload_with_version, checksum_bytes) = data.split_at(data.len() - 2);
+    let expected = crc16_xmodem(payload_with_version);
+    let actual = (checksum_bytes[0] as u16) | ((checksum_bytes[1] as u16) << 8);
+    if expected != actual {
+        return Err(format!(
+            "stellar_strkey_decode: checksum mismatch (expected {:#06x}, got {:#06x})",
+            expected, actual
+        ));
+    }
+
+    let version = payload_with_version[0];
+    let payload = payload_with_version[1..].to_vec();
+    Ok((version, payload))
+}
+
+/// Derive the Stellar public key StrKey from a secret key StrKey.
+///
+/// Decodes the ed25519 seed from the secret key, derives the verifying key,
+/// and re-encodes it as a Stellar public key.
+pub fn stellar_public_from_secret(secret_strkey: &str) -> Result<String, String> {
+    let (version, seed_bytes) = stellar_strkey_decode(secret_strkey)?;
+    if version != 18 << 3 {
+        return Err(format!(
+            "stellar_public_from_secret: expected secret key version {:#04x}, got {:#04x}",
+            18u8 << 3,
+            version
+        ));
+    }
+    let seed: [u8; 32] = seed_bytes.try_into().map_err(|_| {
+        "stellar_public_from_secret: seed must be 32 bytes".to_string()
+    })?;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let verifying_key = signing_key.verifying_key();
+    stellar_strkey_encode(6 << 3, verifying_key.as_bytes())
+}
+
+// ============================================================================
+// Base32 (RFC 4648, uppercase, no padding) — used by Stellar StrKey
+// ============================================================================
+
+const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+fn base32_encode(data: &[u8]) -> String {
+    let mut output = String::new();
+    let mut buffer: u64 = 0;
+    let mut bits_in_buffer: u32 = 0;
+
+    for &byte in data {
+        buffer = (buffer << 8) | (byte as u64);
+        bits_in_buffer += 8;
+        while bits_in_buffer >= 5 {
+            bits_in_buffer -= 5;
+            let index = ((buffer >> bits_in_buffer) & 0x1F) as usize;
+            output.push(BASE32_ALPHABET[index] as char);
+        }
+    }
+    // Remaining bits (left-aligned)
+    if bits_in_buffer > 0 {
+        let index = ((buffer << (5 - bits_in_buffer)) & 0x1F) as usize;
+        output.push(BASE32_ALPHABET[index] as char);
+    }
+    output
+}
+
+fn base32_decode(encoded: &str) -> Result<Vec<u8>, String> {
+    let mut buffer: u64 = 0;
+    let mut bits_in_buffer: u32 = 0;
+    let mut output = Vec::new();
+
+    for ch in encoded.chars() {
+        if ch == '=' {
+            break; // ignore padding
+        }
+        let value = BASE32_ALPHABET
+            .iter()
+            .position(|&c| c == ch as u8)
+            .ok_or_else(|| format!("base32_decode: invalid character '{}'", ch))?;
+        buffer = (buffer << 5) | (value as u64);
+        bits_in_buffer += 5;
+        if bits_in_buffer >= 8 {
+            bits_in_buffer -= 8;
+            output.push((buffer >> bits_in_buffer) as u8 & 0xFF);
+        }
+    }
+    Ok(output)
+}
+
+// ============================================================================
+// CRC-16/XMODEM (poly 0x1021, initial value 0x0000, no input/output reflection)
+// ============================================================================
+
+fn crc16_xmodem(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0x0000;
+    for &byte in data {
+        crc ^= (byte as u16) << 8;
+        for _ in 0..8 {
+            if crc & 0x8000 != 0 {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    crc
+}
+
+// ============================================================================
+// Minimal percent-encoding for the public key in Friendbot URLs
+// ============================================================================
+
+fn urlencoding_encode(input: &str) -> String {
+    let mut encoded = String::new();
+    for byte in input.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{:02X}", byte));
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod stellar_strkey_tests {
+    use super::*;
+
+    #[test]
+    fn test_keypair_generates_valid_strkeys() {
+        // Public key must start with 'G' and be 56 chars
+        // Secret key must start with 'S' and be 56 chars
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let verifying_key = signing_key.verifying_key();
+
+        let pub_strkey = stellar_strkey_encode(6 << 3, verifying_key.as_bytes()).unwrap();
+        let sec_strkey = stellar_strkey_encode(18 << 3, signing_key.as_bytes()).unwrap();
+
+        assert_eq!(pub_strkey.len(), 56, "public key strkey must be 56 chars");
+        assert!(pub_strkey.starts_with('G'), "public key must start with G");
+        assert_eq!(sec_strkey.len(), 56, "secret key strkey must be 56 chars");
+        assert!(sec_strkey.starts_with('S'), "secret key must start with S");
+    }
+
+    #[test]
+    fn test_public_from_secret_roundtrip() {
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let verifying_key = signing_key.verifying_key();
+
+        let sec_strkey = stellar_strkey_encode(18 << 3, signing_key.as_bytes()).unwrap();
+        let pub_strkey_direct = stellar_strkey_encode(6 << 3, verifying_key.as_bytes()).unwrap();
+        let pub_strkey_derived = stellar_public_from_secret(&sec_strkey).unwrap();
+
+        assert_eq!(
+            pub_strkey_direct, pub_strkey_derived,
+            "derived public key must match directly encoded public key"
+        );
+    }
+
+    #[test]
+    fn test_decode_roundtrip() {
+        let payload = [0xABu8; 32];
+        let encoded = stellar_strkey_encode(6 << 3, &payload).unwrap();
+        let (version, decoded_payload) = stellar_strkey_decode(&encoded).unwrap();
+        assert_eq!(version, 6 << 3);
+        assert_eq!(decoded_payload, payload);
     }
 }

@@ -37,7 +37,7 @@ export function RecentGames({ matches, currentUserId }: RecentGamesProps) {
                 <span
                   className={cn(
                     "text-xs font-bold uppercase w-8 text-center py-1 rounded",
-                    isWin ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
+                    isWin ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
                   )}
                 >
                   {isWin ? "W" : "L"}

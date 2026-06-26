@@ -29,15 +29,15 @@ const CATEGORY_ICONS: Record<AchievementCategory, React.ReactNode> = {
 };
 
 const RARITY_COLORS: Record<AchievementRarity, string> = {
-  common: "border-gray-400 bg-gray-50 dark:bg-gray-900/50",
-  rare: "border-blue-400 bg-blue-50 dark:bg-blue-900/20",
+  common: "border-gray-400 bg-muted dark:bg-background/50",
+  rare: "border-primary/70 bg-info-muted dark:bg-info-muted/20",
   epic: "border-purple-400 bg-purple-50 dark:bg-purple-900/20",
   legendary: "border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20",
 };
 
 const RARITY_TEXT_COLORS: Record<AchievementRarity, string> = {
-  common: "text-gray-600 dark:text-gray-400",
-  rare: "text-blue-600 dark:text-blue-400",
+  common: "text-gray-600 dark:text-muted-foreground",
+  rare: "text-primary dark:text-primary/80",
   epic: "text-purple-600 dark:text-purple-400",
   legendary: "text-yellow-600 dark:text-yellow-400",
 };
@@ -168,7 +168,7 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
 
                   {/* Unlocked indicator */}
                   {achievement.unlocked && (
-                    <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400 font-medium">
+                    <span className="inline-flex items-center gap-1 text-xs text-success dark:text-success/80 font-medium">
                       <span>✓</span> Unlocked
                     </span>
                   )}
@@ -179,7 +179,7 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
                     isRecentUnlock(achievement.unlockedAt) && (
                       <span
                         data-testid="new-badge"
-                        className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-info dark:bg-info-muted/40 dark:text-blue-300"
                       >
                         New
                       </span>

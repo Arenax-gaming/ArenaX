@@ -33,7 +33,7 @@ import { authenticateJWT, restrictTo, restrictToScope } from '../middleware/auth
 import requireConfirmationForBulk from '../middleware/confirm.middleware';
 import { adminRateLimiter } from '../middleware/rate-limit.middleware';
 
-const router = Router();
+const router: Router = Router();
 
 router.use(adminRateLimiter, authenticateJWT, restrictTo('ADMIN'));
 

@@ -1,9 +1,16 @@
+"use client";
+
+import { useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/layout/Navbar";
 import { MobileHeaderActions } from "@/components/layout/MobileHeaderActions";
 import { Logo } from "@/components/common/Logo";
 import { ToastContainer } from "@/components/notifications/Toast";
 import { SkipLink } from "@/components/ui/SkipLink";
 import { BottomNav } from "@/components/ui/BottomNav";
+import { PageTransition } from "@/components/animations/PageTransition";
+import { KeyboardShortcutsHelp } from "@/components/ui/KeyboardShortcutsHelp";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import Link from "next/link";
 
 interface AppLayoutProps {
@@ -11,6 +18,37 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
+  const router = useRouter();
+
+  // Handle non-help shortcut actions (navigation, etc.)
+  const handleShortcutAction = useCallback(
+    (id: string) => {
+      switch (id) {
+        case "nav_home":
+          router.push("/");
+          break;
+        case "nav_tournaments":
+          router.push("/tournaments");
+          break;
+        case "nav_leaderboard":
+          router.push("/leaderboard");
+          break;
+        case "nav_profile":
+          router.push("/profile");
+          break;
+        case "nav_matches":
+          router.push("/matches");
+          break;
+        default:
+          break;
+      }
+    },
+    [router],
+  );
+
+  const { shortcuts, customBindings, isHelpOpen, closeHelp } =
+    useKeyboardShortcuts(handleShortcutAction);
+
   return (
     <div className="min-h-screen bg-background font-sans antialiased flex flex-col">
       <SkipLink targetId="main-content" />
@@ -21,11 +59,17 @@ export function AppLayout({ children }: AppLayoutProps) {
           <MobileHeaderActions />
         </div>
       </header>
-      <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main">
-        {children}
-      </main>
+      <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main"><PageTransition>{children}</PageTransition></main>
       <ToastContainer />
       <BottomNav />
+
+      {/* Global keyboard shortcuts help modal */}
+      <KeyboardShortcutsHelp
+        shortcuts={shortcuts}
+        customBindings={customBindings}
+        isOpen={isHelpOpen}
+        onClose={closeHelp}
+      />
       <footer className="border-t py-8 md:py-10" role="contentinfo">
         <div className="container flex flex-col gap-8">
           {/* Top row: nav + social */}

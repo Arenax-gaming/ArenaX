@@ -1,0 +1,12 @@
+[package]
+name = "zk-proof"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+arenax-events = { path = "../arenax-events" }
+cross-contract-utils = { path = "../cross-contract-utils" }
+
+[dev_dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

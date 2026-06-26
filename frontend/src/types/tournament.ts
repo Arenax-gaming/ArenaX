@@ -3,6 +3,7 @@ export interface Tournament {
   id: string;
   name: string;
   description?: string;
+  banner?: string;
   gameType: string;
   tournamentType: string;
   entryFee: number;
@@ -90,6 +91,26 @@ export interface CreateTournamentRequest {
   maxParticipants: number;
   visibility: TournamentVisibility;
   startTime: string;
+}
+
+export type CreateTournamentWizardStep = 1 | 2 | 3 | 4 | "preview" | "success";
+
+export interface CreateTournamentFormData {
+  name: string;
+  gameType: string;
+  description: string;
+  tournamentType: TournamentType;
+  matchFormat: string;
+  rules: string;
+  entryFee: number;
+  prizePool: number;
+  prizeDistribution: string;
+  visibility: TournamentVisibility;
+  maxParticipants: number;
+  registrationOpenDate: string;
+  registrationCloseDate: string;
+  startDate: string;
+  endDate: string;
 }
 
 export interface TournamentFilters {

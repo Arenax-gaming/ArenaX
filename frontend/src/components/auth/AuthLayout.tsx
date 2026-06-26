@@ -21,7 +21,7 @@ export function AuthLayout({ children, title, subtitle, type }: AuthLayoutProps)
             <span className="text-2xl font-bold">ArenaX</span>
           </div>
           <h1 className="text-3xl font-bold mb-4">Competitive Gaming Platform</h1>
-          <p className="text-blue-100 text-lg">
+          <p className="text-info-muted-foreground text-lg">
             Join tournaments, compete for prizes, and climb the leaderboard
           </p>
         </div>
@@ -54,26 +54,26 @@ export function AuthLayout({ children, title, subtitle, type }: AuthLayoutProps)
             {type === 'login' ? (
               <>
                 Don&apos;t have an account?{' '}
-                <Link href="/auth/register" className="text-blue-600 hover:text-blue-700 font-medium">
+                <Link href="/auth/register" className="text-primary hover:text-info font-medium">
                   Sign up
                 </Link>
               </>
             ) : type === 'register' ? (
               <>
                 Already have an account?{' '}
-                <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-medium">
+                <Link href="/auth/login" className="text-primary hover:text-info font-medium">
                   Sign in
                 </Link>
               </>
             ) : type === 'forgot-password' ? (
               <>
                 Remember your password?{' '}
-                <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-medium">
+                <Link href="/auth/login" className="text-primary hover:text-info font-medium">
                   Sign in
                 </Link>
               </>
             ) : (
-              <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-medium">
+              <Link href="/auth/login" className="text-primary hover:text-info font-medium">
                 Return to login
               </Link>
             )}

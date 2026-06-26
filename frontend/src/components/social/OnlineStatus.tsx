@@ -1,13 +1,14 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 import type { UserStatus } from "@/types/social";
 
 const statusConfig: Record<UserStatus, { label: string; color: string; bgColor: string }> = {
-  online: { label: "Online", color: "bg-green-500", bgColor: "bg-green-500/20" },
+  online: { label: "Online", color: "bg-success", bgColor: "bg-success/20" },
   "in-game": { label: "In Game", color: "bg-yellow-500", bgColor: "bg-yellow-500/20" },
   away: { label: "Away", color: "bg-orange-500", bgColor: "bg-orange-500/20" },
-  busy: { label: "Busy", color: "bg-red-500", bgColor: "bg-red-500/20" },
+  busy: { label: "Busy", color: "bg-destructive", bgColor: "bg-destructive/20" },
   offline: { label: "Offline", color: "bg-gray-500", bgColor: "bg-gray-500/20" },
 };
 
@@ -81,7 +82,7 @@ export function StatusSelector({ currentStatus, onStatusChange, className }: Sta
               isActive
                 ? cn(config.bgColor, "ring-2", config.color.replace("bg-", "ring-"))
                 : "hover:bg-muted",
-              "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
             )}
             title={config.label}
           >
@@ -137,11 +138,13 @@ export function AvatarWithStatus({
         )}
       >
         {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={avatar}
             alt={username}
+            width={size === 'sm' ? 32 : size === 'md' ? 40 : 56}
+            height={size === 'sm' ? 32 : size === 'md' ? 40 : 56}
             className="h-full w-full object-cover"
+            loading="lazy"
           />
         ) : (
           <span className="font-bold">{username.charAt(0).toUpperCase()}</span>

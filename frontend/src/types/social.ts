@@ -62,14 +62,46 @@ export interface CommunityPost {
   authorId: string
   authorUsername: string
   authorAvatar?: string
-  title: string
+  title?: string
   content: string
   category: string
   likes: number
   comments: number
+  shares?: number
+  isLiked: boolean
+  isPinned?: boolean
+  createdAt: string
+  tags?: string[]
+  media?: PostMedia[]
+  author?: {
+    id: string
+    username: string
+    avatar?: string
+    elo?: number
+    status?: string
+  }
+}
+
+export interface PostMedia {
+  id: string
+  url: string
+  type: 'image' | 'video'
+  thumbnail?: string
+}
+
+export interface CommunityComment {
+  id: string
+  postId: string
+  authorId: string
+  authorUsername: string
+  authorAvatar?: string
+  content: string
+  likes: number
   isLiked: boolean
   createdAt: string
 }
+
+export type UserStatus = 'online' | 'in-game' | 'away' | 'busy' | 'offline';
 
 export interface OnlineStatus {
   userId: string

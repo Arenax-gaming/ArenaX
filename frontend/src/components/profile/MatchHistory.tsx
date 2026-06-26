@@ -3,6 +3,17 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { MatchWithPlayers } from "@/types/profile";
+
+// Allow the component to accept either the profile-specific MatchWithPlayers
+// (which has score/date) or the general MatchWithPlayers from @/types/match
+// (which has scorePlayer1/scorePlayer2/createdAt). We use an intersection type
+// so both shapes are accepted.
+type AnyMatchWithPlayers = MatchWithPlayers & {
+  scorePlayer1?: number;
+  scorePlayer2?: number;
+  createdAt?: string;
+  completedAt?: string;
+};
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { 
@@ -30,7 +41,7 @@ export interface MatchHistoryFilters {
 }
 
 interface MatchHistoryProps {
-  matches: MatchWithPlayers[];
+  matches: AnyMatchWithPlayers[];
   currentUserId: string;
   filters?: MatchHistoryFilters;
   onFilterChange?: (filters: MatchHistoryFilters) => void;
@@ -87,7 +98,7 @@ export function MatchHistory({
   const gameTypes = Array.from(new Set(matches.map((m) => m.gameType).filter(Boolean)));
 
   // Apply filters client-side
-  const filteredMatches = matches.filter((match) => {
+  const filteredMatches = matches.filter((match: AnyMatchWithPlayers) => {
     const isWin = match.winnerId === currentUserId;
     const opponentName =
       match.player1Id === currentUserId ? match.player2Username : match.player1Username;
@@ -103,7 +114,7 @@ export function MatchHistory({
     
     // Time range filter
     if (filters.timeRange && filters.timeRange !== "all") {
-      const matchDate = new Date(match.date);
+      const matchDate = new Date(match.date ?? match.createdAt ?? Date.now());
       const now = new Date();
       const daysDiff = Math.floor((now.getTime() - matchDate.getTime()) / (1000 * 60 * 60 * 24));
       
@@ -176,11 +187,11 @@ export function MatchHistory({
         {filteredMatches.length > 0 && (
           <div className="grid grid-cols-3 gap-4 pt-4 border-t">
             <div className="text-center">
-              <p className="text-2xl font-bold text-green-600">{wins}</p>
+              <p className="text-2xl font-bold text-success">{wins}</p>
               <p className="text-xs text-muted-foreground">Wins</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-bold text-red-600">{losses}</p>
+              <p className="text-2xl font-bold text-destructive">{losses}</p>
               <p className="text-xs text-muted-foreground">Losses</p>
             </div>
             <div className="text-center">
@@ -309,9 +320,9 @@ export function MatchHistory({
                 match.player1Id === currentUserId
                   ? match.player2Username
                   : match.player1Username;
-              const myScore = match.score.split('-')[0];
-              const opponentScore = match.score.split('-')[1];
-              const date = new Date(match.date);
+              const myScore = match.score?.split('-')[0] ?? String(match.scorePlayer1 ?? 0);
+              const opponentScore = match.score?.split('-')[1] ?? String(match.scorePlayer2 ?? 0);
+              const date = new Date(match.date ?? match.createdAt ?? Date.now());
               
               // Calculate ELO change (mock data)
               const eloChange = isWinner ? Math.floor(Math.random() * 25) + 10 : -(Math.floor(Math.random() * 25) + 10);
@@ -328,8 +339,8 @@ export function MatchHistory({
                         className={cn(
                           "flex items-center justify-center h-12 w-12 rounded-full font-bold text-sm transition-all",
                           isWinner
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-2 border-green-200 dark:border-green-800"
-                            : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border-2 border-red-200 dark:border-red-800"
+                            ? "bg-success-muted text-green-700 dark:bg-success-muted/40 dark:text-success/80 border-2 border-success/30 dark:border-green-800"
+                            : "bg-destructive/10 text-red-700 dark:bg-destructive/20/40 dark:text-destructive/80 border-2 border-red-200 dark:border-red-800"
                         )}
                       >
                         {isWinner ? "W" : "L"}
@@ -379,7 +390,7 @@ export function MatchHistory({
                         
                         <div className={cn(
                           "text-xs font-medium flex items-center gap-1",
-                          eloChange > 0 ? "text-green-600" : "text-red-600"
+                          eloChange > 0 ? "text-success" : "text-destructive"
                         )}>
                           {eloChange > 0 ? (
                             <TrendingUp className="h-3 w-3" />

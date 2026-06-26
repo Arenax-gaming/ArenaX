@@ -67,17 +67,17 @@ export function ProfileHeader({
   const getRankColor = (rank: number) => {
     if (rank <= 10) return 'text-yellow-500';
     if (rank <= 100) return 'text-orange-500';
-    if (rank <= 1000) return 'text-blue-500';
-    return 'text-gray-500';
+    if (rank <= 1000) return 'text-primary';
+    return 'text-muted-foreground';
   };
 
   const getEloTier = (elo: number) => {
     if (elo >= 2400) return { tier: 'Grandmaster', color: 'text-purple-500' };
-    if (elo >= 2200) return { tier: 'Master', color: 'text-red-500' };
-    if (elo >= 2000) return { tier: 'Diamond', color: 'text-blue-500' };
+    if (elo >= 2200) return { tier: 'Master', color: 'text-destructive' };
+    if (elo >= 2000) return { tier: 'Diamond', color: 'text-primary' };
     if (elo >= 1800) return { tier: 'Platinum', color: 'text-cyan-500' };
     if (elo >= 1600) return { tier: 'Gold', color: 'text-yellow-500' };
-    if (elo >= 1400) return { tier: 'Silver', color: 'text-gray-400' };
+    if (elo >= 1400) return { tier: 'Silver', color: 'text-muted-foreground' };
     return { tier: 'Bronze', color: 'text-orange-600' };
   };
 
@@ -147,7 +147,7 @@ export function ProfileHeader({
               {/* Online indicator */}
               <span
                 className={`absolute bottom-2 right-2 w-6 h-6 rounded-full border-4 border-white shadow-md ${
-                  user.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                  user.isOnline ? 'bg-success' : 'bg-gray-400'
                 }`}
                 aria-label={user.isOnline ? 'Online' : 'Offline'}
                 data-testid="online-indicator"
@@ -167,7 +167,7 @@ export function ProfileHeader({
                     {eloTier.tier}
                   </span>
                   {user.isOnline && (
-                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-green-600 bg-green-100">
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-success bg-success-muted">
                       Online
                     </span>
                   )}
@@ -205,18 +205,26 @@ export function ProfileHeader({
                       href={user.socialLinks.twitter}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-info hover:bg-blue-200 transition-colors"
                     >
-                      <Twitter className="h-3 w-3" />
+                      <Twitter className="h-3 w-3" aria-hidden="true" />
                       Twitter
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                   {user.socialLinks.discord && (
-                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
-                      <span className="w-3 h-3 bg-indigo-500 rounded-full" />
-                      {user.socialLinks.discord}
-                    </span>
+                    <a
+                      href={user.socialLinks.discord}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors"
+                    >
+                      <span className="w-3 h-3 bg-indigo-500 rounded-full" aria-hidden="true" />
+                      Discord
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
+                    </a>
                   )}
                   {user.socialLinks.twitch && (
                     <a
@@ -225,9 +233,10 @@ export function ProfileHeader({
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors"
                     >
-                      <Twitch className="h-3 w-3" />
+                      <Twitch className="h-3 w-3" aria-hidden="true" />
                       Twitch
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                   {user.socialLinks.github && (
@@ -235,11 +244,12 @@ export function ProfileHeader({
                       href={user.socialLinks.github}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-muted text-foreground/70 hover:bg-muted/80 transition-colors"
                     >
-                      <Github className="h-3 w-3" />
+                      <Github className="h-3 w-3" aria-hidden="true" />
                       GitHub
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                 </div>
