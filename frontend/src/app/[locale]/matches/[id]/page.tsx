@@ -47,6 +47,7 @@ export default function MatchHubPage() {
   const [liveFeed, setLiveFeed] = useState<
     Array<{ id: string; type: string; message: string; createdAt: string }>
   >([]);
+  const [statusAnnouncement, setStatusAnnouncement] = useState("");
 
   useEffect(() => {
     if (match) {
@@ -63,6 +64,7 @@ export default function MatchHubPage() {
       const statusText = match.status.replace("_", " ");
       setStatusAnnouncement(`Match status changed to ${statusText}`);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
   const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
