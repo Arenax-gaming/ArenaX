@@ -77,8 +77,9 @@ export default function GasOptimizationDashboard() {
             <CardContent className="pt-6">
               <form onSubmit={handleEstimate} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold mb-2">Contract Address</label>
+                  <label htmlFor="gas-contract-id" className="block text-sm font-semibold mb-2">Contract Address</label>
                   <input
+                    id="gas-contract-id"
                     type="text"
                     value={contractId}
                     onChange={(e) => setContractId(e.target.value)}
@@ -89,8 +90,9 @@ export default function GasOptimizationDashboard() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold mb-2">Method Name</label>
+                    <label htmlFor="gas-method" className="block text-sm font-semibold mb-2">Method Name</label>
                     <input
+                      id="gas-method"
                       type="text"
                       value={method}
                       onChange={(e) => setMethod(e.target.value)}
@@ -100,8 +102,9 @@ export default function GasOptimizationDashboard() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold mb-2">Signing Key (Secret)</label>
+                    <label htmlFor="gas-secret" className="block text-sm font-semibold mb-2">Signing Key (Secret)</label>
                     <input
+                      id="gas-secret"
                       type="password"
                       value={secret}
                       onChange={(e) => setSecret(e.target.value)}
@@ -112,8 +115,9 @@ export default function GasOptimizationDashboard() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-2">Method Arguments (JSON)</label>
+                  <label htmlFor="gas-args" className="block text-sm font-semibold mb-2">Method Arguments (JSON)</label>
                   <textarea
+                    id="gas-args"
                     value={args}
                     onChange={(e) => setArgs(e.target.value)}
                     className="w-full px-4 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 font-mono"

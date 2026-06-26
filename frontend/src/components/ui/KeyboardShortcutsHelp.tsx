@@ -149,18 +149,16 @@ export function KeyboardShortcutsHelp({
       role="dialog"
       aria-modal="true"
       aria-label="Keyboard shortcuts"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        // Escape is already handled in useEffect focus-trap; this satisfies a11y linting
-        if (e.key === "Escape") onClose();
-      }}
     >
-      <div
-        ref={dialogRef}
-        className="relative w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
-      >
+      {/* Backdrop — captures click-outside to close */}
+      <button
+        type="button"
+        className="absolute inset-0 w-full h-full cursor-default focus:outline-none"
+        aria-label="Close keyboard shortcuts"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl">
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Keyboard Shortcuts</h2>

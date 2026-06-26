@@ -8,6 +8,7 @@ jest.mock('@/hooks/useAuth', () => ({
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
+  useSearchParams: () => ({ get: jest.fn(() => null) }),
 }));
 
 // CustomizationOptions uses lucide-react icons; mock to keep tests simple

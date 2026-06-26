@@ -207,16 +207,24 @@ export function ProfileHeader({
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-info hover:bg-blue-200 transition-colors"
                     >
-                      <Twitter className="h-3 w-3" />
+                      <Twitter className="h-3 w-3" aria-hidden="true" />
                       Twitter
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                   {user.socialLinks.discord && (
-                    <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
-                      <span className="w-3 h-3 bg-indigo-500 rounded-full" />
-                      {user.socialLinks.discord}
-                    </span>
+                    <a
+                      href={user.socialLinks.discord}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors"
+                    >
+                      <span className="w-3 h-3 bg-indigo-500 rounded-full" aria-hidden="true" />
+                      Discord
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
+                    </a>
                   )}
                   {user.socialLinks.twitch && (
                     <a
@@ -225,9 +233,10 @@ export function ProfileHeader({
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors"
                     >
-                      <Twitch className="h-3 w-3" />
+                      <Twitch className="h-3 w-3" aria-hidden="true" />
                       Twitch
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                   {user.socialLinks.github && (
@@ -235,11 +244,12 @@ export function ProfileHeader({
                       href={user.socialLinks.github}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-muted text-foreground/70 hover:bg-muted transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-muted text-foreground/70 hover:bg-muted/80 transition-colors"
                     >
-                      <Github className="h-3 w-3" />
+                      <Github className="h-3 w-3" aria-hidden="true" />
                       GitHub
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      <span className="sr-only">(opens in new tab)</span>
                     </a>
                   )}
                 </div>
