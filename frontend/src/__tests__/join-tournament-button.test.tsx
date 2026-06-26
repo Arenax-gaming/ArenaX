@@ -22,7 +22,7 @@ jest.mock("@/contexts/NotificationContext", () => ({
 
 jest.mock("@/lib/api", () => ({
   api: {
-    joinTournament: jest.fn(),
+    joinTournament: (...args: unknown[]) => mockJoinTournament(...args),
   },
 }));
 
@@ -78,7 +78,7 @@ describe("JoinTournamentButton", () => {
 
     await waitFor(() => expect(mockJoinTournament).toHaveBeenCalledWith(baseTournament.id));
 
-    expect(screen.getByRole("heading", { name: /successfully joined/i })).toBeInTheDocument();
+    expect(screen.getByText(/successfully joined/i, { selector: 'h2' })).toBeInTheDocument();
     expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBe("true");
     expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({
       title: "Tournament Joined",

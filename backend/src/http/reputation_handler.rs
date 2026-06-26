@@ -279,10 +279,14 @@ pub struct PaginationQuery {
     pub offset: Option<i64>,
 }
 
-/// Configure routes
+/// Configure routes.
+///
+/// Intended to be called via `.configure(...)` inside an existing `/api`
+/// scope.  Opens a `/reputation` sub-scope — **not** `/api/reputation` — so
+/// paths resolve to `/api/reputation/…` without a duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/reputation")
+        web::scope("/reputation")
             // Public endpoints
             .route("/player/{user_id}", web::get().to(get_player_reputation))
             // Authenticated user endpoints

@@ -354,6 +354,8 @@ function ProfileEditContent() {
         </CardHeader>
         <CardContent className="space-y-2">
           <textarea
+            id="bio"
+            aria-label="Bio"
             value={bio}
             onChange={handleBioChange}
             rows={4}

@@ -3,6 +3,17 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { MatchWithPlayers } from "@/types/profile";
+
+// Allow the component to accept either the profile-specific MatchWithPlayers
+// (which has score/date) or the general MatchWithPlayers from @/types/match
+// (which has scorePlayer1/scorePlayer2/createdAt). We use an intersection type
+// so both shapes are accepted.
+type AnyMatchWithPlayers = MatchWithPlayers & {
+  scorePlayer1?: number;
+  scorePlayer2?: number;
+  createdAt?: string;
+  completedAt?: string;
+};
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { 
@@ -30,7 +41,7 @@ export interface MatchHistoryFilters {
 }
 
 interface MatchHistoryProps {
-  matches: MatchWithPlayers[];
+  matches: AnyMatchWithPlayers[];
   currentUserId: string;
   filters?: MatchHistoryFilters;
   onFilterChange?: (filters: MatchHistoryFilters) => void;
@@ -87,7 +98,7 @@ export function MatchHistory({
   const gameTypes = Array.from(new Set(matches.map((m) => m.gameType).filter(Boolean)));
 
   // Apply filters client-side
-  const filteredMatches = matches.filter((match) => {
+  const filteredMatches = matches.filter((match: AnyMatchWithPlayers) => {
     const isWin = match.winnerId === currentUserId;
     const opponentName =
       match.player1Id === currentUserId ? match.player2Username : match.player1Username;
@@ -103,7 +114,7 @@ export function MatchHistory({
     
     // Time range filter
     if (filters.timeRange && filters.timeRange !== "all") {
-      const matchDate = new Date(match.date);
+      const matchDate = new Date(match.date ?? match.createdAt ?? Date.now());
       const now = new Date();
       const daysDiff = Math.floor((now.getTime() - matchDate.getTime()) / (1000 * 60 * 60 * 24));
       
@@ -309,9 +320,9 @@ export function MatchHistory({
                 match.player1Id === currentUserId
                   ? match.player2Username
                   : match.player1Username;
-              const myScore = match.score.split('-')[0];
-              const opponentScore = match.score.split('-')[1];
-              const date = new Date(match.date);
+              const myScore = match.score?.split('-')[0] ?? String(match.scorePlayer1 ?? 0);
+              const opponentScore = match.score?.split('-')[1] ?? String(match.scorePlayer2 ?? 0);
+              const date = new Date(match.date ?? match.createdAt ?? Date.now());
               
               // Calculate ELO change (mock data)
               const eloChange = isWinner ? Math.floor(Math.random() * 25) + 10 : -(Math.floor(Math.random() * 25) + 10);

@@ -245,11 +245,19 @@ class ApiClient {
     return this.request("/admin/disputes");
   }
 
-  async resolveDispute(id: string, data: { status: string; resolution?: string; winnerOverrideId?: string }) {
+  async resolveDispute(id: string, data: { status: string; resolution: string; winnerOverrideId?: string }) {
     return this.request(`/admin/disputes/${id}/resolve`, {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async getActiveMatches(): Promise<import("../types/match").MatchWithPlayers[]> {
+    try {
+      return await this.request<import("../types/match").MatchWithPlayers[]>("/matches?status=in_progress&mine=true");
+    } catch {
+      return [];
+    }
   }
 
   async getAuditLogs(params?: Record<string, any>) {
