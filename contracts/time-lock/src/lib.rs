@@ -85,7 +85,14 @@ impl TimeLock {
 
         env.storage().persistent().set(&key, &op);
 
-        events::emit_operation_scheduled(&env, &operation_id, &target, &function_name, execute_after, &description);
+        events::emit_operation_scheduled(
+            &env,
+            &operation_id,
+            &target,
+            &function_name,
+            execute_after,
+            &description,
+        );
     }
 
     /// Execute a scheduled operation if the timelock delay has passed
@@ -98,7 +105,11 @@ impl TimeLock {
         }
 
         let key = DataKey::Operation(operation_id.clone());
-        let mut op: Operation = env.storage().persistent().get(&key).expect("operation not found");
+        let mut op: Operation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("operation not found");
 
         if op.status != STATUS_SCHEDULED {
             panic!("operation is not scheduled");
@@ -115,7 +126,7 @@ impl TimeLock {
 
         // Perform mock contract execution (in production this would use contract invocation)
         // e.g. env.invoke_contract(...)
-        
+
         events::emit_operation_executed(&env, &operation_id);
     }
 
@@ -129,7 +140,11 @@ impl TimeLock {
         }
 
         let key = DataKey::Operation(operation_id.clone());
-        let mut op: Operation = env.storage().persistent().get(&key).expect("operation not found");
+        let mut op: Operation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("operation not found");
 
         if op.status != STATUS_SCHEDULED {
             panic!("operation is not scheduled");
@@ -151,7 +166,11 @@ impl TimeLock {
         }
 
         let key = DataKey::Operation(operation_id.clone());
-        let mut op: Operation = env.storage().persistent().get(&key).expect("operation not found");
+        let mut op: Operation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("operation not found");
 
         if op.status != STATUS_SCHEDULED {
             panic!("operation is not scheduled");
@@ -172,12 +191,18 @@ impl TimeLock {
 
     /// Get admin address
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     /// Get minimum delay
     pub fn get_min_delay(env: Env) -> u64 {
-        env.storage().instance().get(&DataKey::MinDelay).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::MinDelay)
+            .unwrap_or(0)
     }
 
     /// Update minimum delay

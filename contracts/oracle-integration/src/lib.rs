@@ -21,7 +21,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, Address, BytesN, Env, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -129,10 +129,15 @@ impl OracleIntegration {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::OracleReporter, &oracle_reporter);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleReporter, &oracle_reporter);
         env.storage().instance().set(&DataKey::RandSeq, &0u64);
         env.events().publish(
-            (Symbol::new(&env, "oracle"), Symbol::new(&env, "initialized")),
+            (
+                Symbol::new(&env, "oracle"),
+                Symbol::new(&env, "initialized"),
+            ),
             admin.clone(),
         );
     }
@@ -140,7 +145,9 @@ impl OracleIntegration {
     /// Appoint a fallback reporter (used if the primary reporter is offline).
     pub fn set_fallback_reporter(env: Env, fallback: Address) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::FallbackReporter, &fallback);
+        env.storage()
+            .instance()
+            .set(&DataKey::FallbackReporter, &fallback);
     }
 
     // ── Price Feeds ───────────────────────────────────────────────────────────
@@ -162,9 +169,14 @@ impl OracleIntegration {
             reported_at: env.ledger().timestamp(),
             valid_until: env.ledger().sequence() + valid_ledgers,
         };
-        env.storage().persistent().set(&DataKey::Price(pair.clone()), &feed);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Price(pair.clone()), &feed);
         env.events().publish(
-            (Symbol::new(&env, "oracle"), Symbol::new(&env, "price_reported")),
+            (
+                Symbol::new(&env, "oracle"),
+                Symbol::new(&env, "price_reported"),
+            ),
             (pair, price),
         );
     }
@@ -201,9 +213,14 @@ impl OracleIntegration {
             fulfilled: false,
             random_value: None,
         };
-        env.storage().persistent().set(&DataKey::RandReq(request_id), &req);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RandReq(request_id), &req);
         env.events().publish(
-            (Symbol::new(&env, "oracle"), Symbol::new(&env, "rand_requested")),
+            (
+                Symbol::new(&env, "oracle"),
+                Symbol::new(&env, "rand_requested"),
+            ),
             (requester, request_id),
         );
         request_id
@@ -234,9 +251,14 @@ impl OracleIntegration {
 
         req.fulfilled = true;
         req.random_value = Some(random_value);
-        env.storage().persistent().set(&DataKey::RandReq(request_id), &req);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RandReq(request_id), &req);
         env.events().publish(
-            (Symbol::new(&env, "oracle"), Symbol::new(&env, "rand_fulfilled")),
+            (
+                Symbol::new(&env, "oracle"),
+                Symbol::new(&env, "rand_fulfilled"),
+            ),
             (request_id, random_value),
         );
     }
@@ -248,7 +270,8 @@ impl OracleIntegration {
             .persistent()
             .get(&DataKey::RandReq(request_id))
             .unwrap_or_else(|| panic!("{}", OracleError::RequestNotFound as u32));
-        req.random_value.unwrap_or_else(|| panic!("{}", OracleError::RequestNotFound as u32))
+        req.random_value
+            .unwrap_or_else(|| panic!("{}", OracleError::RequestNotFound as u32))
     }
 
     // ── Game Results ──────────────────────────────────────────────────────────
@@ -273,9 +296,14 @@ impl OracleIntegration {
             reported_at: env.ledger().timestamp(),
             reporter,
         };
-        env.storage().persistent().set(&DataKey::GameResult(match_id.clone()), &result);
+        env.storage()
+            .persistent()
+            .set(&DataKey::GameResult(match_id.clone()), &result);
         env.events().publish(
-            (Symbol::new(&env, "oracle"), Symbol::new(&env, "result_reported")),
+            (
+                Symbol::new(&env, "oracle"),
+                Symbol::new(&env, "result_reported"),
+            ),
             match_id,
         );
     }

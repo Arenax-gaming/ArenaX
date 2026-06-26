@@ -1,6 +1,6 @@
-use soroban_sdk::{testutils::Address as _, Address, Env, Bytes, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Vec};
 
-use crate::{ZkProof, ZkProofClient, Proof};
+use crate::{Proof, ZkProof, ZkProofClient};
 
 #[test]
 fn test() {
@@ -18,12 +18,7 @@ fn test() {
     // Generate a private transaction proof
     let proof_data = Bytes::from_array(&env, &[0, 1, 2, 3]);
     let public_inputs = Vec::new(&env);
-    let proof_id = client.generate_proof(
-        &user,
-        &1u32,
-        &proof_data,
-        &public_inputs
-    );
+    let proof_id = client.generate_proof(&user, &1u32, &proof_data, &public_inputs);
     assert_eq!(proof_id, 1);
 
     // Get the proof

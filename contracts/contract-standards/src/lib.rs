@@ -10,7 +10,7 @@ use soroban_sdk::{contracttype, Address, Env, Map};
 pub trait Pausable {
     /// Check if contract is paused
     fn is_paused(env: &Env) -> bool;
-    
+
     /// Set pause state
     fn set_paused(env: &Env, paused: bool);
 }
@@ -19,7 +19,7 @@ pub trait Pausable {
 pub trait Ownable {
     /// Get current owner
     fn owner(env: &Env) -> Address;
-    
+
     /// Transfer ownership to new owner
     fn transfer_ownership(env: &Env, new_owner: Address);
 }
@@ -28,7 +28,7 @@ pub trait Ownable {
 pub trait Upgradable {
     /// Get current implementation contract address
     fn implementation(env: &Env) -> Address;
-    
+
     /// Upgrade to new implementation
     fn upgrade(env: &Env, new_impl: Address);
 }
@@ -37,10 +37,10 @@ pub trait Upgradable {
 pub trait RoleBasedAccess {
     /// Check if an account has a specific role
     fn has_role(env: &Env, account: Address, role: u32) -> bool;
-    
+
     /// Grant a role to an account
     fn grant_role(env: &Env, account: Address, role: u32);
-    
+
     /// Revoke a role from an account
     fn revoke_role(env: &Env, account: Address, role: u32);
 }
@@ -49,10 +49,10 @@ pub trait RoleBasedAccess {
 pub trait TimeLockable {
     /// Schedule a function call for later execution
     fn schedule(env: &Env, id: [u8; 32], function: &str, args: Vec<soroban_sdk::Val>, delay: u64);
-    
+
     /// Execute a scheduled function call once delay has passed
     fn execute(env: &Env, id: [u8; 32]);
-    
+
     /// Cancel a scheduled function call
     fn cancel(env: &Env, id: [u8; 32]);
 }
@@ -61,10 +61,10 @@ pub trait TimeLockable {
 pub trait EmergencyStoppable {
     /// Trigger emergency stop
     fn emergency_stop(env: &Env);
-    
+
     /// Resume operations after emergency stop
     fn resume(env: &Env);
-    
+
     /// Check if emergency mode is active
     fn is_emergency(env: &Env) -> bool;
 }
@@ -151,4 +151,3 @@ pub trait TokenRegistry {
     fn get_token_metadata(env: &Env, token_address: Address) -> TokenMetadata;
     fn list_tokens(env: &Env) -> Vec<Address>;
 }
-

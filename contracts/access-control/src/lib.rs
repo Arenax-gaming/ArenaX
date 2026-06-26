@@ -13,8 +13,8 @@ pub const ROLE_WHITELIST: u32 = 4;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
-    Role(Address, u32),            // (Account, Role) -> bool
-    Delegation(Address, Address),  // (Delegator, Delegatee) -> DelegationInfo
+    Role(Address, u32),           // (Account, Role) -> bool
+    Delegation(Address, Address), // (Delegator, Delegatee) -> DelegationInfo
 }
 
 #[contracttype]
@@ -36,7 +36,7 @@ impl AccessControl {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        
+
         // Grant admin role to the admin address
         let key = DataKey::Role(admin.clone(), ROLE_ADMIN);
         env.storage().persistent().set(&key, &true);
@@ -46,14 +46,23 @@ impl AccessControl {
     /// Check if an account has a specific role (or admin role, or active delegation)
     pub fn has_role(env: Env, account: Address, role: u32) -> bool {
         // Admin has all privileges
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         if account == admin {
             return true;
         }
 
         // Check direct role assignment
         let key = DataKey::Role(account.clone(), role);
-        if env.storage().persistent().get::<DataKey, bool>(&key).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&key)
+            .unwrap_or(false)
+        {
             return true;
         }
 
@@ -87,7 +96,13 @@ impl AccessControl {
     }
 
     /// Delegate a role to another account for a limited time duration
-    pub fn delegate_role(env: Env, delegator: Address, delegatee: Address, role: u32, duration: u64) {
+    pub fn delegate_role(
+        env: Env,
+        delegator: Address,
+        delegatee: Address,
+        role: u32,
+        duration: u64,
+    ) {
         delegator.require_auth();
 
         // Verify delegator actually has the role
@@ -110,7 +125,11 @@ impl AccessControl {
         delegator.require_auth();
 
         let key = DataKey::Delegation(delegator.clone(), delegatee.clone());
-        if let Some(info) = env.storage().persistent().get::<DataKey, DelegationInfo>(&key) {
+        if let Some(info) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, DelegationInfo>(&key)
+        {
             if info.role == role {
                 env.storage().persistent().remove(&key);
                 events::emit_delegation_revoked(&env, &delegator, &delegatee, role);
@@ -123,9 +142,18 @@ impl AccessControl {
     }
 
     /// Verify if a delegation is currently active
-    pub fn is_delegation_active(env: Env, delegator: Address, delegatee: Address, role: u32) -> bool {
+    pub fn is_delegation_active(
+        env: Env,
+        delegator: Address,
+        delegatee: Address,
+        role: u32,
+    ) -> bool {
         let key = DataKey::Delegation(delegator, delegatee);
-        if let Some(info) = env.storage().persistent().get::<DataKey, DelegationInfo>(&key) {
+        if let Some(info) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, DelegationInfo>(&key)
+        {
             if info.role == role {
                 let now = env.ledger().timestamp();
                 return now < info.expires_at;
@@ -160,7 +188,10 @@ impl AccessControl {
 
     /// Get admin address
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 }
 

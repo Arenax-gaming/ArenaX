@@ -61,11 +61,7 @@ impl ComposableExample {
 
     pub fn increment(env: Env) -> u32 {
         Self::check_not_paused(&env);
-        let mut counter: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0);
+        let mut counter: u32 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0);
         counter += 1;
         env.storage().instance().set(&DataKey::Counter, &counter);
         counter
@@ -73,11 +69,7 @@ impl ComposableExample {
 
     pub fn decrement(env: Env) -> u32 {
         Self::check_not_paused(&env);
-        let mut counter: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0);
+        let mut counter: u32 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0);
         if counter > 0 {
             counter -= 1;
         }
@@ -86,10 +78,7 @@ impl ComposableExample {
     }
 
     pub fn get_counter(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Counter).unwrap_or(0)
     }
 }
 

@@ -10,8 +10,15 @@ pub mod storage {
     use soroban_sdk::{contracttype, Address, Env, Map};
 
     /// Helper for TTL management on persistent keys
-    pub fn extend_persistent_ttl(env: &Env, key: &impl soroban_sdk::IntoVal<Env, Val>, min_ttl: u32, extend_to: u32) {
-        env.storage().persistent().extend_ttl(key, min_ttl, extend_to);
+    pub fn extend_persistent_ttl(
+        env: &Env,
+        key: &impl soroban_sdk::IntoVal<Env, Val>,
+        min_ttl: u32,
+        extend_to: u32,
+    ) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, min_ttl, extend_to);
     }
 
     /// Helper for instance TTL management

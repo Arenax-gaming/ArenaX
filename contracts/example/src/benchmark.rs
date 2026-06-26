@@ -3,7 +3,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Env, symbol_short};
+use soroban_sdk::{symbol_short, testutils::Address as _, Env};
 
 #[test]
 fn test_gas_benchmarks() {
@@ -25,7 +25,7 @@ fn test_gas_benchmarks() {
     client.set_greeting(&user1, &symbol_short!("hello"));
     let cpu_write = env.budget().cpu_instruction_cost();
     let mem_write = env.budget().memory_bytes_cost();
-    
+
     // Benchmark 2: Measure get_greeting (Persistent storage read)
     env.budget().reset_default();
     client.get_greeting(&user1);
@@ -45,12 +45,27 @@ fn test_gas_benchmarks() {
     std::print!("===================================================\n");
     std::print!("Operation            | CPU Instructions | Memory Bytes\n");
     std::print!("---------------------|------------------|-------------\n");
-    std::print!("Persistent Write     | {:<16} | {:<12}\n", cpu_write, mem_write);
-    std::print!("Persistent Read      | {:<16} | {:<12}\n", cpu_read, mem_read);
-    std::print!("Instance Read        | {:<16} | {:<12}\n", cpu_instance, mem_instance);
+    std::print!(
+        "Persistent Write     | {:<16} | {:<12}\n",
+        cpu_write,
+        mem_write
+    );
+    std::print!(
+        "Persistent Read      | {:<16} | {:<12}\n",
+        cpu_read,
+        mem_read
+    );
+    std::print!(
+        "Instance Read        | {:<16} | {:<12}\n",
+        cpu_instance,
+        mem_instance
+    );
     std::print!("===================================================\n");
     std::print!("\n");
 
     // Assert that instance reads are generally cheaper than persistent reads/writes
-    assert!(cpu_instance <= cpu_write, "Instance read should be more efficient than persistent write");
+    assert!(
+        cpu_instance <= cpu_write,
+        "Instance read should be more efficient than persistent write"
+    );
 }
