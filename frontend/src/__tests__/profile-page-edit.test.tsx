@@ -8,6 +8,11 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => '/profile',
+}));
+
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'user-123' } }),
 }));

@@ -10,6 +10,7 @@ import {
 } from "@/hooks/useAchievements";
 import { useAuth } from "@/hooks/useAuth";
 import { AchievementCardSkeleton, Skeleton } from "@/components/common/PageSkeleton";
+import type { AchievementRarity, AchievementCategory } from "@/data/achievements";
 
 export default function AchievementsPage() {
   const { user } = useAuth();
@@ -76,7 +77,9 @@ export default function AchievementsPage() {
               title: a.name,
               description: a.description,
               icon: "🏆",
-              rarity: a.rarity,
+              rarity: a.rarity as AchievementRarity,
+              category: a.category as AchievementCategory,
+              requirements: [],
               points: a.points,
               unlocked:
                 playerAchievements?.achievements.some(
