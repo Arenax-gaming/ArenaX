@@ -38,7 +38,11 @@
         "helmet": "^7.1.0",
         "hpp": "^0.2.3",
         "ioredis": "^5.3.2",
+<<<<<<< HEAD
+        "kafkajs": "^2.2.4",
+=======
         "jsonata": "^2.2.1",
+>>>>>>> origin/main
         "jsonwebtoken": "^9.0.2",
         "nodemailer": "^8.0.9",
         "opossum": "^10.0.0",
