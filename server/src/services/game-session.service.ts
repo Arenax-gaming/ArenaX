@@ -63,7 +63,7 @@ export class GameSessionService {
   }
 
   getSession(id: string): GameSession | undefined {
-
+    return this.sessions.get(id);
   }
 
   async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
@@ -124,7 +124,7 @@ export class GameSessionService {
 
   /** Get all active sessions. */
   getActiveSessions(): GameSession[] {
-
+    return Array.from(this.sessions.values());
   }
 
   /** Forcefully/safely close all active sessions. */

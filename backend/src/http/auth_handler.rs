@@ -215,10 +215,15 @@ pub async fn get_analytics(
     })))
 }
 
-/// Configure authentication routes
+/// Configure authentication routes.
+///
+/// This function is intended to be called via `.configure(...)` inside an
+/// existing `/api` scope.  It therefore opens a `/auth` sub-scope — **not**
+/// `/api/auth` — so the resulting paths resolve to `/api/auth/…` without a
+/// duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/auth")
+        web::scope("/auth")
             .route("/register", web::post().to(register))
             .route("/login", web::post().to(login))
             .route("/refresh", web::post().to(refresh_token))
