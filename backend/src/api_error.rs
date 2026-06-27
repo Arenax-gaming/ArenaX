@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, ResponseError};
 use serde::Serialize;
 use thiserror::Error;
+use tracing::error;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -44,7 +45,15 @@ impl ApiError {
         ApiError::BadRequest(message.into())
     }
 
+    /// Creates an `InternalServerError` response.
+    ///
+    /// The `message` is written to the structured log at ERROR level so
+    /// engineers can diagnose the root cause, but it is **never** forwarded
+    /// to API consumers — the public response always says "Internal server
+    /// error".
     pub fn internal_error(message: impl Into<String>) -> Self {
+        let msg = message.into();
+        error!(error.message = %msg, "Internal server error");
         ApiError::InternalServerError
     }
 

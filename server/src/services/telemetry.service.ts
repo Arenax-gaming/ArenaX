@@ -20,8 +20,7 @@ export const initializeTelemetry = (): void => {
     }
 
     Sentry.init({
-        // @ts-expect-error - dsn is valid but types are outdated
-        dsn: env.SENTRY_DSN,
+        dsn: env.SENTRY_DSN as string,
         environment: env.NODE_ENV,
         release: env.APP_VERSION,
         tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,

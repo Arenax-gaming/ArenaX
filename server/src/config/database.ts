@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { logger } from '../services/logger.service';
 import { metricsService } from '../services/metrics.service';
 import { getEnv } from './env';
+import { getCorrelationId } from '../services/correlation.service';
 
 // Database connection pool configuration — read from the validated env singleton.
 const buildPoolConfig = () => {
@@ -54,6 +55,13 @@ let connectionCount = 0;
 prisma.$use(async (params: Prisma.MiddlewareParams, next: (params: Prisma.MiddlewareParams) => Promise<any>) => {
   const before = Date.now();
   connectionCount++;
+
+  // Decorate raw queries with a correlation_id comment for cross-DB auditing.
+  // e.g. SELECT 1 /* correlation_id: abc-123 */
+  const correlationId = getCorrelationId();
+  if (correlationId && params.args && typeof params.args === 'object' && 'query' in params.args && typeof params.args.query === 'string') {
+    params.args.query = `${params.args.query} /* correlation_id: ${correlationId} */`;
+  }
 
   const model = params.model ?? 'unknown';
   const action = params.action;

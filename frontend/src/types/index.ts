@@ -12,6 +12,8 @@ export * from './social';
 export * from './tournament';
 export * from './transaction';
 export * from './user';
+export * from './table';
+export * from './collaboration';
 
 // Common API response types
 export interface ApiResponse<T> {
