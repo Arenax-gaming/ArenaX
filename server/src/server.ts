@@ -21,7 +21,7 @@ import { startHealthMonitor } from './services/health.service';
 import { Server as SocketIOServer } from 'socket.io';
 import { initGameSocket } from './websockets/game.socket';
 import { MaintenanceService } from './services/maintenance.service';
-import { getDatabaseClient } from './services/database.service';
+import { getDatabaseClient, warmPool, startPoolHealthCheck, drainPool } from './services/database.service';
 import eventMonitoringService from './services/event-monitoring.service';
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -121,8 +121,10 @@ const gracefulShutdown = (signal: string) => {
             process.exit(1);
         }
 
-        logger.info('Graceful shutdown completed');
-        process.exit(0);
+        drainPool().finally(() => {
+            logger.info('Graceful shutdown completed');
+            process.exit(0);
+        });
     });
 
     setTimeout(() => {
@@ -153,7 +155,9 @@ const waitForDatabase = async (
 
 if (env.NODE_ENV !== 'test') {
     waitForDatabase()
+        .then(() => warmPool())
         .then(() => {
+            startPoolHealthCheck({ healthCheckIntervalMs: env.HEALTH_CHECK_INTERVAL_MS });
             server = app.listen(port, () => {
                 logger.info('Server started', {
                     url: `http://localhost:${port}`,
