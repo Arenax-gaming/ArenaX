@@ -2,8 +2,8 @@ import React from 'react';
 import { cn } from '../../lib/utils';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+  size?: 'sm' | 'md' | 'lg' | 'icon';
   loading?: boolean;
 }
 
@@ -14,14 +14,16 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const variantClasses = {
       primary: 'bg-primary/90 text-white hover:bg-blue-700 focus-visible:ring-primary',
       secondary: 'bg-gray-600 text-white hover:bg-surface-raised focus-visible:ring-gray-500',
-      outline: 'border border-border bg-white text-foreground/70 hover:bg-muted focus-visible:ring-gray-500',
+      outline: 'border border-border bg-transparent text-foreground/70 hover:bg-muted focus-visible:ring-gray-500',
       ghost: 'text-foreground/70 hover:bg-muted focus-visible:ring-gray-500',
+      destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive',
     };
 
     const sizeClasses = {
       sm: 'h-8 px-3 text-sm',
       md: 'h-10 px-4 py-2',
       lg: 'h-12 px-6 text-lg',
+      icon: 'h-10 w-10',
     };
 
     return (
