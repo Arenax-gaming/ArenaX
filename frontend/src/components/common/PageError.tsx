@@ -4,7 +4,10 @@
  * Used both by Next.js error.tsx boundary files and inline inside
  * client components that catch API errors themselves.
  */
+"use client";
+
 import React from "react";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -25,13 +28,17 @@ interface PageErrorProps {
 }
 
 export function PageError({
-  title = "Something went wrong",
+  title,
   message,
   onRetry,
-  retryLabel = "Try again",
+  retryLabel,
   className,
   retrying = false,
 }: PageErrorProps) {
+  const t = useTranslations();
+  const defaultTitle = t("error.title");
+  const defaultRetryLabel = t("common.retry");
+
   return (
     <div
       className={cn(
@@ -48,7 +55,7 @@ export function PageError({
         />
       </div>
 
-      <h2 className="mb-2 text-xl font-semibold text-foreground">{title}</h2>
+      <h2 className="mb-2 text-xl font-semibold text-foreground">{title || defaultTitle}</h2>
 
       {message && (
         <p className="mb-6 max-w-md text-sm text-muted-foreground">{message}</p>
@@ -63,7 +70,7 @@ export function PageError({
           className="gap-2"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          {retryLabel}
+          {retryLabel || defaultRetryLabel}
         </Button>
       )}
     </div>

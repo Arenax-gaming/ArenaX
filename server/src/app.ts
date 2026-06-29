@@ -5,9 +5,15 @@ import passport from 'passport';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { correlationMiddleware } from './middleware/correlation.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
+import { getGraphQLExecutor } from './graphql/server';
+import rateLimit from 'express-rate-limit';
+import xss from 'xss-clean';
+import hpp from 'hpp';
+import { setupSwagger } from './openapi/swagger';
 
 const defaultArenaXOrigins = [
     'https://arenax.gg',
@@ -77,10 +83,32 @@ export const createApp = (): Express => {
         })
     );
     app.use(express.json());
+
+    // OWASP Top 10 Protections
+    app.use(xss()); // Prevent XSS attacks
+    app.use(hpp()); // Prevent HTTP Parameter Pollution
+
+    const apiLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: 100,
+        message: 'Too many requests from this IP, please try again after 15 minutes',
+        standardHeaders: 'draft-7',
+        legacyHeaders: false,
+    });
+    app.use('/api', apiLimiter);
+
     app.use(requestIdMiddleware);
+    app.use(correlationMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);
+
+    const graphql = getGraphQLExecutor();
+    graphql.mount(app);
+
+    // Mount Swagger UI
+    setupSwagger(app);
+
     app.use(errorHandler);
 
     return app;

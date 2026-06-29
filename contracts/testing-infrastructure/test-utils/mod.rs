@@ -1,5 +1,5 @@
 /// Shared testing utilities for ArenaX smart contracts
-use soroban_sdk::{Address, BytesN, Env};
+use soroban_sdk::{Address, BytesN, Env, contract, contractimpl};
 
 /// Test fixture builder for common test scenarios
 pub struct TestFixture {
@@ -37,6 +37,10 @@ impl TestFixture {
     pub fn generate_match_id(&self) -> BytesN<32> {
         BytesN::random(&self.env)
     }
+
+    pub fn generate_tournament_id(&self) -> BytesN<32> {
+        BytesN::random(&self.env)
+    }
 }
 
 impl Default for TestFixture {
@@ -47,7 +51,7 @@ impl Default for TestFixture {
 
 /// Mock contract helpers
 pub mod mocks {
-    use soroban_sdk::{contract, contractimpl, Address, Env};
+    use super::*;
 
     #[contract]
     pub struct MockIdentityContract;
@@ -55,7 +59,7 @@ pub mod mocks {
     #[contractimpl]
     impl MockIdentityContract {
         pub fn get_role(_env: Env, _user: Address) -> u32 {
-            2 // Default role
+            2 // Default admin role
         }
 
         pub fn is_verified(_env: Env, _user: Address) -> bool {
@@ -86,11 +90,21 @@ pub mod mocks {
             true
         }
     }
+
+    #[contract]
+    pub struct MockEmergencyPauseContract;
+
+    #[contractimpl]
+    impl MockEmergencyPauseContract {
+        pub fn is_paused(_env: Env, _contract: Address) -> bool {
+            false
+        }
+    }
 }
 
 /// Assertion helpers
 pub mod assertions {
-    use soroban_sdk::Env;
+    use soroban_sdk::{Env, Vec as SorobanVec};
 
     pub fn assert_event_emitted(env: &Env, event_name: &str) {
         let events = env.events().all();
@@ -109,7 +123,7 @@ pub mod assertions {
         );
     }
 
-    pub fn assert_error_contains(result: Result<(), soroban_sdk::Error>, expected: &str) {
+    pub fn assert_error_contains<E: std::fmt::Debug>(result: Result<(), E>, expected: &str) {
         match result {
             Err(e) => {
                 let error_msg = format!("{:?}", e);
@@ -122,6 +136,11 @@ pub mod assertions {
             }
             Ok(_) => panic!("Expected error containing '{}', but got Ok", expected),
         }
+    }
+
+    pub fn assert_events_len(env: &Env, expected_len: usize) {
+        let events = env.events().all();
+        assert_eq!(events.len(), expected_len);
     }
 }
 
@@ -167,7 +186,8 @@ pub mod gas {
 
 /// Property-based testing generators
 pub mod generators {
-    use soroban_sdk::{Address, BytesN, Env};
+    use super::*;
+    use proptest::prelude::*;
 
     pub fn gen_address(env: &Env) -> Address {
         Address::generate(env)
@@ -184,6 +204,14 @@ pub mod generators {
             .unwrap()
             .as_nanos() as i128;
         min + (seed % (max - min + 1))
+    }
+
+    pub fn prop_amount() -> impl Strategy<Value = i128> {
+        1i128..1_000_000i128
+    }
+
+    pub fn prop_tier() -> impl Strategy<Value = u32> {
+        0u32..5u32
     }
 }
 
