@@ -4,6 +4,7 @@ import { useState, createContext, useContext, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 import { api } from "@/lib/api";
+import { AuthApiError, REGISTER_ERROR_MAP } from "@/lib/authErrors";
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -179,6 +180,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       localStorage.setItem(PENDING_VERIFICATION_EMAIL_KEY, userData.email);
       // Don't persist session yet - user needs to verify email
     } catch (err) {
+      if (err instanceof AuthApiError && REGISTER_ERROR_MAP[err.code]) {
+        // Field-specific error — let the form surface it inline; don't set context error
+        throw err;
+      }
       const message =
         err instanceof Error ? err.message : "Registration failed";
       setError(message);
