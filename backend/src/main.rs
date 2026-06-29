@@ -21,6 +21,7 @@ use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
+use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
@@ -110,6 +111,20 @@ async fn main() -> io::Result<()> {
         ),
     );
 
+    // MatchAuthorityService — handles the on-chain match lifecycle FSM.
+    // The protocol signer secret is the Stellar admin key; the match
+    // lifecycle contract address is read from SOROBAN_CONTRACT_MATCH
+    // (falls back to SOROBAN_CONTRACT_PRIZE for backwards compatibility).
+    let match_authority_service = Arc::new(MatchAuthorityService::new(
+        db_pool.clone(),
+        soroban_service.clone(),
+        config.stellar.soroban_contract_match.clone(),
+    ));
+    // Store the signer secret in app_data using the SignerSecret newtype so
+    // it doesn't collide with any other web::Data<String> entries.
+    let protocol_signer_secret =
+        crate::http::match_authority_handler::SignerSecret(config.stellar.admin_secret.clone());
+
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
     let session_registry = Arc::new(SessionRegistry::new());
@@ -117,8 +132,15 @@ async fn main() -> io::Result<()> {
 
     // Initialize Auth Services for Realtime
     let jwt_config = crate::auth::jwt_service::JwtConfig::default();
-    let jwt_service = Arc::new(crate::auth::jwt_service::JwtService::new(jwt_config, redis_conn.clone()));
+    let jwt_service = Arc::new(crate::auth::jwt_service::JwtService::new(jwt_config.clone(), redis_conn.clone()));
     let auth_guard = Arc::new(crate::realtime::auth::RealtimeAuth::new(db_pool.clone()));
+
+    // Build the AuthService used by HTTP handlers (refresh-token rotation,
+    // session management, login, register, etc.)
+    let auth_service = crate::service::auth_service::AuthService::new(
+        db_pool.clone(),
+        crate::auth::jwt_service::JwtService::new(jwt_config, redis_conn.clone()),
+    );
 
     // Start Redis Pub/Sub subscriber (broadcasts to local WebSocket actors)
     let broadcaster = WsBroadcaster::new(
@@ -140,6 +162,7 @@ async fn main() -> io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
+            .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
@@ -148,6 +171,9 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
+            // Match authority service + protocol signer for on-chain match lifecycle
+            .app_data(web::Data::new(match_authority_service.clone()))
+            .app_data(web::Data::new(protocol_signer_secret.clone()))
             .wrap(IdempotencyMiddleware::default(db_pool.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
@@ -226,11 +252,10 @@ async fn main() -> io::Result<()> {
                             .route("/platform", web::get().to(crate::http::analytics_handler::get_platform_metrics))
                             .route("/player/{user_id}", web::get().to(crate::http::analytics_handler::get_player_insights))
                     )
-                    // Tournament endpoints
-                    .service(
-                        web::scope("/tournaments")
-                            .route("/{id}/statistics", web::get().to(crate::http::tournament_handler::get_tournament_statistics))
-                    )
+                    // Tournament endpoints — full lifecycle
+                    .configure(crate::http::tournament_handler::configure_routes)
+                    // Match authority endpoints — on-chain match FSM
+                    .configure(crate::http::match_authority_handler::configure_routes)
                     // Gas endpoints
                     .service(
                         web::scope("/gas")

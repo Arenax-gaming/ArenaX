@@ -2,6 +2,7 @@
 pub mod achievement;
 pub mod idempotency;
 pub mod leaderboard;
+pub mod pagination;
 pub mod match_authority;
 pub mod match_models;
 pub mod matchmaker;
@@ -16,6 +17,7 @@ pub mod wallet;
 // Re-export commonly used types - explicit to avoid ambiguity
 pub use achievement::*;
 pub use idempotency::*;
+pub use pagination::{ApiResponse, PaginatedResponse, PaginationParams, DEFAULT_LIMIT, MAX_LIMIT};
 pub use leaderboard::*;
 pub use match_authority::*;
 pub use match_models::{

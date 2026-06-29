@@ -58,7 +58,7 @@ export class GameSessionService {
       actions: [],
       startedAt: Date.now(),
     };
-    this.sessions.set(id, session);
+
     return session;
   }
 
@@ -124,7 +124,7 @@ export class GameSessionService {
 
   /** Get all active sessions. */
   getActiveSessions(): GameSession[] {
-    return Array.from(this.sessions.values()).filter(s => !s.finishedAt);
+    return Array.from(this.sessions.values());
   }
 
   /** Forcefully/safely close all active sessions. */

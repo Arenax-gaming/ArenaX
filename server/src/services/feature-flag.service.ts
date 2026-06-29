@@ -1,5 +1,5 @@
 import prisma from './database.service';
-import { FeatureFlag } from '@prisma/client';
+import { FeatureFlag, Prisma } from '@prisma/client';
 import { cacheService } from './cache.service';
 import { logger } from './logger.service';
 import * as crypto from 'crypto';
@@ -97,7 +97,7 @@ export class FeatureFlagService {
                 key: data.key,
                 description: data.description,
                 isEnabled: data.isEnabled ?? false,
-                rules: data.rules ?? []
+                rules: (data.rules ?? []) as unknown as Prisma.InputJsonValue
             }
         });
 
