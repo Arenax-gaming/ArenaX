@@ -6,15 +6,16 @@ import Image from 'next/image';
 import { useAuth } from '@/hooks/useAuth';
 import { CustomizationOptions } from '@/components/profile/CustomizationOptions';
 import { validateAvatarFile } from '@/lib/profile-utils';
+import { FileUpload } from '@/components/ui/FileUpload';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { X, Camera, Upload, CheckCircle, AlertTriangle, Twitter, Github, Twitch } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Twitter, Github, Twitch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProfileCustomization } from '@/types/profile';
 import type { UserProfileUpdate } from '@/types/user';
+import { MAX_BIO_LENGTH } from '@/lib/validations/profile';
 
-const MAX_BIO_LENGTH = 500;
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 20;
 
@@ -46,7 +47,8 @@ function ProfileEditContent() {
   // Avatar state
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar ?? null);
-  const [showCropModal, setShowCropModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Validation state
   const [usernameError, setUsernameError] = useState<string | null>(null);
@@ -141,7 +143,7 @@ function ProfileEditContent() {
     const value = e.target.value;
     setBio(value);
     if (value.length > MAX_BIO_LENGTH) {
-      setBioError('Bio must be 500 characters or less');
+      setBioError(`Bio must be ${MAX_BIO_LENGTH} characters or less`);
     } else {
       setBioError(null);
     }
@@ -151,13 +153,12 @@ function ProfileEditContent() {
     setSocialLinks(prev => ({ ...prev, [platform]: value }));
   }
 
-  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function handleAvatarChange(file: File | null) {
     if (!file) return;
 
     const result = validateAvatarFile({ size: file.size, type: file.type });
     if (!result.valid) {
-      setAvatarError(result.error ?? 'Invalid file');
+      setAvatarError(result.error ?? 'Invalid file. Please check size and type.');
       setAvatarFile(null);
       setAvatarPreview(null);
     } else {
@@ -177,6 +178,8 @@ function ProfileEditContent() {
     setAvatarFile(null);
     setAvatarPreview(null);
     setAvatarError(null);
+    // If the user had a previous avatar, we might want to restore it here
+    // setAvatarPreview(user?.avatar ?? null);
   }
 
   async function handleSubmit() {
@@ -184,9 +187,21 @@ function ProfileEditContent() {
 
     setSaving(true);
     setError(null);
+    setUploading(true);
+    setUploadProgress(0);
 
     try {
-      // Simulate API call
+      // Simulate upload progress
+      if (avatarFile) {
+        const progressInterval = setInterval(() => {
+          setUploadProgress(prev => {
+            if (prev >= 95) return 95;
+            return prev + 10;
+          });
+        }, 100);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        clearInterval(progressInterval);
+      }
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Create update object
@@ -217,6 +232,8 @@ function ProfileEditContent() {
     } catch (err) {
       setError('Failed to save profile. Please try again.');
     } finally {
+      setUploadProgress(100);
+      setUploading(false);
       setSaving(false);
     }
   }
@@ -259,59 +276,23 @@ function ProfileEditContent() {
           <CardTitle>Avatar</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-start gap-6">
-            <div className="relative group">
-              <div className="w-32 h-32 rounded-full overflow-hidden bg-muted border-2 border-muted-foreground/20">
-                {avatarPreview ? (
-                  <Image
-                    src={avatarPreview}
-                    alt="Avatar preview"
-                    width={128}
-                    height={128}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                    <Camera className="h-12 w-12" />
-                  </div>
-                )}
-              </div>
-              {avatarPreview && (
-                <button
-                  onClick={handleRemoveAvatar}
-                  className="absolute -top-2 -right-2 p-1 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                  type="button"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex-1 space-y-4">
-              <div>
-                <label htmlFor="avatar-upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 cursor-pointer">
-                  <Upload className="h-4 w-4" />
-                  Upload New Avatar
-                </label>
-                <input
-                  id="avatar-upload"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleAvatarChange}
-                  className="hidden"
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  JPEG, PNG, or WebP. Max 5MB.
-                </p>
-              </div>
-              {avatarError && (
-                <p className="text-sm text-destructive flex items-center gap-1">
-                  <AlertTriangle className="h-4 w-4" />
-                  {avatarError}
-                </p>
-              )}
-            </div>
-          </div>
+          <FileUpload
+            file={avatarFile}
+            preview={avatarPreview}
+            onFileAccepted={handleAvatarChange}
+            onRemove={handleRemoveAvatar}
+            uploading={uploading && !!avatarFile}
+            uploadProgress={uploadProgress}
+            accept={{ 'image/jpeg': [], 'image/png': [], 'image/webp': [] }}
+            maxSize={5 * 1024 * 1024} // 5MB
+            disabled={saving}
+          />
+          {avatarError && (
+            <p className="text-sm text-destructive flex items-center gap-1 mt-2">
+              <AlertTriangle className="h-4 w-4" />
+              {avatarError}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -353,7 +334,10 @@ function ProfileEditContent() {
           <CardTitle>Bio</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
+          <label htmlFor="profile-bio" className="sr-only">Bio</label>
           <textarea
+            id="profile-bio"
+            aria-label="Bio"
             value={bio}
             onChange={handleBioChange}
             rows={4}

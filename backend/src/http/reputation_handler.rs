@@ -6,7 +6,7 @@
 //! - Admin functions for managing bad actors
 
 use crate::api_error::ApiError;
-use crate::models::ApiResponse;
+use crate::models::{ApiResponse, PaginatedResponse, PaginationParams};
 use crate::service::reputation_service::{PlayerReputation, ReputationService};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
@@ -150,11 +150,19 @@ pub async fn get_my_reputation(
 pub async fn get_reputation_history(
     pool: web::Data<sqlx::PgPool>,
     path: web::Path<Uuid>,
-    query: web::Query<PaginationQuery>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = path.into_inner();
-    let limit = query.limit.unwrap_or(20);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM reputation_events WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|e| ApiError::database_error(e))?;
 
     let history = sqlx::query_as!(
         ReputationEventResponse,
@@ -174,23 +182,30 @@ pub async fn get_reputation_history(
         LIMIT $2 OFFSET $3
         "#,
         user_id,
-        limit as i64,
-        offset as i64
+        limit,
+        offset,
     )
     .fetch_all(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(history)))
+    Ok(HttpResponse::Ok().json(PaginatedResponse::new(history, total, &query)))
 }
 
 /// Admin: Get list of bad actors
 pub async fn get_bad_actors(
     pool: web::Data<sqlx::PgPool>,
-    query: web::Query<PaginationQuery>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
-    let limit = query.limit.unwrap_or(50);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE is_bad_actor = true",
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|e| ApiError::database_error(e))?;
 
     let bad_actors = sqlx::query!(
         r#"
@@ -207,14 +222,30 @@ pub async fn get_bad_actors(
         ORDER BY fair_play_score ASC, created_at DESC
         LIMIT $1 OFFSET $2
         "#,
-        limit as i64,
-        offset as i64
+        limit,
+        offset,
     )
     .fetch_all(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(bad_actors)))
+    // Map to serialisable values — sqlx anonymous records aren't directly Serialize
+    let data: Vec<serde_json::Value> = bad_actors
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "username": r.username,
+                "email": r.email,
+                "skill_score": r.skill_score,
+                "fair_play_score": r.fair_play_score,
+                "anticheat_flags_count": r.anticheat_flags_count,
+                "reputation_last_updated": r.reputation_last_updated,
+            })
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(PaginatedResponse::new(data, total, &query)))
 }
 
 /// Admin: Remove bad actor flag (appeal approval)
@@ -273,16 +304,14 @@ pub async fn get_reputation_stats(
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PaginationQuery {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
-/// Configure routes
+/// Configure routes.
+///
+/// Intended to be called via `.configure(...)` inside an existing `/api`
+/// scope.  Opens a `/reputation` sub-scope — **not** `/api/reputation` — so
+/// paths resolve to `/api/reputation/…` without a duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/reputation")
+        web::scope("/reputation")
             // Public endpoints
             .route("/player/{user_id}", web::get().to(get_player_reputation))
             // Authenticated user endpoints

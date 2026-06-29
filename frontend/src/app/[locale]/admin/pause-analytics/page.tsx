@@ -70,8 +70,9 @@ export default function PauseAnalyticsDashboard() {
       {/* Inputs for reason */}
       <div className="bg-gray-50 dark:bg-gray-800/40 p-4 rounded-xl border flex flex-col md:flex-row gap-4 items-center justify-between">
         <div className="flex-1 w-full">
-          <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Incident Reason/Note</label>
+          <label htmlFor="pause-reason" className="block text-xs font-bold text-gray-400 uppercase mb-1">Incident Reason/Note</label>
           <input
+            id="pause-reason"
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}

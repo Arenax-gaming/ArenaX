@@ -171,8 +171,9 @@ export default function AccessControlDashboard() {
             <CardContent>
               <form onSubmit={handleGrant} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Account Address</label>
+                  <label htmlFor="grant-account" className="block text-xs font-bold text-gray-400 uppercase mb-2">Account Address</label>
                   <input
+                    id="grant-account"
                     type="text"
                     value={inputAccount}
                     onChange={(e) => setInputAccount(e.target.value)}
@@ -182,8 +183,9 @@ export default function AccessControlDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Select Role</label>
+                  <label htmlFor="grant-role" className="block text-xs font-bold text-gray-400 uppercase mb-2">Select Role</label>
                   <select
+                    id="grant-role"
                     value={selectedRole}
                     onChange={(e) => setSelectedRole(e.target.value)}
                     className="w-full px-4 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700"
@@ -206,8 +208,9 @@ export default function AccessControlDashboard() {
             <CardContent>
               <form onSubmit={handleDelegate} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Delegator Account</label>
+                  <label htmlFor="delegator-account" className="block text-xs font-bold text-gray-400 uppercase mb-2">Delegator Account</label>
                   <input
+                    id="delegator-account"
                     type="text"
                     value={delegator}
                     onChange={(e) => setDelegator(e.target.value)}
@@ -217,8 +220,9 @@ export default function AccessControlDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Delegatee Account</label>
+                  <label htmlFor="delegatee-account" className="block text-xs font-bold text-gray-400 uppercase mb-2">Delegatee Account</label>
                   <input
+                    id="delegatee-account"
                     type="text"
                     value={delegatee}
                     onChange={(e) => setDelegatee(e.target.value)}
@@ -228,8 +232,9 @@ export default function AccessControlDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Duration (Seconds)</label>
+                  <label htmlFor="delegate-duration" className="block text-xs font-bold text-gray-400 uppercase mb-2">Duration (Seconds)</label>
                   <input
+                    id="delegate-duration"
                     type="number"
                     value={duration}
                     onChange={(e) => setDuration(e.target.value)}

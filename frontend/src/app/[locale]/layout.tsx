@@ -15,6 +15,9 @@ import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
+import { DragAndDropProvider } from "@/components/providers/DragAndDropProvider";
+import { RumProvider } from "@/components/providers/RumProvider";
+
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
@@ -74,6 +77,7 @@ export default function RootLayout({
             defaultTheme="system"
             enableSystem
             disableTransitionOnChange
+            storageKey="theme"
           >
             <ErrorProvider>
               <CollaborationProvider>
@@ -84,7 +88,11 @@ export default function RootLayout({
                         <WalletProvider>
                           <TxStatusProvider>
                             <NotificationProvider>
-                              <AppLayout>{children}</AppLayout>
+                              <RumProvider>
+                                <DragAndDropProvider>
+                                  <AppLayout>{children}</AppLayout>
+                                </DragAndDropProvider>
+                              </RumProvider>
                             </NotificationProvider>
                           </TxStatusProvider>
                         </WalletProvider>
