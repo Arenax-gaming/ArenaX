@@ -27,8 +27,20 @@ import {
 import { formatDate } from "@/lib/utils";
 import { MatchHubDetails } from "@/data/matchHub";
 import { MatchDetail } from "@/types/match";
+import { PageErrorBoundary } from "@/components/common/PageErrorBoundary";
 
 export default function MatchHubPage() {
+  return (
+    <PageErrorBoundary
+      title="Failed to load match"
+      message="We couldn't load this match. The match may no longer exist or there was a connection issue."
+    >
+      <MatchHubPageContent />
+    </PageErrorBoundary>
+  );
+}
+
+function MatchHubPageContent() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();

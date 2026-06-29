@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 export interface CursorPosition {
   x: number;
   y: number;
@@ -68,8 +67,7 @@ export interface PresenceUpdate {
   color: string;
   status: 'online' | 'away' | 'busy' | 'offline';
   timestamp: number;
-=======
-import type { Party, PartyMember, SocialUser } from "./social";
+}
 
 export enum CollaborationChannelType {
   PARTY = "party",
@@ -122,7 +120,7 @@ export interface CoviewPositionEvent extends CollaborationEventBase {
 
 export interface StateUpdateEvent extends CollaborationEventBase {
   type: CollaborationEventType.STATE_UPDATE;
-  state: Record<string, any>;
+  state: Record<string, unknown>;
 }
 
 export interface MessageEvent extends CollaborationEventBase {
@@ -145,7 +143,7 @@ export interface LeaderChangedEvent extends CollaborationEventBase {
 export interface DashboardUpdateEvent extends CollaborationEventBase {
   type: CollaborationEventType.DASHBOARD_UPDATE;
   widgetId: string;
-  widgetData: any;
+  widgetData: unknown;
 }
 
 export type CollaborationEvent =
@@ -167,5 +165,4 @@ export interface CollaborationChannel {
   createdBy: string;
   tournamentId?: string;
   partyId?: string;
->>>>>>> upstream/main
 }
