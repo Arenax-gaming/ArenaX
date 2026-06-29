@@ -5,9 +5,7 @@ import { Tournament } from "@/types/tournament";
 import { Card } from "@/components/ui/Card";
 import { Users, Trophy, Zap } from "lucide-react";
 
-// ─── Avatar color palette ─────────────────────────────────────────────────────
-// Full Tailwind class names appear as literals so JIT compilation includes them.
-
+// Fixed palette — full class names kept as literals so Tailwind JIT includes them.
 export const AVATAR_COLORS = [
   "bg-red-500",
   "bg-orange-500",
@@ -29,11 +27,7 @@ export const AVATAR_COLORS = [
 
 export type AvatarColor = (typeof AVATAR_COLORS)[number];
 
-/**
- * djb2-style hash over UTF-16 code units.
- * Uses Math.imul for 32-bit integer arithmetic and >>> 0 to keep the result
- * unsigned, so the output is always a non-negative integer regardless of input.
- */
+// djb2-style hash — unsigned 32-bit, deterministic, no floating-point drift.
 export function hashUsername(username: string): number {
   let h = 5381;
   for (let i = 0; i < username.length; i++) {
@@ -42,7 +36,6 @@ export function hashUsername(username: string): number {
   return h;
 }
 
-/** Maps a username to a stable entry in AVATAR_COLORS. */
 export function getAvatarColor(username: string): AvatarColor {
   return AVATAR_COLORS[hashUsername(username) % AVATAR_COLORS.length];
 }
@@ -54,25 +47,17 @@ interface ParticipantAvatarProps {
   avatarUrl: string | null | undefined;
 }
 
-/**
- * Renders a participant's avatar image when a URL is available, and falls back
- * to an initials-based placeholder otherwise.
- *
- * Failure handling:
- *   - null / undefined / empty avatarUrl  → placeholder immediately
- *   - image load error (onError)          → sets imgFailed=true, unmounts <img>
- *     so the error event cannot fire again (no re-render loop)
- */
 export function ParticipantAvatar({ username, avatarUrl }: ParticipantAvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
 
+  const hasUrl = Boolean(avatarUrl);
   const colorClass = getAvatarColor(username);
   const initial = username.charAt(0).toUpperCase();
 
-  if (avatarUrl && !imgFailed) {
+  if (hasUrl && !imgFailed) {
     return (
       <img
-        src={avatarUrl}
+        src={avatarUrl!}
         alt={username}
         className="h-8 w-8 rounded-full object-cover flex-shrink-0"
         onError={() => setImgFailed(true)}
@@ -102,10 +87,7 @@ interface MockParticipant {
   rating: number;
 }
 
-const generateMockParticipants = (
-  _gameType: string,
-  count: number,
-): MockParticipant[] => {
+const generateMockParticipants = (gameType: string, count: number): MockParticipant[] => {
   const firstNames = [
     "Alex", "Jordan", "Casey", "Morgan", "Riley",
     "Avery", "Sam", "Taylor", "Quinn", "River", "Blake", "Drew",
