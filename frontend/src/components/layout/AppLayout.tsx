@@ -8,7 +8,7 @@ import { Logo } from "@/components/common/Logo";
 import { ToastContainer } from "@/components/notifications/Toast";
 import { SkipLink } from "@/components/ui/SkipLink";
 import { BottomNav } from "@/components/ui/BottomNav";
-import { PageTransition } from "@/components/animations/PageTransition";
+import { PageTransition } from "@/components/layout/PageTransition";
 import { KeyboardShortcutsHelp } from "@/components/ui/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import Link from "next/link";
