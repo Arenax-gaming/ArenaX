@@ -9,11 +9,13 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover
 // framer-motion: skip animations in tests
 jest.mock('framer-motion', () => {
   const React = require('react');
+  const MotionDiv = React.forwardRef(({ children, ...props }: React.HTMLAttributes<HTMLDivElement> & { exit?: unknown }, ref: React.Ref<HTMLDivElement>) => (
+    <div ref={ref} {...props}>{children}</div>
+  ));
+  MotionDiv.displayName = 'MotionDiv';
   return {
     motion: {
-      div: React.forwardRef(({ children, ...props }: React.HTMLAttributes<HTMLDivElement> & { exit?: unknown }, ref: React.Ref<HTMLDivElement>) => (
-        <div ref={ref} {...props}>{children}</div>
-      )),
+      div: MotionDiv,
     },
     AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   };

@@ -7,6 +7,7 @@ import {
   Party,
   OnlineStatus,
   FriendsListResponse,
+  SocialUser,
 } from '@/types/social'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1'
@@ -31,6 +32,18 @@ export const usePendingFriendRequests = () => {
       if (!res.ok) throw new Error('Failed to fetch friend requests')
       const data = await res.json()
       return data.data as FriendRequest[]
+    },
+  })
+}
+
+export const useSuggestedUsers = () => {
+  return useQuery({
+    queryKey: ['suggestedUsers'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/friends/suggestions`)
+      if (!res.ok) throw new Error('Failed to fetch suggested users')
+      const data = await res.json()
+      return data.data as SocialUser[]
     },
   })
 }

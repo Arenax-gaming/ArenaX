@@ -1,0 +1,8 @@
+[package]
+name = "contract-utils"
+version = "0.1.0"
+edition = "2021"
+authors = ["ArenaX Team <dev@arenax.gg>"]
+
+[dependencies]
+soroban-sdk = "23.5.2"

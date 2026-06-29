@@ -123,13 +123,12 @@ export class RedisListQueueAdapter implements QueueAdapter {
     private running = true
 
     constructor(redis?: RedisClient) {
-        const env = getEnv()
-        if (!redis && !env.REDIS_URL) {
+        if (!redis && !process.env.REDIS_URL) {
             throw new Error(
                 'queue.service: REDIS_URL must be configured before instantiating the queue adapter.',
-            )
+            );
         }
-        this.redis = redis ?? new Redis(env.REDIS_URL as string)
+        this.redis = redis ?? new Redis(getEnv().REDIS_URL as string)
     }
 
     private listKey(priority: JobPriority): string {
