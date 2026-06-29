@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, createContext, useContext, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 import { api } from "@/lib/api";
 import { AuthApiError, REGISTER_ERROR_MAP } from "@/lib/authErrors";
@@ -24,6 +25,8 @@ const REFRESH_TOKEN_KEY = "auth_refresh_token";
 const STORAGE_KEY = "arenax_auth_user";
 const REMEMBER_KEY = "arenax_remember_me";
 const PENDING_VERIFICATION_EMAIL_KEY = "arenax_pending_email";
+
+export const AUTH_PROFILE_QUERY_KEY = ["auth", "profile"] as const;
 
 function getStorage(remember: boolean): Storage {
   return remember ? localStorage : sessionStorage;
@@ -87,11 +90,37 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<AuthUser | null>(() => readStoredUser());
+  const queryClient = useQueryClient();
+  const [hasToken, setHasToken] = useState(() => !!getStoredToken());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
+
+  const profileQuery = useQuery({
+    queryKey: AUTH_PROFILE_QUERY_KEY,
+    queryFn: async (): Promise<AuthUser | null> => {
+      const stored = getStoredToken();
+      if (!stored) return null;
+      const profile = await api.getProfile();
+      return {
+        id: profile.id,
+        username: profile.username,
+        email: profile.email ?? "",
+        isVerified: profile.is_verified,
+        elo: typeof profile.elo === "number" ? profile.elo : 0,
+        createdAt: profile.created_at,
+        token: stored.token,
+        refreshToken: stored.refreshToken,
+      };
+    },
+    enabled: hasToken,
+    staleTime: 60_000,
+    gcTime: 300_000,
+    placeholderData: () => readStoredUser(),
+  });
+
+  const user = profileQuery.data ?? null;
 
   const persistSession = useCallback(
     (authUser: AuthUser, rememberMe: boolean) => {
@@ -120,8 +149,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         response.tokens.accessToken,
         response.tokens.refreshToken
       );
-      setUser(authUser);
       persistSession(authUser, rememberMe);
+      queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
+      setHasToken(true);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Invalid email or password";
@@ -145,7 +175,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         response.tokens.accessToken,
         response.tokens.refreshToken
       );
-      setUser(authUser);
+      queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
+      setHasToken(true);
       localStorage.setItem(PENDING_VERIFICATION_EMAIL_KEY, userData.email);
       // Don't persist session yet - user needs to verify email
     } catch (err) {
@@ -166,10 +197,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       setError(null);
       await api.verifyEmail(token);
-      // If we have a stored user, update their isVerified status
       if (user) {
         const updatedUser = { ...user, isVerified: true };
-        setUser(updatedUser);
+        queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, updatedUser);
         const remember = localStorage.getItem(REMEMBER_KEY) === "true";
         persistSession(updatedUser, remember);
       }
@@ -206,9 +236,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
     localStorage.removeItem(REMEMBER_KEY);
     localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
-    setUser(null);
+    setHasToken(false);
     setError(null);
-  }, []);
+    queryClient.removeQueries({ queryKey: AUTH_PROFILE_QUERY_KEY });
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider

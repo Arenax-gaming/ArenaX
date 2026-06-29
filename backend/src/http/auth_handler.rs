@@ -1,8 +1,8 @@
 use crate::api_error::ApiError;
-use crate::auth::jwt_service::{TokenAnalytics, TokenPair};
+use crate::auth::jwt_service::TokenPair;
 use crate::auth::middleware::ClaimsExt;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest};
-use crate::service::auth_service::AuthService;
+use crate::service::auth_service::{ActiveSession, AuthService};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -30,16 +30,8 @@ pub struct LogoutRequest {
 /// Sessions response
 #[derive(Debug, Serialize)]
 pub struct SessionsResponse {
-    pub sessions: Vec<SessionInfo>,
+    pub sessions: Vec<ActiveSession>,
     pub total: usize,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub device_id: Option<String>,
-    pub created_at: i64,
-    pub last_activity: i64,
 }
 
 /// POST /api/auth/register
@@ -181,12 +173,10 @@ pub async fn get_sessions(
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
-    // This would need to be implemented in auth_service to call jwt_service
-    // For now, return empty response
-    Ok(HttpResponse::Ok().json(SessionsResponse {
-        sessions: vec![],
-        total: 0,
-    }))
+    let sessions = auth_service.get_sessions(user_id).await?;
+    let total = sessions.len();
+
+    Ok(HttpResponse::Ok().json(SessionsResponse { sessions, total }))
 }
 
 /// GET /api/auth/analytics
@@ -204,8 +194,6 @@ pub async fn get_analytics(
         return Err(ApiError::forbidden("Admin access required"));
     }
 
-    // This would need to be implemented in auth_service to call jwt_service
-    // For now, return mock data
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "total_generated": 0,
         "total_validated": 0,
@@ -215,10 +203,15 @@ pub async fn get_analytics(
     })))
 }
 
-/// Configure authentication routes
+/// Configure authentication routes.
+///
+/// This function is intended to be called via `.configure(...)` inside an
+/// existing `/api` scope.  It therefore opens a `/auth` sub-scope — **not**
+/// `/api/auth` — so the resulting paths resolve to `/api/auth/…` without a
+/// duplicate `/api` prefix.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/auth")
+        web::scope("/auth")
             .route("/register", web::post().to(register))
             .route("/login", web::post().to(login))
             .route("/refresh", web::post().to(refresh_token))

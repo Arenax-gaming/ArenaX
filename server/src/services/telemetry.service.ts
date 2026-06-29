@@ -20,7 +20,7 @@ export const initializeTelemetry = (): void => {
     }
 
     Sentry.init({
-        dsn: env.SENTRY_DSN,
+        dsn: env.SENTRY_DSN as string,
         environment: env.NODE_ENV,
         release: env.APP_VERSION,
         tracesSampleRate: env.SENTRY_TRACES_SAMPLE_RATE,
@@ -46,7 +46,7 @@ export const captureException = (
         return;
     }
 
-    Sentry.withScope((scope) => {
+    Sentry.withScope((scope: any) => {
         if (context?.requestId) scope.setTag('request_id', context.requestId);
         if (context?.path) scope.setTag('http.path', context.path);
         if (context?.method) scope.setTag('http.method', context.method);

@@ -1,0 +1,20 @@
+[package]
+name = "batch-operations"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ArenaX Batch Operations — gas-optimized bulk execution for token transfers, tournament registrations, reputation updates, and NFT minting"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+testutils = ["soroban-sdk/testutils"]

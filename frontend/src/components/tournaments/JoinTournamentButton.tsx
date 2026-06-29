@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
@@ -16,13 +16,24 @@ export function JoinTournamentButton({
   tournament,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
-  const { notify } = useNotifications();
+  const { notify, addToast } = useNotifications();
   const [showModal, setShowModal] = useState(false);
   const [joinStatus, setJoinStatus] = useState<
     "idle" | "confirming" | "success" | "error"
   >("idle");
   const [isJoined, setIsJoined] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Prevents state updates after unmount and guards against duplicate submissions
+  const mountedRef = useRef(true);
+  const isRequestInFlight = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Determine button state
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
@@ -33,11 +44,20 @@ export function JoinTournamentButton({
     tournament.status === "registration_open" && !isFull && !isJoined;
 
   const getButtonState = () => {
+    if (joinLoading) {
+      return {
+        label: "Joining…",
+        disabled: true,
+        variant: "primary" as const,
+        loading: true,
+      };
+    }
     if (isJoined) {
       return {
-        label: "✓ Already Joined",
+        label: "Registered ✓",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isFull) {
@@ -45,6 +65,7 @@ export function JoinTournamentButton({
         label: "Tournament Full",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isOngoing) {
@@ -52,6 +73,7 @@ export function JoinTournamentButton({
         label: "Tournament Ongoing",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isCompleted) {
@@ -59,6 +81,7 @@ export function JoinTournamentButton({
         label: "Tournament Completed",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     if (isClosed) {
@@ -66,12 +89,14 @@ export function JoinTournamentButton({
         label: "Registration Closed",
         disabled: true,
         variant: "secondary" as const,
+        loading: false,
       };
     }
     return {
       label: "Join Tournament",
       disabled: false,
       variant: "primary" as const,
+      loading: false,
     };
   };
 
@@ -97,13 +122,21 @@ export function JoinTournamentButton({
   };
 
   const handleConfirmJoin = async () => {
+    // Prevent duplicate submissions from rapid clicks
+    if (isRequestInFlight.current) return;
+    isRequestInFlight.current = true;
+
     setJoinStatus("confirming");
+    setJoinLoading(true);
     setErrorMessage(null);
 
     try {
       await api.joinTournament(tournament.id);
+      if (!mountedRef.current) return;
+
       setJoinStatus("success");
       setIsJoined(true);
+      setJoinLoading(false);
       localStorage.setItem(`tournament-joined-${tournament.id}`, "true");
 
       notify({
@@ -118,16 +151,31 @@ export function JoinTournamentButton({
       });
 
       setTimeout(() => {
-        setShowModal(false);
-        setJoinStatus("idle");
+        if (mountedRef.current) {
+          setShowModal(false);
+          setJoinStatus("idle");
+        }
       }, 2000);
     } catch (error) {
+      if (!mountedRef.current) return;
+
       const message =
         error instanceof Error
           ? error.message
           : "Unable to join tournament. Please try again.";
+
       setErrorMessage(message);
       setJoinStatus("error");
+      setJoinLoading(false);
+
+      addToast({
+        type: "error",
+        title: "Failed to Join Tournament",
+        message,
+        duration: 5000,
+      });
+    } finally {
+      isRequestInFlight.current = false;
     }
   };
 
@@ -142,6 +190,7 @@ export function JoinTournamentButton({
           onClick={handleJoinClick}
           disabled={buttonState.disabled}
           variant={buttonState.variant}
+          loading={buttonState.loading}
           size="lg"
           className="w-full"
         >

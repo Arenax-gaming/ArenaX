@@ -5,7 +5,9 @@ import { User } from "@/types/user";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Edit2, Twitter, Github, Twitch, ExternalLink, Save, X } from "lucide-react";
+import { Edit2, Twitter, Github, Twitch, Save, X, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { MAX_BIO_LENGTH, profileBioSchema } from "@/lib/validations/profile";
 
 interface ProfileBioProps {
   user: User;
@@ -15,11 +17,31 @@ interface ProfileBioProps {
 export function ProfileBio({ user, onSave }: ProfileBioProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [bio, setBio] = useState(user.bio || "");
+  const [bioError, setBioError] = useState<string | null>(null);
   const [twitter, setTwitter] = useState(user.socialLinks?.twitter || "");
   const [discord, setDiscord] = useState(user.socialLinks?.discord || "");
   const [twitch, setTwitch] = useState(user.socialLinks?.twitch || "");
 
+  const bioLength = bio.length;
+  const bioExceedsLimit = bioLength > MAX_BIO_LENGTH;
+  const bioNearLimit = bioLength >= Math.floor(MAX_BIO_LENGTH * 0.9);
+
+  function handleBioChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setBio(value);
+
+    const result = profileBioSchema.safeParse({ bio: value });
+    if (!result.success) {
+      const msg = result.error.issues.find((i) => i.path[0] === "bio")?.message ?? null;
+      setBioError(msg);
+    } else {
+      setBioError(null);
+    }
+  }
+
   const handleSave = () => {
+    if (bioExceedsLimit) return;
+
     onSave({
       bio,
       socialLinks: {
@@ -31,6 +53,15 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
     });
     setIsEditing(false);
   };
+
+  function handleCancel() {
+    setBio(user.bio || "");
+    setBioError(null);
+    setTwitter(user.socialLinks?.twitter || "");
+    setDiscord(user.socialLinks?.discord || "");
+    setTwitch(user.socialLinks?.twitch || "");
+    setIsEditing(false);
+  }
 
   return (
     <Card className="h-full">
@@ -50,11 +81,36 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
               <label htmlFor="bio" className="text-sm font-medium">Bio</label>
               <textarea
                 id="bio"
-                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-describedby="bio-counter bio-error"
+                aria-invalid={bioExceedsLimit}
+                className={cn(
+                  "flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                  bioExceedsLimit && "border-destructive"
+                )}
                 value={bio}
-                onChange={(e) => setBio(e.target.value)}
+                onChange={handleBioChange}
                 placeholder="Tell us about yourself..."
               />
+              <p
+                id="bio-counter"
+                aria-live="polite"
+                className={cn(
+                  "text-xs text-right",
+                  bioNearLimit ? "text-destructive font-medium" : "text-muted-foreground"
+                )}
+              >
+                {bioLength} / {MAX_BIO_LENGTH}
+              </p>
+              {bioError && (
+                <p
+                  id="bio-error"
+                  role="alert"
+                  className="text-sm text-destructive flex items-center gap-1"
+                >
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  {bioError}
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -121,11 +177,11 @@ export function ProfileBio({ user, onSave }: ProfileBioProps) {
       </CardContent>
       {isEditing && (
         <CardFooter className="flex justify-end gap-2 pt-0">
-          <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+          <Button variant="ghost" size="sm" onClick={handleCancel}>
             <X className="h-4 w-4 mr-2" />
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave}>
+          <Button size="sm" onClick={handleSave} disabled={bioExceedsLimit}>
             <Save className="h-4 w-4 mr-2" />
             Save Changes
           </Button>

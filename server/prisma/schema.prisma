@@ -499,15 +499,28 @@ model AuditLog {
   targetId   String
   details        Json?
   requestId      String?
+  correlationId  String?   // cross-service correlation id
   snapshotBefore Json?
   snapshotAfter  Json?
   ipAddress      String?
   userAgent      String?
+  // tamper-evident chain
+  entryHash      String?
+  previousHash   String?
+  // blockchain anchoring
+  anchoredAt     DateTime?
+  anchorTxId     String?
+  // GDPR / retention
+  redactedAt     DateTime?
   createdAt      DateTime @default(now())
 
   @@index([adminId])
   @@index([action])
   @@index([requestId])
+  @@index([correlationId])
+  @@index([createdAt(sort: Desc)])
+  @@index([entryHash])
+  @@index([targetType, targetId])
 }
 
 enum RefundStatus {

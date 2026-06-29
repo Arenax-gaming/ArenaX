@@ -12,7 +12,9 @@ import analyticsRoutes from './analytics.routes';
 import metricsRoutes from './metrics.routes';
 import dashboardRoutes from './dashboard.routes';
 import searchRoutes from './search.routes';
-import featureFlagRoutes from './feature-flag.routes';
+import cacheRoutes from './cache.routes';
+import apiGatewayRoutes from './api-gateway.routes';
+
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
@@ -45,6 +47,8 @@ router.use('/api/v1/analytics', analyticsRoutes);
 router.use('/metrics', metricsRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/v1/search', searchRoutes);
-router.use('/api/v1/feature-flags', featureFlagRoutes);
+router.use('/api/v1/cache', cacheRoutes);
+router.use('/api/v1/gateway', apiGatewayRoutes);
+
 
 export default router;

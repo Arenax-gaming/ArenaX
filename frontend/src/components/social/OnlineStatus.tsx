@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 import type { UserStatus } from "@/types/social";
 
 const statusConfig: Record<UserStatus, { label: string; color: string; bgColor: string }> = {
@@ -137,11 +138,13 @@ export function AvatarWithStatus({
         )}
       >
         {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={avatar}
             alt={username}
+            width={size === 'sm' ? 32 : size === 'md' ? 40 : 56}
+            height={size === 'sm' ? 32 : size === 'md' ? 40 : 56}
             className="h-full w-full object-cover"
+            loading="lazy"
           />
         ) : (
           <span className="font-bold">{username.charAt(0).toUpperCase()}</span>
