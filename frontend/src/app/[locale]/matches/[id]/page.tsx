@@ -27,8 +27,20 @@ import {
 import { formatDate } from "@/lib/utils";
 import { MatchHubDetails } from "@/data/matchHub";
 import { MatchDetail } from "@/types/match";
+import { PageErrorBoundary } from "@/components/common/PageErrorBoundary";
 
 export default function MatchHubPage() {
+  return (
+    <PageErrorBoundary
+      title="Failed to load match"
+      message="We couldn't load this match. The match may no longer exist or there was a connection issue."
+    >
+      <MatchHubPageContent />
+    </PageErrorBoundary>
+  );
+}
+
+function MatchHubPageContent() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
@@ -47,6 +59,7 @@ export default function MatchHubPage() {
   const [liveFeed, setLiveFeed] = useState<
     Array<{ id: string; type: string; message: string; createdAt: string }>
   >([]);
+  const [statusAnnouncement, setStatusAnnouncement] = useState("");
 
   useEffect(() => {
     if (match) {
@@ -63,6 +76,7 @@ export default function MatchHubPage() {
       const statusText = match.status.replace("_", " ");
       setStatusAnnouncement(`Match status changed to ${statusText}`);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
   const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({

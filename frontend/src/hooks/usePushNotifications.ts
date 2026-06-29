@@ -65,7 +65,8 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   const [token, setToken] = useState<string | null>(null);
   const [isEnabled, setIsEnabled] = useState(false);
 
-  // Check support and permission on mount
+  // Only check existing permission state on mount — do NOT request permission automatically.
+  // Permission requests must be deferred until the user explicitly opts in via subscribe().
   useEffect(() => {
     const checkPermission = async () => {
       if (!isPushSupported()) {
@@ -78,7 +79,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
 
       if (status === "granted") {
         setIsEnabled(true);
-        // Get token if available
+        // Restore existing subscription token if already granted
         try {
           const registration = await navigator.serviceWorker.ready;
           const subscription = await registration.pushManager.getSubscription();

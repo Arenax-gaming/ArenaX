@@ -89,30 +89,12 @@ interface MockParticipant {
 
 const generateMockParticipants = (gameType: string, count: number): MockParticipant[] => {
   const firstNames = [
-    "Alex",
-    "Jordan",
-    "Casey",
-    "Morgan",
-    "Riley",
-    "Avery",
-    "Sam",
-    "Taylor",
-    "Quinn",
-    "River",
-    "Blake",
-    "Drew",
+    "Alex", "Jordan", "Casey", "Morgan", "Riley",
+    "Avery", "Sam", "Taylor", "Quinn", "River", "Blake", "Drew",
   ];
   const lastNames = [
-    "Pro",
-    "Elite",
-    "Gaming",
-    "Storm",
-    "Shadow",
-    "Phoenix",
-    "Dragon",
-    "Titan",
-    "Nexus",
-    "Void",
+    "Pro", "Elite", "Gaming", "Storm", "Shadow",
+    "Phoenix", "Dragon", "Titan", "Nexus", "Void",
   ];
 
   const participants: MockParticipant[] = [];
@@ -125,9 +107,7 @@ const generateMockParticipants = (gameType: string, count: number): MockParticip
       id: `participant-${i + 1}`,
       username,
       rank: i + 1,
-      joinedAt: new Date(
-        Date.now() - Math.random() * 86400000 * 7,
-      ).toISOString(),
+      joinedAt: new Date(Date.now() - Math.random() * 86400000 * 7).toISOString(),
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
       rating: Math.floor(Math.random() * 500) + 1000,
     });
@@ -145,16 +125,13 @@ interface TournamentParticipantsProps {
 export function TournamentParticipants({
   tournament,
 }: TournamentParticipantsProps) {
-  const participants = useMemo(() => {
-    return generateMockParticipants(
-      tournament.gameType,
-      tournament.currentParticipants,
-    );
-  }, [tournament.gameType, tournament.currentParticipants]);
+  const participants = useMemo(
+    () => generateMockParticipants(tournament.gameType, tournament.currentParticipants),
+    [tournament.gameType, tournament.currentParticipants],
+  );
 
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
-  const availableSlots =
-    tournament.maxParticipants - tournament.currentParticipants;
+  const availableSlots = tournament.maxParticipants - tournament.currentParticipants;
 
   return (
     <Card className="border-0 shadow-none p-0">
@@ -229,7 +206,7 @@ export function TournamentParticipants({
                     </span>
                   </div>
 
-                  {/* Avatar and Username */}
+                  {/* Avatar + Username */}
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <ParticipantAvatar
                       username={participant.username}
@@ -314,8 +291,7 @@ export function TournamentParticipants({
         <div className="text-center">
           <p className="text-2xl font-bold text-foreground">
             {Math.round(
-              (tournament.currentParticipants / tournament.maxParticipants) *
-                100,
+              (tournament.currentParticipants / tournament.maxParticipants) * 100,
             )}
             %
           </p>

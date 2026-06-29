@@ -187,7 +187,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
           </CardHeader>
           <CardContent className="text-center text-muted-foreground py-8">
             <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>Play more games to see your ELO progression</p>
+            <p>Insufficient data for chart</p>
           </CardContent>
         </Card>
       ) : (
