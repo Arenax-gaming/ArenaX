@@ -5,9 +5,10 @@
  *
  * Modal overlay listing all registered shortcuts grouped by category.
  * Opened via the `?` key or the `openHelp()` callback from useKeyboardShortcuts.
+ * Accessibility: role="dialog", aria-modal, focus trapping, Escape / ? to close.
  */
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
 import type { Shortcut, ShortcutCategory } from "../../hooks/useKeyboardShortcuts";
 
@@ -57,14 +58,77 @@ export function KeyboardShortcutsHelp({
   isOpen,
   onClose,
 }: KeyboardShortcutsHelpProps) {
-  // Close on backdrop click or Escape
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Store the element that was focused before the modal opened
+  useEffect(() => {
+    if (isOpen) {
+      previousFocusRef.current = document.activeElement as HTMLElement;
+    }
+  }, [isOpen]);
+
+  // Focus the dialog container when it opens; restore focus when it closes
+  useEffect(() => {
+    if (!isOpen) {
+      previousFocusRef.current?.focus();
+      return;
+    }
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    // Move focus into the modal
+    const firstFocusable = dialog.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    firstFocusable?.focus();
+  }, [isOpen]);
+
+  // Focus trap + Escape / ? closes
   useEffect(() => {
     if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      // Close on Escape or ?
+      if (e.key === "Escape" || e.key === "?") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Focus trap on Tab
+      if (e.key === "Tab") {
+        const focusable = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hasAttribute("disabled"));
+
+        if (focusable.length === 0) return;
+
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -146,9 +210,10 @@ export function KeyboardShortcutsHelp({
 
         {/* Footer hint */}
         <p className="mt-4 text-center text-xs text-gray-500">
-          Press <KeyCap combo="?" /> to toggle this panel
+          Press <KeyCap combo="?" /> or <KeyCap combo="Escape" /> to close
         </p>
       </div>
     </div>
   );
 }
+

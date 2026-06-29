@@ -235,7 +235,7 @@ class ElasticsearchBackend implements ISearchBackend {
     }
 
     async index(doc: SearchDocument): Promise<void> {
-
+        await fetch(`${this.baseUrl}/_doc/${this.esId(doc)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(doc),
@@ -245,7 +245,7 @@ class ElasticsearchBackend implements ISearchBackend {
     async bulkIndex(docs: SearchDocument[]): Promise<void> {
         if (docs.length === 0) return;
         const lines = docs.flatMap((doc) => [
-
+            JSON.stringify({ index: { _id: this.esId(doc) } }),
             JSON.stringify(doc),
         ]);
         await fetch(`${this.baseUrl}/_bulk`, {
@@ -256,7 +256,7 @@ class ElasticsearchBackend implements ISearchBackend {
     }
 
     async delete(id: string, entity: SearchableEntity): Promise<void> {
-
+        await fetch(`${this.baseUrl}/_doc/${this.esId({ entity, id })}`, {
             method: 'DELETE',
         });
     }
@@ -303,7 +303,7 @@ class ElasticsearchBackend implements ISearchBackend {
             };
         }
 
-
+        const res = await fetch(`${this.baseUrl}/_search`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(esQuery),
@@ -359,7 +359,7 @@ class ElasticsearchBackend implements ISearchBackend {
             },
         };
 
-
+        const res = await fetch(`${this.baseUrl}/_search`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(esQuery),

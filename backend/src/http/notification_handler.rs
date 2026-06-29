@@ -7,12 +7,7 @@ use uuid::Uuid;
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
 use crate::db::DbPool;
-
-/// API response wrapper matching frontend ApiResponse<T>
-#[derive(Serialize)]
-struct ApiResponse<T: Serialize> {
-    data: T,
-}
+use crate::models::{ApiResponse, PaginatedResponse, PaginationParams};
 
 #[derive(Debug, FromRow, Serialize)]
 struct NotificationRow {
@@ -56,8 +51,12 @@ fn notification_to_json(row: NotificationRow) -> serde_json::Value {
 pub async fn get_notifications(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = req.user_id().ok_or(ApiError::Unauthorized)?;
+
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
 
     let rows = sqlx::query_as::<_, NotificationRow>(
         r#"
@@ -65,17 +64,27 @@ pub async fn get_notifications(
         FROM notifications
         WHERE user_id = $1
         ORDER BY created_at DESC
-        LIMIT 100
+        LIMIT $2 OFFSET $3
         "#,
     )
     .bind(user_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool.as_ref())
+    .await
+    .map_err(ApiError::DatabaseError)?;
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool.as_ref())
     .await
     .map_err(ApiError::DatabaseError)?;
 
     let data: Vec<serde_json::Value> = rows.into_iter().map(notification_to_json).collect();
 
-    Ok(HttpResponse::Ok().json(ApiResponse { data }))
+    Ok(HttpResponse::Ok().json(PaginatedResponse::new(data, total, &query)))
 }
 
 /// POST /api/notifications - Create notification (requires auth)

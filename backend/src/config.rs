@@ -71,6 +71,11 @@ pub struct StellarConfig {
     pub soroban_contract_prize: String,
     pub soroban_contract_reputation: String,
     pub soroban_contract_arenax_token: String,
+    /// Contract address for the match-lifecycle Soroban contract.
+    /// Reads `SOROBAN_CONTRACT_MATCH` from the environment; falls back to
+    /// `soroban_contract_prize` so existing deployments keep working without
+    /// adding the new variable.
+    pub soroban_contract_match: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -113,6 +118,9 @@ impl Config {
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
         let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")?;
         let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")?;
+        // Falls back to the prize contract so existing deployments don't break.
+        let soroban_contract_match = env::var("SOROBAN_CONTRACT_MATCH")
+            .unwrap_or_else(|_| soroban_contract_prize.clone());
         let ai_model_path = env::var("AI_MODEL_PATH")?;
         let port: u16 = env::var("PORT")?.parse()?;
         let host = env::var("HOST")?;
@@ -146,6 +154,7 @@ impl Config {
                 soroban_contract_prize,
                 soroban_contract_reputation,
                 soroban_contract_arenax_token,
+                soroban_contract_match,
             },
             ai: AiConfig {
                 model_path: ai_model_path,
