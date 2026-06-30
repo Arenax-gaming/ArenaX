@@ -9,12 +9,22 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1'
 
-export const useLeaderboard = (category: string, limit = 100, offset = 0) => {
+export const useLeaderboard = (
+    category: string,
+    limit = 100,
+    offset = 0,
+    season?: string,
+) => {
     return useQuery({
-        queryKey: ['leaderboard', category, limit, offset],
+        queryKey: ['leaderboard', category, limit, offset, season],
         queryFn: async () => {
+            const params = new URLSearchParams({
+                limit: String(limit),
+                offset: String(offset),
+            })
+            if (season) params.set('season', season)
             const res = await fetch(
-                `${API_BASE}/leaderboards/${category}?limit=${limit}&offset=${offset}`
+                `${API_BASE}/leaderboards/${category}?${params}`
             )
             if (!res.ok) throw new Error('Failed to fetch leaderboard')
             return res.json() as Promise<LeaderboardResponse>
