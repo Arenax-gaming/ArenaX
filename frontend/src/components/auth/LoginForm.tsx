@@ -1,14 +1,26 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { SocialLogin } from './SocialLogin';
-import { AlertCircle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useAuth } from "@/hooks/useAuth";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
+import { useFormAnalytics } from "@/hooks/useFormAnalytics";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/Form";
+import { SocialLogin } from "./SocialLogin";
 
 interface LoginFormProps {
   className?: string;
@@ -17,140 +29,153 @@ interface LoginFormProps {
 export function LoginForm({ className }: LoginFormProps) {
   const { login, loading, error, clearError } = useAuth();
   const router = useRouter();
-  
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    rememberMe: false,
+  const analytics = useFormAnalytics("login");
+
+  const form = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+      rememberMe: false,
+    },
   });
-  
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Clear errors when form changes
+  // Clear auth context error when user edits the form
   useEffect(() => {
-    clearError();
-    setErrors({});
-  }, [formData, clearError]);
+    const subscription = form.watch(() => clearError());
+    return () => subscription.unsubscribe();
+  }, [form, clearError]);
 
-  const validate = () => {
-    const newErrors: Record<string, string> = {};
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Invalid email address';
-    }
-    
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validate()) return;
-    
-    await login({
-      email: formData.email,
-      password: formData.password,
-      rememberMe: formData.rememberMe,
+  // Track form start on first interaction
+  useEffect(() => {
+    const subscription = form.watch((_values, { type }) => {
+      if (type === "change") analytics.trackStart();
+      // Unsubscribe after first change to avoid repeated starts
+      subscription.unsubscribe();
     });
-    
+    return () => subscription.unsubscribe();
+  }, [form, analytics]);
+
+  const onSubmit = async (data: LoginFormData) => {
+    await login({ email: data.email, password: data.password, rememberMe: data.rememberMe });
+
     if (!error) {
-      router.push('/');
+      analytics.trackSubmit({ success: true });
+      router.push("/");
+    } else {
+      analytics.trackSubmit({ success: false });
     }
   };
 
   const handleGuestSession = () => {
-    console.log('Continuing as guest');
-    router.push('/');
+    router.push("/");
   };
 
   return (
-    <div className={cn('space-y-6', className)}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-1">
-          <label htmlFor="email" className="block text-sm font-medium text-foreground">
-            Email address
-          </label>
-          <Input
-            id="email"
-            type="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            error={!!errors.email || !!error}
-            aria-describedby={errors.email ? "email-error" : undefined}
-            aria-invalid={!!errors.email || !!error}
+    <div className={cn("space-y-6", className)}>
+      <Form {...form}>
+        <form
+          onSubmit={form.handleSubmit(onSubmit)}
+          className="space-y-4"
+          noValidate
+        >
+          {/* Email */}
+          <FormField
+            control={form.control}
+            name="email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Email address</FormLabel>
+                <FormControl>
+                  <Input
+                    {...field}
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    error={!!form.formState.errors.email || !!error}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-          {errors.email && (
-            <p id="email-error" className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.email}
-            </p>
+
+          {/* Password */}
+          <FormField
+            control={form.control}
+            name="password"
+            render={({ field }) => (
+              <FormItem>
+                <div className="flex items-center justify-between">
+                  <FormLabel>Password</FormLabel>
+                  <Link
+                    href="/auth/forgot-password"
+                    className="text-sm text-primary hover:text-info font-medium"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+                <FormControl>
+                  <Input
+                    {...field}
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    error={!!form.formState.errors.password || !!error}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Auth context error banner */}
+          {error && (
+            <div
+              role="alert"
+              className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10 dark:text-red-200"
+            >
+              <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-sm">{error}</p>
+            </div>
           )}
-        </div>
-        
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label htmlFor="password" className="block text-sm font-medium text-foreground">
-              Password
-            </label>
-            <Link href="/auth/forgot-password" className="text-sm text-primary hover:text-info font-medium">
-              Forgot password?
-            </Link>
-          </div>
-          <Input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="••••••••"
-            value={formData.password}
-            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-            error={!!errors.password || !!error}
-            aria-describedby={errors.password ? "password-error" : undefined}
-            aria-invalid={!!errors.password || !!error}
+
+          {/* Remember me */}
+          <FormField
+            control={form.control}
+            name="rememberMe"
+            render={({ field }) => (
+              <FormItem className="flex items-center gap-2 space-y-0">
+                <FormControl>
+                  <input
+                    type="checkbox"
+                    id="remember-me"
+                    checked={field.value}
+                    onChange={field.onChange}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                  />
+                </FormControl>
+                <FormLabel htmlFor="remember-me" className="text-sm text-muted-foreground font-normal cursor-pointer">
+                  Remember me
+                </FormLabel>
+              </FormItem>
+            )}
           />
-          {errors.password && (
-            <p id="password-error" className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3 w-3" aria-hidden="true" />
-              {errors.password}
-            </p>
-          )}
-        </div>
-        
-        {error && (
-          <div className="flex gap-2 p-3 rounded-md bg-destructive/5 text-red-800 dark:bg-destructive/10/30 dark:text-red-200">
-            <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-            <p className="text-sm">{error}</p>
-          </div>
-        )}
-        
-        <div className="flex items-center">
-          <input
-            id="remember-me"
-            type="checkbox"
-            checked={formData.rememberMe}
-            onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
-            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-          />
-          <label htmlFor="remember-me" className="ml-2 block text-sm text-muted-foreground">
-            Remember me
-          </label>
-        </div>
-        
-        <Button type="submit" size="lg" className="w-full" loading={loading}>
-          Sign in
-        </Button>
-      </form>
-      
+
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full"
+            loading={loading}
+            disabled={loading}
+          >
+            Sign in
+          </Button>
+        </form>
+      </Form>
+
       <SocialLogin />
-      
+
       <div className="text-center">
         <button
           type="button"
