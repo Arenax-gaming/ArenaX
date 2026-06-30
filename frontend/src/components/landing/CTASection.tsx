@@ -3,10 +3,16 @@ import Link from "next/link";
 
 export function CTASection() {
   return (
-    <section className="container py-8 md:py-12 lg:py-24">
+    <section
+      aria-labelledby="cta-heading"
+      className="container py-8 md:py-12 lg:py-24"
+    >
       <div className="relative rounded-3xl bg-primary px-6 py-16 md:px-12 md:py-24 overflow-hidden">
         <div className="relative z-10 mx-auto flex max-w-[58rem] flex-col items-center gap-4 text-center text-primary-foreground">
-          <h2 className="font-heading text-3xl font-bold leading-[1.1] sm:text-3xl md:text-6xl">
+          <h2
+            id="cta-heading"
+            className="font-heading text-3xl font-bold leading-[1.1] sm:text-3xl md:text-6xl"
+          >
             Ready to Start Winning?
           </h2>
           <p className="max-w-[42rem] leading-normal text-primary-foreground/80 sm:text-xl sm:leading-8">
