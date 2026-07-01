@@ -333,6 +333,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "composable-example"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "contract-standards",
+ "contract-utils",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -343,6 +353,20 @@ name = "contract-registry"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "contract-standards"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "contract-utils"
+version = "0.1.0"
+dependencies = [
  "soroban-sdk",
 ]
 
@@ -1007,6 +1031,7 @@ name = "match-contract"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "contract-standards",
  "soroban-sdk",
 ]
 
@@ -1800,6 +1825,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "token-manager"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "contract-standards",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "tournament-manager"
 version = "0.1.0"
 dependencies = [
@@ -2053,6 +2087,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "zk-proof"
+version = "0.1.0"
+dependencies = [
+ "arenax-events",
+ "cross-contract-utils",
+ "soroban-sdk",
 ]
 
 [[package]]

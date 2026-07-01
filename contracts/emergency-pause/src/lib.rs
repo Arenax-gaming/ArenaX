@@ -78,7 +78,13 @@ impl EmergencyPause {
     }
 
     /// Pause a specific function inside a contract
-    pub fn pause_function(env: Env, caller: Address, contract_address: Address, function_name: Symbol, reason: Symbol) {
+    pub fn pause_function(
+        env: Env,
+        caller: Address,
+        contract_address: Address,
+        function_name: Symbol,
+        reason: Symbol,
+    ) {
         caller.require_auth();
 
         let admin = Self::get_admin(env.clone());
@@ -93,7 +99,12 @@ impl EmergencyPause {
     }
 
     /// Unpause a specific function
-    pub fn unpause_function(env: Env, caller: Address, contract_address: Address, function_name: Symbol) {
+    pub fn unpause_function(
+        env: Env,
+        caller: Address,
+        contract_address: Address,
+        function_name: Symbol,
+    ) {
         caller.require_auth();
 
         let admin = Self::get_admin(env.clone());
@@ -111,21 +122,34 @@ impl EmergencyPause {
     pub fn is_paused(env: Env, contract_address: Address, function_name: Option<Symbol>) -> bool {
         // First check contract-wide pause
         let key = DataKey::Paused(contract_address.clone());
-        if env.storage().persistent().get::<DataKey, bool>(&key).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&key)
+            .unwrap_or(false)
+        {
             return true;
         }
 
         // If function name is specified, check function-specific pause
         if let Some(func) = function_name {
             let func_key = DataKey::FunctionPaused(contract_address, func);
-            return env.storage().persistent().get::<DataKey, bool>(&func_key).unwrap_or(false);
+            return env
+                .storage()
+                .persistent()
+                .get::<DataKey, bool>(&func_key)
+                .unwrap_or(false);
         }
 
         false
     }
 
     /// Batch check if multiple contracts/functions are paused (for Gas Optimization)
-    pub fn batch_is_paused(env: Env, contracts: Vec<Address>, function_names: Vec<Option<Symbol>>) -> Vec<bool> {
+    pub fn batch_is_paused(
+        env: Env,
+        contracts: Vec<Address>,
+        function_names: Vec<Option<Symbol>>,
+    ) -> Vec<bool> {
         if contracts.len() != function_names.len() {
             panic!("contracts and function_names arrays must have same length");
         }
@@ -133,14 +157,21 @@ impl EmergencyPause {
         for i in 0..contracts.len() {
             let contract_address = contracts.get(i).unwrap();
             let function_name = function_names.get(i).unwrap();
-            results.push_back(Self::is_paused(env.clone(), contract_address, function_name));
+            results.push_back(Self::is_paused(
+                env.clone(),
+                contract_address,
+                function_name,
+            ));
         }
         results
     }
 
     /// Get admin address
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     /// Get pause metadata for a contract

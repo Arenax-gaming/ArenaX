@@ -38,15 +38,25 @@ pub struct MatchContract;
 impl MatchContract {
     pub fn set_pause_contract(env: Env, admin: Address, pause_contract: Address) {
         admin.require_auth();
-        env.storage().instance().set(&DataKey::PauseContract, &pause_contract);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseContract, &pause_contract);
     }
 
     fn check_pause(env: &Env) {
-        if let Some(pause_contract) = env.storage().instance().get::<_, Address>(&DataKey::PauseContract) {
+        if let Some(pause_contract) = env
+            .storage()
+            .instance()
+            .get::<_, Address>(&DataKey::PauseContract)
+        {
             let is_paused: bool = env.invoke_contract(
                 &pause_contract,
                 &soroban_sdk::Symbol::new(env, "is_paused"),
-                (env.current_contract_address(), Option::<soroban_sdk::Symbol>::None).into_val(env),
+                (
+                    env.current_contract_address(),
+                    Option::<soroban_sdk::Symbol>::None,
+                )
+                    .into_val(env),
             );
             if is_paused {
                 panic!("contract execution is paused");

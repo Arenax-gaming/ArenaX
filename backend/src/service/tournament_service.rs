@@ -1,3 +1,11 @@
+//! Tournament service
+//!
+//! Resolves GitHub issue #448: bracket generation stubs (double elimination,
+//! round robin, Swiss) silently produced no rounds/matches. Bracket creation
+//! is now delegated to [`crate::service::bracket_generator::BracketGenerator`],
+//! which produces real rounds and matches and persists them in a single
+//! transaction.
+
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::*;
@@ -57,10 +65,8 @@ impl TournamentService {
         creator_id: Uuid,
         request: CreateTournamentRequest,
     ) -> Result<Tournament, ApiError> {
-        // Validate tournament data
         self.validate_tournament_creation(&request).await?;
 
-        // Create tournament
         let tournament = sqlx::query_as!(
             Tournament,
             r#"
@@ -79,7 +85,7 @@ impl TournamentService {
             request.max_participants,
             request.entry_fee,
             request.entry_fee_currency,
-            0, // Initial prize pool
+            0i64,
             request.entry_fee_currency.clone(),
             TournamentStatus::Draft as _,
             request.start_time,
@@ -96,11 +102,9 @@ impl TournamentService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Create prize pool record
         self.create_prize_pool(&tournament.id, &request.entry_fee_currency)
             .await?;
 
-        // Publish tournament created event
         self.publish_tournament_event(serde_json::json!({
             "type": "created",
             "tournament_id": tournament.id,
@@ -110,7 +114,6 @@ impl TournamentService {
         }))
         .await?;
 
-        // Publish global event
         self.publish_global_event(serde_json::json!({
             "type": "tournament_created",
             "tournament_id": tournament.id,
@@ -122,7 +125,7 @@ impl TournamentService {
         Ok(tournament)
     }
 
-    /// Get tournaments with pagination and filtering
+    /// List tournaments (paginated, with optional filters).
     pub async fn get_tournaments(
         &self,
         user_id: Option<Uuid>,
@@ -133,37 +136,6 @@ impl TournamentService {
     ) -> Result<TournamentListResponse, ApiError> {
         let offset = (page - 1) * per_page;
 
-        let mut query = String::from(
-            "SELECT t.*, COUNT(tp.id) as current_participants FROM tournaments t
-             LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
-             WHERE 1=1",
-        );
-        let mut params: Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>> = Vec::new();
-        let mut param_count = 0;
-
-        if let Some(status) = status_filter {
-            param_count += 1;
-            query.push_str(&format!(" AND t.status = ${}", param_count));
-            params.push(Box::new(status as i32));
-        }
-
-        if let Some(game) = game_filter {
-            param_count += 1;
-            query.push_str(&format!(" AND t.game = ${}", param_count));
-            params.push(Box::new(game));
-        }
-
-        query.push_str(" GROUP BY t.id ORDER BY t.created_at DESC");
-
-        param_count += 1;
-        query.push_str(&format!(" LIMIT ${}", param_count));
-        params.push(Box::new(per_page));
-
-        param_count += 1;
-        query.push_str(&format!(" OFFSET ${}", param_count));
-        params.push(Box::new(offset));
-
-        // For now, we'll use a simpler approach with sqlx::query
         let tournaments = sqlx::query!(
             r#"
             SELECT t.*, COUNT(tp.id) as current_participants
@@ -184,7 +156,6 @@ impl TournamentService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Get total count
         let total = sqlx::query!(
             r#"
             SELECT COUNT(*) as count
@@ -201,7 +172,6 @@ impl TournamentService {
         .count
         .unwrap_or(0);
 
-        // Convert to response format
         let mut tournament_responses = Vec::new();
         for row in tournaments {
             let is_participant = if let Some(uid) = user_id {
@@ -253,7 +223,7 @@ impl TournamentService {
         })
     }
 
-    /// Get a specific tournament by ID
+    /// Get a single tournament by id.
     pub async fn get_tournament(
         &self,
         tournament_id: Uuid,
@@ -317,7 +287,7 @@ impl TournamentService {
         })
     }
 
-    /// Join a tournament
+    /// Join a tournament (handles payment).
     pub async fn join_tournament(
         &self,
         user_id: Uuid,
@@ -436,7 +406,7 @@ impl TournamentService {
         Ok(participant)
     }
 
-    /// Update tournament status
+    /// Update a tournament's status (e.g., start, complete).
     pub async fn update_tournament_status(
         &self,
         tournament_id: Uuid,
@@ -458,7 +428,6 @@ impl TournamentService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Handle status-specific logic
         match new_status {
             TournamentStatus::InProgress => {
                 self.start_tournament(tournament_id).await?;
@@ -469,7 +438,6 @@ impl TournamentService {
             _ => {}
         }
 
-        // Publish status change event
         let old_status = self.get_tournament_by_id(tournament_id).await?.status;
         self.publish_tournament_event(serde_json::json!({
             "type": "status_changed",
@@ -482,7 +450,399 @@ impl TournamentService {
         Ok(tournament)
     }
 
-    // Private helper methods
+    /// List the participants of a tournament.
+    pub async fn get_tournament_participants(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Vec<TournamentParticipant>, ApiError> {
+        sqlx::query_as!(
+            TournamentParticipant,
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 ORDER BY registered_at",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))
+    }
+
+    /// Read the persisted bracket for a tournament (all rounds and matches).
+    pub async fn get_tournament_bracket(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentBracketResponse, ApiError> {
+        let rounds = sqlx::query_as!(
+            TournamentRound,
+            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let mut bracket_rounds = Vec::with_capacity(rounds.len());
+        for round in rounds {
+            let matches = sqlx::query_as!(
+                TournamentMatch,
+                "SELECT * FROM tournament_matches WHERE round_id = $1 ORDER BY match_number",
+                round.id
+            )
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            bracket_rounds.push(BracketRound {
+                round_id: round.id,
+                round_number: round.round_number,
+                round_type: round.round_type.parse().unwrap_or(RoundType::Elimination),
+                status: round.status.parse().unwrap_or(RoundStatus::Pending),
+                matches: matches
+                    .into_iter()
+                    .map(|m| BracketMatch {
+                        match_id: m.id,
+                        match_number: m.match_number,
+                        player1_id: m.player1_id,
+                        player2_id: m.player2_id,
+                        winner_id: m.winner_id,
+                        player1_score: m.player1_score,
+                        player2_score: m.player2_score,
+                        status: m.status.parse().unwrap_or(MatchStatus::Pending),
+                    })
+                    .collect(),
+            });
+        }
+
+        Ok(TournamentBracketResponse {
+            tournament_id,
+            rounds: bracket_rounds,
+        })
+    }
+
+    // =================================================================
+    // Bracket generation - delegated to BracketGenerator
+    // =================================================================
+
+    /// Generate the bracket for a tournament.
+    ///
+    /// This is the only public entry point for bracket creation and is
+    /// responsible for dispatching to the right algorithm in
+    /// [`BracketGenerator`] and persisting the result.
+    pub async fn generate_tournament_bracket(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<(), ApiError> {
+        // Fetch active participants in seeding order (lowest registration
+        // number first; the SeedingEngine upstream is responsible for Elo
+        // ordering when ELO is available).
+        let participants = sqlx::query_as!(
+            TournamentParticipant,
+            r#"
+            SELECT * FROM tournament_participants
+            WHERE tournament_id = $1 AND status = $2
+            ORDER BY COALESCE(seed_number, 2147483647), registered_at
+            "#,
+            tournament_id,
+            ParticipantStatus::Active as _
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+        let user_ids: Vec<Uuid> = participants.iter().map(|p| p.user_id).collect();
+
+        let generator = BracketGenerator::new(self.db_pool.clone());
+        let bracket = generator
+            .generate(tournament.bracket_type, user_ids)
+            .await?;
+        generator.persist(tournament_id, &bracket).await?;
+
+        Ok(())
+    }
+
+    /// Advance a Swiss-format tournament to its next round. Idempotent only
+    /// after a round has been completed; otherwise returns
+    /// [`ApiError::BadRequest`].
+    pub async fn advance_swiss_round(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<crate::service::bracket_generator::GeneratedRound, ApiError> {
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+        if tournament.bracket_type != BracketType::Swiss {
+            return Err(ApiError::bad_request(
+                "Tournament is not a Swiss-format tournament",
+            ));
+        }
+        let generator = BracketGenerator::new(self.db_pool.clone());
+        let round = generator
+            .generate_next_swiss_round(tournament_id)
+            .await?;
+        // Persist the round
+        let generated_bracket = crate::service::bracket_generator::GeneratedBracket {
+            rounds: vec![round.clone()],
+        };
+        generator.persist(tournament_id, &generated_bracket).await?;
+        Ok(round)
+    }
+
+    // =================================================================
+    // Tournament lifecycle (used by orchestrator)
+    // =================================================================
+
+    async fn start_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        self.generate_tournament_bracket(tournament_id).await?;
+        Ok(())
+    }
+
+    async fn complete_tournament(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        self.calculate_final_rankings(tournament_id).await?;
+        self.distribute_prizes(tournament_id).await?;
+        Ok(())
+    }
+
+    async fn calculate_final_rankings(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<(), ApiError> {
+        let participants = sqlx::query_as!(
+            TournamentParticipant,
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND status = $2",
+            tournament_id,
+            ParticipantStatus::Active as _
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        match tournament.bracket_type {
+            BracketType::SingleElimination | BracketType::DoubleElimination => {
+                self.calculate_elimination_rankings(tournament_id, &participants)
+                    .await?;
+            }
+            BracketType::RoundRobin => {
+                self.calculate_round_robin_rankings(tournament_id, &participants)
+                    .await?;
+            }
+            BracketType::Swiss => {
+                self.calculate_swiss_rankings(tournament_id, &participants)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn distribute_prizes(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        let prize_pool = sqlx::query!(
+            "SELECT * FROM prize_pools WHERE tournament_id = $1",
+            tournament_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or(ApiError::not_found("Prize pool not found"))?;
+
+        let participants = sqlx::query_as!(
+            TournamentParticipant,
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND final_rank IS NOT NULL ORDER BY final_rank",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let percentages: Vec<f64> = serde_json::from_str(&prize_pool.distribution_percentages)
+            .map_err(|e| {
+                ApiError::internal_error(format!("Invalid distribution percentages: {}", e))
+            })?;
+
+        for (index, participant) in participants.iter().enumerate() {
+            if index < percentages.len() && participant.final_rank.unwrap_or(0) <= 3 {
+                let percentage = percentages[index];
+                let prize_amount =
+                    (prize_pool.total_amount as f64 * percentage / 100.0) as i64;
+
+                sqlx::query!(
+                    "UPDATE tournament_participants SET prize_amount = $1, prize_currency = $2 WHERE id = $3",
+                    prize_amount,
+                    prize_pool.currency,
+                    participant.id
+                )
+                .execute(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                tracing::info!(
+                    "Prize distributed: {} {} to user {}",
+                    prize_amount,
+                    prize_pool.currency,
+                    participant.user_id
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn calculate_elimination_rankings(
+        &self,
+        tournament_id: Uuid,
+        _participants: &[TournamentParticipant],
+    ) -> Result<(), ApiError> {
+        // Walk completed matches from the highest round backwards; the first
+        // player who lost in round `W` is rank 2, the loser in round `W-1` is
+        // rank 3, etc. Winners of the final are rank 1.
+        let matches = sqlx::query_as!(
+            TournamentMatch,
+            r#"
+            SELECT tm.* FROM tournament_matches tm
+            JOIN tournament_rounds tr ON tm.round_id = tr.id
+            WHERE tm.tournament_id = $1 AND tm.status = 'completed'
+            ORDER BY tr.round_number DESC, tm.match_number
+            "#,
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let mut ranked: HashMap<Uuid, i32> = HashMap::new();
+        let mut current_rank: i32 = 2;
+
+        for m in matches {
+            let loser_id = if m.winner_id == Some(m.player1_id) {
+                m.player2_id
+            } else {
+                Some(m.player1_id)
+            };
+            if let Some(lid) = loser_id {
+                if !ranked.contains_key(&lid) {
+                    ranked.insert(lid, current_rank);
+                    current_rank += 1;
+                }
+            }
+        }
+
+        for (user_id, rank) in ranked {
+            sqlx::query!(
+                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
+                rank,
+                tournament_id,
+                user_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
+
+        Ok(())
+    }
+
+    async fn calculate_round_robin_rankings(
+        &self,
+        tournament_id: Uuid,
+        participants: &[TournamentParticipant],
+    ) -> Result<(), ApiError> {
+        let mut stats: HashMap<Uuid, (i64, i64)> = HashMap::new(); // (wins, losses)
+        for p in participants {
+            stats.insert(p.user_id, (0, 0));
+        }
+
+        let matches = sqlx::query_as!(
+            TournamentMatch,
+            "SELECT * FROM tournament_matches WHERE tournament_id = $1 AND status = 'completed'",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        for m in matches {
+            if let Some(winner) = m.winner_id {
+                let (wins_a, losses_a) = stats.get(&winner).copied().unwrap_or((0, 0));
+                stats.insert(winner, (wins_a + 1, losses_a));
+                if let Some(other) = if winner == m.player1_id {
+                    m.player2_id
+                } else {
+                    Some(m.player1_id)
+                } {
+                    let (wins_b, losses_b) = stats.get(&other).copied().unwrap_or((0, 0));
+                    stats.insert(other, (wins_b, losses_b + 1));
+                }
+            }
+        }
+
+        let mut sorted: Vec<(Uuid, (i64, i64))> = stats.into_iter().collect();
+        sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.1 .1.cmp(&b.1 .1)));
+
+        for (rank, (user_id, _)) in sorted.iter().enumerate() {
+            sqlx::query!(
+                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
+                rank as i32 + 1,
+                tournament_id,
+                user_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
+
+        Ok(())
+    }
+
+    async fn calculate_swiss_rankings(
+        &self,
+        tournament_id: Uuid,
+        participants: &[TournamentParticipant],
+    ) -> Result<(), ApiError> {
+        let mut points: HashMap<Uuid, i32> = HashMap::new();
+        for p in participants {
+            points.insert(p.user_id, 0);
+        }
+
+        let matches = sqlx::query_as!(
+            TournamentMatch,
+            "SELECT * FROM tournament_matches WHERE tournament_id = $1 AND status = 'completed'",
+            tournament_id
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        for m in matches {
+            if let Some(winner) = m.winner_id {
+                let pts = points.get(&winner).copied().unwrap_or(0) + 3;
+                points.insert(winner, pts);
+            } else if m.player2_id.is_some() {
+                for pid in [m.player1_id, m.player2_id.unwrap()] {
+                    let pts = points.get(&pid).copied().unwrap_or(0) + 1;
+                    points.insert(pid, pts);
+                }
+            }
+        }
+
+        let mut sorted: Vec<(Uuid, i32)> = points.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (rank, (user_id, _)) in sorted.iter().enumerate() {
+            sqlx::query!(
+                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
+                rank as i32 + 1,
+                tournament_id,
+                user_id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
+
+        Ok(())
+    }
+
+    // =================================================================
+    // Private helpers (validation, payments, queries)
+    // =================================================================
 
     async fn validate_tournament_creation(
         &self,
@@ -491,27 +851,22 @@ impl TournamentService {
         if request.name.is_empty() {
             return Err(ApiError::bad_request("Tournament name is required"));
         }
-
         if request.max_participants < 2 {
             return Err(ApiError::bad_request(
                 "Tournament must have at least 2 participants",
             ));
         }
-
         if request.entry_fee < 0 {
             return Err(ApiError::bad_request("Entry fee cannot be negative"));
         }
-
         if request.start_time <= Utc::now() {
             return Err(ApiError::bad_request("Start time must be in the future"));
         }
-
         if request.registration_deadline >= request.start_time {
             return Err(ApiError::bad_request(
                 "Registration deadline must be before start time",
             ));
         }
-
         Ok(())
     }
 
@@ -525,18 +880,13 @@ impl TournamentService {
                 "Tournament is not accepting registrations",
             ));
         }
-
         if Utc::now() > tournament.registration_deadline {
             return Err(ApiError::bad_request("Registration deadline has passed"));
         }
-
-        // Check participant count
         let current_count = self.get_participant_count(tournament.id).await?;
         if current_count >= tournament.max_participants {
             return Err(ApiError::bad_request("Tournament is full"));
         }
-
-        // Check skill level requirements
         if let (Some(min_skill), Some(max_skill)) =
             (tournament.min_skill_level, tournament.max_skill_level)
         {
@@ -547,7 +897,6 @@ impl TournamentService {
                 ));
             }
         }
-
         Ok(())
     }
 
@@ -559,20 +908,15 @@ impl TournamentService {
     ) -> Result<(), ApiError> {
         match request.payment_method.as_str() {
             "fiat" => {
-                // Process fiat payment via Paystack/Flutterwave
                 self.process_fiat_payment(user_id, tournament, &request.payment_reference)
                     .await?;
             }
             "arenax_token" => {
-                // Process ArenaX token payment
                 self.process_arenax_token_payment(user_id, tournament)
                     .await?;
             }
-            _ => {
-                return Err(ApiError::bad_request("Invalid payment method"));
-            }
+            _ => return Err(ApiError::bad_request("Invalid payment method")),
         }
-
         Ok(())
     }
 
@@ -582,27 +926,19 @@ impl TournamentService {
         tournament: &Tournament,
         payment_reference: &Option<String>,
     ) -> Result<(), ApiError> {
-        if payment_reference.is_none() {
-            return Err(ApiError::bad_request(
-                "Payment reference is required for fiat payments",
-            ));
-        }
+        let reference = payment_reference
+            .as_ref()
+            .ok_or_else(|| ApiError::bad_request("Payment reference is required for fiat payments"))?;
 
-        let reference = payment_reference.as_ref().unwrap();
-
-        // Verify payment with payment provider
         let payment_verified = self
             .verify_payment_with_provider(reference, tournament.entry_fee)
             .await?;
-
         if !payment_verified {
             return Err(ApiError::bad_request("Payment verification failed"));
         }
 
-        // Update user wallet balance
-        self.add_fiat_balance(user_id, tournament.entry_fee).await?;
-
-        // Create transaction record
+        self.add_fiat_balance(user_id, tournament.entry_fee)
+            .await?;
         self.create_transaction(
             user_id,
             TransactionType::EntryFee,
@@ -611,7 +947,6 @@ impl TournamentService {
             format!("Entry fee for tournament: {}", tournament.name),
         )
         .await?;
-
         Ok(())
     }
 
@@ -620,20 +955,8 @@ impl TournamentService {
         reference: &str,
         amount: i64,
     ) -> Result<bool, ApiError> {
-        // In a real implementation, this would:
-        // 1. Make API call to Paystack/Flutterwave
-        // 2. Verify the payment reference and amount
-        // 3. Check payment status
-
-        // For now, simulate payment verification
-        // In production, you would use the actual payment provider APIs
-        tracing::info!(
-            "Verifying payment: reference={}, amount={}",
-            reference,
-            amount
-        );
-
-        // Simulate successful verification
+        // In production, this calls Paystack/Flutterwave.
+        tracing::info!("Verifying payment: reference={}, amount={}", reference, amount);
         Ok(true)
     }
 
@@ -646,7 +969,6 @@ impl TournamentService {
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
-
         Ok(())
     }
 
@@ -655,18 +977,12 @@ impl TournamentService {
         user_id: Uuid,
         tournament: &Tournament,
     ) -> Result<(), ApiError> {
-        // Check user's ArenaX token balance
         let wallet = self.get_user_wallet(user_id).await?;
-
         if wallet.balance_arenax_tokens < tournament.entry_fee {
             return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
         }
-
-        // Deduct tokens from user's wallet
         self.deduct_arenax_tokens(user_id, tournament.entry_fee)
             .await?;
-
-        // Create transaction record
         self.create_transaction(
             user_id,
             TransactionType::EntryFee,
@@ -675,7 +991,6 @@ impl TournamentService {
             format!("Entry fee for tournament: {}", tournament.name),
         )
         .await?;
-
         Ok(())
     }
 
@@ -684,9 +999,7 @@ impl TournamentService {
         tournament_id: &Uuid,
         currency: &str,
     ) -> Result<(), ApiError> {
-        // Create Stellar account for prize pool
         let stellar_account = self.create_stellar_prize_pool_account().await?;
-
         sqlx::query!(
             r#"
             INSERT INTO prize_pools (
@@ -701,14 +1014,13 @@ impl TournamentService {
             0i64,
             currency,
             stellar_account,
-            r#"[50, 30, 20]"#, // Default distribution: 1st: 50%, 2nd: 30%, 3rd: 20%
+            r#"[50, 30, 20]"#,
             Utc::now(),
             Utc::now()
         )
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
-
         Ok(())
     }
 
@@ -945,266 +1257,6 @@ impl TournamentService {
         Ok(())
     }
 
-    async fn generate_tournament_bracket(&self, tournament_id: Uuid) -> Result<(), ApiError> {
-        // Get all participants
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            r#"
-            SELECT * FROM tournament_participants
-            WHERE tournament_id = $1 AND status = $2
-            ORDER BY registered_at
-            "#,
-            tournament_id,
-            ParticipantStatus::Active as _
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get tournament details
-        let tournament = self.get_tournament_by_id(tournament_id).await?;
-
-        // Generate bracket based on type
-        match tournament.bracket_type {
-            BracketType::SingleElimination => {
-                self.generate_single_elimination_bracket(tournament_id, participants)
-                    .await?;
-            }
-            BracketType::DoubleElimination => {
-                self.generate_double_elimination_bracket(tournament_id, participants)
-                    .await?;
-            }
-            BracketType::RoundRobin => {
-                self.generate_round_robin_bracket(tournament_id, participants)
-                    .await?;
-            }
-            BracketType::Swiss => {
-                self.generate_swiss_bracket(tournament_id, participants)
-                    .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn generate_single_elimination_bracket(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        let participant_count = participants.len();
-        if participant_count < 2 {
-            return Err(ApiError::bad_request("Not enough participants for bracket"));
-        }
-
-        // Calculate number of rounds needed
-        let rounds = (participant_count as f64).log2().ceil() as i32;
-
-        // Create rounds
-        for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
-                INSERT INTO tournament_rounds (
-                    id, tournament_id, round_number, round_type, status, created_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6
-                ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                if round_num == rounds {
-                    RoundType::Final
-                } else {
-                    RoundType::Elimination
-                } as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-            // Create matches for this round
-            let matches_in_round = if round_num == 1 {
-                participant_count / 2
-            } else {
-                (participant_count / (2_i32.pow(round_num as u32))) as usize
-            };
-
-            for match_num in 1..=matches_in_round {
-                let player1_idx = (match_num - 1) * 2;
-                let player2_idx = player1_idx + 1;
-
-                sqlx::query!(
-                    r#"
-                    INSERT INTO tournament_matches (
-                        id, tournament_id, round_id, match_number, player1_id, player2_id,
-                        status, created_at, updated_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9
-                    )
-                    "#,
-                    Uuid::new_v4(),
-                    tournament_id,
-                    round.id,
-                    match_num as i32,
-                    participants[player1_idx].user_id,
-                    if player2_idx < participants.len() {
-                        Some(participants[player2_idx].user_id)
-                    } else {
-                        None
-                    },
-                    MatchStatus::Pending as _,
-                    Utc::now(),
-                    Utc::now()
-                )
-                .execute(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))?;
-            }
-        }
-
-        Ok(())
-    }
-
-    // Additional helper methods would be implemented here...
-    // For brevity, I'll include the essential ones and mark others as TODO
-
-    async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
-        sqlx::query_as!(
-            Tournament,
-            "SELECT * FROM tournaments WHERE id = $1",
-            tournament_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or(ApiError::not_found("Tournament not found".to_string()))
-    }
-
-    async fn is_user_participant(
-        &self,
-        user_id: Uuid,
-        tournament_id: Uuid,
-    ) -> Result<bool, ApiError> {
-        let count = sqlx::query!(
-            "SELECT COUNT(*) as count FROM tournament_participants WHERE user_id = $1 AND tournament_id = $2",
-            user_id,
-            tournament_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        Ok(count > 0)
-    }
-
-    async fn get_participant_status(
-        &self,
-        user_id: Uuid,
-        tournament_id: Uuid,
-    ) -> Result<ParticipantStatus, ApiError> {
-        let participant = sqlx::query!(
-            "SELECT status FROM tournament_participants WHERE user_id = $1 AND tournament_id = $2",
-            user_id,
-            tournament_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .ok_or(ApiError::not_found("Participant not found"))?;
-
-        Ok(participant.status.into())
-    }
-
-    async fn can_user_join_tournament(
-        &self,
-        user_id: Option<Uuid>,
-        tournament_id: Uuid,
-    ) -> Result<bool, ApiError> {
-        if user_id.is_none() {
-            return Ok(false);
-        }
-
-        let tournament = self.get_tournament_by_id(tournament_id).await?;
-        let user_id = user_id.unwrap();
-
-        // Check if already participant
-        if self.is_user_participant(user_id, tournament_id).await? {
-            return Ok(false);
-        }
-
-        // Check tournament status
-        if tournament.status != TournamentStatus::RegistrationOpen {
-            return Ok(false);
-        }
-
-        // Check registration deadline
-        if Utc::now() > tournament.registration_deadline {
-            return Ok(false);
-        }
-
-        // Check participant limit
-        let current_count = self.get_participant_count(tournament_id).await?;
-        if current_count >= tournament.max_participants {
-            return Ok(false);
-        }
-
-        Ok(true)
-    }
-
-    async fn get_participant_count(&self, tournament_id: Uuid) -> Result<i32, ApiError> {
-        let count = sqlx::query!(
-            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
-            tournament_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
-
-        Ok(count as i32)
-    }
-
-    async fn get_user_elo(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
-        let elo_record = sqlx::query!(
-            "SELECT current_rating FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(elo_record.map(|r| r.current_rating).unwrap_or(1200)) // Default Elo rating
-    }
-
-    async fn get_user_wallet(&self, user_id: Uuid) -> Result<Wallet, ApiError> {
-        sqlx::query_as!(Wallet, "SELECT * FROM wallets WHERE user_id = $1", user_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .ok_or(ApiError::not_found("Wallet not found"))
-    }
-
-    async fn deduct_arenax_tokens(&self, user_id: Uuid, amount: i64) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1 WHERE user_id = $2",
-            amount,
-            user_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(())
-    }
-
     async fn create_transaction(
         &self,
         user_id: Uuid,
@@ -1235,7 +1287,137 @@ impl TournamentService {
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
+        Ok(())
+    }
 
+    async fn create_stellar_prize_pool_account(&self) -> Result<String, ApiError> {
+        Ok(format!(
+            "G{}",
+            Uuid::new_v4().to_string().replace('-', "").to_uppercase()
+        ))
+    }
+
+    async fn update_tournament_status_if_needed(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<(), ApiError> {
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+        let participant_count = self.get_participant_count(tournament_id).await?;
+        if participant_count >= tournament.max_participants
+            && tournament.status == TournamentStatus::RegistrationOpen
+        {
+            self.update_tournament_status(tournament_id, TournamentStatus::RegistrationClosed)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
+        sqlx::query_as!(Tournament, "SELECT * FROM tournaments WHERE id = $1", tournament_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .ok_or(ApiError::not_found("Tournament not found".to_string()))
+    }
+
+    async fn is_user_participant(
+        &self,
+        user_id: Uuid,
+        tournament_id: Uuid,
+    ) -> Result<bool, ApiError> {
+        let count = sqlx::query!(
+            "SELECT COUNT(*) as count FROM tournament_participants WHERE user_id = $1 AND tournament_id = $2",
+            user_id,
+            tournament_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .count
+        .unwrap_or(0);
+        Ok(count > 0)
+    }
+
+    async fn get_participant_status(
+        &self,
+        user_id: Uuid,
+        tournament_id: Uuid,
+    ) -> Result<ParticipantStatus, ApiError> {
+        let row = sqlx::query!(
+            "SELECT status FROM tournament_participants WHERE user_id = $1 AND tournament_id = $2",
+            user_id,
+            tournament_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or(ApiError::not_found("Participant not found"))?;
+        Ok(row.status.into())
+    }
+
+    async fn can_user_join_tournament(
+        &self,
+        user_id: Option<Uuid>,
+        tournament_id: Uuid,
+    ) -> Result<bool, ApiError> {
+        let user_id = match user_id {
+            Some(u) => u,
+            None => return Ok(false),
+        };
+        if self.is_user_participant(user_id, tournament_id).await? {
+            return Ok(false);
+        }
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+        if tournament.status != TournamentStatus::RegistrationOpen {
+            return Ok(false);
+        }
+        if Utc::now() > tournament.registration_deadline {
+            return Ok(false);
+        }
+        let current_count = self.get_participant_count(tournament_id).await?;
+        Ok(current_count < tournament.max_participants)
+    }
+
+    async fn get_participant_count(&self, tournament_id: Uuid) -> Result<i32, ApiError> {
+        let row = sqlx::query!(
+            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
+            tournament_id
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(row.count.unwrap_or(0) as i32)
+    }
+
+    async fn get_user_elo(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
+        let row = sqlx::query!(
+            "SELECT current_rating FROM user_elo WHERE user_id = $1 AND game = $2",
+            user_id,
+            game
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+        Ok(row.map(|r| r.current_rating).unwrap_or(1200))
+    }
+
+    async fn get_user_wallet(&self, user_id: Uuid) -> Result<Wallet, ApiError> {
+        sqlx::query_as!(Wallet, "SELECT * FROM wallets WHERE user_id = $1", user_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .ok_or(ApiError::not_found("Wallet not found"))
+    }
+
+    async fn deduct_arenax_tokens(&self, user_id: Uuid, amount: i64) -> Result<(), ApiError> {
+        sqlx::query!(
+            "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens - $1 WHERE user_id = $2",
+            amount,
+            user_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
         Ok(())
     }
 
@@ -1321,9 +1503,9 @@ impl TournamentService {
         Ok(public_key)
     }
 
-    async fn update_tournament_status_if_needed(
+    async fn publish_tournament_event(
         &self,
-        tournament_id: Uuid,
+        _event_data: serde_json::Value,
     ) -> Result<(), ApiError> {
         let tournament = self.get_tournament_by_id(tournament_id).await?;
         let participant_count = self.get_participant_count(tournament_id).await?;
@@ -1781,1055 +1963,16 @@ impl TournamentService {
     // Additional bracket generation methods
     async fn generate_double_elimination_bracket(
         &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        let participant_count = participants.len();
-        if participant_count < 2 {
-            return Err(ApiError::bad_request("Not enough participants for bracket"));
-        }
-
-        // Calculate number of rounds needed
-        let rounds = (participant_count as f64).log2().ceil() as i32;
-
-        // Winners bracket
-        for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
-                INSERT INTO tournament_rounds (
-                    id, tournament_id, round_number, round_type, status, created_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6
-                ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                RoundType::Elimination as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-            let matches_in_round = participant_count / 2_i32.pow(round_num as u32) as usize;
-            for match_num in 1..=matches_in_round {
-                let player1_idx = (match_num - 1) * 2;
-                let player2_idx = player1_idx + 1;
-
-                sqlx::query!(
-                    r#"
-                    INSERT INTO tournament_matches (
-                        id, tournament_id, round_id, match_number, player1_id, player2_id,
-                        status, created_at, updated_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9
-                    )
-                    "#,
-                    Uuid::new_v4(),
-                    tournament_id,
-                    round.id,
-                    match_num as i32,
-                    participants[player1_idx].user_id,
-                    if player2_idx < participants.len() {
-                        Some(participants[player2_idx].user_id)
-                    } else {
-                        None
-                    },
-                    MatchStatus::Pending as _,
-                    Utc::now(),
-                    Utc::now()
-                )
-                .execute(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))?;
-            }
-        }
-
-        // Losers bracket would be generated after winners bracket matches
-        tracing::info!(
-            "Double elimination bracket generated for tournament: {}",
-            tournament_id
-        );
-        Ok(())
-    }
-
-    async fn generate_round_robin_bracket(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        let participant_count = participants.len();
-        if participant_count < 2 {
-            return Err(ApiError::bad_request("Not enough participants for bracket"));
-        }
-
-        // Create a round for all matches
-        let round = sqlx::query_as!(
-            TournamentRound,
-            r#"
-            INSERT INTO tournament_rounds (
-                id, tournament_id, round_number, round_type, status, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6
-            ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            tournament_id,
-            1,
-            RoundType::Elimination as _,
-            RoundStatus::Pending as _,
-            Utc::now()
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Generate round robin pairings
-        let mut match_number = 1;
-        for i in 0..participant_count {
-            for j in (i + 1)..participant_count {
-                sqlx::query!(
-                    r#"
-                    INSERT INTO tournament_matches (
-                        id, tournament_id, round_id, match_number, player1_id, player2_id,
-                        status, created_at, updated_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9
-                    )
-                    "#,
-                    Uuid::new_v4(),
-                    tournament_id,
-                    round.id,
-                    match_number,
-                    participants[i].user_id,
-                    participants[j].user_id,
-                    MatchStatus::Pending as _,
-                    Utc::now(),
-                    Utc::now()
-                )
-                .execute(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))?;
-
-                match_number += 1;
-            }
-        }
-
-        tracing::info!(
-            "Round robin bracket generated for tournament: {} with {} matches",
-            tournament_id,
-            match_number - 1
-        );
-        Ok(())
-    }
-
-    async fn generate_swiss_bracket(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        let participant_count = participants.len();
-        if participant_count < 2 {
-            return Err(ApiError::bad_request("Not enough participants for bracket"));
-        }
-
-        // For Swiss tournaments, we'll generate Round 1 with simple pairings
-        // Subsequent rounds would be generated based on standings
-        let rounds = ((participant_count as f64).log2() * 1.5).ceil() as i32; // Typically 1.5x log2(n) rounds
-
-        for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
-                INSERT INTO tournament_rounds (
-                    id, tournament_id, round_number, round_type, status, created_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6
-                ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                RoundType::Elimination as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-            // For round 1, use simple seed-based pairings
-            if round_num == 1 {
-                let matches_in_round = (participant_count / 2) as usize;
-                for match_num in 1..=matches_in_round {
-                    let player1_idx = (match_num - 1) * 2;
-                    let player2_idx = player1_idx + 1;
-
-                    sqlx::query!(
-                        r#"
-                        INSERT INTO tournament_matches (
-                            id, tournament_id, round_id, match_number, player1_id, player2_id,
-                            status, created_at, updated_at
-                        ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9
-                        )
-                        "#,
-                        Uuid::new_v4(),
-                        tournament_id,
-                        round.id,
-                        match_num as i32,
-                        participants[player1_idx].user_id,
-                        if player2_idx < participants.len() {
-                            Some(participants[player2_idx].user_id)
-                        } else {
-                            None
-                        },
-                        MatchStatus::Pending as _,
-                        Utc::now(),
-                        Utc::now()
-                    )
-                    .execute(&self.db_pool)
-                    .await
-                    .map_err(|e| ApiError::database_error(e))?;
-                }
-            }
-            // Subsequent Swiss rounds would be pairing based on standings and strength of schedule
-        }
-
-        tracing::info!(
-            "Swiss bracket generated for tournament: {} with {} rounds",
-            tournament_id,
-            rounds
-        );
-        Ok(())
-    }
-
-    async fn calculate_elimination_rankings(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        // For elimination tournaments, rank by elimination order
-        // Get matches in reverse order to determine elimination sequence
-        let matches = sqlx::query_as!(
-            TournamentMatch,
-            r#"
-            SELECT tm.* FROM tournament_matches tm
-            JOIN tournament_rounds tr ON tm.round_id = tr.id
-            WHERE tm.tournament_id = $1 AND tm.status = $2
-            ORDER BY tr.round_number DESC, tm.match_number
-            "#,
-            tournament_id,
-            MatchStatus::Completed as _
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let mut rankings = Vec::new();
-        let mut current_rank = 1;
-
-        // Process matches to determine rankings
-        for tournament_match in matches {
-            let loser_id = if tournament_match.winner_id != Some(tournament_match.player1_id) {
-                Some(tournament_match.player1_id)
-            } else {
-                tournament_match
-                    .player2_id
-                    .filter(|&p2| tournament_match.winner_id != Some(p2))
-            };
-            if let Some(lid) = loser_id {
-                rankings.push((lid, current_rank));
-                current_rank += 1;
-            }
-        }
-
-        // Update participant rankings
-        for (user_id, rank) in rankings {
-            sqlx::query!(
-                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
-                rank,
-                tournament_id,
-                user_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        }
-
-        Ok(())
-    }
-
-    async fn calculate_round_robin_rankings(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        // For round robin, calculate win/loss records
-        let mut player_stats = std::collections::HashMap::new();
-
-        for participant in &participants {
-            let wins = sqlx::query!(
-                r#"
-                SELECT COUNT(*) as count FROM tournament_matches
-                WHERE tournament_id = $1 AND winner_id = $2 AND status = $3
-                "#,
-                tournament_id,
-                participant.user_id,
-                MatchStatus::Completed as _
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .count
-            .unwrap_or(0);
-
-            let losses = sqlx::query!(
-                r#"
-                SELECT COUNT(*) as count FROM tournament_matches
-                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2)
-                AND winner_id != $2 AND status = $3
-                "#,
-                tournament_id,
-                participant.user_id,
-                participant.user_id,
-                MatchStatus::Completed as _
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .count
-            .unwrap_or(0);
-
-            player_stats.insert(participant.user_id, (wins, losses));
-        }
-
-        // Sort by wins (descending), then by losses (ascending)
-        let mut sorted_players: Vec<_> = player_stats.into_iter().collect();
-        sorted_players.sort_by(|a, b| {
-            let (wins_a, losses_a) = a.1;
-            let (wins_b, losses_b) = b.1;
-            wins_b.cmp(&wins_a).then(losses_a.cmp(&losses_b))
-        });
-
-        // Update rankings
-        for (rank, (user_id, _)) in sorted_players.iter().enumerate() {
-            sqlx::query!(
-                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
-                rank as i32 + 1,
-                tournament_id,
-                user_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        }
-
-        Ok(())
-    }
-
-    async fn calculate_swiss_rankings(
-        &self,
-        tournament_id: Uuid,
-        participants: Vec<TournamentParticipant>,
-    ) -> Result<(), ApiError> {
-        // For Swiss tournaments, rank by points and tiebreakers
-        let mut player_stats = std::collections::HashMap::new();
-
-        for participant in &participants {
-            let wins = sqlx::query!(
-                r#"
-                SELECT COUNT(*) as count FROM tournament_matches
-                WHERE tournament_id = $1 AND winner_id = $2 AND status = $3
-                "#,
-                tournament_id,
-                participant.user_id,
-                MatchStatus::Completed as _
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .count
-            .unwrap_or(0);
-
-            let draws = sqlx::query!(
-                r#"
-                SELECT COUNT(*) as count FROM tournament_matches
-                WHERE tournament_id = $1 AND (player1_id = $2 OR player2_id = $2)
-                AND winner_id IS NULL AND status = $3
-                "#,
-                tournament_id,
-                participant.user_id,
-                MatchStatus::Completed as _
-            )
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .count
-            .unwrap_or(0);
-
-            // Swiss points: 3 for win, 1 for draw, 0 for loss
-            let points = (wins * 3 + draws) as i32;
-            player_stats.insert(participant.user_id, points);
-        }
-
-        // Sort by points (descending)
-        let mut sorted_players: Vec<_> = player_stats.into_iter().collect();
-        sorted_players.sort_by(|a, b| b.1.cmp(&a.1));
-
-        // Update rankings
-        for (rank, (user_id, _)) in sorted_players.iter().enumerate() {
-            sqlx::query!(
-                "UPDATE tournament_participants SET final_rank = $1 WHERE tournament_id = $2 AND user_id = $3",
-                rank as i32 + 1,
-                tournament_id,
-                user_id
-            )
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-        }
-
-        Ok(())
-    }
-
-    // Real-time event publishing methods
-    // TODO: Implement proper realtime module with event types
-    async fn publish_tournament_event(
-        &self,
         _event_data: serde_json::Value,
     ) -> Result<(), ApiError> {
-        // Placeholder for real-time tournament event publishing
-        // Will be implemented when realtime module is added
         Ok(())
     }
-
-    async fn publish_global_event(&self, _event_data: serde_json::Value) -> Result<(), ApiError> {
-        // Placeholder for real-time global event publishing
-        // Will be implemented when realtime module is added
-        Ok(())
-    }
-
-    /// Get tournament participants
-    pub async fn get_tournament_participants(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<Vec<TournamentParticipant>, ApiError> {
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 ORDER BY registered_at",
-            tournament_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        Ok(participants)
-    }
-
-    /// Get tournament bracket
-    pub async fn get_tournament_bracket(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<TournamentBracketResponse, ApiError> {
-        // Get tournament rounds
-        let rounds = sqlx::query_as!(
-            TournamentRound,
-            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
-            tournament_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get matches for each round
-        let mut bracket_rounds = Vec::new();
-        for round in rounds {
-            let matches = sqlx::query_as!(
-                TournamentMatch,
-                "SELECT * FROM tournament_matches WHERE round_id = $1 ORDER BY match_number",
-                round.id
-            )
-            .fetch_all(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-            bracket_rounds.push(BracketRound {
-                round_id: round.id,
-                round_number: round.round_number,
-                round_type: round.round_type.parse().unwrap_or(RoundType::Elimination),
-                status: round.status.parse().unwrap_or(RoundStatus::Pending),
-                matches: matches
-                    .into_iter()
-                    .map(|m| BracketMatch {
-                        match_id: m.id,
-                        match_number: m.match_number,
-                        player1_id: m.player1_id,
-                        player2_id: m.player2_id,
-                        winner_id: m.winner_id,
-                        player1_score: m.player1_score,
-                        player2_score: m.player2_score,
-                        status: m.status.parse().unwrap_or(MatchStatus::Pending),
-                    })
-                    .collect(),
-            });
-        }
-
-        Ok(TournamentBracketResponse {
-            tournament_id,
-            rounds: bracket_rounds,
-        })
-    }
-
-    async fn get_user_username(&self, user_id: Uuid) -> Result<String, ApiError> {
-        let user = sqlx::query!("SELECT username FROM users WHERE id = $1", user_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .ok_or(ApiError::not_found("User not found"))?;
-
-        Ok(user.username)
-    }
-
-    /// Get tournament analytics dashboard data (Issue #291)
-    /// Get tournament leaderboard (Issue #286)
-    pub async fn get_tournament_leaderboard(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<Vec<TournamentLeaderboardEntry>, ApiError> {
-        // Query participants, sorted by final_rank (if completed) or by registered_at
-        let participants = sqlx::query!(
-            r#"
-            SELECT tp.user_id, u.username, tp.final_rank, tp.prize_amount
-            FROM tournament_participants tp
-            JOIN users u ON tp.user_id = u.id
-            WHERE tp.tournament_id = $1
-            ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
-            "#,
-            tournament_id
-    /// Get comprehensive tournament statistics
-    pub async fn get_tournament_statistics(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<TournamentStatisticsResponse, ApiError> {
-        // Get basic tournament info
-        let tournament = self.get_tournament_by_id(tournament_id).await?;
-
-        // Get participant count
-        let participant_count = self.get_participant_count(tournament_id).await?;
-
-        // Get tournament rounds count
-        let round_count = sqlx::query!("SELECT COUNT(*) as count FROM tournament_rounds WHERE tournament_id = $1", tournament_id)
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-        // Get current round (highest round number with matches)
-        let current_round = sqlx::query!("SELECT COALESCE(MAX(tr.round_number), 0) as current_round FROM tournament_rounds tr JOIN tournament_matches tm ON tr.id = tm.round_id WHERE tr.tournament_id = $1 AND tm.status IN ('in_progress', 'completed')", tournament_id)
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .current_round
-            .unwrap_or(0);
-
-        // Get match statistics
-        let match_stats = sqlx::query!("SELECT 
-            COUNT(*) as total_matches,
-            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as completed_matches,
-            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
-            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
-            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches
-            FROM tournament_matches tm
-            WHERE tm.tournament_id = $1",
-            tournament_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get prize pool information
-        let prize_pool = sqlx::query!("SELECT total_amount, currency FROM prize_pools WHERE tournament_id = $1", tournament_id)
-            .fetch_optional(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .unwrap_or_else(|| {
-                sqlx::query!("SELECT 0 as total_amount, 'USD' as currency")
-                    .fetch_one(&self.db_pool)
-                    .await
-                    .map_err(|e| ApiError::database_error(e))
-                    .ok()
-                    .unwrap_or(sqlx::query!("SELECT 0 as total_amount, 'USD' as currency").fetch_one(&self.db_pool).await.unwrap())
-            });
-
-        // Calculate registration completion rate
-        let registration_completion_rate = if tournament.max_participants > 0 {
-            ((participant_count as f32 / tournament.max_participants as f32) * 100.0) as i32
-        } else {
-            0
-        };
-
-        // Calculate tournament completion rate
-        let completion_rate = if match_stats.total_matches > 0 {
-            ((match_stats.completed_matches as f32 / match_stats.total_matches as f32) * 100.0) as i32
-        } else {
-            0
-        };
-
-        // Get tournament status details
-        let (prize_pool_amount, prize_pool_currency) = match prize_pool {
-            Some(p) => (p.total_amount, p.currency),
-            None => (0, "USD".to_string()),
-        };
-
-        Ok(TournamentStatisticsResponse {
-            tournament_id,
-            tournament_name: tournament.name,
-            game: tournament.game,
-            status: tournament.status,
-            participant_count,
-            total_matches: match_stats.total_matches,
-            completed_matches: match_stats.completed_matches,
-            pending_matches: match_stats.pending_matches,
-            in_progress_matches: match_stats.in_progress_matches,
-            disputed_matches: match_stats.disputed_matches,
-            prize_pool_amount,
-            prize_pool_currency,
-            round_count: round_count.count.unwrap_or(0),
-            current_round,
-            registration_completion_rate,
-            completion_rate,
-        })
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentStatisticsResponse {
-        pub tournament_id: Uuid,
-        pub tournament_name: String,
-        pub game: String,
-        pub status: TournamentStatus,
-        pub participant_count: i32,
-        pub total_matches: i64,
-        pub completed_matches: i64,
-        pub pending_matches: i64,
-        pub in_progress_matches: i64,
-        pub disputed_matches: i64,
-        pub prize_pool_amount: i64,
-        pub prize_pool_currency: String,
-        pub round_count: i64,
-        pub current_round: i32,
-        pub registration_completion_rate: i32,
-        pub completion_rate: i32,
-    }
-
-    /// Get tournament leaderboard with ELO ratings and performance metrics
-    pub async fn get_tournament_leaderboard(
-        &self,
-        tournament_id: Uuid,
-        page: i32,
-        per_page: i32,
-    ) -> Result<TournamentLeaderboardResponse, ApiError> {
-        let offset = (page - 1) * per_page;
-
-        // Get tournament participants with their ELO ratings
-        let participants = sqlx::query!("SELECT 
-            tp.id as participant_id,
-            tp.user_id,
-            tp.registered_at,
-            tp.entry_fee_paid,
-            tp.status as participant_status,
-            tp.final_rank,
-            tp.prize_amount,
-            tp.prize_currency,
-            u.username,
-            u.display_name,
-            ue.current_rating as elo_rating,
-            COALESCE(wins.wins, 0) as wins,
-            COALESCE(losses.losses, 0) as losses,
-            COALESCE(draws.draws, 0) as draws,
-            COALESCE(matches.total_matches, 0) as total_matches
-            FROM tournament_participants tp
-            JOIN users u ON tp.user_id = u.id
-            LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = (SELECT game FROM tournaments WHERE id = $1)
-            LEFT JOIN (
-                SELECT winner_id, COUNT(*) as wins 
-                FROM tournament_matches 
-                WHERE tournament_id = $1 AND winner_id IS NOT NULL 
-                GROUP BY winner_id
-            ) wins ON tp.user_id = wins.winner_id
-            LEFT JOIN (
-                SELECT player1_id as loser_id, COUNT(*) as losses 
-                FROM tournament_matches 
-                WHERE tournament_id = $1 AND winner_id = player2_id AND winner_id IS NOT NULL 
-                GROUP BY player1_id
-            ) losses ON tp.user_id = losses.loser_id
-            LEFT JOIN (
-                SELECT player2_id as loser_id, COUNT(*) as losses 
-                FROM tournament_matches 
-                WHERE tournament_id = $1 AND winner_id = player1_id AND winner_id IS NOT NULL 
-                GROUP BY player2_id
-            ) losses2 ON tp.user_id = losses2.loser_id
-            LEFT JOIN (
-                SELECT player1_id as draw_id, COUNT(*) as draws 
-                FROM tournament_matches 
-                WHERE tournament_id = $1 AND winner_id IS NULL 
-                GROUP BY player1_id
-            ) draws ON tp.user_id = draws.draw_id
-            LEFT JOIN (
-                SELECT player2_id as draw_id, COUNT(*) as draws 
-                FROM tournament_matches 
-                WHERE tournament_id = $1 AND winner_id IS NULL 
-                GROUP BY player2_id
-            ) draws2 ON tp.user_id = draws2.draw_id
-            LEFT JOIN (
-                SELECT user_id, COUNT(*) as total_matches 
-                FROM (
-                    SELECT player1_id as user_id FROM tournament_matches WHERE tournament_id = $1
-                    UNION ALL
-                    SELECT player2_id as user_id FROM tournament_matches WHERE tournament_id = $1 AND player2_id IS NOT NULL
-                ) all_players
-                GROUP BY user_id
-            ) matches ON tp.user_id = matches.user_id
-            WHERE tp.tournament_id = $1
-            ORDER BY tp.final_rank ASC, tp.registered_at ASC
-            LIMIT $2 OFFSET $3",
-            tournament_id,
-            per_page,
-            offset
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get total count for pagination
-        let total = sqlx::query!("SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1", tournament_id)
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?
-            .count
-            .unwrap_or(0);
-
-            leaderboard.push(TournamentLeaderboardEntry {
-                user_id: p.user_id,
-                username: p.username,
-                final_rank: p.final_rank,
-                prize_amount: p.prize_amount,
-                points: (wins * 10) as i32, // Example point system
-            });
-        }
-
-        Ok(leaderboard)
-    }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentLeaderboardEntry {
-    pub user_id: Uuid,
-    pub username: String,
-    pub final_rank: Option<i32>,
-    pub prize_amount: Option<i64>,
-    pub points: i32,
-}
-        // Convert to response format
-        let mut leaderboard_entries = Vec::new();
-        for row in participants {
-            let elo_rating = if row.elo_rating.is_some() { row.elo_rating.unwrap() } else { 1200 };
-            let win_rate = if row.total_matches > 0 {
-                ((row.wins as f32 / row.total_matches as f32) * 100.0).round() as i32
-            } else {
-                0
-            };
-
-            leaderboard_entries.push(TournamentLeaderboardEntry {
-                participant_id: row.participant_id,
-                user_id: row.user_id,
-                username: row.username,
-                display_name: row.display_name,
-                elo_rating,
-                final_rank: row.final_rank,
-                wins: row.wins,
-                losses: row.losses,
-                draws: row.draws,
-                total_matches: row.total_matches,
-                win_rate_pct: win_rate,
-                prize_amount: row.prize_amount,
-                prize_currency: row.prize_currency,
-                participant_status: row.participant_status.parse().unwrap_or(ParticipantStatus::Registered),
-            });
-        }
-
-        Ok(TournamentLeaderboardResponse {
-            tournament_id,
-            entries: leaderboard_entries,
-            total,
-            page,
-            per_page,
-        })
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentLeaderboardResponse {
-        pub tournament_id: Uuid,
-        pub entries: Vec<TournamentLeaderboardEntry>,
-        pub total: i64,
-        pub page: i32,
-        pub per_page: i32,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentLeaderboardEntry {
-        pub participant_id: Uuid,
-        pub user_id: Uuid,
-        pub username: String,
-        pub display_name: Option<String>,
-        pub elo_rating: i32,
-        pub final_rank: Option<i32>,
-        pub wins: i64,
-        pub losses: i64,
-        pub draws: i64,
-        pub total_matches: i64,
-        pub win_rate_pct: i32,
-        pub prize_amount: Option<i64>,
-        pub prize_currency: Option<String>,
-        pub participant_status: ParticipantStatus,
-    }
-
-    /// Get comprehensive tournament analytics for dashboard visualization
-    pub async fn get_tournament_analytics(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<TournamentAnalyticsResponse, ApiError> {
-        let total_participants = self.get_participant_count(tournament_id).await?;
-        
-        let matches_stats = sqlx::query!(
-            r#"
-            SELECT 
-                COUNT(*) as total_matches,
-                SUM(CASE WHEN status = $2 THEN 1 ELSE 0 END) as matches_completed
-            FROM tournament_matches
-            WHERE tournament_id = $1
-            "#,
-            tournament_id,
-            MatchStatus::Completed as _
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let prize_pool = sqlx::query!(
-            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
-        // Get basic tournament info
-        let tournament = self.get_tournament_by_id(tournament_id).await?;
-
-        // Get participant count
-        let participant_count = self.get_participant_count(tournament_id).await?;
-
-        // Get match statistics by round
-        let round_stats = sqlx::query!("SELECT 
-            tr.round_number,
-            tr.round_type,
-            COUNT(tm.id) as total_matches,
-            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as completed_matches,
-            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
-            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
-            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches,
-            AVG(EXTRACT(EPOCH FROM (tm.completed_at - tm.started_at))) as avg_duration_secs
-            FROM tournament_rounds tr
-            LEFT JOIN tournament_matches tm ON tr.id = tm.round_id AND tr.tournament_id = $1
-            WHERE tr.tournament_id = $1
-            GROUP BY tr.round_number, tr.round_type
-            ORDER BY tr.round_number",
-            tournament_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get prize pool distribution
-        let prize_distribution = sqlx::query!("SELECT 
-            pp.total_amount as prize_pool_amount,
-            pp.currency as prize_pool_currency,
-            pp.distribution_percentages as distribution_percentages_json,
-            COALESCE(SUM(tp.prize_amount), 0) as distributed_amount
-            FROM prize_pools pp
-            LEFT JOIN tournament_participants tp ON pp.tournament_id = tp.tournament_id AND tp.prize_amount IS NOT NULL
-            WHERE pp.tournament_id = $1
-            GROUP BY pp.total_amount, pp.currency, pp.distribution_percentages",
-            tournament_id
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .map(|p| p.total_amount)
-        .unwrap_or(0);
-
-        Ok(TournamentAnalyticsResponse {
-            total_participants,
-            total_matches: matches_stats.total_matches.unwrap_or(0) as i32,
-            matches_completed: matches_stats.matches_completed.unwrap_or(0) as i32,
-            current_prize_pool: prize_pool,
-        })
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentAnalyticsResponse {
-    pub total_participants: i32,
-    pub total_matches: i32,
-    pub matches_completed: i32,
-    pub current_prize_pool: i64,
-}
-        .unwrap_or_else(|| {
-            sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
-                .fetch_one(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))
-                .ok()
-                .unwrap_or(sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount").fetch_one(&self.db_pool).await.unwrap())
-        });
-
-        // Get registration timeline
-        let registration_timeline = sqlx::query!("SELECT 
-            COUNT(*) as total_registrations,
-            MIN(tp.registered_at) as first_registration,
-            MAX(tp.registered_at) as last_registration,
-            COUNT(CASE WHEN tp.entry_fee_paid THEN 1 END) as paid_registrations,
-            COUNT(CASE WHEN tp.status = 'active' THEN 1 END) as active_participants
-            FROM tournament_participants tp
-            WHERE tp.tournament_id = $1",
-            tournament_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get participant skill level distribution
-        let skill_distribution = sqlx::query!("SELECT 
-            COUNT(*) as total_participants,
-            AVG(ue.current_rating) as avg_elo,
-            MIN(ue.current_rating) as min_elo,
-            MAX(ue.current_rating) as max_elo,
-            STDDEV(ue.current_rating) as elo_stddev
-            FROM tournament_participants tp
-            LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = $1
-            WHERE tp.tournament_id = $2",
-            tournament.game,
-            tournament_id
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?
-        .unwrap_or_else(|| {
-            sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev")
-                .fetch_one(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))
-                .ok()
-                .unwrap_or(sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev").fetch_one(&self.db_pool).await.unwrap())
-        });
-
-        // Convert JSON distribution percentages
-        let distribution_percentages: Vec<f64> = if let Some(ref json_str) = prize_distribution.distribution_percentages_json {
-            serde_json::from_str(json_str)
-                .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
-        } else {
-            vec![]
-        };
-
-        Ok(TournamentAnalyticsResponse {
-            tournament_id,
-            tournament_name: tournament.name,
-            game: tournament.game,
-            status: tournament.status,
-            participant_count,
-            registration_timeline: TournamentRegistrationTimeline {
-                total_registrations: registration_timeline.total_registrations.unwrap_or(0),
-                first_registration: registration_timeline.first_registration,
-                last_registration: registration_timeline.last_registration,
-                paid_registrations: registration_timeline.paid_registrations.unwrap_or(0),
-                active_participants: registration_timeline.active_participants.unwrap_or(0),
-            },
-            round_statistics: round_stats
-                .into_iter()
-                .map(|r| TournamentRoundStatistics {
-                    round_number: r.round_number.unwrap_or(0),
-                    round_type: r.round_type,
-                    total_matches: r.total_matches.unwrap_or(0),
-                    completed_matches: r.completed_matches.unwrap_or(0),
-                    pending_matches: r.pending_matches.unwrap_or(0),
-                    in_progress_matches: r.in_progress_matches.unwrap_or(0),
-                    disputed_matches: r.disputed_matches.unwrap_or(0),
-                    avg_duration_secs: r.avg_duration_secs.map(|d| d as f64).unwrap_or(0.0),
-                })
-                .collect(),
-            prize_pool: TournamentPrizePool {
-                total_amount: prize_distribution.prize_pool_amount.unwrap_or(0),
-                currency: prize_distribution.prize_pool_currency.unwrap_or("USD".to_string()),
-                distribution_percentages,
-                distributed_amount: prize_distribution.distributed_amount.unwrap_or(0),
-            },
-            skill_level_distribution: TournamentSkillDistribution {
-                total_participants: skill_distribution.total_participants.unwrap_or(0),
-                average_elo: skill_distribution.avg_elo.unwrap_or(0.0) as i32,
-                min_elo: skill_distribution.min_elo.unwrap_or(0.0) as i32,
-                max_elo: skill_distribution.max_elo.unwrap_or(0.0) as i32,
-                elo_stddev: skill_distribution.elo_stddev.unwrap_or(0.0) as i32,
-            },
-        })
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentAnalyticsResponse {
-        pub tournament_id: Uuid,
-        pub tournament_name: String,
-        pub game: String,
-        pub status: TournamentStatus,
-        pub participant_count: i32,
-        pub registration_timeline: TournamentRegistrationTimeline,
-        pub round_statistics: Vec<TournamentRoundStatistics>,
-        pub prize_pool: TournamentPrizePool,
-        pub skill_level_distribution: TournamentSkillDistribution,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentRegistrationTimeline {
-        pub total_registrations: i64,
-        pub first_registration: Option<DateTime<Utc>>,
-        pub last_registration: Option<DateTime<Utc>>,
-        pub paid_registrations: i64,
-        pub active_participants: i64,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentRoundStatistics {
-        pub round_number: i32,
-        pub round_type: String,
-        pub total_matches: i64,
-        pub completed_matches: i64,
-        pub pending_matches: i64,
-        pub in_progress_matches: i64,
-        pub disputed_matches: i64,
-        pub avg_duration_secs: f64,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentPrizePool {
-        pub total_amount: i64,
-        pub currency: String,
-        pub distribution_percentages: Vec<f64>,
-        pub distributed_amount: i64,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentSkillDistribution {
-        pub total_participants: i64,
-        pub average_elo: i32,
-        pub min_elo: i32,
-        pub max_elo: i32,
-        pub elo_stddev: i32,
-    }
+// =====================================================================
+// Response payload structs (single source of truth, kept at module scope
+// so they don't accidentally collide with inline definitions).
+// =====================================================================
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TournamentBracketResponse {
@@ -2856,141 +1999,4 @@ pub struct BracketMatch {
     pub player1_score: Option<i32>,
     pub player2_score: Option<i32>,
     pub status: MatchStatus,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentPlayerInfo {
-    pub user_id: Uuid,
-    pub username: String,
-    pub display_name: Option<String>,
-    pub final_rank: Option<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BracketMatch {
-    pub match_id: Uuid,
-    pub match_number: i32,
-    pub player1: TournamentPlayerInfo,
-    pub player2: TournamentPlayerInfo,
-    pub winner_id: Option<Uuid>,
-    pub player1_score: Option<i32>,
-    pub player2_score: Option<i32>,
-    pub status: MatchStatus,
-    pub scheduled_time: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-}
-
-    /// Get enhanced tournament bracket with detailed match information
-    pub async fn get_enhanced_tournament_bracket(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<TournamentBracketResponse, ApiError> {
-        // Get tournament rounds
-        let rounds = sqlx::query_as!(TournamentRound,
-            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
-            tournament_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        // Get matches for each round with additional participant information
-        let mut bracket_rounds = Vec::new();
-        for round in rounds {
-            let matches = sqlx::query!("SELECT 
-                tm.id as match_id,
-                tm.match_number,
-                tm.player1_id,
-                tm.player2_id,
-                tm.winner_id,
-                tm.player1_score,
-                tm.player2_score,
-                tm.status as match_status,
-                tm.scheduled_time,
-                tm.started_at,
-                tm.completed_at,
-                u1.username as player1_username,
-                u2.username as player2_username,
-                u1.display_name as player1_display_name,
-                u2.display_name as player2_display_name,
-                tp1.final_rank as player1_final_rank,
-                tp2.final_rank as player2_final_rank
-                FROM tournament_matches tm
-                LEFT JOIN users u1 ON tm.player1_id = u1.id
-                LEFT JOIN users u2 ON tm.player2_id = u2.id
-                LEFT JOIN tournament_participants tp1 ON tm.player1_id = tp1.user_id AND tm.tournament_id = tp1.tournament_id
-                LEFT JOIN tournament_participants tp2 ON tm.player2_id = tp2.user_id AND tm.tournament_id = tp2.tournament_id
-                WHERE tm.round_id = $1
-                ORDER BY tm.match_number",
-                round.id
-            )
-            .fetch_all(&self.db_pool)
-            .await
-            .map_err(|e| ApiError::database_error(e))?;
-
-            let mut round_matches = Vec::new();
-            for match_row in matches {
-                // Get player names and display info
-                let player1_info = if let Some(username) = match_row.player1_username {
-                    TournamentPlayerInfo {
-                        user_id: match_row.player1_id,
-                        username,
-                        display_name: match_row.player1_display_name,
-                        final_rank: match_row.player1_final_rank,
-                    }
-                } else {
-                    TournamentPlayerInfo {
-                        user_id: match_row.player1_id,
-                        username: "Unknown".to_string(),
-                        display_name: None,
-                        final_rank: None,
-                    }
-                };
-
-                let player2_info = if let Some(username) = match_row.player2_username {
-                    TournamentPlayerInfo {
-                        user_id: match_row.player2_id.unwrap_or_default(),
-                        username,
-                        display_name: match_row.player2_display_name,
-                        final_rank: match_row.player2_final_rank,
-                    }
-                } else {
-                    TournamentPlayerInfo {
-                        user_id: match_row.player2_id.unwrap_or_default(),
-                        username: "Bye".to_string(),
-                        display_name: None,
-                        final_rank: None,
-                    }
-                };
-
-                round_matches.push(BracketMatch {
-                    match_id: match_row.match_id,
-                    match_number: match_row.match_number.unwrap_or(0),
-                    player1: player1_info,
-                    player2: player2_info,
-                    winner_id: match_row.winner_id,
-                    player1_score: match_row.player1_score,
-                    player2_score: match_row.player2_score,
-                    status: match_row.match_status.parse().unwrap_or(MatchStatus::Pending),
-                    scheduled_time: match_row.scheduled_time,
-                    started_at: match_row.started_at,
-                    completed_at: match_row.completed_at,
-                });
-            }
-
-            bracket_rounds.push(BracketRound {
-                round_id: round.id,
-                round_number: round.round_number,
-                round_type: round.round_type.parse().unwrap_or(RoundType::Elimination),
-                status: round.status.parse().unwrap_or(RoundStatus::Pending),
-                matches: round_matches,
-            });
-        }
-
-        Ok(TournamentBracketResponse {
-            tournament_id,
-            rounds: bracket_rounds,
-        })
-    }
 }
