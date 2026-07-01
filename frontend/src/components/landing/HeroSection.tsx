@@ -17,7 +17,10 @@ export function HeroSection() {
     : {};
 
   return (
-    <section className="relative overflow-hidden bg-background pb-16 pt-20 md:pb-32 md:pt-32 lg:pb-40 lg:pt-40">
+    <section
+      aria-labelledby="hero-heading"
+      className="relative overflow-hidden bg-background pb-16 pt-20 md:pb-32 md:pt-32 lg:pb-40 lg:pt-40"
+    >
       <div className="container relative z-10 flex max-w-[64rem] flex-col items-center gap-4 text-center">
         <motion.div
           {...motionProps}
@@ -29,6 +32,7 @@ export function HeroSection() {
           🎉 <span className="ml-1">Season 1 is now live</span>
         </motion.div>
         <motion.h1
+          id="hero-heading"
           {...motionProps}
           initial={prefersReducedMotion ? undefined : { opacity: 0, y: 20 }}
           animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}

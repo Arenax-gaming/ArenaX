@@ -5,6 +5,7 @@ import passport from 'passport';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { correlationMiddleware } from './middleware/correlation.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
@@ -88,15 +89,16 @@ export const createApp = (): Express => {
     app.use(hpp()); // Prevent HTTP Parameter Pollution
 
     const apiLimiter = rateLimit({
-        windowMs: 15 * 60 * 1000, // 15 minutes
-        limit: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+        windowMs: 15 * 60 * 1000,
+        limit: 100,
         message: 'Too many requests from this IP, please try again after 15 minutes',
-        standardHeaders: 'draft-7', // draft-6: `RateLimit-*` headers; draft-7: combined `RateLimit` header
-        legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+        standardHeaders: 'draft-7',
+        legacyHeaders: false,
     });
-    app.use('/api', apiLimiter); // Apply rate limiter to all /api routes
+    app.use('/api', apiLimiter);
 
     app.use(requestIdMiddleware);
+    app.use(correlationMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);

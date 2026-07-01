@@ -118,8 +118,8 @@ export function BottomNav({ className }: BottomNavProps) {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex flex-col items-center justify-center",
-                    "flex-1 h-full py-2",
+                    "relative flex flex-col items-center justify-center",
+                    "flex-1 h-full py-2 gap-0.5",
                     "transition-colors duration-200",
                     isActive
                       ? "text-primary"
@@ -127,16 +127,38 @@ export function BottomNav({ className }: BottomNavProps) {
                   )}
                   aria-current={isActive ? "page" : undefined}
                 >
-                  <div className="relative">
+                  {/* Shared sliding top-border indicator */}
+                  {isActive && (
+                    <motion.div
+                      className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full bg-primary"
+                      layoutId={prefersReducedMotion ? undefined : "activeBar"}
+                      transition={
+                        prefersReducedMotion
+                          ? { duration: 0 }
+                          : { type: "spring", damping: 30, stiffness: 400 }
+                      }
+                    />
+                  )}
+
+                  {/* Active background pill */}
+                  {isActive && (
+                    <motion.div
+                      className="absolute inset-x-2 inset-y-1 rounded-xl bg-primary/10"
+                      layoutId={prefersReducedMotion ? undefined : "activeBg"}
+                      transition={
+                        prefersReducedMotion
+                          ? { duration: 0 }
+                          : { type: "spring", damping: 30, stiffness: 400 }
+                      }
+                    />
+                  )}
+
+                  <div className="relative z-10">
                     {item.icon(isActive)}
-                    {isActive && !prefersReducedMotion && (
-                      <motion.div
-                        className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary"
-                        layoutId="activeIndicator"
-                      />
-                    )}
                   </div>
-                  <span className="text-xs mt-1 font-medium">{item.label}</span>
+                  <span className="relative z-10 text-xs font-medium">
+                    {item.label}
+                  </span>
                 </Link>
               );
             })}

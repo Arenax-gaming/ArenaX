@@ -39,6 +39,7 @@
         "hpp": "^0.2.3",
         "ioredis": "^5.3.2",
         "jsonata": "^2.2.1",
+        "kafkajs": "^2.2.4",
         "jsonwebtoken": "^9.0.2",
         "nodemailer": "^8.0.9",
         "opossum": "^10.0.0",

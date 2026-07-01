@@ -26,11 +26,17 @@ export function ActiveTournamentsSection() {
   if (tournaments.length === 0) return null;
 
   return (
-    <section className="space-y-6">
+    <section
+      aria-labelledby="active-tournaments-heading"
+      className="space-y-6"
+    >
       {/* Section header */}
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <h2
+            id="active-tournaments-heading"
+            className="text-2xl font-bold tracking-tight flex items-center gap-2"
+          >
             <Trophy className="h-6 w-6 text-yellow-500" aria-hidden="true" />
             Active Tournaments
           </h2>

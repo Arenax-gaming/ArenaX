@@ -9,7 +9,10 @@ declare global {
             username: string;
         }
         interface Request {
+            /** Legacy alias — equals correlationId. Kept for backward compatibility. */
             requestId: string;
+            /** Active correlation ID for this request. */
+            correlationId: string;
             log: Logger;
             user?: User;
         }

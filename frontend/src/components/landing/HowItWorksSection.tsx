@@ -38,7 +38,10 @@ export function HowItWorksSection() {
   const prefersReducedMotion = useReducedMotion();
 
   return (
-    <section className="container py-8 md:py-12 lg:py-24">
+    <section
+      aria-labelledby="how-it-works-heading"
+      className="container py-8 md:py-12 lg:py-24"
+    >
       <motion.div
         initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 20 }}
         whileInView={
@@ -48,7 +51,10 @@ export function HowItWorksSection() {
         transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.5 }}
         className="mx-auto flex max-w-[58rem] flex-col items-center justify-center gap-4 text-center"
       >
-        <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl">
+        <h2
+          id="how-it-works-heading"
+          className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-6xl"
+        >
           How it Works
         </h2>
         <p className="max-w-[85%] leading-normal text-muted-foreground sm:text-lg sm:leading-7">

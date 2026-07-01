@@ -374,7 +374,7 @@ impl WalletService {
         Ok(())
     }
 
-    /// Get transaction history for a user
+    /// Get transaction history for a user (legacy — page/per_page ints)
     pub async fn get_transaction_history(
         &self,
         user_id: Uuid,
@@ -405,6 +405,47 @@ impl WalletService {
         .await?;
 
         Ok(transactions)
+    }
+
+    /// Get paginated transaction history and total count for a user.
+    ///
+    /// Returns `(transactions, total_count)`.  The limit is already clamped
+    /// by [`PaginationParams::resolved_limit`] before reaching this method.
+    pub async fn get_transaction_history_paginated(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<Transaction>, i64), WalletError> {
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM transactions WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_one(&*self.db_pool)
+        .await?;
+
+        let transactions = sqlx::query_as!(
+            Transaction,
+            r#"
+            SELECT id, user_id,
+                transaction_type as "transaction_type: TransactionType",
+                amount, currency,
+                status as "status: TransactionStatus",
+                reference, description, metadata,
+                stellar_transaction_id, created_at, updated_at, completed_at
+            FROM transactions
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+            "#,
+            user_id,
+            limit,
+            offset,
+        )
+        .fetch_all(&*self.db_pool)
+        .await?;
+
+        Ok((transactions, total))
     }
 
     /// Get transaction by reference

@@ -1,7 +1,7 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
 pub mod analytics_service;
-pub mod bracket_generator;
+pub mod auth_service;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod leaderboard_service;

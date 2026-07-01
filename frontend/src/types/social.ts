@@ -1,10 +1,19 @@
-export interface Friend {
+export type UserStatus = 'online' | 'offline' | 'in-game' | 'away' | 'busy'
+
+export interface SocialUser {
   id: string
   username: string
-  avatarUrl?: string
-  isOnline: boolean
+  avatar?: string
+  elo: number
+  status: UserStatus
+  currentActivity?: string
   lastSeen?: string
-  addedAt: string
+}
+
+export interface Friend extends SocialUser {
+  friendSince: string
+  isFavorite?: boolean
+  mutualFriends?: number
 }
 
 export interface FriendRequest {

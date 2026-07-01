@@ -1557,6 +1557,188 @@ impl TournamentService {
         Ok(())
     }
 
+    /// Trigger prize distribution for a completed tournament.
+    ///
+    /// Exposed as `pub` so the HTTP handler can call it directly.
+    /// The internal logic writes prize amounts to the DB first and then
+    /// attempts on-chain transfer via the Soroban prize contract.
+    pub async fn trigger_prize_distribution(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        // Validate tournament exists and is in a distributable state
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+        if tournament.status != TournamentStatus::Completed {
+            return Err(ApiError::bad_request(
+                "Tournament must be completed before distributing prizes",
+            ));
+        }
+        self.distribute_prizes(tournament_id).await
+    }
+
+    /// Cancel a tournament and refund all participants.
+    ///
+    /// Sets status to `Cancelled`, then issues a wallet refund for every
+    /// participant who paid an entry fee.
+    pub async fn cancel_tournament(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        // Only non-terminal statuses can be cancelled
+        if matches!(
+            tournament.status,
+            TournamentStatus::Completed | TournamentStatus::Cancelled
+        ) {
+            return Err(ApiError::bad_request(
+                "Cannot cancel a tournament that is already completed or cancelled",
+            ));
+        }
+
+        // Issue refunds for every participant who paid
+        let participants = sqlx::query_as!(
+            TournamentParticipant,
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND entry_fee_paid = true",
+            tournament_id,
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        for participant in &participants {
+            // Refund in the tournament's currency
+            match tournament.entry_fee_currency.as_str() {
+                "ARENAX_TOKEN" => {
+                    sqlx::query!(
+                        "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens + $1 WHERE user_id = $2",
+                        tournament.entry_fee,
+                        participant.user_id,
+                    )
+                    .execute(&self.db_pool)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))?;
+                }
+                _ => {
+                    // NGN and other fiat
+                    sqlx::query!(
+                        "UPDATE wallets SET balance_ngn = balance_ngn + $1 WHERE user_id = $2",
+                        tournament.entry_fee,
+                        participant.user_id,
+                    )
+                    .execute(&self.db_pool)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))?;
+                }
+            }
+
+            self.create_transaction(
+                participant.user_id,
+                TransactionType::Refund,
+                tournament.entry_fee,
+                tournament.entry_fee_currency.clone(),
+                format!("Refund for cancelled tournament: {}", tournament.name),
+            )
+            .await?;
+        }
+
+        // Update tournament status
+        let updated = sqlx::query_as!(
+            Tournament,
+            r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *"#,
+            TournamentStatus::Cancelled as _,
+            Utc::now(),
+            tournament_id,
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        tracing::info!(
+            tournament_id = %tournament_id,
+            refunds_issued = participants.len(),
+            "Tournament cancelled and refunds issued"
+        );
+
+        Ok(updated)
+    }
+
+    /// Advance the tournament bracket to the next round.
+    ///
+    /// Transitions the tournament to `InProgress` (generating the initial
+    /// bracket if not already done) and marks the current pending round as
+    /// `InProgress`.
+    pub async fn advance_bracket(&self, tournament_id: Uuid) -> Result<(), ApiError> {
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        match tournament.status {
+            TournamentStatus::RegistrationClosed | TournamentStatus::Upcoming => {
+                // First advancement: set to InProgress and generate bracket
+                sqlx::query!(
+                    r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3"#,
+                    TournamentStatus::InProgress as _,
+                    Utc::now(),
+                    tournament_id,
+                )
+                .execute(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                self.start_tournament(tournament_id).await?;
+            }
+            TournamentStatus::InProgress => {
+                // Subsequent advancements: complete the current round and
+                // start the next pending one
+                sqlx::query!(
+                    r#"
+                    UPDATE tournament_rounds
+                    SET status = $1, completed_at = $2
+                    WHERE tournament_id = $3 AND status = $4
+                    "#,
+                    RoundStatus::Completed as _,
+                    Utc::now(),
+                    tournament_id,
+                    RoundStatus::InProgress as _,
+                )
+                .execute(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                let advanced = sqlx::query!(
+                    r#"
+                    UPDATE tournament_rounds
+                    SET status = $1, started_at = $2
+                    WHERE id = (
+                        SELECT id FROM tournament_rounds
+                        WHERE tournament_id = $3 AND status = $4
+                        ORDER BY round_number ASC
+                        LIMIT 1
+                    )
+                    RETURNING id
+                    "#,
+                    RoundStatus::InProgress as _,
+                    Utc::now(),
+                    tournament_id,
+                    RoundStatus::Pending as _,
+                )
+                .fetch_optional(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                if advanced.is_none() {
+                    // No pending rounds left — complete the tournament
+                    self.update_tournament_status(
+                        tournament_id,
+                        TournamentStatus::Completed,
+                    )
+                    .await?;
+                    tracing::info!(tournament_id = %tournament_id, "Tournament completed after final round");
+                }
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "Tournament must be in RegistrationClosed, Upcoming, or InProgress state to advance the bracket",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     async fn distribute_prizes(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Get prize pool information
         let prize_pool = sqlx::query!(
