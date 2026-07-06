@@ -65,6 +65,8 @@ function LeaderboardRow({
       style={style}
       className="flex items-center border-b border-gray-200 dark:border-gray-800 hover:bg-muted dark:hover:bg-background/50 transition-colors"
       onClick={() => data.onItemClick(index)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); data.onItemClick(index); } }}
+      tabIndex={0}
     >
       {/* Rank */}
       <div className="w-14 shrink-0 px-4 text-sm font-semibold">

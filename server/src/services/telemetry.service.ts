@@ -1,3 +1,4 @@
+// @ts-ignore - @sentry/node has no type declarations
 import * as Sentry from '@sentry/node';
 import { logger } from './logger.service';
 import { getEnv } from '../config/env';
