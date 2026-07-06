@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, Bytes, Vec};
+use soroban_sdk::{contractevent, Address, Bytes, Env, Vec};
 
 #[contractevent(topics = ["ZKProof", "VERIFIED"])]
 pub struct ProofVerified {
@@ -45,17 +45,9 @@ pub fn emit_proof_generated(env: &Env, proof_id: u64, generator: &Address, proof
 }
 
 pub fn emit_private_transaction(env: &Env, tx_id: u64, proof_id: u64) {
-    PrivateTransaction {
-        tx_id,
-        proof_id,
-    }
-    .publish(env);
+    PrivateTransaction { tx_id, proof_id }.publish(env);
 }
 
 pub fn emit_anonymous_vote(env: &Env, vote_id: u64, proof_id: u64) {
-    AnonymousVote {
-        vote_id,
-        proof_id,
-    }
-    .publish(env);
+    AnonymousVote { vote_id, proof_id }.publish(env);
 }

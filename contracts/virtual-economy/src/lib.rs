@@ -500,7 +500,11 @@ impl VirtualEconomyContract {
         let mut creator = None;
 
         if let MarketplaceAsset::NFT(token_id) = &order.asset {
-            if let Some(metadata) = env.storage().persistent().get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone())) {
+            if let Some(metadata) = env
+                .storage()
+                .persistent()
+                .get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone()))
+            {
                 creator = Some(metadata.creator.clone());
 
                 // Only pay royalty if seller != creator (not a primary sale)
@@ -830,7 +834,10 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
-    pub fn get_nft_license(env: Env, token_id: BytesN<32>) -> Result<LicenseConfig, VirtualEconomyError> {
+    pub fn get_nft_license(
+        env: Env,
+        token_id: BytesN<32>,
+    ) -> Result<LicenseConfig, VirtualEconomyError> {
         env.storage()
             .persistent()
             .get(&DataKey::NFTLicense(token_id))

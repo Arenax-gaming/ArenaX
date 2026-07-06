@@ -33,7 +33,7 @@ fn test_access_control_workflow() {
     // Delegate role
     // env.ledger().set_timestamp(100);
     client.delegate_role(&user1, &user2, &ROLE_OPERATOR, &100);
-    
+
     // Delegation is active
     assert!(client.is_delegation_active(&user1, &user2, &ROLE_OPERATOR));
     assert!(client.has_delegated_role(&user1, &user2, &ROLE_OPERATOR));

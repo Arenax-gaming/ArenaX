@@ -1,7 +1,7 @@
 #![cfg(test)]
 use super::*;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{BytesN, Env, contract, contractimpl};
+use soroban_sdk::{contract, contractimpl, BytesN, Env};
 
 // Mock User Identity Contract for testing
 #[contract]

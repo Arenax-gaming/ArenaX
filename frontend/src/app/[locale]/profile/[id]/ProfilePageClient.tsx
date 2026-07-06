@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { isSectionVisible } from '@/lib/profile-utils';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
@@ -76,12 +77,16 @@ export function ProfilePageClient({
       <div className="mb-6 flex flex-wrap gap-3 justify-between items-center">
         <div className="flex flex-wrap gap-3">
           {viewerRelation === 'owner' && (
-            <Button variant="outline" asChild>
-              <a href="/profile/edit">
-                <Settings className="h-4 w-4 mr-2" />
-                Edit Profile
-              </a>
-            </Button>
+            // Plain Next.js link styled to match <Button variant="outline" size="md">.
+            // We avoid the polymorphic `Button asChild` pattern since the local
+            // Button component doesn't expose it; this keeps the same visual.
+            <Link
+              href="/profile/edit"
+              className="inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 border border-border bg-transparent text-foreground/70 hover:bg-muted focus-visible:ring-gray-500 h-10 px-4 py-2"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Edit Profile
+            </Link>
           )}
           
           {viewerRelation === 'public' && (

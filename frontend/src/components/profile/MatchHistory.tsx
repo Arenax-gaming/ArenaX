@@ -24,7 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 
 // Allow either the profile-specific or general MatchWithPlayers shape
-type AnyMatchWithPlayers = MatchWithPlayers & {
+export type AnyMatchWithPlayers = MatchWithPlayers & {
   scorePlayer1?: number;
   scorePlayer2?: number;
   createdAt?: string;

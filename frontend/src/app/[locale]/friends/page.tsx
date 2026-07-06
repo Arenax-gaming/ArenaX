@@ -1,11 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
-import { UserPlus, Users, Search, MessageSquare } from "lucide-react";
+import { UserPlus, Users } from "lucide-react";
 import { FriendsList } from "@/components/social/FriendsList";
 import { FriendRequests } from "@/components/social/FriendRequests";
 import { InviteFriends } from "@/components/social/InviteFriends";
-import { useFriendsList, usePendingFriendRequests } from "@/hooks/useSocial";
+import {
+  useFriendsList,
+  usePendingFriendRequests,
+  useAcceptFriendRequest,
+} from "@/hooks/useSocial";
 
 export default function FriendsPage() {
   const [activeTab, setActiveTab] = useState<"list" | "requests" | "invite">(
@@ -13,15 +17,50 @@ export default function FriendsPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { data: friendsData, isLoading: friendsLoading } = useFriendsList();
-  const { data: requestsData, isLoading: requestsLoading } =
-    usePendingFriendRequests();
+  const { data: friendsData } = useFriendsList();
+  const { data: requestsData } = usePendingFriendRequests();
+
+  // Wired to the existing /friends/requests/accept endpoint.
+  const acceptRequest = useAcceptFriendRequest();
 
   const friends = friendsData?.friends || [];
-  const filteredFriends = friends.filter((f) =>
-    f.username.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
-  const onlineFriends = friends.filter((f) => f.isOnline).length;
+  const onlineFriends = friends.filter(
+    (f) => f.status === "online" || f.status === "in-game",
+  ).length;
+
+  // Stubs for actions the backend doesn't yet expose. Logging keeps them
+  // dev-visible; in production the branches are stripped at build time.
+  const handleRemoveFriend = (friendId: string) => {
+    // TODO: replace with useRemoveFriend mutation once /friends/remove lands.
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[FriendsPage] Remove friend requested but backend endpoint isn't wired up yet:",
+        friendId,
+      );
+    }
+  };
+
+  const handleInviteToParty = (friendId: string) => {
+    // Use the existing party creation flow; /party/new reads ?invite=<id>.
+    window.location.href = `/party/new?invite=${friendId}`;
+  };
+
+  const handleAcceptRequest = (requestId: string) => {
+    acceptRequest.mutate(requestId);
+  };
+
+  const handleDeclineRequest = (requestId: string) => {
+    // TODO: replace with useDeclineFriendRequest mutation once
+    // /friends/requests/decline lands.
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[FriendsPage] Decline friend request requested but backend endpoint isn't wired up yet:",
+        requestId,
+      );
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">
@@ -74,36 +113,26 @@ export default function FriendsPage() {
           </button>
         </div>
 
-        {/* Search Bar */}
-        {activeTab === "list" && (
-          <div className="mb-6 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search friends..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary"
-            />
-          </div>
-        )}
-
         {/* Content */}
         <div className="bg-surface/50 rounded-lg border border-border p-6">
           {activeTab === "list" && (
             <FriendsList
-              friends={filteredFriends}
-              isLoading={friendsLoading}
-              onMessage={(friendId) => {
+              friends={friends}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onRemoveFriend={handleRemoveFriend}
+              onSendMessage={(friendId) => {
                 window.location.href = `/messages?friend=${friendId}`;
               }}
+              onInviteToParty={handleInviteToParty}
             />
           )}
 
           {activeTab === "requests" && (
             <FriendRequests
               requests={requestsData || []}
-              isLoading={requestsLoading}
+              onAccept={handleAcceptRequest}
+              onDecline={handleDeclineRequest}
             />
           )}
 

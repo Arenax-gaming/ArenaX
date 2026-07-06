@@ -140,10 +140,7 @@ fn test_batch_mint_zero_amount_fails() {
     let c = client(&env, &contract_id);
     let r = vec_addresses(&env, 2);
     let a = vec_i128(&env, &[100, 0]);
-    assert_eq!(
-        c.try_batch_mint(&r, &a),
-        Err(Ok(BatchError::InvalidAmount))
-    );
+    assert_eq!(c.try_batch_mint(&r, &a), Err(Ok(BatchError::InvalidAmount)));
 }
 
 #[test]
@@ -152,10 +149,7 @@ fn test_batch_mint_negative_amount_fails() {
     let c = client(&env, &contract_id);
     let r = vec_addresses(&env, 1);
     let a = vec_i128(&env, &[-50]);
-    assert_eq!(
-        c.try_batch_mint(&r, &a),
-        Err(Ok(BatchError::InvalidAmount))
-    );
+    assert_eq!(c.try_batch_mint(&r, &a), Err(Ok(BatchError::InvalidAmount)));
 }
 
 #[test]

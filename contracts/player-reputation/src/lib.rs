@@ -817,7 +817,10 @@ impl PlayerReputationContract {
         }
 
         let base_recovery = (recovery_days as i128) * config.base_recovery_rate;
-        let recovery_amount = core::cmp::min(base_recovery, config.max_recovery_per_day * recovery_days as i128);
+        let recovery_amount = core::cmp::min(
+            base_recovery,
+            config.max_recovery_per_day * recovery_days as i128,
+        );
 
         profile.reputation_score = profile.reputation_score.saturating_add(recovery_amount);
         profile.last_recovery_ts = now;
@@ -850,7 +853,11 @@ impl PlayerReputationContract {
     }
 
     /// Set decay exemption until timestamp
-    pub fn set_decay_exempt(env: Env, player: Address, until_ts: u64) -> Result<(), PlayerReputationError> {
+    pub fn set_decay_exempt(
+        env: Env,
+        player: Address,
+        until_ts: u64,
+    ) -> Result<(), PlayerReputationError> {
         Self::require_admin(&env)?;
 
         let config = Self::get_config(&env);
@@ -867,11 +874,18 @@ impl PlayerReputationContract {
     }
 
     /// Update configuration
-    pub fn update_config(env: Env, new_config: ReputationConfig) -> Result<(), PlayerReputationError> {
+    pub fn update_config(
+        env: Env,
+        new_config: ReputationConfig,
+    ) -> Result<(), PlayerReputationError> {
         Self::require_admin(&env)?;
 
         env.storage().instance().set(&DataKey::Config, &new_config);
-        events::emit_decay_config_updated(&env, new_config.gaming_decay_per_day, env.ledger().timestamp());
+        events::emit_decay_config_updated(
+            &env,
+            new_config.gaming_decay_per_day,
+            env.ledger().timestamp(),
+        );
 
         Ok(())
     }

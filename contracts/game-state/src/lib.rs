@@ -440,11 +440,7 @@ impl GameStateContract {
         env.storage().instance().set(&DataKey::Paused, &paused);
     }
 
-    pub fn configure_compression(
-        env: Env,
-        admin: Address,
-        config: CompressionConfig,
-    ) {
+    pub fn configure_compression(env: Env, admin: Address, config: CompressionConfig) {
         Self::require_admin(&env, &admin);
         env.storage()
             .instance()

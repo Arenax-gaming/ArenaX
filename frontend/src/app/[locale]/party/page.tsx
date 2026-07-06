@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import { Users, Plus, Gamepad2 } from "lucide-react";
-import { PartyManager } from "@/components/social/PartyManager";
-import { useCreateParty, useFriendsList } from "@/hooks/useSocial";
+import { useCreateParty } from "@/hooks/useSocial";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function PartyPage() {
@@ -13,7 +12,6 @@ export default function PartyPage() {
   const [partyDescription, setPartyDescription] = useState("");
   const [maxMembers, setMaxMembers] = useState(4);
 
-  const { data: friendsData } = useFriendsList();
   const createPartyMutation = useCreateParty();
 
   const handleCreateParty = async () => {
@@ -127,8 +125,20 @@ export default function PartyPage() {
           </div>
         )}
 
-        {/* Party Manager */}
-        <PartyManager friends={friendsData?.friends || []} />
+        {/* Active party placeholder — the full lifecycle view lives in
+            <PartyManager /> which is rendered once a party has been created
+            (see PartyManagerProps for the required state + callbacks). */}
+        <div className="bg-surface/50 rounded-lg border border-border p-6 text-center">
+          <Gamepad2 className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+          <h2 className="text-lg font-semibold text-white mb-1">
+            No active party
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Use the form above to create a party. Once one exists, the full
+            party management view (members, invites, voice chat, ready/queue)
+            will appear here.
+          </p>
+        </div>
       </div>
     </div>
   );

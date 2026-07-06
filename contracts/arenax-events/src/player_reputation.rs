@@ -209,11 +209,7 @@ pub struct DecayConfigUpdated {
     pub timestamp: u64,
 }
 
-pub fn emit_decay_config_updated(
-    env: &Env,
-    new_decay_per_day: i128,
-    timestamp: u64,
-) {
+pub fn emit_decay_config_updated(env: &Env, new_decay_per_day: i128, timestamp: u64) {
     DecayConfigUpdated {
         new_decay_per_day,
         timestamp,

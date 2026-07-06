@@ -12,6 +12,7 @@ import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
 import rateLimit from 'express-rate-limit';
 import xss from 'xss-clean';
+// @ts-ignore - hpp has no type declarations
 import hpp from 'hpp';
 import { setupSwagger } from './openapi/swagger';
 
