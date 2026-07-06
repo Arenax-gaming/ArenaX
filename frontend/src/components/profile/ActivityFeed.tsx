@@ -171,7 +171,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
           {ACTIVITY_FILTERS.map((filter) => (
             <Button
               key={filter.key}
-              variant={selectedFilter === filter.key ? "default" : "outline"}
+              variant={selectedFilter === filter.key ? "primary" : "outline"}
               size="sm"
               onClick={() => setSelectedFilter(filter.key)}
               className="h-8 px-3 text-xs"

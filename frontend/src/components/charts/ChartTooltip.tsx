@@ -15,8 +15,21 @@ import type {
   ValueType,
 } from "recharts/types/component/DefaultTooltipContent";
 
-interface ChartTooltipProps extends TooltipProps<ValueType, NameType> {
-  formatter?: (value: ValueType, name: NameType) => string;
+/**
+ * `Omit` the upstream `formatter` because its parameter types conflict with
+ * our consumer-facing signature (the base type's parameter is narrower than
+ * what call sites actually pass at runtime when the tooltip is empty).
+ *
+ * `payload` / `label` are widened to optionals because the upstream
+ * `TooltipProps` marks them as required context-derived properties; in
+ * practice they are absent when the tooltip has no data.
+ */
+interface ChartTooltipProps
+  extends Omit<TooltipProps<ValueType, NameType>, "formatter"> {
+  active?: boolean;
+  payload?: any[];
+  label?: any;
+  formatter?: (value: any, name: any) => string;
 }
 
 export function ChartTooltip({
@@ -36,7 +49,7 @@ export function ChartTooltip({
       {label && (
         <p className="font-semibold text-foreground mb-1">{String(label)}</p>
       )}
-      {payload.map((entry, i) => (
+      {payload.map((entry: any, i: number) => (
         <div key={i} className="flex items-center gap-2">
           <span
             className="inline-block h-2 w-2 rounded-full shrink-0"
@@ -46,7 +59,7 @@ export function ChartTooltip({
           <span className="text-muted-foreground">{entry.name}:</span>
           <span className="font-medium text-foreground">
             {formatter
-              ? formatter(entry.value as ValueType, entry.name as NameType)
+              ? formatter(entry.value, entry.name)
               : String(entry.value)}
           </span>
         </div>

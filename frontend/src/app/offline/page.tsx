@@ -1,3 +1,6 @@
+// On-demand SSR — the SW precache keeps this available offline.
+export const dynamic = "force-dynamic";
+
 export default function OfflinePage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
@@ -7,12 +10,14 @@ export default function OfflinePage() {
         No internet connection detected. Check your network and try again.
         Changes you make will sync automatically when you reconnect.
       </p>
-      <button
-        onClick={() => window.location.reload()}
+      {/* Plain anchor — RSC-safe. Same-URL navigation triggers a full
+          browser page reload, equivalent to window.location.reload(). */}
+      <a
+        href="./"
         className="mt-2 rounded-lg bg-blue-600 px-5 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         Try again
-      </button>
+      </a>
     </main>
   );
 }

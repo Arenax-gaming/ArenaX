@@ -157,6 +157,18 @@ class ApiClient {
   }
 
   // Notification endpoints (persistent, stored in DB)
+  // Username availability check (used by useUsernameAvailability hook)
+  async checkUsernameAvailability(username: string): Promise<{ available: boolean }> {
+    try {
+      return await this.request<{ available: boolean }>(
+        `/users/check-username?username=${encodeURIComponent(username)}`,
+      );
+    } catch {
+      // Soft-fail so the hook can show an error state rather than crashing.
+      return { available: false };
+    }
+  }
+
   async getNotifications(): Promise<
     Array<{
       id: string;

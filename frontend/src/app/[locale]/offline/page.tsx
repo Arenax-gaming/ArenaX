@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { WifiOff, RefreshCw } from "lucide-react";
 
+// Bypass static prerender for the offline page — next-pwa precaches it
+// from the SW cache manifest on first visit, so on-demand SSR is fine.
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Offline - ArenaX",
   description: "You are offline",
@@ -14,17 +18,21 @@ export default function OfflinePage() {
       </div>
       <h1 className="mb-2 text-2xl font-bold text-white">You&apos;re Offline</h1>
       <p className="mb-8 max-w-md text-gray-400">
-        Don&apos;t worry! You can still browse cached content. 
+        Don&apos;t worry! You can still browse cached content.
         Connect to the internet to access the latest features.
       </p>
       <div className="flex gap-4">
-        <button
-          onClick={() => window.location.reload()}
+        {/* Plain anchor — RSC-safe (no event handler). Navigation to the same
+            URL triggers a full browser page reload, equivalent to the
+            original window.location.reload(). Native <a> (not Next.js Link)
+            so the browser does its real navigation, not a soft refresh. */}
+        <a
+          href="./"
           className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
         >
           <RefreshCw className="h-4 w-4" />
           Try Again
-        </button>
+        </a>
         <Link
           href="/"
           className="inline-flex items-center rounded-lg border border-gray-700 px-6 py-3 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800"

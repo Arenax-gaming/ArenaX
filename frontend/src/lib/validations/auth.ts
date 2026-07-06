@@ -29,7 +29,12 @@ const usernameField = z
 export const loginSchema = z.object({
   email: emailField,
   password: z.string().min(1, "Password is required"),
-  rememberMe: z.boolean().optional().default(false),
+  // Required boolean so the schema's `input` and `output` shapes are
+  // identical (no `.optional()` / `.default()` widening). The form already
+  // supplies `rememberMe: false` in its `defaultValues`, so runtime values
+  // always include the field; this alignment is what lets the React Hook
+  // Form + zodResolver generics in LoginForm.tsx type-check.
+  rememberMe: z.boolean(),
 });
 
 export type LoginFormData = z.infer<typeof loginSchema>;

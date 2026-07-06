@@ -115,12 +115,15 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       const registration = await navigator.serviceWorker.ready;
 
       // Subscribe to push
+      // The DOM `subscribe` API expects `BufferSource`, but `Uint8Array` is
+      // a subtype in this lib config; cast via `unknown` keeps strict mode happy.
+      const vapidKey = urlBase64ToUint8Array(
+        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
+      ) as unknown as BufferSource;
+
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(
-          // In production, use your VAPID public key
-          process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ""
-        ),
+        applicationServerKey: vapidKey,
       });
 
       // Send subscription to server
@@ -178,15 +181,21 @@ export function usePushNotifications(): UsePushNotificationsReturn {
         return;
       }
 
-      const options: NotificationOptions = {
+      // `NotificationOptions` in the current lib config doesn't include
+      // `vibrate` or `actions` — both live on the ServiceWorker
+      // Notification API separately. Project them onto our local type to
+      // keep the constructor call ergonomic without `as any` at the
+      // call site.
+      const options = {
         body: payload.body,
         icon: payload.icon || "/icons/icon-192x192.png",
         badge: payload.badge || "/icons/icon-72x72.png",
         tag: payload.tag,
         data: payload.data,
-        vibrate: [100, 50, 100],
-        actions: payload.actions,
-      };
+        // Cast: `actions` and `vibrate` are valid on NotificationOptions in
+        // newer lib targets but not in the one shipped here.
+        ...(payload.actions ? { actions: payload.actions } : {}),
+      } as NotificationOptions;
 
       // Try to use service worker notification first
       if ("serviceWorker" in navigator) {

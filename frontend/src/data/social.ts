@@ -5,6 +5,7 @@ import type {
   Conversation,
   Party,
   PartyInvite,
+  PartyMember,
   CommunityPost,
   CommunityComment,
   SocialNotification,
@@ -93,10 +94,25 @@ export const mockFriends: Friend[] = [
   { ...mockSocialUsers[7], friendSince: "2026-03-05T17:00:00Z", mutualFriends: 2 },
 ];
 
+// Helper to lift a SocialUser into FriendRequest's denormalized fields.
+const denormFromUser = (user: SocialUser) => ({
+  fromUserId: user.id,
+  fromUsername: user.username,
+  fromAvatar: user.avatar,
+});
+
 // Mock Friend Requests
 export const mockFriendRequests: FriendRequest[] = [
   {
     id: "req-1",
+    ...denormFromUser({
+      id: "user-200",
+      username: "GhostReaper",
+      avatar:
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=GhostReaper",
+      elo: 1320,
+      status: "online",
+    }),
     fromUser: {
       id: "user-200",
       username: "GhostReaper",
@@ -104,12 +120,22 @@ export const mockFriendRequests: FriendRequest[] = [
       elo: 1320,
       status: "online",
     },
+    toUserId: currentUser.id,
     message: "Hey! I saw you in the leaderboard, would love to play together!",
     createdAt: "2026-03-10T10:30:00Z",
     status: "pending",
   },
   {
     id: "req-2",
+    ...denormFromUser({
+      id: "user-201",
+      username: "PixelWarrior",
+      avatar:
+        "https://api.dicebear.com/7.x/avataaars/svg?seed=PixelWarrior",
+      elo: 1150,
+      status: "offline",
+      lastSeen: "5 hours ago",
+    }),
     fromUser: {
       id: "user-201",
       username: "PixelWarrior",
@@ -118,148 +144,211 @@ export const mockFriendRequests: FriendRequest[] = [
       status: "offline",
       lastSeen: "5 hours ago",
     },
+    toUserId: currentUser.id,
     createdAt: "2026-03-09T15:45:00Z",
     status: "pending",
   },
 ];
 
+// Helper to build a chat-style Message object carrying both the new
+// (conversationId/senderId/timestamp) and legacy (fromUserId/toUserId/isRead)
+// fields so Message's tightened contract accepts the mock data.
+const chatMessage = (m: {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderUsername: string;
+  content: string;
+  timestamp: string;
+  status: Message["status"];
+  type?: Message["type"];
+  isRead?: boolean;
+}): Message => ({
+  id: m.id,
+  conversationId: m.conversationId,
+  senderId: m.senderId,
+  fromUserId: m.senderId,
+  fromUsername: m.senderUsername,
+  content: m.content,
+  timestamp: m.timestamp,
+  createdAt: m.timestamp,
+  status: m.status,
+  type: m.type ?? "text",
+  toUserId: m.senderId === currentUser.id ? "user-124" : currentUser.id,
+  isRead: m.isRead ?? m.status === "read",
+});
+
 // Mock Conversations
 export const mockConversations: Conversation[] = [
   {
     id: "conv-1",
+    participantId: mockSocialUsers[0].id,
+    participantUsername: mockSocialUsers[0].username,
+    participantAvatar: mockSocialUsers[0].avatar,
     type: "direct",
     participants: [mockSocialUsers[0]],
     unreadCount: 2,
     updatedAt: "2026-03-10T11:30:00Z",
-    lastMessage: {
+    lastMessage: chatMessage({
       id: "msg-10",
       conversationId: "conv-1",
       senderId: mockSocialUsers[0].id,
+      senderUsername: mockSocialUsers[0].username,
       content: "Hey! Are you ready for the tournament tonight?",
       timestamp: "2026-03-10T11:30:00Z",
       status: "delivered",
-      type: "text",
-    },
+    }),
   },
   {
     id: "conv-2",
+    participantId: mockSocialUsers[2].id,
+    participantUsername: mockSocialUsers[2].username,
+    participantAvatar: mockSocialUsers[2].avatar,
     type: "direct",
     participants: [mockSocialUsers[2]],
     unreadCount: 0,
     updatedAt: "2026-03-10T09:15:00Z",
-    lastMessage: {
+    lastMessage: chatMessage({
       id: "msg-20",
       conversationId: "conv-2",
       senderId: currentUser.id,
+      senderUsername: currentUser.username,
       content: "GG! That was an amazing match!",
       timestamp: "2026-03-10T09:15:00Z",
       status: "read",
-      type: "text",
-    },
+    }),
   },
   {
     id: "conv-3",
+    participantId: "party-1",
+    participantUsername: "Elite Squad",
     type: "party",
-    participants: [mockSocialUsers[0], mockSocialUsers[1], mockSocialUsers[2]],
+    participants: [
+      mockSocialUsers[0],
+      mockSocialUsers[1],
+      mockSocialUsers[2],
+    ],
     unreadCount: 5,
     updatedAt: "2026-03-10T12:00:00Z",
     partyId: "party-1",
-    lastMessage: {
+    lastMessage: chatMessage({
       id: "msg-30",
       conversationId: "conv-3",
       senderId: mockSocialUsers[1].id,
+      senderUsername: mockSocialUsers[1].username,
       content: "Let's queue up in 10 minutes!",
       timestamp: "2026-03-10T12:00:00Z",
       status: "delivered",
-      type: "text",
-    },
+    }),
   },
 ];
 
 // Mock Messages for a conversation
 export const mockMessages: Message[] = [
-  {
+  chatMessage({
     id: "msg-1",
     conversationId: "conv-1",
     senderId: mockSocialUsers[0].id,
+    senderUsername: mockSocialUsers[0].username,
     content: "Hey! How's it going?",
     timestamp: "2026-03-10T10:00:00Z",
     status: "read",
-    type: "text",
-  },
-  {
+    isRead: true,
+  }),
+  chatMessage({
     id: "msg-2",
     conversationId: "conv-1",
     senderId: currentUser.id,
+    senderUsername: currentUser.username,
     content: "Pretty good! Just finished a ranked match. You?",
     timestamp: "2026-03-10T10:02:00Z",
     status: "read",
-    type: "text",
-  },
-  {
+    isRead: true,
+  }),
+  chatMessage({
     id: "msg-3",
     conversationId: "conv-1",
     senderId: mockSocialUsers[0].id,
+    senderUsername: mockSocialUsers[0].username,
     content: "Same here! Won my last two games. Want to duo queue?",
     timestamp: "2026-03-10T10:05:00Z",
     status: "read",
-    type: "text",
-  },
-  {
+    isRead: true,
+  }),
+  chatMessage({
     id: "msg-4",
     conversationId: "conv-1",
     senderId: currentUser.id,
+    senderUsername: currentUser.username,
     content: "Sure! Give me a few minutes to finish up here.",
     timestamp: "2026-03-10T10:07:00Z",
     status: "read",
-    type: "text",
-  },
-  {
+    isRead: true,
+  }),
+  chatMessage({
     id: "msg-5",
     conversationId: "conv-1",
     senderId: mockSocialUsers[0].id,
+    senderUsername: mockSocialUsers[0].username,
     content: "No rush! I'll be waiting.",
     timestamp: "2026-03-10T10:08:00Z",
     status: "read",
-    type: "text",
-  },
-  {
+    isRead: true,
+  }),
+  chatMessage({
     id: "msg-10",
     conversationId: "conv-1",
     senderId: mockSocialUsers[0].id,
+    senderUsername: mockSocialUsers[0].username,
     content: "Hey! Are you ready for the tournament tonight?",
     timestamp: "2026-03-10T11:30:00Z",
     status: "delivered",
-    type: "text",
-  },
+    isRead: false,
+  }),
 ];
+
+// Helper to build a PartyMember that satisfies both the new user/isReady/
+// isSpeaking fields and the legacy userId/username fields.
+const partyMember = (
+  user: SocialUser,
+  role: "leader" | "member",
+  joinedAt: string,
+  isReady: boolean,
+): PartyMember["userId"] extends string
+  ? {
+      userId: string;
+      username: string;
+      avatarUrl?: string;
+      role: "leader" | "member";
+      joinedAt: string;
+      user: SocialUser;
+      isReady: boolean;
+      isSpeaking: boolean;
+    }
+  : never => ({
+  userId: user.id,
+  username: user.username,
+  avatarUrl: user.avatar,
+  role,
+  joinedAt,
+  user,
+  isReady,
+  isSpeaking: false,
+});
 
 // Mock Party
 export const mockParty: Party = {
   id: "party-1",
   name: "Elite Squad",
   leaderId: currentUser.id,
+  leaderUsername: currentUser.username,
   members: [
-    {
-      user: { ...currentUser, status: "online" },
-      role: "leader",
-      joinedAt: "2026-03-10T08:00:00Z",
-      isReady: true,
-    },
-    {
-      user: mockSocialUsers[0],
-      role: "member",
-      joinedAt: "2026-03-10T08:15:00Z",
-      isReady: true,
-    },
-    {
-      user: mockSocialUsers[2],
-      role: "member",
-      joinedAt: "2026-03-10T08:30:00Z",
-      isReady: false,
-    },
+    partyMember({ ...currentUser, status: "online" }, "leader", "2026-03-10T08:00:00Z", true),
+    partyMember(mockSocialUsers[0], "member", "2026-03-10T08:15:00Z", true),
+    partyMember(mockSocialUsers[2], "member", "2026-03-10T08:30:00Z", false),
   ],
   maxMembers: 5,
+  currentMembers: 3,
   isPrivate: false,
   createdAt: "2026-03-10T08:00:00Z",
   voiceChatEnabled: true,
@@ -279,12 +368,48 @@ export const mockPartyInvites: PartyInvite[] = [
   },
 ];
 
+// Helper to build a CommunityPost with both `author` object and
+// `authorId`/`authorUsername`/`category` required fields.
+const communityPost = (
+  p: {
+    id: string;
+    author: SocialUser;
+    content: string;
+    tags?: string[];
+    likes: number;
+    comments: number;
+    shares?: number;
+    createdAt: string;
+    isLiked: boolean;
+    isPinned: boolean;
+    category: string;
+    media?: CommunityPost["media"];
+  },
+): CommunityPost => ({
+  id: p.id,
+  authorId: p.author.id,
+  authorUsername: p.author.username,
+  authorAvatar: p.author.avatar,
+  author: p.author,
+  content: p.content,
+  category: p.category,
+  tags: p.tags,
+  likes: p.likes,
+  comments: p.comments,
+  shares: p.shares,
+  isLiked: p.isLiked,
+  isPinned: p.isPinned,
+  createdAt: p.createdAt,
+  media: p.media,
+});
+
 // Mock Community Posts
 export const mockCommunityPosts: CommunityPost[] = [
-  {
+  communityPost({
     id: "post-1",
     author: mockSocialUsers[6],
-    content: "Just hit 1500 ELO! Thanks to everyone who helped me improve. Special shoutout to my duo partner @ShadowNinja for all the practice sessions! 🎉",
+    content:
+      "Just hit 1500 ELO! Thanks to everyone who helped me improve. Special shoutout to my duo partner @ShadowNinja for all the practice sessions! 🎉",
     tags: ["milestone", "celebration", "ranked"],
     likes: 42,
     comments: 12,
@@ -292,11 +417,13 @@ export const mockCommunityPosts: CommunityPost[] = [
     createdAt: "2026-03-10T09:00:00Z",
     isLiked: false,
     isPinned: false,
-  },
-  {
+    category: "milestone",
+  }),
+  communityPost({
     id: "post-2",
     author: mockSocialUsers[1],
-    content: "Looking for serious players to form a competitive team. Must have 1400+ ELO and be available for practice 3x per week. DM me if interested!",
+    content:
+      "Looking for serious players to form a competitive team. Must have 1400+ ELO and be available for practice 3x per week. DM me if interested!",
     tags: ["recruitment", "competitive", "team"],
     likes: 28,
     comments: 15,
@@ -304,16 +431,20 @@ export const mockCommunityPosts: CommunityPost[] = [
     createdAt: "2026-03-09T16:30:00Z",
     isLiked: true,
     isPinned: true,
-  },
-  {
+    category: "recruitment",
+  }),
+  communityPost({
     id: "post-3",
     author: mockSocialUsers[2],
-    content: "New strategy guide just dropped! Check out my latest video on advanced positioning techniques. Link in bio!",
+    content:
+      "New strategy guide just dropped! Check out my latest video on advanced positioning techniques. Link in bio!",
     media: [
       {
+        id: "media-3-1",
         type: "image",
         url: "https://placehold.co/800x400/1a1a2e/00d4ff?text=Strategy+Guide+Thumbnail",
-        thumbnail: "https://placehold.co/400x200/1a1a2e/00d4ff?text=Thumbnail",
+        thumbnail:
+          "https://placehold.co/400x200/1a1a2e/00d4ff?text=Thumbnail",
       },
     ],
     tags: ["guide", "strategy", "video"],
@@ -323,11 +454,13 @@ export const mockCommunityPosts: CommunityPost[] = [
     createdAt: "2026-03-08T14:00:00Z",
     isLiked: false,
     isPinned: false,
-  },
-  {
+    category: "guide",
+  }),
+  communityPost({
     id: "post-4",
     author: mockSocialUsers[7],
-    content: "Tournament tonight at 8PM EST! Prize pool is 5000 AX tokens. Register now through the tournaments page. Good luck to all participants! 🏆",
+    content:
+      "Tournament tonight at 8PM EST! Prize pool is 5000 AX tokens. Register now through the tournaments page. Good luck to all participants! 🏆",
     tags: ["tournament", "announcement", "esports"],
     likes: 156,
     comments: 45,
@@ -335,7 +468,8 @@ export const mockCommunityPosts: CommunityPost[] = [
     createdAt: "2026-03-10T08:00:00Z",
     isLiked: true,
     isPinned: true,
-  },
+    category: "tournament",
+  }),
 ];
 
 // Mock Comments
@@ -413,7 +547,7 @@ export const mockNotifications: SocialNotification[] = [
 // Mock Social Stats
 export const mockSocialStats: SocialStats = {
   totalFriends: mockFriends.length,
-  onlineFriends: mockFriends.filter(f => f.status !== "offline").length,
+  onlineFriends: mockFriends.filter((f) => f.status !== "offline").length,
   totalMessages: 156,
   partiesJoined: 12,
   communityPosts: 8,

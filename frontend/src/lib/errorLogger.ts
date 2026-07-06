@@ -8,6 +8,9 @@ import {
   generateErrorId,
 } from "./errors";
 
+// Re-export so consumers can `import { LoggedError } from "@/lib/errorLogger"`
+export type { LoggedError } from "./errors";
+
 class ErrorLogger {
   private errors: LoggedError[] = [];
   private readonly maxErrors = 100;

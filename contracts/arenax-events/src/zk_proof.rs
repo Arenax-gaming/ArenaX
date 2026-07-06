@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Bytes, Env, Vec};
+use soroban_sdk::{contractevent, Address, Env};
 
 #[contractevent(topics = ["ZKProof", "VERIFIED"])]
 pub struct ProofVerified {

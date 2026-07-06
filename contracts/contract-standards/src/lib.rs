@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Env, Map, Vec};
+use soroban_sdk::{contracttype, Address, Env, Vec};
 
 // ---------------------------------------------------------------------------
 // Standardized Contract Interface Traits

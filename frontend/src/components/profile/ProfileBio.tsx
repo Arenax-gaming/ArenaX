@@ -46,11 +46,10 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
     if (onEditToggle) onEditToggle(v);
     else setInternalEditing(v);
   };
-  const form = useForm<ProfileBioFormData & {
-    twitter: string;
-    discord: string;
-    twitch: string;
-  }>({
+  // Use a single schema-derived type (rather than intersecting extra fields)
+  // so the zodResolver's Resolver<Input, any, Output> lines up with the
+  // useForm generic - both agree on the same input/output shape.
+  const form = useForm<ProfileBioFormData>({
     resolver: zodResolver(profileBioSchema),
     defaultValues: {
       bio: user.bio ?? "",

@@ -10,13 +10,30 @@ const urlField = z
     "Must be a valid URL starting with http:// or https://"
   );
 
-// ─── Bio-only (used inline in ProfileBio) ─────────────────────────────────────
+// ─── Bio + social links (used by ProfileBio) ─────────────────────────────────
+//
+// Bio is optional (users may not have one), but the social URL fields are
+// required booleans in the form contract — the form-level `defaultValues`
+// always populate them with the user's existing values (or empty strings),
+// so requiring them at validation time keeps the schema's `input` and
+// `output` shapes equivalent. That alignment is what allows the React
+// Hook Form + zodResolver generics in ProfileBio.tsx to type-check.
+
+const optionalUrl = z
+  .string()
+  .refine(
+    (v) => !v || v.startsWith("https://") || v.startsWith("http://"),
+    "Must be a valid URL starting with http:// or https://",
+  );
 
 export const profileBioSchema = z.object({
   bio: z
     .string()
     .max(MAX_BIO_LENGTH, `Bio must be ${MAX_BIO_LENGTH} characters or less`)
     .optional(),
+  twitter: optionalUrl,
+  discord: z.string().max(100, "Discord handle is too long"),
+  twitch: optionalUrl,
 });
 
 export type ProfileBioFormData = z.infer<typeof profileBioSchema>;

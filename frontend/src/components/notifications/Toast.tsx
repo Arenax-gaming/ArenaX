@@ -71,12 +71,14 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
   progressRef.current = progress;
 
   useEffect(() => {
-    if (!toast.duration || toast.duration <= 0) return;
+    // `duration` is optional on the notification contract - treat absence
+    // as "do not auto-dismiss" rather than crashing the timer effect.
+    if (toast.duration === undefined || toast.duration <= 0) return;
 
     const interval = setInterval(() => {
       if (!isPaused) {
         const elapsed = Date.now() - startTimeRef.current;
-        const remaining = Math.max(0, 100 - (elapsed / toast.duration) * 100);
+        const remaining = Math.max(0, 100 - (elapsed / toast.duration!) * 100);
         setProgress(remaining);
 
         if (remaining <= 0) {
@@ -163,7 +165,7 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
       >
         <X className="h-4 w-4" />
       </Button>
-      {toast.showProgress && toast.duration && toast.duration > 0 && (
+      {toast.showProgress && toast.duration !== undefined && toast.duration > 0 && (
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-current opacity-20 rounded-b-lg overflow-hidden">
           <motion.div
             className="h-full bg-current"
