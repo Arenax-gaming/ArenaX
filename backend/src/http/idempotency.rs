@@ -2,7 +2,7 @@ use crate::api_error::ApiError;
 use crate::auth::Claims;
 use crate::db::DbPool;
 use crate::models::idempotency::*;
-use crate::service::idempotency_service::{IdempotencyService, IdempotencyKeyResponse};
+use crate::service::idempotency_service::{IdempotencyKeyRequest, IdempotencyKeyResponse, IdempotencyService};
 use actix_web::{web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

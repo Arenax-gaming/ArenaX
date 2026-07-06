@@ -1,6 +1,6 @@
 #![no_std]
 
-use contract_standards::{Ownable, TokenMetadata, TokenRegistry};
+use contract_standards::TokenMetadata;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
 
 #[contracttype]
@@ -24,7 +24,7 @@ impl TokenManager {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
             .instance()
-            .set(&DataKey::TokenList, &Vec::new(&env));
+            .set(&DataKey::TokenList, &Vec::<Address>::new(&env));
     }
 
     pub fn admin(env: Env) -> Address {

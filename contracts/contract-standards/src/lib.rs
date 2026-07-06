@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Env, Map};
+use soroban_sdk::{contracttype, Address, Env, Map, Vec};
 
 // ---------------------------------------------------------------------------
 // Standardized Contract Interface Traits
@@ -129,14 +129,14 @@ macro_rules! impl_pausable {
 pub struct TokenMetadata {
     pub name: soroban_sdk::String,
     pub symbol: soroban_sdk::String,
-    pub decimals: u8,
+    pub decimals: u32,
 }
 
 /// Standard Token Interface (Soroban compatible)
 pub trait Token {
     fn name(env: &Env) -> soroban_sdk::String;
     fn symbol(env: &Env) -> soroban_sdk::String;
-    fn decimals(env: &Env) -> u8;
+    fn decimals(env: &Env) -> u32;
     fn total_supply(env: &Env) -> i128;
     fn balance(env: &Env, id: Address) -> i128;
     fn transfer(env: &Env, from: Address, to: Address, amount: i128);

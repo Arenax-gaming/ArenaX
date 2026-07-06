@@ -7,7 +7,7 @@ use soroban_sdk::{Env, IntoVal, Val, Vec};
 // ---------------------------------------------------------------------------
 
 pub mod storage {
-    use soroban_sdk::{contracttype, Address, Env, Map};
+    use soroban_sdk::{contracttype, Address, Env, Map, Val};
 
     /// Helper for TTL management on persistent keys
     pub fn extend_persistent_ttl(

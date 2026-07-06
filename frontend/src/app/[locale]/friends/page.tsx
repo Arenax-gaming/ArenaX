@@ -21,7 +21,7 @@ export default function FriendsPage() {
   const filteredFriends = friends.filter((f) =>
     f.username.toLowerCase().includes(searchQuery.toLowerCase()),
   );
-  const onlineFriends = friends.filter((f) => f.isOnline).length;
+  const onlineFriends = friends.filter((f) => f.status === 'online' || f.status === 'in-game').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">
