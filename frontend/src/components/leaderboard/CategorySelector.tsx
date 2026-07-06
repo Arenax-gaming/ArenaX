@@ -1,8 +1,11 @@
 'use client'
 
 import React from 'react'
+import type { LeaderboardCategory } from '@/types/leaderboard'
 
-type Category = 'global' | 'tournaments' | 'casual'
+// Re-use the canonical type so this selector stays in sync with the
+// /types/leaderboard definition (`global | tournaments | casual | ranked`).
+type Category = LeaderboardCategory
 
 interface CategorySelectorProps {
   category: Category
@@ -24,6 +27,11 @@ const categories: { id: Category; label: string; description: string }[] = [
     id: 'casual',
     label: 'Casual',
     description: 'Casual game rankings',
+  },
+  {
+    id: 'ranked',
+    label: 'Ranked',
+    description: 'Ranked match ladder',
   },
 ]
 

@@ -265,11 +265,7 @@ pub fn emit_tournament_config_updated(env: &Env, tournament_id: &BytesN<32>) {
     .publish(env);
 }
 
-pub fn emit_batch_results_updated(
-    env: &Env,
-    tournament_id: &BytesN<32>,
-    match_count: u32,
-) {
+pub fn emit_batch_results_updated(env: &Env, tournament_id: &BytesN<32>, match_count: u32) {
     BatchResultsUpdated {
         tournament_id: tournament_id.clone(),
         match_count,

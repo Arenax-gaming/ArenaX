@@ -94,12 +94,8 @@ impl BatchOperations {
             return Err(BatchError::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalSupply, &0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::NftCount, &0u32);
+        env.storage().instance().set(&DataKey::TotalSupply, &0i128);
+        env.storage().instance().set(&DataKey::NftCount, &0u32);
         Ok(())
     }
 
@@ -141,9 +137,7 @@ impl BatchOperations {
     }
 
     pub fn nft_owner(env: Env, token_id: u32) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::NftOwner(token_id))
+        env.storage().instance().get(&DataKey::NftOwner(token_id))
     }
 
     pub fn nft_count(env: Env) -> u32 {
@@ -269,9 +263,7 @@ impl BatchOperations {
         }
 
         // Single write for supply — avoids n storage writes.
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalSupply, &supply);
+        env.storage().instance().set(&DataKey::TotalSupply, &supply);
 
         Ok(())
     }
@@ -457,10 +449,7 @@ impl BatchOperations {
     // Gas optimization: NftCount loaded once, incremented in-memory, written once.
     //
     /// Mint NFTs to multiple owners atomically.
-    pub fn batch_mint_nft(
-        env: Env,
-        owners: Vec<Address>,
-    ) -> Result<Vec<u32>, BatchError> {
+    pub fn batch_mint_nft(env: Env, owners: Vec<Address>) -> Result<Vec<u32>, BatchError> {
         Self::require_initialized(&env)?;
         Self::require_admin(&env)?;
 
@@ -491,9 +480,7 @@ impl BatchOperations {
         }
 
         // Single write for the updated count.
-        env.storage()
-            .instance()
-            .set(&DataKey::NftCount, &next_id);
+        env.storage().instance().set(&DataKey::NftCount, &next_id);
 
         Ok(minted_ids)
     }

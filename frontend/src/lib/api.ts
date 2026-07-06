@@ -1,5 +1,6 @@
 import { ApiResponse, ApiError } from "../types";
 import { AuthApiError } from "./authErrors";
+import type { Tournament } from "../types/tournament";
 
 class ApiClient {
   private baseURL: string;
@@ -116,8 +117,8 @@ class ApiClient {
     return this.request(`/tournaments${queryString}`);
   }
 
-  async getTournament(id: string) {
-    return this.request(`/tournaments/${id}`);
+  async getTournament(id: string): Promise<Tournament> {
+    return this.request<Tournament>(`/tournaments/${id}`);
   }
 
   async createTournament(tournament: any) {

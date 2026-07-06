@@ -18,7 +18,7 @@ function LeaderboardsContent() {
 
   const [category, setCategory] = useState<LeaderboardCategory>("global");
   const [season, setSeason] = useState(() => searchParams.get("season") ?? "current");
-  const [sortBy, setSortBy] = useState<"points" | "wins" | "winRate">("points");
+  const [sortBy, setSortBy] = useState<"eloRating" | "wins" | "winRate">("eloRating");
   const [searchQuery, setSearchQuery] = useState("");
 
   const handleSeasonChange = useCallback(
