@@ -1,4 +1,6 @@
 #![no_std]
+#![allow(deprecated)]
+#![allow(clippy::print_with_newline)]
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
 

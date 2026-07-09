@@ -201,8 +201,10 @@ function MatchHubPageContent() {
     );
   }
 
-  // Make sure we have the MatchHubDetails shape for the rest of the component
-  if (!("player1" in match) || !("player2" in match)) {
+  // Make sure we have the MatchHubDetails shape for the rest of the component.
+  // Note: `match` itself is `MatchHubDetails | null` (per the hook return
+  // shape), so we also bail when the hook returned no record.
+  if (!match || !("player1" in match) || !("player2" in match)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">

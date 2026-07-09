@@ -58,7 +58,7 @@ const PrizeRow = ({ entry }: { entry: PrizeDistribution }) => (
       #{entry.position} · {entry.label}
     </span>
     <span className="font-medium text-foreground">
-      ${entry.amount.toLocaleString()}
+      ${entry.amount?.toLocaleString() ?? '—'}
       <span className="ml-2 text-xs text-muted-foreground">
         ({entry.percentage}%)
       </span>
@@ -222,7 +222,7 @@ export default function TournamentResultsPage() {
                   Final bracket
                 </h2>
                 <SingleEliminationBracket
-                  data={bracketData}
+                  bracketData={bracketData}
                   currentUserId={currentUserId}
                 />
               </section>

@@ -105,7 +105,10 @@ const PLACEMENT_CLASSES: Record<Placement, string> = {
   right: 'left-full top-1/2 -translate-y-1/2 ml-2',
 };
 
-const PLACEMENT_INITIAL: Record<Placement, object> = {
+// framer-motion's initial/animate/exit props are typed as a discriminated union of
+// transition variants, so a Record of plain objects requires widening to `any`
+// to satisfy the union. Each entry is still a valid motion target at runtime.
+const PLACEMENT_INITIAL: Record<Placement, any> = {
   top: { opacity: 0, y: 4 },
   bottom: { opacity: 0, y: -4 },
   left: { opacity: 0, x: 4 },
@@ -123,19 +126,19 @@ export function TooltipContent({ children, className }: TooltipContentProps) {
   return (
     <AnimatePresence>
       {open && (
-        <motion.div
-          id={contentId}
-          role="tooltip"
-          initial={PLACEMENT_INITIAL[placement]}
-          animate={{ opacity: 1, x: 0, y: 0 }}
-          exit={PLACEMENT_INITIAL[placement]}
-          transition={{ duration: 0.12 }}
-          className={cn(
-            'absolute z-50 whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-md',
-            PLACEMENT_CLASSES[placement],
-            className,
-          )}
-        >
+    <motion.div
+      id={contentId}
+      role="tooltip"
+      initial={PLACEMENT_INITIAL[placement]}
+      animate={{ opacity: 1, x: 0, y: 0 }}
+      exit={PLACEMENT_INITIAL[placement]}
+      transition={{ duration: 0.12 }}
+      className={cn(
+        'absolute z-50 whitespace-nowrap rounded-md bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-md',
+        PLACEMENT_CLASSES[placement],
+        className,
+      )}
+    >
           {children}
         </motion.div>
       )}

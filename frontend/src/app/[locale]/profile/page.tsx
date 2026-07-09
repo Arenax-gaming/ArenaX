@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import { EloChart } from "@/components/profile/EloChart";
-import { MatchHistory } from "@/components/profile/MatchHistory";
+import { MatchHistory, AnyMatchWithPlayers } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Button } from "@/components/ui/Button";
@@ -136,7 +136,14 @@ export default function ProfilePage() {
 
         {/* Right Column - Match History */}
         <div className="space-y-8">
-           <MatchHistory matches={mockMatchHistory} currentUserId={user.id} />
+           <MatchHistory
+             // mockMatchHistory's runtime shape extends MatchWithPlayers with
+             // legacy fields (scorePlayer1/createdAt etc.); the component's
+             // AnyMatchWithPlayers accepts both. The double-cast silences the
+             // strict overload without changing runtime data.
+             matches={mockMatchHistory as unknown as AnyMatchWithPlayers[]}
+             currentUserId={user.id}
+           />
         </div>
       </div>
       </div>

@@ -957,6 +957,7 @@ fn test_resolve_dispute() {
         tournament_id.clone(),
         match_id.clone(),
         String::from_str(&env, "No evidence found"),
+        None,
     );
 
     let dispute: Dispute = env

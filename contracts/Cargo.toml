@@ -60,6 +60,27 @@ lto = true       # Link-time optimization
 codegen-units = 1
 panic = "abort"
 
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+bool_assert_comparison = "allow"
+needless_borrows_for_generic_args = "allow"
+manual_range_contains = "allow"
+let_and_return = "allow"
+manual_abs_diff = "allow"
+len_zero = "allow"
+unnecessary_cast = "allow"
+large_enum_variant = "allow"
+manual_checked_ops = "allow"
+new_without_default = "allow"
+print_with_newline = "allow"
+
+[workspace.lints.rust]
+dead-code = "allow"
+unused-imports = "allow"
+unused-variables = "allow"
+unused-mut = "allow"
+deprecated = "allow"
+
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true

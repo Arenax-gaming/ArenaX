@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Env, symbol_short};
+use soroban_sdk::{symbol_short, testutils::Address as _, testutils::Ledger as _, Env};
 
 fn generate_id(env: &Env, seed: u8) -> BytesN<32> {
     let mut bytes = [0u8; 32];
@@ -32,7 +32,7 @@ fn test_time_lock_workflow() {
 
     // Try to schedule with too small delay (should panic)
     // client.schedule_operation(&admin, &op_id, &target, &func, &args, &50, &description);
-    
+
     // Schedule with valid delay
     client.schedule_operation(&admin, &op_id, &target, &func, &args, &200, &description);
 

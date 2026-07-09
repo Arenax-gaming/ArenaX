@@ -52,10 +52,9 @@ impl ApiError {
     /// to API consumers — the public response always says "Internal server
     /// error".
     pub fn internal_error(message: impl Into<String>) -> Self {
-        ApiError::InternalServerError(message.into())
         let msg = message.into();
         error!(error.message = %msg, "Internal server error");
-        ApiError::InternalServerError
+        ApiError::InternalServerError(msg)
     }
 
     pub fn database_error(e: impl Into<sqlx::Error>) -> Self {

@@ -32,7 +32,7 @@ export class EventStore {
       topic: TOPICS.EVENT_STORE,
       messages: [
         {
-          key: `${envelope.eventType}::${envelope.payload && typeof envelope.payload === 'object' && 'userId' in (envelope.payload as object) ? (envelope.payload as { userId: string }).userId : uuidv4()}`,
+          key: `${envelope.eventType}::${envelope.payload && typeof envelope.payload === 'object' && 'userId' in (envelope.payload as object) ? ((envelope.payload as any) as { userId: string }).userId : uuidv4()}`,
           value: JSON.stringify(envelope),
           headers: {
             eventType: envelope.eventType,

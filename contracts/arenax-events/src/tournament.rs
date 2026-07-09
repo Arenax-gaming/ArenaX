@@ -239,3 +239,37 @@ pub fn emit_dispute_resolved(
     }
     .publish(env);
 }
+
+// ---------------------------------------------------------------------------
+// Extended event types for config updates and batch operations
+// ---------------------------------------------------------------------------
+
+#[contractevent(topics = ["ArenaXTournMgr_v1", "CONFIG_UPDATED"])]
+pub struct TournamentConfigUpdated {
+    pub tournament_id: BytesN<32>,
+    pub updated_at: u64,
+}
+
+#[contractevent(topics = ["ArenaXTournMgr_v1", "BATCH_RESULTS_UPDATED"])]
+pub struct BatchResultsUpdated {
+    pub tournament_id: BytesN<32>,
+    pub match_count: u32,
+    pub updated_at: u64,
+}
+
+pub fn emit_tournament_config_updated(env: &Env, tournament_id: &BytesN<32>) {
+    TournamentConfigUpdated {
+        tournament_id: tournament_id.clone(),
+        updated_at: env.ledger().timestamp(),
+    }
+    .publish(env);
+}
+
+pub fn emit_batch_results_updated(env: &Env, tournament_id: &BytesN<32>, match_count: u32) {
+    BatchResultsUpdated {
+        tournament_id: tournament_id.clone(),
+        match_count,
+        updated_at: env.ledger().timestamp(),
+    }
+    .publish(env);
+}

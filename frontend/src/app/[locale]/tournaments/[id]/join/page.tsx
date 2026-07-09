@@ -29,7 +29,7 @@ export default function TournamentJoinPage() {
       setFetchError(null);
 
       try {
-        const data = await api.getTournament(tournamentId);
+        const data = (await api.getTournament(tournamentId));
         if (active) {
           setTournament(data);
         }

@@ -2,6 +2,27 @@ import { PrismaClient } from '@prisma/client';
 import { recordQueryExecution } from './slow-query-detector.service';
 import { recordMetric } from './query-analytics.service';
 
+// ─── Pool configuration type ────────────────────────────────────────────
+
+export interface PoolServiceConfig {
+  /** Minimum number of connections to warm. Defaults to DATABASE_POOL_MIN or 2. */
+  minConnections?: number;
+  /** Health check interval in ms. Defaults to 30_000. */
+  healthCheckIntervalMs?: number;
+}
+
+// ─── Pool metrics (non-exported globals) ─────────────────────────────────
+
+let _idleCount = 0;
+let _activeCount = 0;
+
+/** Simple counter-like value holders for tracking active/idle connections */
+const dbActiveConnections = { set: (v: number) => { _activeCount = v; }, get: () => _activeCount };
+const dbIdleConnections = { set: (v: number) => { _idleCount = v; }, get: () => _idleCount };
+
+function incActive() { _activeCount++; }
+function decActive() { if (_activeCount > 0) _activeCount--; }
+
 export type DatabaseTransactionClient = Pick<
     PrismaClient,
     | 'ledger'
@@ -152,7 +173,9 @@ export function startPoolHealthCheck(cfg: PoolServiceConfig = {}): () => void {
     }, intervalMs);
 
     // Allow the process to exit even if the interval is still active.
-    if (_healthInterval.unref) _healthInterval.unref();
+    if (_healthInterval && typeof _healthInterval === 'object' && 'unref' in _healthInterval) {
+      (_healthInterval as any).unref();
+    }
 
     return stopPoolHealthCheck;
 }

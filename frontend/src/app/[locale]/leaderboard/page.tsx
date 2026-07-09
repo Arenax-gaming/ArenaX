@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
+import Image from "next/image";
 import { ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Trophy, Loader2 } from "lucide-react";
 import type { LeaderboardCategory } from "@/types/leaderboard";
 import { useLeaderboard } from "@/hooks/useLeaderboard";

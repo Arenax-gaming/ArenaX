@@ -141,7 +141,7 @@ export default function AnalyticsDashboardPage() {
               <YAxis unit="%" tick={{ fontSize: 11, fill: "#9ca3af" }} />
               <Tooltip
                 contentStyle={{ background: "#1f2937", border: "none", borderRadius: 6 }}
-                formatter={(v: number) => [`${v}%`, "Conversion"]}
+                formatter={(v: number | undefined) => [`${(v ?? 0).toFixed(1)}%`, "Conversion"]}
               />
               <Bar dataKey="conversions" radius={[4, 4, 0, 0]}>
                 <Cell fill="#6366f1" />

@@ -1,28 +1,23 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, CSSProperties } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Image from 'next/image';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import { useVirtualScrollAnalytics } from '@/hooks/useVirtualScrollAnalytics';
+import type { LeaderboardEntry } from '@/types/leaderboard';
 
-export interface LeaderboardEntry {
-  rank: number;
-  userId: string;
-  username: string;
-  avatar?: string;
-  points: number;
-  wins: number;
-  winRate: number;
-  lastUpdated: Date;
-  trend?: 'up' | 'down' | 'stable';
-}
+// Re-export the canonical type so consumers (and existing tests that import
+// `LeaderboardEntry` from this module) keep working unchanged.
+export type { LeaderboardEntry };
+
+type SortColumn = 'eloRating' | 'wins' | 'winRate';
 
 interface LeaderboardTableProps {
   entries: LeaderboardEntry[];
   isLoading?: boolean;
-  sortBy?: 'points' | 'wins' | 'winRate';
-  onSortChange?: (sortBy: string) => void;
+  sortBy?: SortColumn;
+  onSortChange?: (sortBy: SortColumn) => void;
   /** Height of the virtual scroll container. Defaults to 480. */
   height?: number;
   /** Threshold in pixels from the bottom to trigger onLoadMore */
@@ -34,6 +29,12 @@ interface LeaderboardTableProps {
 }
 
 const ROW_HEIGHT = 56; // px — must match the row's rendered height
+
+const SORT_COLUMNS: { key: SortColumn; label: string; widthClass: string }[] = [
+  { key: 'eloRating', label: 'ELO', widthClass: 'w-24' },
+  { key: 'wins', label: 'Wins', widthClass: 'w-16' },
+  { key: 'winRate', label: 'Win Rate', widthClass: 'w-20' },
+];
 
 // ─── Row renderer (defined outside the component so it stays stable) ─────────
 
@@ -50,12 +51,15 @@ function LeaderboardRow({
   const entry = data.entries[index];
   if (!entry) return null;
 
+  // Prefer the server-supplied `ranking`; fall back to the row index for
+  // optimistic / client-only entry updates.
+  const rank = entry.ranking ?? index + 1;
   const rankColor =
-    entry.rank === 1
+    rank === 1
       ? 'text-yellow-400'
-      : entry.rank === 2
+      : rank === 2
       ? 'text-gray-300'
-      : entry.rank === 3
+      : rank === 3
       ? 'text-orange-400'
       : 'text-foreground';
 
@@ -65,17 +69,19 @@ function LeaderboardRow({
       style={style}
       className="flex items-center border-b border-gray-200 dark:border-gray-800 hover:bg-muted dark:hover:bg-background/50 transition-colors"
       onClick={() => data.onItemClick(index)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); data.onItemClick(index); } }}
+      tabIndex={0}
     >
       {/* Rank */}
       <div className="w-14 shrink-0 px-4 text-sm font-semibold">
-        <span className={rankColor}>#{entry.rank}</span>
+        <span className={rankColor}>#{rank}</span>
       </div>
 
       {/* Player */}
       <div className="flex-1 flex items-center gap-3 px-4 py-2 min-w-0">
-        {entry.avatar ? (
+        {entry.avatarUrl ? (
           <Image
-            src={entry.avatar}
+            src={entry.avatarUrl}
             alt={entry.username}
             width={32}
             height={32}
@@ -91,9 +97,9 @@ function LeaderboardRow({
         </span>
       </div>
 
-      {/* Points */}
+      {/* ELO */}
       <div className="w-24 shrink-0 px-4 text-sm text-right font-semibold text-foreground">
-        {entry.points.toLocaleString()}
+        {entry.eloRating.toLocaleString()}
       </div>
 
       {/* Wins */}
@@ -105,13 +111,6 @@ function LeaderboardRow({
       <div className="w-20 shrink-0 px-4 text-sm text-right font-semibold text-foreground">
         {(entry.winRate * 100).toFixed(1)}%
       </div>
-
-      {/* Trend */}
-      <div className="w-16 shrink-0 px-4 flex justify-center">
-        {entry.trend === 'up' && <ChevronUp className="w-5 h-5 text-success" aria-label="Trending up" />}
-        {entry.trend === 'down' && <ChevronDown className="w-5 h-5 text-destructive" aria-label="Trending down" />}
-        {entry.trend === 'stable' && <span className="text-muted-foreground" aria-label="Stable">—</span>}
-      </div>
     </div>
   );
 }
@@ -121,7 +120,7 @@ function LeaderboardRow({
 export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   entries,
   isLoading = false,
-  sortBy = 'points',
+  sortBy = 'eloRating',
   onSortChange,
   height = 480,
   loadMoreThreshold = 200,
@@ -136,12 +135,12 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   const sortedEntries = useMemo(() => {
     const sorted = [...entries].sort((a, b) => {
       const diff =
-        sortBy === 'points' ? a.points - b.points
+        sortBy === 'eloRating' ? a.eloRating - b.eloRating
         : sortBy === 'wins' ? a.wins - b.wins
         : a.winRate - b.winRate;
       return sortDirection === 'asc' ? diff : -diff;
     });
-    return sorted.map((entry, i) => ({ ...entry, rank: i + 1 }));
+    return sorted;
   }, [entries, sortBy, sortDirection]);
 
   useEffect(() => {
@@ -156,7 +155,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
     }
   }, [sortedEntries.length, height, analytics]);
 
-  const handleSort = (column: 'points' | 'wins' | 'winRate') => {
+  const handleSort = (column: SortColumn) => {
     if (sortBy === column) {
       setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -185,7 +184,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
     analytics.trackItemClick(index);
   };
 
-  const SortIcon = ({ column }: { column: string }) => {
+  const SortIcon = ({ column }: { column: SortColumn }) => {
     if (sortBy !== column) return <div className="w-4 h-4" aria-hidden="true" />;
     return sortDirection === 'asc'
       ? <ChevronUp className="w-4 h-4" aria-hidden="true" />
@@ -220,17 +219,11 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
         <div role="columnheader" className="flex-1 px-4 py-3 text-left text-sm font-semibold text-foreground/70">
           Player
         </div>
-        {(
-          [
-            { key: 'points', label: 'Points' },
-            { key: 'wins', label: 'Wins' },
-            { key: 'winRate', label: 'Win Rate' },
-          ] as const
-        ).map(({ key, label }) => (
+        {SORT_COLUMNS.map(({ key, label, widthClass }) => (
           <button
             key={key}
             role="columnheader"
-            className={`w-${key === 'winRate' ? '20' : key === 'wins' ? '16' : '24'} shrink-0 px-4 py-3 text-right text-sm font-semibold text-foreground/70 hover:bg-muted dark:hover:bg-surface cursor-pointer flex items-center justify-end gap-2`}
+            className={`${widthClass} shrink-0 px-4 py-3 text-right text-sm font-semibold text-foreground/70 hover:bg-muted dark:hover:bg-surface cursor-pointer flex items-center justify-end gap-2`}
             onClick={() => handleSort(key)}
             aria-sort={sortBy === key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
           >
@@ -238,9 +231,6 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
             <SortIcon column={key} />
           </button>
         ))}
-        <div role="columnheader" className="w-16 shrink-0 px-4 py-3 text-center text-sm font-semibold text-foreground/70">
-          Trend
-        </div>
       </div>
 
       {/* Virtualised rows */}

@@ -88,7 +88,14 @@ export default function MessagesPage() {
                           {conv.participantUsername}
                         </p>
                         <p className="text-sm text-muted-foreground truncate">
-                          {conv.lastMessage}
+                          {/* `lastMessage` is `string | Message | undefined` per types/social.
+                              Render only the `.content` if it's a Message object, otherwise
+                              show the raw string. */}
+                          {conv.lastMessage
+                            ? typeof conv.lastMessage === "string"
+                              ? conv.lastMessage
+                              : conv.lastMessage.content
+                            : ""}
                         </p>
                       </div>
                       {conv.unreadCount > 0 && (

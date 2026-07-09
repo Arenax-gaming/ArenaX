@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Env, symbol_short};
+use soroban_sdk::{symbol_short, testutils::Address as _, Env};
 
 #[test]
 fn test_emergency_pause_workflow() {
@@ -39,7 +39,7 @@ fn test_emergency_pause_workflow() {
     // Function specific pause
     let func_name = symbol_short!("withdraw");
     client.pause_function(&admin, &contract_to_pause, &func_name, &reason);
-    
+
     // Contract-wide should be false, but function should be paused
     assert!(!client.is_paused(&contract_to_pause, &None));
     assert!(client.is_paused(&contract_to_pause, &Some(func_name.clone())));
@@ -74,6 +74,6 @@ fn test_batch_pause_check() {
     functions.push_back(None);
 
     let results = client.batch_is_paused(&contracts, &functions);
-    assert_eq!(results.get(0).unwrap(), true);
-    assert_eq!(results.get(1).unwrap(), false);
+    assert!(results.get(0).unwrap());
+    assert!(!results.get(1).unwrap());
 }

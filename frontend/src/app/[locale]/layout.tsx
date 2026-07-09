@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider, useMessages } from "next-intl";
+import { setRequestLocale } from "next-intl/server";
 import { routing, Locale } from "@/i18n/routing";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
@@ -55,6 +56,8 @@ export default function RootLayout({
   params: { locale: Locale };
 }) {
   const { locale } = params;
+
+  setRequestLocale(locale);
   
   if (!routing.locales.includes(locale)) {
     notFound();

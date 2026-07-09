@@ -13,12 +13,12 @@ import { tournamentRegistrationSchema } from "../tournament";
 
 describe("loginSchema", () => {
   it("accepts valid credentials", () => {
-    const result = loginSchema.safeParse({ email: "user@example.com", password: "secret" });
+    const result = loginSchema.safeParse({ email: "user@example.com", password: "secret", rememberMe: false });
     expect(result.success).toBe(true);
   });
 
   it("rejects missing email", () => {
-    const result = loginSchema.safeParse({ email: "", password: "secret" });
+    const result = loginSchema.safeParse({ email: "", password: "secret", rememberMe: false });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.some((i) => i.path[0] === "email")).toBe(true);
@@ -26,12 +26,12 @@ describe("loginSchema", () => {
   });
 
   it("rejects invalid email format", () => {
-    const result = loginSchema.safeParse({ email: "notanemail", password: "secret" });
+    const result = loginSchema.safeParse({ email: "notanemail", password: "secret", rememberMe: false });
     expect(result.success).toBe(false);
   });
 
   it("rejects missing password", () => {
-    const result = loginSchema.safeParse({ email: "user@example.com", password: "" });
+    const result = loginSchema.safeParse({ email: "user@example.com", password: "", rememberMe: false });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.some((i) => i.path[0] === "password")).toBe(true);
@@ -122,15 +122,15 @@ describe("passwordResetSchema", () => {
 
 describe("profileBioSchema", () => {
   it("accepts empty bio", () => {
-    expect(profileBioSchema.safeParse({ bio: "" }).success).toBe(true);
+    expect(profileBioSchema.safeParse({ bio: "", discord: "", twitter: "", twitch: "" }).success).toBe(true);
   });
 
   it("accepts bio within limit", () => {
-    expect(profileBioSchema.safeParse({ bio: "Hello!" }).success).toBe(true);
+    expect(profileBioSchema.safeParse({ bio: "Hello!", discord: "", twitter: "", twitch: "" }).success).toBe(true);
   });
 
   it("rejects bio over 280 characters", () => {
-    const result = profileBioSchema.safeParse({ bio: "a".repeat(281) });
+    const result = profileBioSchema.safeParse({ bio: "a".repeat(281), discord: "", twitter: "", twitch: "" });
     expect(result.success).toBe(false);
   });
 });

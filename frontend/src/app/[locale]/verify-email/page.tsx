@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function OldVerifyEmailPage() {
+function OldVerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -13,4 +13,12 @@ export default function OldVerifyEmailPage() {
   }, [router, searchParams]);
 
   return null;
+}
+
+export default function OldVerifyEmailPage() {
+  return (
+    <Suspense fallback={null}>
+      <OldVerifyEmailContent />
+    </Suspense>
+  );
 }

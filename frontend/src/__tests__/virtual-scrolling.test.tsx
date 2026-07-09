@@ -123,14 +123,18 @@ global.ResizeObserver = class {
 
 function makeLeaderboardEntries(count: number): LeaderboardEntry[] {
   return Array.from({ length: count }, (_, i) => ({
-    rank: i + 1,
+    id: `entry-${i}`,
     userId: `user-${i}`,
     username: `Player${i}`,
-    points: 1000 - i * 10,
+    avatarUrl: undefined,
+    ranking: i + 1,
+    eloRating: 1000 - i * 10,
+    matchesPlayed: 50 - i,
     wins: 50 - i,
+    losses: i,
     winRate: (50 - i) / 100,
-    lastUpdated: new Date(),
-    trend: (["up", "down", "stable"] as const)[i % 3],
+    period: "season-1",
+    updatedAt: new Date().toISOString(),
   }));
 }
 

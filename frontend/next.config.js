@@ -10,6 +10,12 @@ try {
   console.warn("[next.config] next-pwa unavailable, running without PWA");
 }
 
+// Wire next-intl (App Router) so locale-prefixed routes like /en/about
+// resolve during prerender + build. See:
+// https://next-intl.dev/docs/getting-started/app-router
+const createNextIntlPlugin = require("next-intl/plugin");
+const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Image optimization for mobile
@@ -64,4 +70,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withPWA(nextConfig);
+module.exports = withPWA(withNextIntl(nextConfig));

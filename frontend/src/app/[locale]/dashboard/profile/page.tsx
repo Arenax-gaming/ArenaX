@@ -8,7 +8,25 @@ import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
 import { StatsOverview } from "@/components/dashboard/StatsOverview";
 import { currentUser as fallbackUser, mockEloHistory } from "@/data/user";
-import { mockMatchHistory } from "@/data/matches";
+import { mockMatchHistory as _mockMatchHistory } from "@/data/matches";
+import type { AnyMatchWithPlayers } from "@/components/profile/MatchHistory";
+
+const mockMatchHistory: AnyMatchWithPlayers[] = _mockMatchHistory.map((m) => ({
+  id: m.id,
+  player1Id: m.player1Id,
+  player2Id: m.player2Id,
+  player1Username: m.player1Username,
+  player2Username: m.player2Username,
+  winnerId: m.winnerId ?? m.player1Id,
+  gameType: m.gameType,
+  score: `${m.scorePlayer1 ?? 0}-${m.scorePlayer2 ?? 0}`,
+  date: m.completedAt ?? m.createdAt,
+  tournamentName: m.tournamentName,
+  scorePlayer1: m.scorePlayer1,
+  scorePlayer2: m.scorePlayer2,
+  createdAt: m.createdAt,
+  completedAt: m.completedAt,
+}));
 import { User } from "@/types/user";
 
 export default function DashboardProfilePage() {

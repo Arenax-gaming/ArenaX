@@ -214,11 +214,14 @@ export function NotificationSettings({
                 Mute notifications during scheduled hours
               </p>
             </div>
-            <Switch checked={settings.quietHours.enabled} onCheckedChange={(e) =>
-                  onUpdate({
-                    quietHours: { ...settings.quietHours, enabled: checked },
-                  })
-                } />
+            <Switch
+              checked={settings.quietHours.enabled}
+              onCheckedChange={(checked) =>
+                onUpdate({
+                  quietHours: { ...settings.quietHours, enabled: checked },
+                })
+              }
+            />
           </div>
 
           {settings.quietHours.enabled && (

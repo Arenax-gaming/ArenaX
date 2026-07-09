@@ -261,7 +261,7 @@ export function ProfileHeader({
               {isOwner ? (
                 <>
                   <Link href="/profile/edit">
-                    <Button variant="default" className="w-full sm:w-auto">
+                    <Button variant="primary" className="w-full sm:w-auto">
                       Edit Profile
                     </Button>
                   </Link>

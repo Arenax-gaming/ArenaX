@@ -16,7 +16,8 @@ describe('registerSchema — username validation', () => {
     email: 'test@example.com',
     password: 'Password1!',
     confirmPassword: 'Password1!',
-  };
+    agreeToTerms: true,
+  } as const;
 
   it('accepts a valid alphanumeric username', () => {
     expect(registerSchema.safeParse({ ...base, username: 'Arena123' }).success).toBe(true);

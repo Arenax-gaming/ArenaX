@@ -17,10 +17,16 @@ function isRecentUnlock(unlockedAt: string): boolean {
   return new Date(unlockedAt).getTime() > Date.now() - THIRTY_DAYS_MS;
 }
 
-type AchievementCategory = 'all' | 'combat' | 'social' | 'progression' | 'special';
+// Backend model `Achievement.category` (from types/profile.ts) only supports
+// combat/social/progression/special. `'all'` is a *filter*-only sentinel in
+// the UI and must not be allowed to leak into the persistence type, so we
+// keep a separate union for the filter state and align it with the
+// `EnhancedAchievement.category` extension accordingly.
+type AchievementCategory = 'combat' | 'social' | 'progression' | 'special';
+type FilterCategory = 'all' | AchievementCategory;
 type AchievementRarity = 'common' | 'rare' | 'epic' | 'legendary';
 
-const CATEGORY_ICONS: Record<AchievementCategory, React.ReactNode> = {
+const CATEGORY_ICONS: Record<FilterCategory, React.ReactNode> = {
   all: <Trophy className="h-4 w-4" />,
   combat: <Zap className="h-4 w-4" />,
   social: <Users className="h-4 w-4" />,
@@ -42,7 +48,9 @@ const RARITY_TEXT_COLORS: Record<AchievementRarity, string> = {
   legendary: "text-yellow-600 dark:text-yellow-400",
 };
 
-// Enhanced Achievement interface (extending the base type)
+// Enhanced Achievement interface (extending the base type). Note that the
+// shared `category` field is the *backend* category (no `'all'`), distinct
+// from the UI's filter sentinel `FilterCategory`.
 interface EnhancedAchievement extends Achievement {
   category?: AchievementCategory;
   rarity?: AchievementRarity;
@@ -50,7 +58,7 @@ interface EnhancedAchievement extends Achievement {
 }
 
 export function AchievementShowcase({ achievements }: AchievementShowcaseProps) {
-  const [selectedCategory, setSelectedCategory] = useState<AchievementCategory>('all');
+  const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all');
   const [showOnlyUnlocked, setShowOnlyUnlocked] = useState(false);
 
   // Convert achievements to enhanced format with defaults
@@ -76,7 +84,7 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
     .filter(a => a.unlocked)
     .reduce((sum, a) => sum + (a.points || 0), 0);
 
-  const categories: { key: AchievementCategory; label: string }[] = [
+  const categories: { key: FilterCategory; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'combat', label: 'Combat' },
     { key: 'social', label: 'Social' },
@@ -109,7 +117,7 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
             {categories.map((category) => (
               <Button
                 key={category.key}
-                variant={selectedCategory === category.key ? "default" : "outline"}
+                variant={selectedCategory === category.key ? "primary" : "outline"}
                 size="sm"
                 onClick={() => setSelectedCategory(category.key)}
                 className="h-8 px-3 text-xs"
@@ -120,7 +128,7 @@ export function AchievementShowcase({ achievements }: AchievementShowcaseProps) 
             ))}
           </div>
           <Button
-            variant={showOnlyUnlocked ? "default" : "outline"}
+            variant={showOnlyUnlocked ? "primary" : "outline"}
             size="sm"
             onClick={() => setShowOnlyUnlocked(!showOnlyUnlocked)}
             className="h-8 px-3 text-xs"
