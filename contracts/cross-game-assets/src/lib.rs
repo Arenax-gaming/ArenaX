@@ -1,4 +1,6 @@
 #![no_std]
+#![allow(deprecated)]
+#![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
 
@@ -120,6 +122,7 @@ impl CrossGameAssets {
     }
 
     /// Register a new cross-game asset type.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_asset(
         env: Env,
         asset_id: BytesN<32>,
@@ -161,6 +164,7 @@ impl CrossGameAssets {
     }
 
     /// Issue API: register an asset for a source game with compact metadata.
+    #[allow(deprecated)]
     pub fn register_cross_game_asset(
         env: Env,
         game_id: u32,
@@ -220,6 +224,7 @@ impl CrossGameAssets {
             .set(&DataKey::AssetDef(asset_id), &def);
     }
 
+    #[allow(deprecated)]
     pub fn sync_asset_metadata(env: Env, asset_id: BytesN<32>, game_id: u32, metadata: String) {
         Self::require_admin(&env);
         if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
@@ -235,6 +240,7 @@ impl CrossGameAssets {
     // ── Minting ───────────────────────────────────────────────────────────────
 
     /// Mint (grant) an asset to a player. Caller must be an authorised game contract or admin.
+    #[allow(deprecated)]
     pub fn mint(
         env: Env,
         caller: Address,
@@ -314,6 +320,7 @@ impl CrossGameAssets {
     // ── Transfers ─────────────────────────────────────────────────────────────
 
     /// Transfer an asset between players across games.
+    #[allow(deprecated)]
     pub fn transfer(
         env: Env,
         from: Address,
@@ -391,6 +398,7 @@ impl CrossGameAssets {
     }
 
     /// Move an owner's asset into another compatible game context.
+    #[allow(deprecated)]
     pub fn transfer_asset_to_game(
         env: Env,
         owner: Address,
@@ -421,6 +429,7 @@ impl CrossGameAssets {
     }
 
     /// Burn (consume) an asset — e.g. spending in-game currency.
+    #[allow(deprecated)]
     pub fn burn(env: Env, owner: Address, asset_id: BytesN<32>, amount: i128) {
         Self::require_not_paused(&env);
         owner.require_auth();

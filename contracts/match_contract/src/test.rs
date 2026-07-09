@@ -261,18 +261,19 @@ fn test_resolve_dispute_from_wrong_state() {
     client.resolve_dispute(&match_id, &player_a, &identity_contract_id, &referee);
 }
 
+#[contract]
+pub struct MockUnauthorizedIdentityContract;
+
+#[contractimpl]
+impl MockUnauthorizedIdentityContract {
+    pub fn get_role(_env: Env, _user: Address) -> u32 {
+        0 // Not authorized
+    }
+}
+
 #[test]
 #[should_panic(expected = "only referee or admin can resolve disputes")]
 fn test_resolve_dispute_unauthorized_role() {
-    #[contract]
-    struct MockUnauthorizedIdentityContract;
-    #[contractimpl]
-    impl MockUnauthorizedIdentityContract {
-        pub fn get_role(_env: Env, _user: Address) -> u32 {
-            0 // Not authorized
-        }
-    }
-
     let env = Env::default();
     env.mock_all_auths();
 

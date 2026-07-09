@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String};
 
 /// Storage keys for all contract data
 #[derive(Clone)]

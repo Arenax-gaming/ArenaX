@@ -1,4 +1,7 @@
 //! # oracle-integration — Issue #492
+#![allow(deprecated)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 //!
 //! Provides reliable external data feeds for ArenaX contracts:
 //!   * **Price feeds** — e.g. USDC/XLM spot price for stake normalisation.

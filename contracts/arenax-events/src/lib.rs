@@ -40,4 +40,5 @@ pub mod slashing;
 pub mod staking;
 pub mod time_lock;
 pub mod tournament;
+pub mod virtual_economy;
 pub mod zk_proof;

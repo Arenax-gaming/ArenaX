@@ -371,7 +371,7 @@ impl PlayerReputationContract {
     pub fn get_reputation_history(
         env: Env,
         player: Address,
-        days: u32,
+        _days: u32,
     ) -> Result<Vec<ReputationSnapshot>, PlayerReputationError> {
         let mut history = Vec::new(&env);
 
@@ -397,7 +397,7 @@ impl PlayerReputationContract {
     pub fn calculate_skill_progression(
         env: Env,
         player: Address,
-        time_period_days: u32,
+        _time_period_days: u32,
     ) -> Result<SkillProgression, PlayerReputationError> {
         let config = Self::get_config(&env);
         let now = env.ledger().timestamp();
@@ -405,11 +405,11 @@ impl PlayerReputationContract {
 
         // Simplified calculation - in practice, would use historical data
         let games_played = profile.wins + profile.losses + profile.draws;
-        let win_rate = if games_played > 0 {
-            (profile.wins * 100) / games_played
-        } else {
-            0
-        };
+        let win_rate = profile
+            .wins
+            .checked_mul(100)
+            .and_then(|n| n.checked_div(games_played))
+            .unwrap_or(0);
 
         let progression = SkillProgression {
             current_rating: profile.skill_rating,
@@ -498,8 +498,8 @@ impl PlayerReputationContract {
     }
 
     /// Get leaderboard rankings
-    pub fn get_leaderboard(env: Env, leaderboard_type: u32, limit: u32) -> Vec<LeaderboardEntry> {
-        let mut leaderboard = Vec::new(&env);
+    pub fn get_leaderboard(env: Env, _leaderboard_type: u32, _limit: u32) -> Vec<LeaderboardEntry> {
+        let leaderboard = Vec::new(&env);
 
         // In a real implementation, this would query and sort all players
         // For now, return empty leaderboard as placeholder
@@ -908,11 +908,11 @@ impl PlayerReputationContract {
             current_rating: profile.skill_rating,
             rating_change: 0,
             games_played: profile.wins + profile.losses + profile.draws,
-            win_rate: if profile.wins + profile.losses + profile.draws > 0 {
-                (profile.wins * 100) / (profile.wins + profile.losses + profile.draws)
-            } else {
-                0
-            },
+            win_rate: profile
+                .wins
+                .checked_mul(100)
+                .and_then(|n| n.checked_div(profile.wins + profile.losses + profile.draws))
+                .unwrap_or(0),
             improvement_rate: 0,
             consistency_score: Self::calculate_consistency(&profile),
         };

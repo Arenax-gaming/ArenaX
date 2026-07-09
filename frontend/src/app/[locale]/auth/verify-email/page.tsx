@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { EmailVerification } from '@/components/auth/EmailVerification';
 import { useAuth } from '@/hooks/useAuth';
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { verifyEmail, user } = useAuth();
@@ -34,5 +34,13 @@ export default function VerifyEmailPage() {
     >
       <EmailVerification />
     </AuthLayout>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

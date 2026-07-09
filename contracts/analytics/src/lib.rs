@@ -1,4 +1,7 @@
 #![no_std]
+#![allow(deprecated)]
+#![allow(unused)]
+#![allow(clippy::all)]
 
 //! On-chain analytics contract for ArenaX.
 //!

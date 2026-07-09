@@ -74,6 +74,6 @@ fn test_batch_pause_check() {
     functions.push_back(None);
 
     let results = client.batch_is_paused(&contracts, &functions);
-    assert_eq!(results.get(0).unwrap(), true);
-    assert_eq!(results.get(1).unwrap(), false);
+    assert!(results.get(0).unwrap());
+    assert!(!results.get(1).unwrap());
 }

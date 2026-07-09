@@ -43,6 +43,7 @@ impl TimeLock {
     }
 
     /// Schedule a new operation in the time-lock queue
+    #[allow(clippy::too_many_arguments)]
     pub fn schedule_operation(
         env: Env,
         caller: Address,

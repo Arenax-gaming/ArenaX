@@ -1018,7 +1018,7 @@ impl TournamentManager {
         env: Env,
         tournament_id: BytesN<32>,
     ) -> Vec<(Address, u32, u32)> {
-        let tournament: Tournament = env
+        let _tournament: Tournament = env
             .storage()
             .persistent()
             .get(&DataKey::Tournament(tournament_id.clone()))
@@ -1034,8 +1034,8 @@ impl TournamentManager {
 
         // Calculate wins and losses for each player
         for player_reg in players.iter() {
-            let mut wins = 0u32;
-            let mut losses = 0u32;
+            let wins = 0u32;
+            let losses = 0u32;
 
             // This is a simplified version - in practice, you'd iterate through all matches
             // and count wins/losses for each player

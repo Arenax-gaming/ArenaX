@@ -1,7 +1,8 @@
 #![no_std]
+#![allow(clippy::needless_borrows_for_generic_args)]
 
 use arenax_events::staking as events;
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env};
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
