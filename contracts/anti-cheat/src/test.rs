@@ -11,6 +11,7 @@ use crate::{
 #[test]
 fn test_initialize() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -37,6 +38,7 @@ fn test_initialize() {
 #[should_panic(expected = "already initialized")]
 fn test_initialize_twice() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -47,6 +49,7 @@ fn test_initialize_twice() {
 #[test]
 fn test_report_suspicious_activity() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -88,6 +91,7 @@ fn test_report_suspicious_activity() {
 #[should_panic(expected = "invalid severity")]
 fn test_report_invalid_severity() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -107,6 +111,7 @@ fn test_report_invalid_severity() {
 #[test]
 fn test_validate_game_action() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -130,6 +135,7 @@ fn test_validate_game_action() {
 #[test]
 fn test_calculate_cheat_probability() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -151,6 +157,7 @@ fn test_calculate_cheat_probability() {
 #[test]
 fn test_apply_sanction() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -187,6 +194,7 @@ fn test_apply_sanction() {
 #[should_panic]
 fn test_apply_sanction_unauthorized() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -211,6 +219,7 @@ fn test_apply_sanction_unauthorized() {
 #[test]
 fn test_appeal_sanction() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -265,6 +274,7 @@ fn test_appeal_sanction() {
 #[should_panic(expected = "not your sanction")]
 fn test_appeal_not_your_sanction() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player1 = Address::generate(&env);
     let player2 = Address::generate(&env);
@@ -294,6 +304,7 @@ fn test_appeal_not_your_sanction() {
 #[test]
 fn test_review_appeal() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -347,6 +358,7 @@ fn test_review_appeal() {
 #[test]
 fn test_get_player_trust_score() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let player = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -362,6 +374,7 @@ fn test_get_player_trust_score() {
 #[test]
 fn test_update_anticheat_params() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -395,6 +408,7 @@ fn test_update_anticheat_params() {
 #[should_panic(expected = "only admin can update parameters")]
 fn test_update_anticheat_params_unauthorized() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let unauthorized = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
@@ -419,6 +433,7 @@ fn test_update_anticheat_params_unauthorized() {
 #[test]
 fn test_verify_activity() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -457,6 +472,7 @@ fn test_verify_activity() {
 #[should_panic(expected = "only admin can verify activity")]
 fn test_verify_activity_unauthorized() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -487,6 +503,7 @@ fn test_verify_activity_unauthorized() {
 #[test]
 fn test_emergency_mode() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -506,6 +523,7 @@ fn test_emergency_mode() {
 #[test]
 fn test_whistleblower_protection() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -538,6 +556,7 @@ fn test_whistleblower_protection() {
 #[test]
 fn test_analytics() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reputation_contract = Address::generate(&env);
 
@@ -550,6 +569,7 @@ fn test_analytics() {
 #[test]
 fn test_behavior_profile() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -581,6 +601,7 @@ fn test_behavior_profile() {
 #[test]
 fn test_confidence_score() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);
@@ -617,6 +638,7 @@ fn test_confidence_score() {
 #[test]
 fn test_false_positive_prevention() {
     let env = Env::default();
+    let contract_id = env.register(AntiCheatContract, ());
     let admin = Address::generate(&env);
     let reporter = Address::generate(&env);
     let player = Address::generate(&env);

@@ -165,24 +165,26 @@ describe('ProfileBio — successful submission', () => {
 });
 
 describe('ProfileBio — constant / schema consistency', () => {
+  const baseSchemaData = { discord: '', twitter: '', twitch: '' };
+
   it('profileBioSchema rejects bio longer than MAX_BIO_LENGTH', () => {
-    const result = profileBioSchema.safeParse({ bio: 'A'.repeat(MAX_BIO_LENGTH + 1) });
+    const result = profileBioSchema.safeParse({ ...baseSchemaData, bio: 'A'.repeat(MAX_BIO_LENGTH + 1) });
     expect(result.success).toBe(false);
   });
 
   it('profileBioSchema accepts bio exactly at MAX_BIO_LENGTH', () => {
-    const result = profileBioSchema.safeParse({ bio: 'A'.repeat(MAX_BIO_LENGTH) });
+    const result = profileBioSchema.safeParse({ ...baseSchemaData, bio: 'A'.repeat(MAX_BIO_LENGTH) });
     expect(result.success).toBe(true);
   });
 
   it('profileBioSchema accepts an undefined bio', () => {
-    const result = profileBioSchema.safeParse({ bio: undefined });
+    const result = profileBioSchema.safeParse({ ...baseSchemaData, bio: undefined });
     expect(result.success).toBe(true);
   });
 
   it('MAX_BIO_LENGTH matches the schema max constraint', () => {
-    const tooLong = profileBioSchema.safeParse({ bio: 'A'.repeat(MAX_BIO_LENGTH + 1) });
-    const exactLimit = profileBioSchema.safeParse({ bio: 'A'.repeat(MAX_BIO_LENGTH) });
+    const tooLong = profileBioSchema.safeParse({ ...baseSchemaData, bio: 'A'.repeat(MAX_BIO_LENGTH + 1) });
+    const exactLimit = profileBioSchema.safeParse({ ...baseSchemaData, bio: 'A'.repeat(MAX_BIO_LENGTH) });
     expect(tooLong.success).toBe(false);
     expect(exactLimit.success).toBe(true);
   });
