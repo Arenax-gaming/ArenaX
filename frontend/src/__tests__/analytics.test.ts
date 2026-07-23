@@ -5,6 +5,8 @@
 import { AnalyticsService } from "@/lib/analytics";
 import { ABTestingService } from "@/lib/abTesting";
 import type { AnalyticsAdapter, AnalyticsPayload } from "@/types/analytics";
+import { isValidEventName, validatePayload, shouldSample, configureSampling } from "@/lib/analyticsGovernance";
+import { trackFunnelStep, trackFunnelStepByName, FUNNELS } from "@/lib/funnelTracker";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -190,5 +192,121 @@ describe("Consent persistence", () => {
 
     const s2 = new AnalyticsService();
     expect(s2.getConsent().analytics).toBe("granted");
+  });
+});
+
+// ── Governance ────────────────────────────────────────────────────────────────
+
+describe("Analytics Governance", () => {
+  it("isValidEventName returns true for known events", () => {
+    expect(isValidEventName("page_view")).toBe(true);
+    expect(isValidEventName("game_start")).toBe(true);
+    expect(isValidEventName("game_mode_selected")).toBe(true);
+    expect(isValidEventName("auth_login")).toBe(true);
+  });
+
+  it("isValidEventName returns false for unknown events", () => {
+    expect(isValidEventName("nonexistent_event")).toBe(false);
+    expect(isValidEventName("")).toBe(false);
+  });
+
+  it("validatePayload rejects missing event name", () => {
+    const result = validatePayload({ timestamp: Date.now(), sessionId: "abc" });
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("Missing event name");
+  });
+
+  it("validatePayload rejects unknown event name", () => {
+    const result = validatePayload({ event: "fake_event", timestamp: Date.now(), sessionId: "abc" });
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("Unknown event");
+  });
+
+  it("validatePayload rejects invalid timestamp", () => {
+    const result = validatePayload({ event: "page_view", timestamp: -1, sessionId: "abc" });
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("Invalid timestamp");
+  });
+
+  it("validatePayload rejects missing sessionId", () => {
+    const result = validatePayload({ event: "page_view", timestamp: Date.now(), sessionId: "" });
+    expect(result.isValid).toBe(false);
+    expect(result.error).toContain("Missing sessionId");
+  });
+
+  it("validatePayload accepts valid payload", () => {
+    const result = validatePayload({ event: "page_view", timestamp: Date.now(), sessionId: "abc" });
+    expect(result.isValid).toBe(true);
+  });
+
+  it("shouldSample returns true when rate is 1", () => {
+    configureSampling({ defaultRate: 1 });
+    expect(shouldSample("page_view")).toBe(true);
+  });
+
+  it("shouldSample returns false when rate is 0", () => {
+    configureSampling({ defaultRate: 0 });
+    expect(shouldSample("page_view")).toBe(false);
+  });
+
+  it("shouldSample uses per-event rate over default", () => {
+    configureSampling({ defaultRate: 1, rates: { page_view: 0 } });
+    expect(shouldSample("page_view")).toBe(false);
+    expect(shouldSample("game_start")).toBe(true);
+  });
+});
+
+// ── Funnel Tracker ────────────────────────────────────────────────────────────
+
+describe("Funnel Tracker", () => {
+  let service: AnalyticsService;
+  let adapter: ReturnType<typeof makeAdapter>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    service = new AnalyticsService();
+    service.setConsent("granted");
+    adapter = makeAdapter();
+    service.registerAdapter(adapter);
+  });
+
+  it("tracks funnel_step with correct payload", () => {
+    trackFunnelStep("registration", "signup", 1);
+    expect(adapter.events).toHaveLength(1);
+    expect(adapter.events[0].event).toBe("funnel_step");
+    const payload = adapter.events[0] as { funnelName: string; stepName: string; stepIndex: number };
+    expect(payload.funnelName).toBe("registration");
+    expect(payload.stepName).toBe("signup");
+    expect(payload.stepIndex).toBe(1);
+  });
+
+  it("trackFunnelStepByName resolves step index correctly", () => {
+    trackFunnelStepByName("registration", "first_game");
+    expect(adapter.events).toHaveLength(1);
+    const payload = adapter.events[0] as { funnelName: string; stepName: string; stepIndex: number };
+    expect(payload.stepName).toBe("first_game");
+    expect(payload.stepIndex).toBe(2);
+  });
+
+  it("trackFunnelStepByName ignores unknown funnel", () => {
+    trackFunnelStepByName("nonexistent", "step");
+    expect(adapter.events).toHaveLength(0);
+  });
+
+  it("trackFunnelStepByName ignores unknown step", () => {
+    trackFunnelStepByName("registration", "nonexistent_step");
+    expect(adapter.events).toHaveLength(0);
+  });
+
+  it("FUNNELS contains registration funnel with expected steps", () => {
+    expect(FUNNELS.registration).toBeDefined();
+    expect(FUNNELS.registration.steps).toEqual([
+      "visit",
+      "signup",
+      "first_game",
+      "first_tournament",
+      "first_purchase",
+    ]);
   });
 });

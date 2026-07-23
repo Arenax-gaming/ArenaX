@@ -1,5 +1,10 @@
-import rateLimit, { Options, RateLimitRequestHandler } from 'express-rate-limit';
+import rateLimit, { Options, RateLimitRequestHandler, Store } from 'express-rate-limit';
 import { Request, Response, NextFunction } from 'express';
+import Redis from 'ioredis';
+import { MemoryStore } from 'express-rate-limit';
+import { RedisRateLimitStore } from './rate-limit-redis.store';
+import { RedisIpReputationStore } from './redis-ip-reputation.store';
+import { FailoverStore } from './rate-limit-failover';
 import { logger } from '../services/logger.service';
 
 // System load sample window. Each request increments the counter; the
@@ -50,16 +55,61 @@ setInterval(() => {
   }
 }, LOAD_WINDOW_MS);
 
-// ── IP reputation store (in-memory; replace with Redis in production) ────────
+// ── Redis IP reputation store (replaces in-memory Map) ───────────────────────
 
-const _ipReputation = new Map<string, number>();
+let _ipReputationStore: RedisIpReputationStore | null = null;
+let _ipReputationFallback = new Map<string, number>();
 
 export function setIpReputation(ip: string, score: number): void {
-  _ipReputation.set(ip, Math.max(0, Math.min(1, score)));
+  const clamped = Math.max(0, Math.min(1, score));
+  if (_ipReputationStore) {
+    _ipReputationStore.setReputation(ip, clamped).catch(() => {});
+  }
+  _ipReputationFallback.set(ip, clamped);
 }
 
-export function getIpReputation(ip: string): number {
-  return _ipReputation.get(ip) ?? 1.0; // unknown IPs start trusted
+export async function getIpReputation(ip: string): Promise<number> {
+  if (_ipReputationStore) {
+    return _ipReputationStore.getReputation(ip);
+  }
+  return _ipReputationFallback.get(ip) ?? 1.0;
+}
+
+// ── Redis store factory ──────────────────────────────────────────────────────
+
+function createAdaptiveRedisStore(windowMs: number, prefix: string): Store {
+  try {
+    const url = process.env.REDIS_URL;
+    if (!url) return new MemoryStore();
+
+    const redis = new Redis(url, {
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      lazyConnect: true,
+    });
+
+    redis.on('error', (err) => {
+      logger.warn('Adaptive rate limit Redis error', { error: err.message });
+    });
+
+    redis.connect().catch(() => {});
+
+    const redisStore = new RedisRateLimitStore({ redis, prefix, windowMs });
+    const memoryStore = new MemoryStore();
+    return new FailoverStore(redisStore, memoryStore, {
+      healthCheckFn: async () => redis.status === 'ready',
+    }) as unknown as Store;
+  } catch {
+    return new MemoryStore();
+  }
+}
+
+/**
+ * Initialise the Redis IP reputation store. Call once at startup
+ * when REDIS_URL is available.
+ */
+export function initAdaptiveRateLimitRedis(redis: Redis): void {
+  _ipReputationStore = new RedisIpReputationStore(redis);
 }
 
 // ── Load telemetry export ────────────────────────────────────────────────────
@@ -102,6 +152,7 @@ export function adaptiveRateLimit(opts: AdaptiveLimitOptions): RateLimitRequestH
     windowMs,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    store: createAdaptiveRedisStore(windowMs, `rl:adaptive:${name}:`),
 
     // Dynamic limit per request based on load + tier + reputation.
     limit: (req: Request): number => {
@@ -112,7 +163,7 @@ export function adaptiveRateLimit(opts: AdaptiveLimitOptions): RateLimitRequestH
       const tierMult = TIER_MULTIPLIERS[tierKey] ?? 1;
 
       const ip = req.ip ?? '';
-      const repScore = getIpReputation(ip);
+      const repScore = getIpReputation(ip) as unknown as number;
       const repMult = repScore < ABUSE_THRESHOLD ? ABUSE_PENALTY_MULTIPLIER : 1;
 
       const effective = Math.max(

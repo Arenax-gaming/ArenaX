@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import Redis from 'ioredis';
 import { logger } from '../services/logger.service';
 import { metricsService } from '../services/metrics.service';
 
@@ -23,10 +24,10 @@ export interface TokenBucketState {
 // ---------------------------------------------------------------------------
 
 export interface ITokenBucketStore {
-  get(identifier: string): TokenBucketState | undefined;
-  set(identifier: string, state: TokenBucketState): void;
-  delete(identifier: string): void;
-  cleanup?(maxAge: number): void;
+  get(identifier: string): TokenBucketState | undefined | Promise<TokenBucketState | undefined>;
+  set(identifier: string, state: TokenBucketState): void | Promise<void>;
+  delete(identifier: string): void | Promise<void>;
+  cleanup?(maxAge: number): void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,81 @@ export class InMemoryTokenBucketStore implements ITokenBucketStore {
 
   get size(): number {
     return this.store.size;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Redis Token Bucket Store
+// ---------------------------------------------------------------------------
+
+export class RedisTokenBucketStore implements ITokenBucketStore {
+  private redis: Redis;
+  private prefix: string;
+
+  constructor(redis: Redis, prefix = 'tb:') {
+    this.redis = redis;
+    this.prefix = prefix;
+  }
+
+  private key(identifier: string): string {
+    return `${this.prefix}${identifier}`;
+  }
+
+  async get(identifier: string): Promise<TokenBucketState | undefined> {
+    try {
+      const data = await this.redis.hgetall(this.key(identifier));
+      if (!data.tokens) return undefined;
+      return {
+        tokens: parseFloat(data.tokens),
+        lastRefill: parseInt(data.lastRefill, 10),
+      };
+    } catch (error) {
+      logger.error('Redis token bucket get failed', { identifier, error });
+      return undefined;
+    }
+  }
+
+  async set(identifier: string, state: TokenBucketState): Promise<void> {
+    try {
+      const key = this.key(identifier);
+      await this.redis
+        .multi()
+        .hset(key, {
+          tokens: String(state.tokens),
+          lastRefill: String(state.lastRefill),
+        })
+        .expire(key, 3600)
+        .exec();
+    } catch (error) {
+      logger.error('Redis token bucket set failed', { identifier, error });
+    }
+  }
+
+  async delete(identifier: string): Promise<void> {
+    try {
+      await this.redis.del(this.key(identifier));
+    } catch (error) {
+      logger.error('Redis token bucket delete failed', { identifier, error });
+    }
+  }
+
+  async cleanup(maxAge: number): Promise<void> {
+    try {
+      const cutoff = Date.now() - maxAge;
+      const keys = await this.redis.keys(`${this.prefix}*`);
+      if (keys.length === 0) return;
+
+      const pipeline = this.redis.pipeline();
+      for (const key of keys) {
+        const lastRefill = await this.redis.hget(key, 'lastRefill');
+        if (lastRefill && parseInt(lastRefill, 10) < cutoff) {
+          pipeline.del(key);
+        }
+      }
+      await pipeline.exec();
+    } catch (error) {
+      logger.error('Redis token bucket cleanup failed', { error });
+    }
   }
 }
 
@@ -168,14 +244,14 @@ export class TokenBucketRateLimiter {
   }
 
   middleware() {
-    return (req: Request, res: Response, next: NextFunction): void => {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       const id = this.identify(req);
       const effective = this.resolveEffectiveConfig(id);
 
-      let bucket = this.store.get(id);
+      let bucket = await this.store.get(id);
       if (!bucket) {
         bucket = { tokens: effective.capacity, lastRefill: Date.now() };
-        this.store.set(id, bucket);
+        await this.store.set(id, bucket);
       }
 
       const tokenBucket = new TokenBucket(bucket, effective);
@@ -209,7 +285,7 @@ export class TokenBucketRateLimiter {
         return;
       }
 
-      this.store.set(id, tokenBucket.getState());
+      await this.store.set(id, tokenBucket.getState());
 
       res.set({
         [`${this.headerPrefix}-Limit`]: String(effective.capacity),
@@ -220,19 +296,19 @@ export class TokenBucketRateLimiter {
     };
   }
 
-  getState(identifier: string): TokenBucketState | undefined {
+  getState(identifier: string): TokenBucketState | undefined | Promise<TokenBucketState | undefined> {
     return this.store.get(identifier);
   }
 
-  reset(identifier: string): void {
-    this.store.delete(identifier);
+  async reset(identifier: string): Promise<void> {
+    await this.store.delete(identifier);
     this.violations.delete(identifier);
     this.escalations.delete(identifier);
   }
 
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     if (this.store.cleanup) {
-      this.store.cleanup(60_000);
+      await this.store.cleanup(60_000);
     }
   }
 
@@ -273,26 +349,72 @@ function defaultIdentifier(req: Request): string {
   return user?.id ? `user:${user.id}` : `ip:${req.ip ?? 'unknown'}`;
 }
 
+// ---------------------------------------------------------------------------
+// Store factory — auto-select Redis or in-memory
+// ---------------------------------------------------------------------------
+
+function createTokenBucketStore(identifier: string): ITokenBucketStore {
+  const url = process.env.REDIS_URL;
+  if (!url) return new InMemoryTokenBucketStore();
+
+  try {
+    const redis = new Redis(url, {
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      lazyConnect: true,
+    });
+
+    redis.on('error', (err) => {
+      logger.warn(`Token bucket Redis error [${identifier}]`, { error: err.message });
+    });
+
+    redis.connect().catch(() => {});
+
+    // Redis store with automatic fallback: if Redis is down, the get/set
+    // methods catch errors and return undefined, which causes the middleware
+    // to create a fresh in-memory bucket.
+    return new RedisTokenBucketStore(redis, `tb:${identifier}:`);
+  } catch {
+    return new InMemoryTokenBucketStore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pre-configured limiters
+// ---------------------------------------------------------------------------
+
 export const createTokenBucketLimiter = (config: TokenBucketConfig, opts?: TokenBucketLimiterOptions): TokenBucketRateLimiter => {
   return new TokenBucketRateLimiter(config, opts);
 };
 
 export const authTokenBucketLimiter = createTokenBucketLimiter(
   { capacity: 5, refillRate: 5 / 60, identifier: 'auth' },
-  { escalation: { threshold: 3, multiplier: 0.1, durationMs: 300_000 } }
+  {
+    store: createTokenBucketStore('auth'),
+    escalation: { threshold: 3, multiplier: 0.1, durationMs: 300_000 },
+  }
 );
 
 export const paymentTokenBucketLimiter = createTokenBucketLimiter(
   { capacity: 10, refillRate: 10 / 60, identifier: 'payment' },
-  { escalation: { threshold: 5, multiplier: 0.2, durationMs: 600_000 } }
+  {
+    store: createTokenBucketStore('payment'),
+    escalation: { threshold: 5, multiplier: 0.2, durationMs: 600_000 },
+  }
 );
 
 export const gameActionTokenBucketLimiter = createTokenBucketLimiter(
   { capacity: 30, refillRate: 30 / 60, identifier: 'game-action' },
-  { escalation: { threshold: 10, multiplier: 0.5, durationMs: 300_000 } }
+  {
+    store: createTokenBucketStore('game-action'),
+    escalation: { threshold: 10, multiplier: 0.5, durationMs: 300_000 },
+  }
 );
 
 export const generalTokenBucketLimiter = createTokenBucketLimiter(
   { capacity: 100, refillRate: 100 / 60, identifier: 'general' },
-  { escalation: { threshold: 20, multiplier: 0.3, durationMs: 300_000 } }
+  {
+    store: createTokenBucketStore('general'),
+    escalation: { threshold: 20, multiplier: 0.3, durationMs: 300_000 },
+  }
 );

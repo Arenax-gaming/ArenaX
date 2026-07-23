@@ -1,9 +1,74 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { MemoryStore, Store } from 'express-rate-limit';
 import { Request, Response } from 'express';
+import Redis from 'ioredis';
+import { RedisRateLimitStore } from './rate-limit-redis.store';
+import { FailoverStore } from './rate-limit-failover';
+import { logger } from '../services/logger.service';
 
-/**
- * Parse trusted IPs and accounts from environment variables
- */
+// ---------------------------------------------------------------------------
+// Redis connection for rate limiting (lazy singleton)
+// ---------------------------------------------------------------------------
+
+let _rateLimitRedis: Redis | null = null;
+let _redisConnected = false;
+
+function getRateLimitRedis(): Redis | null {
+    if (_rateLimitRedis) return _rateLimitRedis;
+
+    const url = process.env.REDIS_URL;
+    if (!url) {
+        logger.info('REDIS_URL not set — using in-memory rate limit store');
+        return null;
+    }
+
+    try {
+        _rateLimitRedis = new Redis(url, {
+            enableOfflineQueue: false,
+            maxRetriesPerRequest: 1,
+            lazyConnect: true,
+            keyPrefix: '',
+        });
+
+        _rateLimitRedis.on('ready', () => {
+            _redisConnected = true;
+            logger.info('Redis rate limit store connected');
+        });
+
+        _rateLimitRedis.on('error', (err) => {
+            _redisConnected = false;
+            logger.warn('Redis rate limit error — using in-memory fallback', { error: err.message });
+        });
+
+        _rateLimitRedis.on('close', () => {
+            _redisConnected = false;
+        });
+
+        _rateLimitRedis.connect().catch(() => {});
+        return _rateLimitRedis;
+    } catch (error) {
+        logger.warn('Failed to create Redis rate limit connection', { error });
+        return null;
+    }
+}
+
+function createRateLimitStore(windowMs: number, prefix: string): Store {
+    const redis = getRateLimitRedis();
+    if (!redis) {
+        return new MemoryStore();
+    }
+
+    const redisStore = new RedisRateLimitStore({ redis, prefix, windowMs });
+    const memoryStore = new MemoryStore();
+
+    return new FailoverStore(redisStore, memoryStore, {
+        healthCheckFn: async () => _redisConnected,
+    }) as unknown as Store;
+}
+
+// ---------------------------------------------------------------------------
+// Trusted IPs / accounts (unchanged)
+// ---------------------------------------------------------------------------
+
 const getTrustedIps = (): string[] => {
     const envIps = process.env.RATE_LIMIT_TRUSTED_IPS;
     if (!envIps) return [];
@@ -19,40 +84,26 @@ const getTrustedAccounts = (): string[] => {
 const trustedIps = getTrustedIps();
 const trustedAccounts = getTrustedAccounts();
 
-/**
- * Check if request should skip rate limiting
- */
 const shouldSkipRateLimit = (req: Request): boolean => {
-    // Skip if IP is in trusted list
-    if (req.ip && trustedIps.includes(req.ip)) {
-        return true;
-    }
-
-    // Skip if user account is in trusted list
-    if (req.user && trustedAccounts.includes(req.user.id)) {
-        return true;
-    }
-
-    // Skip if user is admin
-    if (req.user && req.user.role === 'ADMIN') {
-        return true;
-    }
-
+    if (req.ip && trustedIps.includes(req.ip)) return true;
+    if (req.user && trustedAccounts.includes(req.user.id)) return true;
+    if (req.user && req.user.role === 'ADMIN') return true;
     return false;
 };
 
-/**
- * Tiered rate limiting middleware based on endpoint risk.
- */
+// ---------------------------------------------------------------------------
+// Tiered rate limiters (Redis-backed with failover)
+// ---------------------------------------------------------------------------
 
 // 1. Auth: Strict (Prevent brute force)
 export const authRateLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    limit: 5, // 5 requests per window
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     skip: shouldSkipRateLimit,
-    message: { 
+    store: createRateLimitStore(15 * 60 * 1000, 'rl:auth:'),
+    message: {
         error: 'Too many authentication attempts. Please try again after 15 minutes.',
         code: 'RATE_LIMIT_EXCEEDED',
         retryAfter: 900
@@ -64,12 +115,13 @@ export const authRateLimiter = rateLimit({
 
 // 2. Payments: Medium with burst control
 export const paymentRateLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
+    windowMs: 1 * 60 * 1000,
     limit: 10,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     skip: shouldSkipRateLimit,
-    message: { 
+    store: createRateLimitStore(60_000, 'rl:payment:'),
+    message: {
         error: 'Payment processing rate limit exceeded. Please wait a moment.',
         code: 'PAYMENT_RATE_LIMIT_EXCEEDED',
         retryAfter: 60
@@ -83,7 +135,8 @@ export const adminRateLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     skip: shouldSkipRateLimit,
-    message: { 
+    store: createRateLimitStore(60_000, 'rl:admin:'),
+    message: {
         error: 'Admin API rate limit exceeded.',
         code: 'ADMIN_RATE_LIMIT_EXCEEDED',
         retryAfter: 60
@@ -97,7 +150,8 @@ export const publicRateLimiter = rateLimit({
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     skip: shouldSkipRateLimit,
-    message: { 
+    store: createRateLimitStore(60_000, 'rl:public:'),
+    message: {
         error: 'Global rate limit exceeded.',
         code: 'GLOBAL_RATE_LIMIT_EXCEEDED',
         retryAfter: 60
@@ -107,22 +161,33 @@ export const publicRateLimiter = rateLimit({
 // 5. API Key based rate limiter for public API endpoints
 export const apiKeyRateLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,
-    limit: 1000, // Higher limit for API key users
+    limit: 1000,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     skip: (req: Request) => {
-        // Skip if trusted
         if (shouldSkipRateLimit(req)) return true;
-        // Apply stricter limits if no API key
         return !req.headers['x-api-key'];
     },
+    store: createRateLimitStore(60_000, 'rl:apikey:'),
     keyGenerator: (req: Request) => {
         const apiKey = req.headers['x-api-key'] as string;
         return apiKey ? `api-${apiKey}` : (req.ip || 'unknown');
     },
-    message: { 
+    message: {
         error: 'API rate limit exceeded.',
         code: 'API_RATE_LIMIT_EXCEEDED',
         retryAfter: 60
     }
 });
+
+// ---------------------------------------------------------------------------
+// Exports for monitoring
+// ---------------------------------------------------------------------------
+
+export function isRateLimitRedisConnected(): boolean {
+    return _redisConnected;
+}
+
+export function getRateLimitRedisClient(): Redis | null {
+    return _rateLimitRedis;
+}

@@ -10,6 +10,12 @@ pub enum DataKey {
     Contract(Symbol),
     ContractList,
     Paused,
+    ContractVersion(Symbol, u32),
+    ActiveVersion(Symbol),
+    VersionList(Symbol),
+    ContractCategory(Symbol),
+    ContractStatus(Symbol),
+    CategoryList,
 }
 
 #[contracttype]
@@ -20,6 +26,17 @@ pub struct ContractInfo {
     pub registered_at: u64,
     pub updated_at: Option<u64>,
     pub registered_by: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractVersion {
+    pub version: u32,
+    pub address: Address,
+    pub deployed_at: u64,
+    pub deployed_by: Address,
+    pub notes: Symbol,
+    pub is_active: bool,
 }
 
 #[contract]
@@ -45,6 +62,9 @@ impl ContractRegistry {
         env.storage()
             .instance()
             .set(&DataKey::ContractList, &Vec::<Symbol>::new(&env));
+        env.storage()
+            .instance()
+            .set(&DataKey::CategoryList, &Vec::<Symbol>::new(&env));
 
         events::emit_initialized(&env, &admin);
     }
@@ -447,6 +467,510 @@ impl ContractRegistry {
         env.storage().instance().set(&DataKey::Admin, &new_admin);
     }
 
+    // Version Management Functions
+
+    /// Register a new version of a contract
+    ///
+    /// The first version registered for a contract name automatically becomes
+    /// the active version. Subsequent versions are registered as inactive.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must be authorized)
+    /// * `name` - The contract name this version belongs to
+    /// * `version` - The version number (must be unique per contract name)
+    /// * `address` - The address where this version is deployed
+    /// * `notes` - A symbol note describing this version
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If version already exists for this contract name
+    /// * If contract name is not registered
+    pub fn register_version(
+        env: Env,
+        admin: Address,
+        name: Symbol,
+        version: u32,
+        address: Address,
+        notes: Symbol,
+    ) {
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Contract(name.clone()))
+        {
+            panic!("contract not registered");
+        }
+
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::ContractVersion(name.clone(), version))
+        {
+            panic!("version already exists");
+        }
+
+        let version_list: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::VersionList(name.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let is_active = version_list.is_empty();
+
+        let contract_version = ContractVersion {
+            version,
+            address: address.clone(),
+            deployed_at: env.ledger().timestamp(),
+            deployed_by: admin.clone(),
+            notes,
+            is_active,
+        };
+
+        env.storage().instance().set(
+            &DataKey::ContractVersion(name.clone(), version),
+            &contract_version,
+        );
+
+        let mut new_version_list = version_list;
+        new_version_list.push_back(version);
+        env.storage()
+            .instance()
+            .set(&DataKey::VersionList(name.clone()), &new_version_list);
+
+        if is_active {
+            env.storage()
+                .instance()
+                .set(&DataKey::ActiveVersion(name.clone()), &version);
+            events::emit_version_activated(&env, &name, version);
+        }
+
+        events::emit_version_registered(&env, &name, version, &address);
+    }
+
+    /// Get the currently active version for a contract
+    ///
+    /// # Arguments
+    /// * `name` - The contract name to look up
+    ///
+    /// # Returns
+    /// The active ContractVersion
+    ///
+    /// # Panics
+    /// * If no active version exists for the contract name
+    pub fn get_active_version(env: Env, name: Symbol) -> ContractVersion {
+        let version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveVersion(name.clone()))
+            .expect("no active version for contract");
+
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion(name, version))
+            .expect("active version not found")
+    }
+
+    /// Set a specific version as the active version
+    ///
+    /// Use this to rollback to a previous version or promote a new one.
+    /// All previously active versions are marked as inactive.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must be authorized)
+    /// * `name` - The contract name
+    /// * `version` - The version number to activate
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If the version does not exist for this contract name
+    pub fn set_active_version(env: Env, admin: Address, name: Symbol, version: u32) {
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        let mut contract_version: ContractVersion = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractVersion(name.clone(), version))
+            .expect("version not found");
+
+        // Deactivate the current active version if one exists
+        if let Some(current_active_version) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::ActiveVersion(name.clone()))
+        {
+            if current_active_version != version {
+                let mut old_version: ContractVersion = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::ContractVersion(
+                        name.clone(),
+                        current_active_version,
+                    ))
+                    .expect("current active version not found");
+                old_version.is_active = false;
+                env.storage().instance().set(
+                    &DataKey::ContractVersion(name.clone(), current_active_version),
+                    &old_version,
+                );
+            }
+        }
+
+        contract_version.is_active = true;
+        env.storage().instance().set(
+            &DataKey::ContractVersion(name.clone(), version),
+            &contract_version,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ActiveVersion(name.clone()), &version);
+
+        events::emit_version_activated(&env, &name, version);
+    }
+
+    /// Get a specific version of a contract
+    ///
+    /// # Arguments
+    /// * `name` - The contract name
+    /// * `version` - The version number to retrieve
+    ///
+    /// # Returns
+    /// The ContractVersion for the specified version
+    ///
+    /// # Panics
+    /// * If the version does not exist
+    pub fn get_version(env: Env, name: Symbol, version: u32) -> ContractVersion {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion(name, version))
+            .expect("version not found")
+    }
+
+    /// Get all versions registered for a contract
+    ///
+    /// # Arguments
+    /// * `name` - The contract name
+    ///
+    /// # Returns
+    /// Vector of all ContractVersion entries for the contract
+    pub fn get_version_history(env: Env, name: Symbol) -> Vec<ContractVersion> {
+        let version_list: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::VersionList(name.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for v in version_list.iter() {
+            if let Some(contract_version) = env
+                .storage()
+                .instance()
+                .get::<DataKey, ContractVersion>(&DataKey::ContractVersion(name.clone(), v))
+            {
+                result.push_back(contract_version);
+            }
+        }
+        result
+    }
+
+    /// Mark a version as deprecated (inactive)
+    ///
+    /// This sets the version's `is_active` flag to false. If this was the
+    /// active version, there will be no active version until `set_active_version`
+    /// is called.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must be authorized)
+    /// * `name` - The contract name
+    /// * `version` - The version number to deprecate
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If the version does not exist
+    pub fn deprecate_version(env: Env, admin: Address, name: Symbol, version: u32) {
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        let mut contract_version: ContractVersion = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractVersion(name.clone(), version))
+            .expect("version not found");
+
+        contract_version.is_active = false;
+        env.storage().instance().set(
+            &DataKey::ContractVersion(name.clone(), version),
+            &contract_version,
+        );
+
+        // If this was the active version, remove the active pointer
+        if let Some(active_version) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::ActiveVersion(name.clone()))
+        {
+            if active_version == version {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::ActiveVersion(name.clone()));
+            }
+        }
+
+        events::emit_version_deprecated(&env, &name, version);
+    }
+
+    /// Get the most recently registered version for a contract
+    ///
+    /// # Arguments
+    /// * `name` - The contract name
+    ///
+    /// # Returns
+    /// The most recently registered ContractVersion
+    ///
+    /// # Panics
+    /// * If no versions exist for the contract name
+    pub fn get_latest_version(env: Env, name: Symbol) -> ContractVersion {
+        let version_list: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::VersionList(name.clone()))
+            .expect("no versions registered");
+
+        let latest_version = version_list
+            .get(version_list.len() - 1)
+            .expect("version list is empty");
+
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion(name, latest_version))
+            .expect("latest version not found")
+    }
+
+    // Discovery Functions
+
+    /// Get the contract name by its deployed address (reverse lookup)
+    ///
+    /// # Arguments
+    /// * `address` - The deployed contract address to look up
+    ///
+    /// # Returns
+    /// The contract name associated with the address
+    ///
+    /// # Panics
+    /// * If no contract is registered with the given address
+    pub fn get_contract_by_address(env: Env, address: Address) -> Symbol {
+        let contract_list: Vec<Symbol> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractList)
+            .unwrap_or(Vec::new(&env));
+
+        for name in contract_list.iter() {
+            let name_clone = name.clone();
+            if let Some(contract_info) = env
+                .storage()
+                .instance()
+                .get::<DataKey, ContractInfo>(&DataKey::Contract(name_clone))
+            {
+                if contract_info.address == address {
+                    return name;
+                }
+            }
+        }
+        panic!("no contract found for address");
+    }
+
+    /// Get all contracts in a specific category
+    ///
+    /// # Arguments
+    /// * `category` - The category to filter by
+    ///
+    /// # Returns
+    /// Vector of contract names in the category
+    pub fn get_contracts_by_category(env: Env, category: Symbol) -> Vec<Symbol> {
+        let contract_list: Vec<Symbol> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractList)
+            .unwrap_or(Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for name in contract_list.iter() {
+            let name_clone = name.clone();
+            if let Some(cat) = env
+                .storage()
+                .instance()
+                .get::<DataKey, Symbol>(&DataKey::ContractCategory(name_clone))
+            {
+                if cat == category {
+                    result.push_back(name);
+                }
+            }
+        }
+        result
+    }
+
+    /// Set the category for a contract
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must be authorized)
+    /// * `name` - The contract name
+    /// * `category` - The category to assign
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If contract name is not registered
+    pub fn set_contract_category(env: Env, admin: Address, name: Symbol, category: Symbol) {
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Contract(name.clone()))
+        {
+            panic!("contract not registered");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractCategory(name.clone()), &category);
+
+        let mut category_list: Vec<Symbol> = env
+            .storage()
+            .instance()
+            .get(&DataKey::CategoryList)
+            .unwrap_or(Vec::new(&env));
+
+        if !category_list.contains(&category) {
+            category_list.push_back(category.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::CategoryList, &category_list);
+        }
+
+        events::emit_contract_categorized(&env, &name, &category);
+    }
+
+    /// List all registered categories
+    ///
+    /// # Returns
+    /// Vector of all unique category symbols
+    pub fn list_categories(env: Env) -> Vec<Symbol> {
+        env.storage()
+            .instance()
+            .get(&DataKey::CategoryList)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Search for contracts by name prefix
+    ///
+    /// # Arguments
+    /// * `prefix` - The prefix to search for
+    ///
+    /// # Returns
+    /// Vector of contract names that start with the given prefix
+    pub fn search_contracts(env: Env, prefix: Symbol) -> Vec<Symbol> {
+        let contract_list: Vec<Symbol> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractList)
+            .unwrap_or(Vec::new(&env));
+
+        extern crate alloc;
+        use alloc::string::ToString;
+        let prefix_string = prefix.to_string();
+        let prefix_bytes = prefix_string.into_bytes();
+        let prefix_len = prefix_bytes.len();
+
+        let mut result = Vec::new(&env);
+        for name in contract_list.iter() {
+            let name_string = name.to_string();
+            let name_bytes = name_string.into_bytes();
+            let name_len = name_bytes.len();
+            if name_len >= prefix_len {
+                let mut matches = true;
+                let mut i = 0;
+                while i < prefix_len {
+                    if name_bytes[i] != prefix_bytes[i] {
+                        matches = false;
+                        break;
+                    }
+                    i += 1;
+                }
+                if matches {
+                    result.push_back(name);
+                }
+            }
+        }
+        result
+    }
+
+    // Contract Status Functions
+
+    /// Set the status of a contract (e.g. active, deprecated, suspended)
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must be authorized)
+    /// * `name` - The contract name
+    /// * `status` - The status to set
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If contract name is not registered
+    pub fn set_contract_status(env: Env, admin: Address, name: Symbol, status: Symbol) {
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Contract(name.clone()))
+        {
+            panic!("contract not registered");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractStatus(name.clone()), &status);
+
+        events::emit_contract_status_changed(&env, &name, &status);
+    }
+
+    /// Get the status of a contract
+    ///
+    /// # Arguments
+    /// * `name` - The contract name
+    ///
+    /// # Returns
+    /// The status Symbol of the contract
+    ///
+    /// # Panics
+    /// * If contract name is not registered
+    pub fn get_contract_status(env: Env, name: Symbol) -> Symbol {
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Contract(name.clone()))
+        {
+            panic!("contract not registered");
+        }
+
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractStatus(name))
+            .unwrap_or(Symbol::new(&env, "active"))
+    }
+
     // Helper functions for internal use
 
     fn require_admin(env: &Env) {
@@ -461,3 +985,6 @@ impl ContractRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod test;
