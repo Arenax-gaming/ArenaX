@@ -38,11 +38,20 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const progressPercent = Math.min((waitTime / estimatedTime) * 100, 100);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
       <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-12 border border-white/20 max-w-md w-full mx-4">
         <div className="text-center">
-          <div className="relative mb-8">
+          {/* Announced once; the ticking timer is intentionally outside this live region */}
+          <p role="status" aria-live="polite" className="sr-only">
+            {isSearching
+              ? `Searching for opponents in ${gameMode} mode`
+              : 'Match found'}
+          </p>
+
+          <div className="relative mb-8" aria-hidden="true">
             <div className="w-32 h-32 mx-auto rounded-full border-4 border-purple-500 border-t-transparent animate-spin" />
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="text-4xl">🎮</span>
@@ -76,16 +85,24 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
           </div>
 
           <div className="space-y-3">
-            <div className="w-full bg-surface-raised rounded-full h-2">
-              <div 
+            <div
+              role="progressbar"
+              aria-label="Matchmaking progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progressPercent)}
+              className="w-full bg-surface-raised rounded-full h-2"
+            >
+              <div
                 className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all duration-1000"
-                style={{ width: `${Math.min((waitTime / estimatedTime) * 100, 100)}%` }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
-            
+
             <button
+              type="button"
               onClick={onCancel}
-              className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive/80 rounded-lg transition-colors duration-200 border border-red-500/30"
+              className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive/80 rounded-lg transition-colors duration-200 border border-red-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
             >
               Cancel Matchmaking
             </button>
