@@ -10,6 +10,7 @@ import { AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
+import { useAnalytics } from "@/hooks/useAnalytics";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import {
@@ -30,6 +31,7 @@ export function LoginForm({ className }: LoginFormProps) {
   const { login, loading, error, clearError } = useAuth();
   const router = useRouter();
   const analytics = useFormAnalytics("login");
+  const { track } = useAnalytics();
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -61,6 +63,7 @@ export function LoginForm({ className }: LoginFormProps) {
 
     if (!error) {
       analytics.trackSubmit({ success: true });
+      track("auth_login", { method: "email" });
       router.push("/");
     } else {
       analytics.trackSubmit({ success: false });

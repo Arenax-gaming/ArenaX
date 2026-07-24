@@ -1,0 +1,88 @@
+{
+  "info": {
+    "name": "ArenaX Match API",
+    "description": "Match endpoints: create match, get match",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Match",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('Response has match data', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json).to.have.property('id');",
+              "  pm.collectionVariables.set('match_id', json.id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"playerAId\": \"{{player_a_id}}\",\n  \"playerBId\": \"{{player_b_id}}\",\n  \"onChainId\": \"{{$randomInt}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/matches",
+          "host": ["{{base_url}}"],
+          "path": ["matches"]
+        }
+      }
+    },
+    {
+      "name": "Get Match",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has match id', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json).to.have.property('id');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/matches/{{match_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["matches", "{{match_id}}"]
+        }
+      }
+    }
+  ]
+}

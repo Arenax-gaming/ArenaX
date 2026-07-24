@@ -13,7 +13,9 @@
         "prisma:migrate:deploy": "prisma migrate deploy",
         "prisma:seed": "ts-node prisma/seed.ts",
         "prisma:studio": "prisma studio",
-        "lint": "tsc --noEmit"
+        "lint": "tsc --noEmit",
+        "test:api": "node test/newman/run-all.js",
+        "test:api:report": "node test/newman/run-all.js --reporter htmlextra"
     },
     "dependencies": {
         "@opentelemetry/api": "^1.9.0",
@@ -77,6 +79,8 @@
         "socket.io-client": "^4.8.3",
         "ts-node": "^10.9.2",
         "ts-node-dev": "^2.0.0",
+        "newman": "^6.2.1",
+        "newman-reporter-htmlextra": "^1.23.1",
         "typescript": "^5.3.3"
     },
     "overrides": {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface GameMode {
   id: string;
@@ -76,6 +77,7 @@ interface GameModeSelectorProps {
 
 export default function GameModeSelector({ onSelect, selectedMode }: GameModeSelectorProps) {
   const [hoveredMode, setHoveredMode] = useState<string | null>(null);
+  const { track } = useAnalytics();
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -83,7 +85,10 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
         <button
           key={mode.id}
           type="button"
-          onClick={() => onSelect(mode.id)}
+          onClick={() => {
+            track('game_mode_selected', { gameMode: mode.id });
+            onSelect(mode.id);
+          }}
           onMouseEnter={() => setHoveredMode(mode.id)}
           onMouseLeave={() => setHoveredMode(null)}
           className={`

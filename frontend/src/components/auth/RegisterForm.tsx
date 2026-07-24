@@ -11,6 +11,7 @@ import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
 import { registerSchema, type RegisterFormData } from "@/lib/validations/auth";
 import { AuthApiError, REGISTER_ERROR_MAP } from "@/lib/authErrors";
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
+import { useAnalytics } from "@/hooks/useAnalytics";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -34,6 +35,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
   const { register, loading, error, clearError, user } = useAuth();
   const router = useRouter();
   const analytics = useFormAnalytics("register");
+  const { track } = useAnalytics();
 
   const form = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
@@ -90,6 +92,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
         confirmPassword: data.confirmPassword,
       });
       analytics.trackSubmit({ success: true });
+      track("auth_signup", { method: "email" });
       router.push("/auth/verify-email");
     } catch (err) {
       analytics.trackSubmit({ success: false });

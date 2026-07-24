@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { QRCode } from "@/components/wallet/QRCode";
 import { WalletAssetCode } from "@/lib/wallet/types";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface DepositModalProps {
   open: boolean;
@@ -27,6 +28,7 @@ export function DepositModal({
   const [requestUrl, setRequestUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { track } = useAnalytics();
 
   if (!open) {
     return null;
@@ -34,7 +36,9 @@ export function DepositModal({
 
   const handleRecordDeposit = () => {
     const parsedAmount = Number(amount);
+    track("purchase_initiated", { asset, amount: parsedAmount });
     onRecordDeposit(asset, Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0);
+    track("purchase_completed", { asset, amount: parsedAmount });
     onClose();
   };
 

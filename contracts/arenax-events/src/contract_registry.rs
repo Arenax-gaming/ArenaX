@@ -36,6 +36,37 @@ pub struct RegistryPaused {
     pub paused_by: Address,
 }
 
+#[contractevent(topics = ["ArenaXCReg_v1", "VERSION_REGISTERED"])]
+pub struct VersionRegistered {
+    pub name: Symbol,
+    pub version: u32,
+    pub deployed_address: Address,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "VERSION_ACTIVATED"])]
+pub struct VersionActivated {
+    pub name: Symbol,
+    pub version: u32,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "VERSION_DEPRECATED"])]
+pub struct VersionDeprecated {
+    pub name: Symbol,
+    pub version: u32,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "CATEGORIZED"])]
+pub struct ContractCategorized {
+    pub name: Symbol,
+    pub category: Symbol,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "STATUS_CHANGED"])]
+pub struct ContractStatusChanged {
+    pub name: Symbol,
+    pub status: Symbol,
+}
+
 pub fn emit_initialized(env: &Env, admin: &Address) {
     Initialized {
         admin: admin.clone(),
@@ -86,6 +117,47 @@ pub fn emit_registry_paused(env: &Env, paused: bool, paused_by: &Address) {
     RegistryPaused {
         paused,
         paused_by: paused_by.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_version_registered(env: &Env, name: &Symbol, version: u32, deployed_address: &Address) {
+    VersionRegistered {
+        name: name.clone(),
+        version,
+        deployed_address: deployed_address.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_version_activated(env: &Env, name: &Symbol, version: u32) {
+    VersionActivated {
+        name: name.clone(),
+        version,
+    }
+    .publish(env);
+}
+
+pub fn emit_version_deprecated(env: &Env, name: &Symbol, version: u32) {
+    VersionDeprecated {
+        name: name.clone(),
+        version,
+    }
+    .publish(env);
+}
+
+pub fn emit_contract_categorized(env: &Env, name: &Symbol, category: &Symbol) {
+    ContractCategorized {
+        name: name.clone(),
+        category: category.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_contract_status_changed(env: &Env, name: &Symbol, status: &Symbol) {
+    ContractStatusChanged {
+        name: name.clone(),
+        status: status.clone(),
     }
     .publish(env);
 }

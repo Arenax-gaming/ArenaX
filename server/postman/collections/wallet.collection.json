@@ -1,0 +1,82 @@
+{
+  "info": {
+    "name": "ArenaX Wallet API",
+    "description": "Wallet endpoints: get wallet, escrow funds",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get My Wallet",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response has wallet data', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json).to.have.property('address');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/wallet/me",
+          "host": ["{{base_url}}"],
+          "path": ["wallet", "me"]
+        }
+      }
+    },
+    {
+      "name": "Lock Escrow",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 or 201', () => {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"matchId\": \"{{match_id}}\",\n  \"amount\": 10\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/wallet/escrow/lock",
+          "host": ["{{base_url}}"],
+          "path": ["wallet", "escrow", "lock"]
+        }
+      }
+    }
+  ]
+}
