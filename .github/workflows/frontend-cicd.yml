@@ -1,0 +1,322 @@
+name: Frontend CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, dev, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-cicd.yml"
+  pull_request:
+    branches: [main, dev, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-cicd.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: ./frontend
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  # Stage 1 – Lint
+  # ─────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 2 – Type Check
+  # ─────────────────────────────────────────────────────────
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 3 – Unit & Integration Tests
+  # ─────────────────────────────────────────────────────────
+  unit-test:
+    name: Unit / Integration Tests
+    runs-on: ubuntu-latest
+    needs: type-check
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests with coverage
+        run: npm run test -- --coverage --ci --forceExit
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jest-coverage
+          path: frontend/coverage/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 4 – Production Build
+  # ─────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: unit-test
+    env:
+      NODE_ENV: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build
+          path: |
+            frontend/.next/
+            frontend/public/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 5 – E2E Tests (Playwright)
+  # ─────────────────────────────────────────────────────────
+  e2e-test:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build
+          path: frontend/
+
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright snapshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-snapshots
+          path: frontend/e2e/**/*.png
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 6 – Deploy to Staging (dev/develop branch only)
+  # ─────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: e2e-test
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/develop')
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build
+          path: frontend/
+
+      # Replace the step below with your actual deploy command
+      # e.g., Vercel: npx vercel --token ${{ secrets.DEPLOY_TOKEN }} --prod=false
+      # e.g., AWS: aws s3 sync .next/static s3://staging-bucket
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying to staging: ${{ vars.STAGING_URL }}"
+          echo "Deploy token present: ${{ secrets.DEPLOY_TOKEN != '' }}"
+          # TODO: replace with actual deploy command, e.g.:
+          # npx vercel --token ${{ secrets.DEPLOY_TOKEN }} --yes
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          STAGING_URL: ${{ vars.STAGING_URL }}
+
+      - name: Post-deployment health check
+        run: |
+          echo "Running health check against ${{ vars.STAGING_URL }}"
+          STAGING_URL="${{ vars.STAGING_URL }}"
+          if [ -z "$STAGING_URL" ]; then
+            echo "STAGING_URL not configured — skipping health check"
+            exit 0
+          fi
+          MAX_RETRIES=5
+          RETRY_DELAY=10
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Health check attempt $i/$MAX_RETRIES..."
+            if curl -f -s -o /dev/null -w "%{http_code}" "${STAGING_URL}/api/health" | grep -q "^2"; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Health check failed, retrying in ${RETRY_DELAY}s..."
+            sleep $RETRY_DELAY
+          done
+          echo "Health check failed after $MAX_RETRIES attempts"
+          exit 1
+
+  # ─────────────────────────────────────────────────────────
+  # Stage 7 – Deploy to Production (main branch only)
+  # ─────────────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build
+          path: frontend/
+
+      # Replace the step below with your actual production deploy command
+      - name: Deploy to production environment
+        run: |
+          echo "Deploying to production: ${{ vars.PRODUCTION_URL }}"
+          echo "Deploy token present: ${{ secrets.PRODUCTION_DEPLOY_TOKEN != '' }}"
+          # TODO: replace with actual deploy command, e.g.:
+          # npx vercel --token ${{ secrets.PRODUCTION_DEPLOY_TOKEN }} --prod --yes
+        env:
+          PRODUCTION_DEPLOY_TOKEN: ${{ secrets.PRODUCTION_DEPLOY_TOKEN }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+
+      - name: Post-deployment health check
+        run: |
+          echo "Running health check against ${{ vars.PRODUCTION_URL }}"
+          PRODUCTION_URL="${{ vars.PRODUCTION_URL }}"
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "PRODUCTION_URL not configured — skipping health check"
+            exit 0
+          fi
+          MAX_RETRIES=8
+          RETRY_DELAY=15
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Health check attempt $i/$MAX_RETRIES..."
+            if curl -f -s -o /dev/null -w "%{http_code}" "${PRODUCTION_URL}/api/health" | grep -q "^2"; then
+              echo "Production health check passed!"
+              exit 0
+            fi
+            echo "Health check failed, retrying in ${RETRY_DELAY}s..."
+            sleep $RETRY_DELAY
+          done
+          echo "Production health check failed after $MAX_RETRIES attempts"
+          exit 1
