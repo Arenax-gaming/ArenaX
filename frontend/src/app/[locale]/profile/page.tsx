@@ -5,14 +5,17 @@ import Image from "next/image";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
+import { ReputationBadge } from "@/components/profile/ReputationBadge";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Button } from "@/components/ui/Button";
 import { currentUser as initialUser, mockEloHistory } from "@/data/user";
 import { mockMatchHistory } from "@/data/matches";
 import { User } from "@/types/user";
+import { useMyReputation } from "@/hooks/useReputation";
 
 export default function ProfilePage() {
   const [user, setUser] = useState<User>(initialUser);
+  const { data: reputation } = useMyReputation();
   // #323: isEditing now actually drives a visible edit affordance —
   // when true the username field flips to an input plus Save / Cancel
   // controls; otherwise the page reads as a static profile header.
@@ -77,6 +80,13 @@ export default function ProfilePage() {
                 <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider rounded-full border border-primary/20">
                     Pro Player
                 </span>
+                {reputation && (
+                  <ReputationBadge
+                    tier={reputation.tier}
+                    score={reputation.fair_play_score}
+                    size="sm"
+                  />
+                )}
             </div>
             <p className="text-muted-foreground flex items-center gap-2">
                 {user.email}
