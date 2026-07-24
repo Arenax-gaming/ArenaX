@@ -107,7 +107,54 @@ class ApiClient {
       is_verified: boolean;
       created_at: string;
       elo?: number;
+      bio?: string;
+      avatar?: string;
+      global_rank?: number;
+      current_streak?: number;
+      wins?: number;
+      losses?: number;
     }>("/users/me");
+  }
+
+  async updateProfile(data: {
+    username?: string;
+    bio?: string;
+    avatar?: string;
+    socialLinks?: {
+      twitter?: string;
+      discord?: string;
+      twitch?: string;
+      github?: string;
+    };
+  }) {
+    return this.request<{
+      id: string;
+      username: string;
+      email: string | null;
+      is_verified: boolean;
+      created_at: string;
+      elo?: number;
+      bio?: string;
+      avatar?: string;
+    }>("/users/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getProfileStats() {
+    return this.request<{
+      elo: number;
+      global_rank: number;
+      wins: number;
+      losses: number;
+      win_rate: number;
+      current_streak: number;
+    }>("/users/me/stats");
+  }
+
+  async getJoinedTournaments() {
+    return this.request<{ id: string }[]>("/users/me/tournaments");
   }
 
   // Tournament endpoints

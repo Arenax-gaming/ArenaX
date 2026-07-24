@@ -39,8 +39,10 @@ export interface MatchResult {
 export interface MatchFilters {
   tournamentId?: string;
   playerId?: string;
+  userId?: string;
   status?: MatchStatus;
   gameType?: string;
+  mine?: boolean;
   page?: number;
   limit?: number;
 }
