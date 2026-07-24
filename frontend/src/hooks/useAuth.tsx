@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, createContext, useContext, useCallback } from "react";
+import { useState, createContext, useContext, useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 import { api } from "@/lib/api";
@@ -16,6 +17,10 @@ interface AuthContextType {
   clearError: () => void;
   verifyEmail: (token: string) => Promise<void>;
   resendVerificationEmail: (email: string) => Promise<void>;
+  /** Exposed so components can manually trigger a token refresh if needed. */
+  refreshAccessToken: () => Promise<string>;
+  /** True while a token refresh is in flight. */
+  isRefreshing: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -90,10 +95,14 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [hasToken, setHasToken] = useState(() => !!getStoredToken());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Track isRefreshing via a ref so the stable callback can read it
+  const isRefreshingRef = useRef(false);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -241,9 +250,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     queryClient.removeQueries({ queryKey: AUTH_PROFILE_QUERY_KEY });
   }, [queryClient]);
 
+  const refreshAccessToken = useCallback(async (): Promise<string> => {
+    isRefreshingRef.current = true;
+    setIsRefreshing(true);
+    try {
+      return await api.refreshAccessToken();
+    } finally {
+      isRefreshingRef.current = false;
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Register the auth-failure handler with ApiClient once on mount so it can
+  // trigger logout + redirect when a refresh attempt fails inside request().
+  useEffect(() => {
+    api.setOnAuthFailure(() => {
+      logout();
+      router.push("/login?reason=session_expired");
+    });
+  }, [logout, router]);
+
   return (
     <AuthContext.Provider
-      value={{ user, login, register, logout, loading, error, clearError, verifyEmail, resendVerificationEmail }}
+      value={{ user, login, register, logout, loading, error, clearError, verifyEmail, resendVerificationEmail, refreshAccessToken, isRefreshing }}
     >
       {children}
     </AuthContext.Provider>

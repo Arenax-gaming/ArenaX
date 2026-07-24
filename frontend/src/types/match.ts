@@ -45,6 +45,13 @@ export interface MatchFilters {
   limit?: number;
 }
 
+export interface ReportScoreRequest {
+  score: number;
+  opponentScore: number;
+  proofUrl?: string;
+  telemetryData?: Record<string, unknown>;
+}
+
 // Enhanced types for detailed match view
 export interface MatchRound {
   roundNumber: number;

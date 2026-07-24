@@ -27,23 +27,19 @@ function NotificationItem({
   const { markAsRead, removeNotification } = useNotifications();
   const isRead = notification.read;
 
-  const handleClick = () => {
+  const handleMarkRead = () => {
     if (!isRead) markAsRead(notification.id);
   };
 
-  const content = (
-    <div
-      className={cn(
-        "flex flex-col gap-1 p-4 rounded-lg transition-colors cursor-pointer",
-        !isRead && "bg-primary/5"
-      )}
-      onClick={handleClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") handleClick();
-      }}
-    >
+  const handleDelete = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    removeNotification(notification.id);
+  };
+
+  // Inner content — the readable part of the notification
+  const innerContent = (
+    <div className="flex flex-col gap-1 pr-10">
       <div className="flex items-start justify-between gap-2">
         <p className={cn("font-medium text-sm", !isRead && "font-semibold")}>
           {notification.title}
@@ -65,28 +61,64 @@ function NotificationItem({
     </div>
   );
 
+  // Delete button — always rendered outside any <a> to avoid nested interactives.
+  // On pointer-fine devices (mouse) it fades in on hover; on touch devices it is
+  // always visible so users don't have to hover to find it.
+  const deleteButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={cn(
+        "absolute top-2 right-2 h-8 w-8 p-0 transition-opacity",
+        // Always visible on coarse-pointer (touch) devices; fade in on hover for mouse
+        "opacity-100 @pointer-coarse:opacity-100",
+        "sm:opacity-0 sm:group-hover:opacity-100",
+      )}
+      onClick={handleDelete}
+      aria-label="Remove notification"
+    >
+      <Trash2 className="h-4 w-4" />
+    </Button>
+  );
+
   return (
     <div className="group relative border-b border-border/50 last:border-0">
       {notification.link ? (
-        <Link href={notification.link} className="block">
-          {content}
-        </Link>
+        // Link wraps only the readable content — delete button is a sibling
+        <>
+          <Link
+            href={notification.link}
+            className={cn(
+              "block p-4 rounded-lg transition-colors",
+              !isRead && "bg-primary/5",
+            )}
+            onClick={handleMarkRead}
+          >
+            {innerContent}
+          </Link>
+          {deleteButton}
+        </>
       ) : (
-        content
+        // No link — whole row is a div button, delete button still sits outside
+        // interactive content via absolute positioning
+        <>
+          <div
+            className={cn(
+              "p-4 rounded-lg transition-colors cursor-pointer",
+              !isRead && "bg-primary/5",
+            )}
+            role="button"
+            tabIndex={0}
+            onClick={handleMarkRead}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") handleMarkRead();
+            }}
+          >
+            {innerContent}
+          </div>
+          {deleteButton}
+        </>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="absolute top-2 right-2 h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          removeNotification(notification.id);
-        }}
-        aria-label="Remove notification"
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
     </div>
   );
 }
