@@ -1,4 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
+import { cacheService } from './cache.service';
+import { logger } from './logger.service';
 
 export interface GameSession {
   id: string;
@@ -23,6 +25,7 @@ function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T>
 }
 
 const STALE_TIMEOUT_MS = 30 * 60 * 1000;
+const SESSION_CACHE_TTL_SECONDS = 3600; // 1 hour TTL for active sessions
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 function startCleanupInterval(): void {
@@ -33,6 +36,8 @@ function startCleanupInterval(): void {
       if (session.finishedAt && (now - session.finishedAt) > STALE_TIMEOUT_MS) {
         sessionStore.delete(id);
         sessionLocks.delete(id);
+        cacheService.delete(`game:session:${id}`).catch(() => {});
+        cacheService.delete(`game:state:${id}`).catch(() => {});
       }
     }
     if (sessionStore.size === 0 && cleanupInterval) {
@@ -47,6 +52,35 @@ startCleanupInterval();
 export class GameSessionService {
   private sessions: Map<string, GameSession> = sessionStore;
 
+  private getCacheKey(sessionId: string): string {
+    return `game:session:${sessionId}`;
+  }
+
+  private getStateCacheKey(sessionId: string): string {
+    return `game:state:${sessionId}`;
+  }
+
+  async createSessionAsync(
+    players: string[],
+    gameMode: string,
+    settings: Record<string, any> = {}
+  ): Promise<GameSession> {
+    const id = uuidv4();
+    const session: GameSession = {
+      id,
+      players,
+      gameMode,
+      settings,
+      state: {},
+      actions: [],
+      startedAt: Date.now(),
+    };
+
+    this.sessions.set(id, session);
+    await this.persistToCache(session);
+    return session;
+  }
+
   createSession(players: string[], gameMode: string, settings: Record<string, any> = {}): GameSession {
     const id = uuidv4();
     const session: GameSession = {
@@ -59,6 +93,11 @@ export class GameSessionService {
       startedAt: Date.now(),
     };
 
+    this.sessions.set(id, session);
+    this.persistToCache(session).catch((err) => {
+      logger.warn('Failed to persist session to distributed cache', { sessionId: id, error: err.message });
+    });
+
     return session;
   }
 
@@ -66,56 +105,92 @@ export class GameSessionService {
     return this.sessions.get(id);
   }
 
+  async getSessionAsync(id: string): Promise<GameSession | undefined> {
+    const local = this.sessions.get(id);
+    if (local) return local;
+
+    // Distributed cache fallback for cluster environments
+    const cached = await cacheService.get<GameSession>(this.getCacheKey(id), 'game_session');
+    if (cached) {
+      this.sessions.set(id, cached);
+      return cached;
+    }
+
+    return undefined;
+  }
+
+  private async persistToCache(session: GameSession): Promise<void> {
+    const key = this.getCacheKey(session.id);
+    const stateKey = this.getStateCacheKey(session.id);
+    await Promise.all([
+      cacheService.set(key, session, SESSION_CACHE_TTL_SECONDS),
+      cacheService.set(stateKey, session.state, SESSION_CACHE_TTL_SECONDS),
+    ]);
+  }
+
   async updateGameState(sessionId: string, newState: any): Promise<GameSession> {
     return withSessionLock(sessionId, async () => {
-      const session = this.sessions.get(sessionId);
+      let session = await this.getSessionAsync(sessionId);
       if (!session) throw new Error('Session not found');
       session.state = { ...session.state, ...newState };
+      this.sessions.set(sessionId, session);
+      await this.persistToCache(session);
       return session;
     });
   }
 
   async processPlayerAction(sessionId: string, playerId: string, action: any): Promise<GameSession> {
     return withSessionLock(sessionId, async () => {
-      const session = this.sessions.get(sessionId);
+      let session = await this.getSessionAsync(sessionId);
       if (!session) throw new Error('Session not found');
       if (!session.players.includes(playerId)) {
         throw new Error('Player not part of this session');
       }
       session.actions.push({ playerId, action, timestamp: Date.now() });
+      this.sessions.set(sessionId, session);
+      await this.persistToCache(session);
       return session;
     });
   }
 
   async finishGame(sessionId: string, results: any): Promise<GameSession> {
     return withSessionLock(sessionId, async () => {
-      const session = this.sessions.get(sessionId);
+      let session = await this.getSessionAsync(sessionId);
       if (!session) throw new Error('Session not found');
       session.finishedAt = Date.now();
       session.state = results;
+      this.sessions.set(sessionId, session);
+      await this.persistToCache(session);
       return session;
     });
   }
 
   async generateReplayData(sessionId: string): Promise<any> {
     return withSessionLock(sessionId, async () => {
-      const session = this.sessions.get(sessionId);
+      let session = await this.getSessionAsync(sessionId);
       if (!session) throw new Error('Session not found');
       return session.actions;
     });
   }
 
   /**
-   * Remove a session from the store and free all associated resources
-   * (including its lock entry).
-   *
-   * Must be called when a game ends or when all players disconnect so the
-   * module-level `sessionStore` Map does not grow unboundedly over the
-   * server's lifetime.
+   * Remove a session from the store and free all associated resources.
+   * Invalidates both local and distributed Redis cache keys.
    */
   removeSession(sessionId: string): void {
     this.sessions.delete(sessionId);
     sessionLocks.delete(sessionId);
+    cacheService.delete(this.getCacheKey(sessionId)).catch(() => {});
+    cacheService.delete(this.getStateCacheKey(sessionId)).catch(() => {});
+  }
+
+  async removeSessionAsync(sessionId: string): Promise<void> {
+    this.sessions.delete(sessionId);
+    sessionLocks.delete(sessionId);
+    await Promise.all([
+      cacheService.delete(this.getCacheKey(sessionId)),
+      cacheService.delete(this.getStateCacheKey(sessionId)),
+    ]);
   }
 
   getActiveSessionCount(): number {

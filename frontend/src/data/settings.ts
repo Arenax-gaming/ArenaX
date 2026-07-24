@@ -13,12 +13,69 @@ export const defaultKeyBindings: KeyBinding[] = [
   { action: "Use Ability 1", primaryKey: "Q" },
   { action: "Use Ability 2", primaryKey: "Shift" },
   { action: "Use Ultimate", primaryKey: "F" },
+  { action: "Skill 1 (Primary)", primaryKey: "1", modifier: "None" },
+  { action: "Skill 2 (Secondary)", primaryKey: "2", modifier: "None" },
+  { action: "Skill 3 (Utility)", primaryKey: "3", modifier: "None" },
+  { action: "Skill 4 (Ultimate)", primaryKey: "4", modifier: "None" },
+  { action: "Skill Quick Boost", primaryKey: "Q", modifier: "Shift" },
+  { action: "Skill Quick Shield", primaryKey: "E", modifier: "Ctrl" },
   { action: "Open Menu", primaryKey: "Escape" },
   { action: "Open Map", primaryKey: "M" },
   { action: "Open Scoreboard", primaryKey: "Tab" },
   { action: "Voice Chat", primaryKey: "V" },
   { action: "Ping", primaryKey: "G" },
 ];
+
+export const keybindingPresets: Record<string, { label: string; description: string; bindings: Partial<Record<string, { primaryKey: string; modifier?: "Ctrl" | "Shift" | "Alt" | "None" }>> }> = {
+  qwerty: {
+    label: "QWERTY Standard",
+    description: "Standard layout for QWERTY keyboards",
+    bindings: {
+      "Move Forward": { primaryKey: "W" },
+      "Move Back": { primaryKey: "S" },
+      "Move Left": { primaryKey: "A" },
+      "Move Right": { primaryKey: "D" },
+      "Skill 1 (Primary)": { primaryKey: "1", modifier: "None" },
+      "Skill 2 (Secondary)": { primaryKey: "2", modifier: "None" },
+      "Skill 3 (Utility)": { primaryKey: "3", modifier: "None" },
+      "Skill 4 (Ultimate)": { primaryKey: "4", modifier: "None" },
+      "Skill Quick Boost": { primaryKey: "Q", modifier: "Shift" },
+      "Skill Quick Shield": { primaryKey: "E", modifier: "Ctrl" },
+    },
+  },
+  dvorak: {
+    label: "DVORAK Layout",
+    description: "Optimized layout for DVORAK keyboards",
+    bindings: {
+      "Move Forward": { primaryKey: "," },
+      "Move Back": { primaryKey: "O" },
+      "Move Left": { primaryKey: "A" },
+      "Move Right": { primaryKey: "E" },
+      "Skill 1 (Primary)": { primaryKey: "7", modifier: "None" },
+      "Skill 2 (Secondary)": { primaryKey: "8", modifier: "None" },
+      "Skill 3 (Utility)": { primaryKey: "9", modifier: "None" },
+      "Skill 4 (Ultimate)": { primaryKey: "0", modifier: "None" },
+      "Skill Quick Boost": { primaryKey: "'", modifier: "Shift" },
+      "Skill Quick Shield": { primaryKey: ".", modifier: "Ctrl" },
+    },
+  },
+  moba_gaming: {
+    label: "Gaming / MOBA",
+    description: "Esports & MOBA style layout (QWER / D,F)",
+    bindings: {
+      "Move Forward": { primaryKey: "W" },
+      "Move Back": { primaryKey: "S" },
+      "Move Left": { primaryKey: "A" },
+      "Move Right": { primaryKey: "D" },
+      "Skill 1 (Primary)": { primaryKey: "Q", modifier: "None" },
+      "Skill 2 (Secondary)": { primaryKey: "W", modifier: "Shift" },
+      "Skill 3 (Utility)": { primaryKey: "E", modifier: "None" },
+      "Skill 4 (Ultimate)": { primaryKey: "R", modifier: "None" },
+      "Skill Quick Boost": { primaryKey: "D", modifier: "None" },
+      "Skill Quick Shield": { primaryKey: "F", modifier: "None" },
+    },
+  },
+};
 
 // Default settings
 export const defaultSettings: UserSettings = {

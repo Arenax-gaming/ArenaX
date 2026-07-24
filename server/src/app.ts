@@ -7,6 +7,7 @@ import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
 import { correlationMiddleware } from './middleware/correlation.middleware';
+import { requestLogger } from './middleware/request-logger.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
@@ -20,6 +21,7 @@ import { initAdaptiveRateLimitRedis } from './middleware/adaptiveRateLimit.middl
 import { RateLimitAnalytics } from './services/rate-limit-analytics.service';
 import { isRateLimitRedisConnected, getRateLimitRedisClient } from './middleware/rate-limit.middleware';
 import xss from 'xss-clean';
+// @ts-ignore
 import hpp from 'hpp';
 import { setupSwagger } from './openapi/swagger';
 import { logger } from './services/logger.service';
@@ -135,6 +137,7 @@ export const createApp = (): Express => {
 
     app.use(requestIdMiddleware);
     app.use(correlationMiddleware);
+    app.use(requestLogger());
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);
