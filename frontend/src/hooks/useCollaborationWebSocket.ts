@@ -1,23 +1,15 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CollaborationChannel,
   CollaborationEvent,
-  CollaborationUser,
+  CollaborationServerMessage,
 } from "@/types/collaboration";
 import {
   CollaborationChannelType,
   CollaborationEventType,
 } from "@/types/collaboration";
-import { mockSocialUsers } from "@/data/social";
-import { currentUser } from "@/data/user";
 
 interface UseCollaborationWebSocketOptions {
   channelId?: string;
@@ -35,16 +27,117 @@ interface UseCollaborationWebSocketReturn {
   disconnect: () => void;
 }
 
-// Mock data for demonstration
-const mockChannelBase: CollaborationChannel = {
-  id: "collab-channel-1",
-  type: CollaborationChannelType.TOURNAMENT_COVIEW,
-  name: "Tournament #1 Viewing Party",
-  users: [],
-  createdAt: Date.now(),
-  createdBy: currentUser.id,
-  tournamentId: "tournament-1",
-};
+const MAX_EVENTS = 50;
+const MAX_RECONNECT_DELAY_MS = 10_000;
+const TOURNAMENT_CHANNEL_PREFIX = "tournament-";
+
+const KNOWN_EVENT_TYPES = new Set<string>(
+  Object.values(CollaborationEventType)
+);
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return (
+    localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token")
+  );
+}
+
+/**
+ * The CollaborationProvider is mounted outside the AuthProvider, so the
+ * current user id is read from the persisted session instead of useAuth().
+ */
+function getStoredUserId(): string | null {
+  if (typeof window === "undefined") return null;
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      const stored = storage.getItem("arenax_auth_user");
+      if (!stored) continue;
+      const parsed = JSON.parse(stored) as { id?: unknown };
+      if (typeof parsed.id === "string") return parsed.id;
+    } catch {
+      // Ignore malformed stored sessions
+    }
+  }
+  return null;
+}
+
+function buildWsUrl(channelId: string, channelType: CollaborationChannelType) {
+  // Co-view channel ids are "tournament-{tournamentId}"; the server route is
+  // keyed by the tournament id itself.
+  const resourceId =
+    channelType === CollaborationChannelType.TOURNAMENT_COVIEW &&
+    channelId.startsWith(TOURNAMENT_CHANNEL_PREFIX)
+      ? channelId.slice(TOURNAMENT_CHANNEL_PREFIX.length)
+      : channelId;
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const token = getAuthToken();
+  const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+  return `${protocol}://${window.location.host}/ws/collaboration/${encodeURIComponent(resourceId)}${qs}`;
+}
+
+function parseServerMessage(raw: unknown): CollaborationServerMessage | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw) as { type?: unknown };
+    if (typeof parsed?.type !== "string") return null;
+    if (
+      parsed.type === "ping" ||
+      parsed.type === "channel_state" ||
+      KNOWN_EVENT_TYPES.has(parsed.type)
+    ) {
+      return parsed as CollaborationServerMessage;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function applyEventToChannel(
+  channel: CollaborationChannel | null,
+  event: CollaborationEvent
+): CollaborationChannel | null {
+  if (!channel || event.channelId !== channel.id) return channel;
+
+  switch (event.type) {
+    case CollaborationEventType.USER_JOINED:
+      if (channel.users.some((u) => u.id === event.user.id)) return channel;
+      return { ...channel, users: [...channel.users, event.user] };
+    case CollaborationEventType.USER_LEFT:
+      return {
+        ...channel,
+        users: channel.users.filter((u) => u.id !== event.userId),
+      };
+    case CollaborationEventType.READY_CHANGED:
+      return {
+        ...channel,
+        users: channel.users.map((u) =>
+          u.id === event.userId ? { ...u, isReady: event.isReady } : u
+        ),
+      };
+    default:
+      return channel;
+  }
+}
+
+function appendEvent(
+  prev: CollaborationEvent[],
+  event: CollaborationEvent
+): CollaborationEvent[] {
+  // The server echoes messages back to the sender; skip echoes of
+  // optimistically-appended messages.
+  if (
+    event.type === CollaborationEventType.MESSAGE &&
+    prev.some(
+      (e) =>
+        e.type === CollaborationEventType.MESSAGE &&
+        e.messageId === event.messageId
+    )
+  ) {
+    return prev;
+  }
+  return [event, ...prev].slice(0, MAX_EVENTS);
+}
 
 export function useCollaborationWebSocket({
   channelId,
@@ -55,174 +148,125 @@ export function useCollaborationWebSocket({
   const [channel, setChannel] = useState<CollaborationChannel | null>(null);
   const [events, setEvents] = useState<CollaborationEvent[]>([]);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [suspended, setSuspended] = useState(false);
+  const [connectionNonce, setConnectionNonce] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const closedRef = useRef(false);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
-  // Mock initial channel and users
-  const initialChannel = useMemo(() => {
-    if (!channelId || !channelType) return null;
-
-    const users: CollaborationUser[] = [
-      {
-        id: currentUser.id,
-        username: currentUser.username,
-        avatar: currentUser.avatar,
-        status: "online",
-        isReady: true,
-      },
-    ];
-
-    // Add some mock users
-    const mockUsersToAdd = [mockSocialUsers[0], mockSocialUsers[2]];
-    mockUsersToAdd.forEach((user) => {
-      users.push({
-        id: user.id,
-        username: user.username,
-        avatar: user.avatar,
-        status: user.status,
-        isReady: Math.random() > 0.5,
-      });
-    });
-
-    return {
-      ...mockChannelBase,
-      id: channelId,
-      type: channelType,
-      users,
-    } as CollaborationChannel;
+  // A manual disconnect() only suspends the current channel session.
+  useEffect(() => {
+    setSuspended(false);
   }, [channelId, channelType]);
 
-  // Helper to send mock events (for demo purposes)
-  const sendMockEvent = useCallback(() => {
-    if (!initialChannel) return;
-
-    const eventTypes = [
-      CollaborationEventType.USER_JOINED,
-      CollaborationEventType.MESSAGE,
-      CollaborationEventType.COVIEW_POSITION,
-    ];
-    const randomType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
-    const randomUser = mockSocialUsers[Math.floor(Math.random() * mockSocialUsers.length)];
-
-    let newEvent: CollaborationEvent;
-
-    switch (randomType) {
-      case CollaborationEventType.USER_JOINED:
-        newEvent = {
-          type: CollaborationEventType.USER_JOINED,
-          channelId: initialChannel.id,
-          timestamp: Date.now(),
-          userId: randomUser.id,
-          user: {
-            id: randomUser.id,
-            username: randomUser.username,
-            avatar: randomUser.avatar,
-            status: randomUser.status,
-          },
-        };
-        break;
-      case CollaborationEventType.MESSAGE:
-        newEvent = {
-          type: CollaborationEventType.MESSAGE,
-          channelId: initialChannel.id,
-          timestamp: Date.now(),
-          userId: randomUser.id,
-          content: ["Let's go!", "GG!", "Nice shot!", "Wow!"][Math.floor(Math.random() * 4)],
-          messageId: `msg-${Date.now()}`,
-        };
-        break;
-      case CollaborationEventType.COVIEW_POSITION:
-        newEvent = {
-          type: CollaborationEventType.COVIEW_POSITION,
-          channelId: initialChannel.id,
-          timestamp: Date.now(),
-          userId: randomUser.id,
-          tournamentId: initialChannel.tournamentId || "",
-          matchId: Math.random() > 0.5 ? "match-1" : undefined,
-        };
-        break;
-      default:
-        return;
-    }
-
-    setEvents((prev) => [newEvent, ...prev].slice(0, 50));
-  }, [initialChannel]);
-
-  const connect = useCallback(() => {
-    if (!enabled || !initialChannel) {
+  useEffect(() => {
+    if (!enabled || !channelId || !channelType || suspended) {
+      setIsConnected(false);
+      setChannel(null);
       return;
     }
+    if (typeof window === "undefined") return;
 
-    closedRef.current = false;
+    let closed = false;
+    let retry = 0;
 
-    // Mock WebSocket connection (for demo)
-    setTimeout(() => {
-      if (closedRef.current) return;
+    const handleMessage = (raw: unknown) => {
+      const message = parseServerMessage(raw);
+      if (!message) return;
 
-      setIsConnected(true);
-      setChannel(initialChannel);
-      setConnectionError(null);
-    }, 800);
+      if (message.type === "ping") {
+        wsRef.current?.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+      if (message.type === "channel_state") {
+        setChannel(message.channel);
+        return;
+      }
+      setEvents((prev) => appendEvent(prev, message));
+      setChannel((prev) => applyEventToChannel(prev, message));
+    };
+
+    const scheduleReconnect = () => {
+      if (closed) return;
+      const delay = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * 2 ** retry);
+      retry += 1;
+      reconnectTimeoutRef.current = setTimeout(connect, delay);
+    };
+
+    const connect = () => {
+      if (closed) return;
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(buildWsUrl(channelId, channelType));
+      } catch {
+        setConnectionError("Unable to open collaboration connection");
+        scheduleReconnect();
+        return;
+      }
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        retry = 0;
+        setIsConnected(true);
+        setConnectionError(null);
+      };
+      ws.onmessage = (event) => handleMessage(event.data);
+      ws.onclose = () => {
+        if (closed) return;
+        setIsConnected(false);
+        setConnectionError("Collaboration connection lost. Reconnecting...");
+        scheduleReconnect();
+      };
+      ws.onerror = () => {
+        ws.close();
+      };
+    };
+
+    connect();
 
     return () => {
-      // Cleanup
+      closed = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      wsRef.current?.close();
+      wsRef.current = null;
+      setIsConnected(false);
+      setChannel(null);
+      setEvents([]);
+      setConnectionError(null);
     };
-  }, [enabled, initialChannel]);
+  }, [channelId, channelType, enabled, suspended, connectionNonce]);
 
   const disconnect = useCallback(() => {
-    closedRef.current = true;
-    setIsConnected(false);
-    setChannel(null);
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
+    setSuspended(true);
   }, []);
 
   const reconnect = useCallback(() => {
-    disconnect();
-    connect();
-  }, [connect, disconnect]);
+    setSuspended(false);
+    setConnectionNonce((nonce) => nonce + 1);
+  }, []);
 
   const sendEvent = useCallback(
     (event: Omit<CollaborationEvent, "timestamp" | "userId">) => {
-      if (!initialChannel) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      const fullEvent: CollaborationEvent = {
+      const fullEvent = {
         ...event,
         timestamp: Date.now(),
-        userId: currentUser.id,
+        userId: getStoredUserId() ?? "",
       } as CollaborationEvent;
 
-      setEvents((prev) => [fullEvent, ...prev].slice(0, 50));
+      ws.send(JSON.stringify(fullEvent));
+      // Optimistic append; the server echo is deduped in appendEvent.
+      setEvents((prev) => appendEvent(prev, fullEvent));
     },
-    [initialChannel]
+    []
   );
-
-  useEffect(() => {
-    if (enabled && initialChannel) {
-      const cleanup = connect();
-      return () => {
-        cleanup?.();
-        disconnect();
-      };
-    }
-    disconnect();
-  }, [connect, disconnect, enabled, initialChannel]);
-
-  // Simulate random events for demo purposes
-  useEffect(() => {
-    if (!isConnected) return;
-
-    const interval = setInterval(() => {
-      if (Math.random() > 0.7) {
-        sendMockEvent();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isConnected, sendMockEvent]);
 
   return {
     isConnected,
