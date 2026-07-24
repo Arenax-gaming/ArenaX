@@ -1,10 +1,11 @@
 import { ApiResponse, ApiError } from "../types";
 import { AuthApiError } from "./authErrors";
+import { API_BASE } from "./constants";
 
 class ApiClient {
   private baseURL: string;
 
-  constructor(baseURL: string = "/api") {
+  constructor(baseURL: string = API_BASE) {
     this.baseURL = baseURL;
   }
 
