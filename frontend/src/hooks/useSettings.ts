@@ -207,19 +207,45 @@ export function useSettings() {
   }, []);
 
   // Update key binding
-  const updateKeyBinding = useCallback((action: string, key: string, isPrimary: boolean = true) => {
-    setSettings((prev) => ({
-      ...prev,
-      game: {
-        ...prev.game,
-        controls: prev.game.controls.map((binding) =>
-          binding.action === action
-            ? { ...binding, ...(isPrimary ? { primaryKey: key } : { secondaryKey: key }) }
-            : binding
-        ),
-      },
-    }));
-  }, []);
+  const updateKeyBinding = useCallback(
+    (
+      action: string,
+      key: string,
+      isPrimary: boolean = true,
+      modifier?: "Ctrl" | "Shift" | "Alt" | "None"
+    ) => {
+      setSettings((prev) => {
+        const existing = prev.game.controls.find((b) => b.action === action);
+        const newControls = existing
+          ? prev.game.controls.map((binding) =>
+              binding.action === action
+                ? {
+                    ...binding,
+                    ...(isPrimary ? { primaryKey: key } : { secondaryKey: key }),
+                    ...(modifier !== undefined ? { modifier } : {}),
+                  }
+                : binding
+            )
+          : [
+              ...prev.game.controls,
+              {
+                action,
+                primaryKey: key,
+                modifier: modifier || "None",
+              },
+            ];
+
+        return {
+          ...prev,
+          game: {
+            ...prev.game,
+            controls: newControls,
+          },
+        };
+      });
+    },
+    []
+  );
 
   // Reset key binding
   const resetKeyBinding = useCallback((action: string) => {

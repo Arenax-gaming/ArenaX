@@ -1,10 +1,10 @@
-// filepath: frontend/src/components/game/MobileGameControls.tsx
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useDevice, useVibration } from "@/hooks/useMobile";
 import { useSwipeGesture } from "@/hooks/useSwipeGesture";
+import { SkillQuickAccessBar } from "@/components/game/SkillQuickAccessBar";
 
 interface GameControlConfig {
   size?: "small" | "medium" | "large";
@@ -96,25 +96,27 @@ function VirtualJoystick({
     <div
       ref={joystickRef}
       className={cn(
-        "relative w-24 h-24 rounded-full bg-background/50 border-2 border-border",
-        "flex items-center justify-center",
-        disabled && "opacity-50",
+        // Guaranteed minimum 44x44px touch target (w-24 h-24 = 96x96px)
+        "relative w-24 h-24 min-w-[44px] min-h-[44px] rounded-full bg-background/60 backdrop-blur-md border-2 border-border/80",
+        "flex items-center justify-center touch-none select-none shadow-lg",
+        disabled && "opacity-50 cursor-not-allowed",
         className
       )}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      aria-label="Virtual Movement Joystick"
     >
       {/* Outer ring */}
-      <div className="absolute inset-1 rounded-full border border-muted-foreground/20" />
+      <div className="absolute inset-1 rounded-full border border-muted-foreground/30 pointer-events-none" />
 
       {/* Joystick knob */}
       <div
         className={cn(
-          "w-12 h-12 rounded-full bg-primary transition-transform",
-          "shadow-lg",
-          isActive && "scale-110"
+          "w-12 h-12 min-w-[44px] min-h-[44px] rounded-full bg-primary transition-transform pointer-events-none",
+          "shadow-xl border border-primary-foreground/20",
+          isActive && "scale-110 bg-primary/90"
         )}
         style={{
           transform: `translate(${position.x}px, ${position.y}px)`,
@@ -163,32 +165,35 @@ function ActionButton({
     onRelease?.();
   }, [onRelease]);
 
+  // Guaranteed minimum 44x44px for accessibility across all size settings
   const sizeClasses = {
-    small: "w-14 h-14 text-sm",
-    medium: "w-16 h-16 text-base",
-    large: "w-20 h-20 text-lg",
+    small: "w-12 h-12 min-w-[44px] min-h-[44px] text-sm",
+    medium: "w-16 h-16 min-w-[44px] min-h-[44px] text-base",
+    large: "w-20 h-20 min-w-[44px] min-h-[44px] text-lg",
   };
 
   const variantClasses = {
-    primary: "bg-primary text-primary-foreground",
-    secondary: "bg-secondary text-secondary-foreground",
-    danger: "bg-destructive text-destructive-foreground",
+    primary: "bg-primary text-primary-foreground shadow-primary/20",
+    secondary: "bg-secondary text-secondary-foreground shadow-secondary/20",
+    danger: "bg-destructive text-destructive-foreground shadow-destructive/20",
   };
 
   return (
     <button
       className={cn(
-        "rounded-full font-semibold transition-all",
+        "rounded-full font-semibold transition-all shadow-md select-none touch-none",
         "flex items-center justify-center gap-1",
-        "active:scale-95 active:opacity-80",
+        "active:scale-95 active:opacity-80 focus:outline-none focus:ring-2 focus:ring-primary",
         sizeClasses[size],
         variantClasses[variant],
-        disabled && "opacity-50 cursor-not-allowed"
+        disabled && "opacity-50 cursor-not-allowed",
+        isPressed && "scale-95 opacity-90"
       )}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
       disabled={disabled}
+      aria-label={`Action ${label}`}
     >
       {icon}
       {label}
@@ -235,14 +240,13 @@ export function MobileGameControls({
   }, [onMove]);
 
   // Track gesture for quick actions
-  const { handleTouchStart: handleSwipeStart, handleTouchEnd: handleSwipeEnd } =
-    useSwipeGesture({
-      threshold: 30,
-      onSwipeLeft: () => onSpecial?.(),
-      onSwipeRight: () => onAttack?.(),
-      onSwipeUp: () => onJump?.(),
-      enabled: !disabled,
-    });
+  useSwipeGesture({
+    threshold: 30,
+    onSwipeLeft: () => onSpecial?.(),
+    onSwipeRight: () => onAttack?.(),
+    onSwipeUp: () => onJump?.(),
+    enabled: !disabled,
+  });
 
   // Show controls only on mobile
   if (!isMobile) {
@@ -252,15 +256,21 @@ export function MobileGameControls({
   return (
     <div
       className={cn(
-        "fixed inset-0 pointer-events-none z-50",
-        "flex flex-col justify-between",
-        isLandscape ? "flex-row" : "flex-col-reverse"
+        "fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-3 sm:p-6",
+        isLandscape ? "flex-row flex-wrap" : "flex-col-reverse gap-4"
       )}
     >
-      {/* Top bar - pause button */}
-      <div className="pointer-events-auto p-4 flex justify-end">
+      {/* Top Bar - Pause & Header HUD */}
+      <div className="pointer-events-auto w-full flex items-center justify-between gap-2">
+        {/* Integrated Skill Quick Access Bar */}
+        <SkillQuickAccessBar
+          mobileCompact
+          disabled={disabled}
+          className="pointer-events-auto shadow-lg max-w-[calc(100%-60px)]"
+        />
+
         <button
-          className="w-12 h-12 rounded-full bg-background/80 backdrop-blur flex items-center justify-center"
+          className="w-12 h-12 min-w-[44px] min-h-[44px] rounded-full bg-background/80 backdrop-blur border border-border/60 flex items-center justify-center shadow-lg active:scale-95"
           onClick={onPause}
           disabled={disabled}
           aria-label="Pause game"
@@ -281,15 +291,15 @@ export function MobileGameControls({
         </button>
       </div>
 
-      {/* Bottom controls */}
+      {/* Bottom Controls Area: Joystick & Action Buttons */}
       <div
         className={cn(
-          "pointer-events-auto p-4",
-          isLandscape ? "flex-row items-center" : "flex flex-col items-center gap-4"
+          "pointer-events-auto w-full flex items-end justify-between gap-4",
+          isLandscape ? "flex-row items-end" : "flex-row items-end"
         )}
       >
-        {/* Left side - Movement joystick */}
-        <div className={cn(isLandscape ? "order-1" : "order-2")}>
+        {/* Left side - Movement Joystick */}
+        <div className="flex items-center justify-center p-2">
           <VirtualJoystick
             onMove={handleMove}
             onRelease={handleRelease}
@@ -297,14 +307,8 @@ export function MobileGameControls({
           />
         </div>
 
-        {/* Right side - Action buttons */}
-        <div
-          className={cn(
-            "flex gap-3",
-            isLandscape ? "flex-col" : "flex-row",
-            isLandscape ? "order-2" : "order-1"
-          )}
-        >
+        {/* Right side - Action Buttons */}
+        <div className="flex gap-2 sm:gap-4 flex-wrap justify-end items-end">
           <ActionButton
             label="A"
             onPress={onAttack || (() => {})}
