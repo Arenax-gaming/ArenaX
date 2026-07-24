@@ -378,18 +378,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retry = 0;
     let closed = false;
+    let authFailed = false;
+
+    // 1008 = policy violation, 4401/4403 = app-level auth failure codes
+    const AUTH_FAILURE_CLOSE_CODES = [1008, 4401, 4403];
+
+    const getAuthToken = () =>
+      localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token");
 
     const buildWsUrl = () => {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const token =
-        localStorage.getItem("auth_token") ??
-        sessionStorage.getItem("auth_token");
-      const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-      return `${protocol}://${window.location.host}/ws/notifications${qs}`;
+      // The token is deliberately NOT part of the URL: query strings end up
+      // in server access logs, browser history, and Referer headers. Auth is
+      // performed via the first message after the socket opens instead.
+      return `${protocol}://${window.location.host}/ws/notifications`;
     };
 
     const scheduleReconnect = () => {
-      if (closed) return;
+      if (closed || authFailed) return;
       const delay = Math.min(10000, 1000 * 2 ** retry);
       retry += 1;
       reconnectTimer = setTimeout(connect, delay);
@@ -428,6 +434,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           ws?.send(JSON.stringify({ type: "pong" }));
           return;
         }
+        if (parsed?.type === "auth_ok" || parsed?.type === "auth_success") {
+          return;
+        }
+        if (
+          parsed?.type === "auth_error" ||
+          parsed?.type === "auth_failed" ||
+          parsed?.type === "unauthorized"
+        ) {
+          authFailed = true;
+          ws?.close();
+          return;
+        }
         const notification = normalizeNotification(parsed);
         if (notification) handleIncomingNotification(notification);
       } catch {
@@ -446,10 +464,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       ws.onopen = () => {
         retry = 0;
+        const token = getAuthToken();
+        if (token) {
+          ws?.send(JSON.stringify({ type: "auth", token }));
+        }
       };
       ws.onmessage = (event) => handleMessage(event.data);
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (closed) return;
+        if (AUTH_FAILURE_CLOSE_CODES.includes(event.code)) {
+          authFailed = true;
+          return;
+        }
         scheduleReconnect();
       };
       ws.onerror = () => {
