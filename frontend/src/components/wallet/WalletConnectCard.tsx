@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { useWallet } from "@/hooks/useWallet";
+import { useAnalytics } from "@/hooks/useAnalytics";
 
 interface WalletConnectCardProps {
   onOpenDeposit: () => void;
@@ -34,6 +35,7 @@ export function WalletConnectCard({
     connectAlbedoWallet,
     disconnectWallet,
   } = useWallet();
+  const { track } = useAnalytics();
 
   return (
     <Card>
@@ -48,6 +50,7 @@ export function WalletConnectCard({
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button
               onClick={() => {
+                track("wallet_connected", { walletType: "freighter" });
                 void connectFreighterWallet();
               }}
               loading={connectingWallet === "freighter"}
@@ -58,6 +61,7 @@ export function WalletConnectCard({
             <Button
               variant="outline"
               onClick={() => {
+                track("wallet_connected", { walletType: "albedo" });
                 void connectAlbedoWallet();
               }}
               loading={connectingWallet === "albedo"}

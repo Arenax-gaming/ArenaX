@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -13,8 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Image as ImageIcon, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Trophy } from "lucide-react";
-import type { LeaderboardPlayer } from "@/types/leaderboard";
+import { ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Trophy, Loader2 } from "lucide-react";
 import type { LeaderboardCategory } from "@/types/leaderboard";
 import { useLeaderboard } from "@/hooks/useLeaderboard";
 
@@ -29,6 +28,16 @@ const CATEGORIES: { value: LeaderboardCategory; label: string }[] = [
   { value: "ranked", label: "Ranked" },
   { value: "tournaments", label: "Tournaments" },
   { value: "casual", label: "Casual" },
+];
+
+const SEASONS: { id: string; label: string }[] = [
+  { id: "current", label: "Current Season" },
+  { id: "season-5", label: "Season 5" },
+  { id: "season-4", label: "Season 4" },
+  { id: "season-3", label: "Season 3" },
+  { id: "season-2", label: "Season 2" },
+  { id: "season-1", label: "Season 1" },
+  { id: "all-time", label: "All Time" },
 ];
 
 const SORT_COLUMNS = ["eloRating", "wins", "winRate", "matchesPlayed"] as const;
@@ -187,16 +196,37 @@ function SkeletonRows({ count }: { count: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main page
+// Main page content (inner — uses useSearchParams)
 // ---------------------------------------------------------------------------
-export default function LeaderboardPage() {
+function LeaderboardContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [category, setCategory] = useState<LeaderboardCategory>("global");
+  const [season, setSeason] = useState(() => searchParams.get("season") ?? "current");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortColumn>("eloRating");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(25);
+
+  const handleSeasonChange = useCallback(
+    (newSeason: string) => {
+      setSeason(newSeason);
+      setPage(1);
+      const params = new URLSearchParams(searchParams.toString());
+      if (newSeason === "current") {
+        params.delete("season");
+      } else {
+        params.set("season", newSeason);
+      }
+      const qs = params.toString();
+      router.push(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
 
   // Debounce search
   useEffect(() => {
@@ -212,10 +242,11 @@ export default function LeaderboardPage() {
   const offset = (page - 1) * pageSize;
 
   // Fetch from the real API via useLeaderboard
-  const { data, isLoading, isError, refetch } = useLeaderboard(
+  const { data, isLoading, isFetching, isError, refetch } = useLeaderboard(
     category,
     pageSize,
-    offset
+    offset,
+    season,
   );
 
   // Derived values
@@ -276,7 +307,7 @@ export default function LeaderboardPage() {
           <CardTitle className="text-base">Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Search */}
             <div className="space-y-1.5">
               <label htmlFor="search-player" className="text-sm font-medium">
@@ -312,6 +343,25 @@ export default function LeaderboardPage() {
               </Select>
             </div>
 
+            {/* Season */}
+            <div className="space-y-1.5">
+              <label htmlFor="season-filter" className="text-sm font-medium">
+                Season
+              </label>
+              <Select value={season} onValueChange={handleSeasonChange}>
+                <SelectTrigger id="season-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEASONS.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Sort */}
             <div className="space-y-1.5">
               <label htmlFor="sort-by" className="text-sm font-medium">
@@ -340,10 +390,13 @@ export default function LeaderboardPage() {
       {/* Rankings table */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
+          <CardTitle className="text-base flex items-center gap-2">
             Rankings
+            {isFetching && !isLoading && (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Loading season data…" />
+            )}
             {!isLoading && totalCount > 0 && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
+              <span className="text-sm font-normal text-muted-foreground">
                 {totalCount.toLocaleString()} players
               </span>
             )}
@@ -424,7 +477,7 @@ export default function LeaderboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {isLoading ? (
+                    {isFetching ? (
                       <SkeletonRows count={pageSize} />
                     ) : visibleEntries.length === 0 ? (
                       <tr>
@@ -518,7 +571,7 @@ export default function LeaderboardPage() {
               </div>
 
               {/* Pagination */}
-              {!isLoading && totalCount > 0 && (
+              {!isFetching && totalCount > 0 && (
                 <Pagination
                   page={page}
                   totalPages={totalPages}
@@ -531,7 +584,7 @@ export default function LeaderboardPage() {
                     setPageSize(s);
                     setPage(1);
                   }}
-                  isLoading={isLoading}
+                  isLoading={isFetching}
                 />
               )}
             </>
@@ -539,5 +592,22 @@ export default function LeaderboardPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page export — wraps content in Suspense for useSearchParams
+// ---------------------------------------------------------------------------
+export default function LeaderboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[200px]">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <LeaderboardContent />
+    </Suspense>
   );
 }

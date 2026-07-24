@@ -69,6 +69,44 @@ pub struct AssetTransfer {
     pub transferred_at: u64,
 }
 
+/// Cross-chain bridge request
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BridgeRequest {
+    pub request_id: BytesN<32>,
+    pub owner: Address,
+    pub asset_id: BytesN<32>,
+    pub amount: i128,
+    pub source_chain: String,
+    pub target_chain: String,
+    pub source_game_id: u32,
+    pub target_game_id: u32,
+    pub status: u32,
+    pub created_at: u64,
+    pub completed_at: Option<u64>,
+    pub nonce: u64,
+}
+
+/// Bridge status constants
+pub const BRIDGE_STATUS_PENDING: u32 = 0;
+pub const BRIDGE_STATUS_CONFIRMED: u32 = 1;
+pub const BRIDGE_STATUS_COMPLETED: u32 = 2;
+pub const BRIDGE_STATUS_FAILED: u32 = 3;
+pub const BRIDGE_STATUS_CANCELLED: u32 = 4;
+
+/// Supported external chains
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ChainConfig {
+    pub chain_id: String,
+    pub chain_name: String,
+    pub bridge_contract: Address,
+    pub is_active: bool,
+    pub max_bridge_amount: i128,
+    pub bridge_fee_bps: u32, // basis points (1/100 of 1%)
+    pub cooldown_secs: u64,
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -83,6 +121,13 @@ pub enum DataKey {
     AuthorisedGame(u32),
     Paused,
     NftSerial(BytesN<32>),
+    /// Bridge-related keys
+    BridgeRequest(BytesN<32>),
+    BridgeNonce,
+    ChainConfig(String),
+    BridgeLock(Address, BytesN<32>),
+    BridgeCooldown(Address, String),
+    SupportedChains,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -471,6 +516,360 @@ impl CrossGameAssets {
             panic!("game not compatible");
         }
         Self::burn(env, owner, asset_id, amount);
+    }
+
+    // ── Bridging ───────────────────────────────────────────────────────────
+
+    /// Register a supported external chain for bridging
+    pub fn register_chain(
+        env: Env,
+        chain_id: String,
+        chain_name: String,
+        bridge_contract: Address,
+        max_bridge_amount: i128,
+        bridge_fee_bps: u32,
+        cooldown_secs: u64,
+    ) {
+        Self::require_admin(&env);
+        let config = ChainConfig {
+            chain_id: chain_id.clone(),
+            chain_name,
+            bridge_contract,
+            is_active: true,
+            max_bridge_amount,
+            bridge_fee_bps,
+            cooldown_secs,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::ChainConfig(chain_id.clone()), &config);
+
+        // Add to supported chains list
+        let mut chains: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::SupportedChains)
+            .unwrap_or(Vec::new(&env));
+        let mut found = false;
+        let mut i = 0;
+        while i < chains.len() {
+            if chains.get(i).unwrap() == chain_id {
+                found = true;
+                break;
+            }
+            i += 1;
+        }
+        if !found {
+            chains.push_back(chain_id);
+            env.storage().instance().set(&DataKey::SupportedChains, &chains);
+        }
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("CHAIN_REG"), chain_id),
+            (bridge_contract, max_bridge_amount, bridge_fee_bps),
+        );
+    }
+
+    /// Deactivate a chain
+    pub fn deactivate_chain(env: Env, chain_id: String) {
+        Self::require_admin(&env);
+        let mut config: ChainConfig = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ChainConfig(chain_id.clone()))
+            .expect("chain not found");
+        config.is_active = false;
+        env.storage()
+            .persistent()
+            .set(&DataKey::ChainConfig(chain_id), &config);
+    }
+
+    /// Initiate a bridge request - locks assets on source chain
+    pub fn initiate_bridge(
+        env: Env,
+        owner: Address,
+        asset_id: BytesN<32>,
+        amount: i128,
+        target_chain: String,
+        source_game_id: u32,
+        target_game_id: u32,
+    ) -> BytesN<32> {
+        Self::require_not_paused(&env);
+        owner.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        // Verify asset is transferable
+        let def: AssetDefinition = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AssetDef(asset_id.clone()))
+            .expect("asset not registered");
+        if !def.is_transferable {
+            panic!("asset not transferable");
+        }
+
+        // Verify chain is active
+        let chain_config: ChainConfig = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ChainConfig(target_chain.clone()))
+            .expect("target chain not registered");
+        if !chain_config.is_active {
+            panic!("target chain is not active");
+        }
+
+        // Check bridge amount limit
+        if chain_config.max_bridge_amount > 0 && amount > chain_config.max_bridge_amount {
+            panic!("bridge amount exceeds chain limit");
+        }
+
+        // Check cooldown
+        let cooldown_key = DataKey::BridgeCooldown(owner.clone(), target_chain.clone());
+        let last_bridge: u64 = env
+            .storage()
+            .persistent()
+            .get(&cooldown_key)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        if now < last_bridge + chain_config.cooldown_secs {
+            panic!("bridge cooldown not elapsed");
+        }
+
+        // Lock assets - reduce owner balance
+        let bal_key = DataKey::Balance(owner.clone(), asset_id.clone());
+        let mut bal: AssetBalance = env
+            .storage()
+            .persistent()
+            .get(&bal_key)
+            .expect("insufficient balance");
+        if bal.amount < amount {
+            panic!("insufficient balance");
+        }
+        bal.amount -= amount;
+        if bal.amount == 0 {
+            env.storage().persistent().remove(&bal_key);
+        } else {
+            env.storage().persistent().set(&bal_key, &bal);
+        }
+
+        // Generate request ID
+        let nonce: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BridgeNonce)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::BridgeNonce, &(nonce + 1));
+        let mut request_bytes = [0u8; 32];
+        request_bytes[0..8].copy_from_slice(&nonce.to_be_bytes());
+        request_bytes[8..12].copy_from_slice(&source_game_id.to_be_bytes());
+        request_bytes[12..16].copy_from_slice(&target_game_id.to_be_bytes());
+        let request_id = BytesN::from_array(env, &request_bytes);
+
+        // Create bridge request
+        let request = BridgeRequest {
+            request_id: request_id.clone(),
+            owner: owner.clone(),
+            asset_id: asset_id.clone(),
+            amount,
+            source_chain: soroban_sdk::String::from_str(&env, "stellar"),
+            target_chain: target_chain.clone(),
+            source_game_id,
+            target_game_id,
+            status: BRIDGE_STATUS_PENDING,
+            created_at: now,
+            completed_at: None,
+            nonce,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeRequest(request_id.clone()), &request);
+
+        // Set cooldown
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeCooldown(owner.clone(), target_chain), &now);
+
+        // Lock the assets record
+        env.storage().persistent().set(
+            &DataKey::BridgeLock(owner, asset_id.clone()),
+            &amount,
+        );
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("BRIDGE_INIT"), request_id.clone(), asset_id),
+            (amount, source_game_id, target_game_id),
+        );
+
+        request_id
+    }
+
+    /// Complete a bridge request (called by bridge oracle/admin)
+    pub fn complete_bridge(
+        env: Env,
+        request_id: BytesN<32>,
+    ) {
+        Self::require_admin(&env);
+        let mut request: BridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BridgeRequest(request_id.clone()))
+            .expect("bridge request not found");
+
+        if request.status != BRIDGE_STATUS_PENDING {
+            panic!("bridge request not in pending status");
+        }
+
+        let now = env.ledger().timestamp();
+        request.status = BRIDGE_STATUS_COMPLETED;
+        request.completed_at = Some(now);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeRequest(request_id.clone()), &request);
+
+        // Remove the lock
+        env.storage().persistent().remove(
+            &DataKey::BridgeLock(request.owner.clone(), request.asset_id.clone()),
+        );
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("BRIDGE_DONE"), request_id),
+            (request.amount, request.source_chain, request.target_chain),
+        );
+    }
+
+    /// Fail a bridge request (called by bridge oracle/admin)
+    pub fn fail_bridge(
+        env: Env,
+        request_id: BytesN<32>,
+    ) {
+        Self::require_admin(&env);
+        let mut request: BridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BridgeRequest(request_id.clone()))
+            .expect("bridge request not found");
+
+        if request.status != BRIDGE_STATUS_PENDING {
+            panic!("bridge request not in pending status");
+        }
+
+        request.status = BRIDGE_STATUS_FAILED;
+        request.completed_at = Some(env.ledger().timestamp());
+
+        // Refund the locked assets
+        let bal_key = DataKey::Balance(request.owner.clone(), request.asset_id.clone());
+        let existing: Option<AssetBalance> = env.storage().persistent().get(&bal_key);
+        let balance = if let Some(mut b) = existing {
+            b.amount += request.amount;
+            b
+        } else {
+            AssetBalance {
+                owner: request.owner.clone(),
+                asset_id: request.asset_id.clone(),
+                amount: request.amount,
+                nft_serial: None,
+                acquired_at: env.ledger().timestamp(),
+                source_game_id: request.source_game_id,
+            }
+        };
+        env.storage().persistent().set(&bal_key, &balance);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeRequest(request_id.clone()), &request);
+
+        // Remove the lock
+        env.storage().persistent().remove(
+            &DataKey::BridgeLock(request.owner, request.asset_id),
+        );
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("BRIDGE_FAIL"), request_id),
+            request.amount,
+        );
+    }
+
+    /// Cancel a bridge request (called by owner)
+    pub fn cancel_bridge(
+        env: Env,
+        owner: Address,
+        request_id: BytesN<32>,
+    ) {
+        owner.require_auth();
+        let mut request: BridgeRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BridgeRequest(request_id.clone()))
+            .expect("bridge request not found");
+
+        if request.owner != owner {
+            panic!("not the bridge request owner");
+        }
+
+        if request.status != BRIDGE_STATUS_PENDING {
+            panic!("bridge request not in pending status");
+        }
+
+        request.status = BRIDGE_STATUS_CANCELLED;
+
+        // Refund the locked assets
+        let bal_key = DataKey::Balance(owner.clone(), request.asset_id.clone());
+        let existing: Option<AssetBalance> = env.storage().persistent().get(&bal_key);
+        let balance = if let Some(mut b) = existing {
+            b.amount += request.amount;
+            b
+        } else {
+            AssetBalance {
+                owner: owner.clone(),
+                asset_id: request.asset_id.clone(),
+                amount: request.amount,
+                nft_serial: None,
+                acquired_at: env.ledger().timestamp(),
+                source_game_id: request.source_game_id,
+            }
+        };
+        env.storage().persistent().set(&bal_key, &balance);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeRequest(request_id.clone()), &request);
+
+        // Remove the lock
+        env.storage().persistent().remove(
+            &DataKey::BridgeLock(owner, request.asset_id),
+        );
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("BRIDGE_CANCEL"), request_id),
+            request.amount,
+        );
+    }
+
+    /// Get bridge request status
+    pub fn get_bridge_request(env: Env, request_id: BytesN<32>) -> Option<BridgeRequest> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BridgeRequest(request_id))
+    }
+
+    /// Get supported chains
+    pub fn get_supported_chains(env: Env) -> Vec<String> {
+        env.storage()
+            .instance()
+            .get(&DataKey::SupportedChains)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Get chain configuration
+    pub fn get_chain_config(env: Env, chain_id: String) -> Option<ChainConfig> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ChainConfig(chain_id))
     }
 
     // ── Views ─────────────────────────────────────────────────────────────────

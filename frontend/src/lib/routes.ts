@@ -8,6 +8,7 @@ export const mainNav: NavItem[] = [
   { label: "Tournaments", href: "/tournaments" },
   { label: "Wallet", href: "/wallet" },
   { label: "Leaderboard", href: "/leaderboard" },
+  { label: "Governance", href: "/governance" },
 ];
 
 export const authNav = {

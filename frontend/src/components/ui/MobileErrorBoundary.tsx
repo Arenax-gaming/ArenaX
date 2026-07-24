@@ -1,23 +1,30 @@
-// filepath: frontend/src/components/ui/MobileErrorBoundary.tsx
 "use client";
 
 import { Component, ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { AlertTriangle, RefreshCw, Home, Mail } from "lucide-react";
+import { logError } from "@/lib/errorLogger";
+import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
 
-interface ErrorBoundaryProps {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface MobileErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactNode;
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
 }
 
-interface ErrorBoundaryState {
+interface MobileErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
 }
 
-// Mobile-specific error messages
-const MOBILE_ERROR_MESSAGES = {
+// ─── Error message map ────────────────────────────────────────────────────────
+
+const MOBILE_ERROR_MESSAGES: Record<
+  "network" | "timeout" | "offline" | "auth" | "generic",
+  { title: string; message: string; action: string }
+> = {
   network: {
     title: "Connection Lost",
     message: "Please check your internet connection and try again.",
@@ -28,156 +35,156 @@ const MOBILE_ERROR_MESSAGES = {
     message: "The server took too long to respond. Please try again.",
     action: "Try Again",
   },
+  offline: {
+    title: "You\u2019re Offline",
+    message: "Please connect to the internet to continue.",
+    action: "Go Back",
+  },
+  auth: {
+    title: "Session Expired",
+    message: "Please sign in again to continue.",
+    action: "Sign In",
+  },
   generic: {
     title: "Something Went Wrong",
     message: "An unexpected error occurred. Please try again.",
     action: "Refresh",
   },
-  offline: {
-    title: "You're Offline",
-    message: "Please connect to the internet to continue.",
-    action: "Go Back",
-  },
 };
 
+type MobileErrorType = keyof typeof MOBILE_ERROR_MESSAGES;
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export class MobileErrorBoundary extends Component<
-  ErrorBoundaryProps,
-  ErrorBoundaryState
+  MobileErrorBoundaryProps,
+  MobileErrorBoundaryState
 > {
-  constructor(props: ErrorBoundaryProps) {
+  constructor(props: MobileErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): MobileErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Mobile Error Boundary caught:", error, errorInfo);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    logError(error, {
+      source: "MobileErrorBoundary",
+      componentStack: errorInfo.componentStack,
+    });
     this.props.onError?.(error, errorInfo);
   }
 
-  handleRetry = () => {
+  handleRetry = (): void => {
     this.setState({ hasError: false, error: null });
   };
 
-  handleGoHome = () => {
+  handleGoHome = (): void => {
     window.location.href = "/";
   };
 
-  handleReportIssue = () => {
+  handleReportIssue = (): void => {
     window.location.href = "/contact?error=true";
   };
 
-  getErrorType = (): keyof typeof MOBILE_ERROR_MESSAGES => {
+  getErrorType(): MobileErrorType {
     const { error } = this.state;
     if (!error) return "generic";
 
-    const message = error.message.toLowerCase();
-    if (message.includes("network") || message.includes("fetch")) {
-      return "network";
+    const category = determineErrorCategory(error);
+
+    switch (category) {
+      case ErrorCategory.NETWORK:
+        return error.message.toLowerCase().includes("timeout") ? "timeout" : "network";
+      case ErrorCategory.AUTHENTICATION:
+        return "auth";
+      default: {
+        const msg = error.message.toLowerCase();
+        if (msg.includes("offline")) return "offline";
+        return "generic";
+      }
     }
-    if (message.includes("timeout") || message.includes("timed out")) {
-      return "timeout";
-    }
-    if (message.includes("offline")) {
-      return "offline";
-    }
-    return "generic";
-  };
+  }
 
   render() {
-    if (this.state.hasError) {
-      if (this.props.fallback) {
-        return this.props.fallback;
-      }
+    if (!this.state.hasError) return this.props.children;
 
-      const errorType = this.getErrorType();
-      const errorInfo = MOBILE_ERROR_MESSAGES[errorType];
+    if (this.props.fallback) return this.props.fallback;
 
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="w-full max-w-md text-center">
-            {/* Error Icon */}
-            <div className="mx-auto w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-6">
-              <AlertTriangle className="w-8 h-8 text-destructive" />
-            </div>
+    const errorType = this.getErrorType();
+    const info = MOBILE_ERROR_MESSAGES[errorType];
 
-            {/* Error Title */}
-            <h1 className="text-xl font-bold text-foreground mb-2">
-              {errorInfo.title}
-            </h1>
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-md text-center">
+          {/* Icon */}
+          <div className="mx-auto w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-6">
+            <AlertTriangle className="w-8 h-8 text-destructive" aria-hidden="true" />
+          </div>
 
-            {/* Error Message */}
-            <p className="text-sm text-muted-foreground mb-6">
-              {errorInfo.message}
-            </p>
+          {/* Title */}
+          <h1 className="text-xl font-bold text-foreground mb-2">{info.title}</h1>
 
-            {/* Error Code (for debugging) */}
-            {this.state.error && (
-              <details className="mb-6 text-left">
-                <summary className="text-xs text-muted-foreground cursor-pointer">
-                  Technical Details
-                </summary>
-                <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">
-                  {this.state.error.message}
-                </pre>
-              </details>
-            )}
+          {/* Message */}
+          <p className="text-sm text-muted-foreground mb-6">{info.message}</p>
 
-            {/* Action Buttons */}
-            <div className="space-y-3">
+          {/* Technical details (collapsed) */}
+          {this.state.error && (
+            <details className="mb-6 text-left">
+              <summary className="text-xs text-muted-foreground cursor-pointer select-none">
+                Technical details
+              </summary>
+              <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-x-auto">
+                {this.state.error.message}
+              </pre>
+            </details>
+          )}
+
+          {/* Actions */}
+          <div className="space-y-3">
+            {errorType === "auth" ? (
               <Button
-                onClick={this.handleRetry}
+                onClick={() => { window.location.href = "/login"; }}
                 className="w-full"
                 size="lg"
               >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                {errorInfo.action}
+                {info.action}
               </Button>
+            ) : (
+              <Button onClick={this.handleRetry} className="w-full" size="lg">
+                <RefreshCw className="w-4 h-4 mr-2" aria-hidden="true" />
+                {info.action}
+              </Button>
+            )}
 
-              <div className="flex gap-3">
-                <Button
-                  onClick={this.handleGoHome}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-
-                <Button
-                  onClick={this.handleReportIssue}
-                  variant="ghost"
-                  className="flex-1"
-                >
-                  <Mail className="w-4 h-4 mr-2" />
-                  Report
-                </Button>
-              </div>
+            <div className="flex gap-3">
+              <Button onClick={this.handleGoHome} variant="outline" className="flex-1">
+                <Home className="w-4 h-4 mr-2" aria-hidden="true" />
+                Home
+              </Button>
+              <Button onClick={this.handleReportIssue} variant="ghost" className="flex-1">
+                <Mail className="w-4 h-4 mr-2" aria-hidden="true" />
+                Report
+              </Button>
             </div>
           </div>
         </div>
-      );
-    }
-
-    return this.props.children;
+      </div>
+    );
   }
 }
 
-// Hook for mobile-specific error handling
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Thin hook for imperatively handling errors inside mobile-specific components.
+ * Logs the error via `errorLogger` and fires gtag if available.
+ */
 export function useMobileErrorHandler() {
-  const handleError = (error: Error) => {
-    console.error("[Mobile Error]:", error);
-    
-    // Track error for analytics
-    if (typeof window !== "undefined" && (window as any).gtag) {
-      (window as any).gtag("event", "exception", {
-        description: error.message,
-        fatal: false,
-      });
-    }
+  const handleError = (error: Error, metadata?: Record<string, unknown>): void => {
+    logError(error, { source: "useMobileErrorHandler", ...metadata });
   };
 
   return { handleError };

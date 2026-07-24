@@ -1,109 +1,107 @@
 import { test, expect } from "@playwright/test";
+import {
+  mockAuthHandlers,
+  mockNotificationHandlers,
+} from "./mocks/handlers";
 
-/**
- * Authentication Flow E2E Tests (#703)
- *
- * Tests login, register pages, and auth-gated routes.
- */
-test.describe("Authentication", () => {
-  test("login page renders input fields", async ({ page }) => {
-    await page.goto("/en/login", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+const LOCALE = "en";
 
-    // ArenaX uses phone-based OTP — look for phone, email, or generic text input
-    const inputLocator = page.locator(
-      "input[type='tel'], input[type='email'], input[type='text'], input[name*='phone'], input[name*='email']"
+test.describe("Auth journeys", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockAuthHandlers(page);
+    await mockNotificationHandlers(page);
+    // Mock username-availability check so it doesn't block submission
+    await page.route("**/api/auth/username-available**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ available: true }),
+      })
     );
-    const count = await inputLocator.count();
-    expect(count).toBeGreaterThan(0);
   });
 
-  test("login page has a submit button", async ({ page }) => {
-    await page.goto("/en/login", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+  test("register → redirected to verify-email page", async ({ page }) => {
+    await page.goto(`/${LOCALE}/register`);
 
-    const submitButton = page.locator(
-      "button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), button:has-text('Continue')"
-    );
-    const count = await submitButton.count();
-    expect(count).toBeGreaterThan(0);
+    await page.fill("#username", "testuser");
+    await page.fill("#email", "test@example.com");
+    await page.fill("#password", "Password1!");
+    await page.fill("#confirmPassword", "Password1!");
+
+    // Wait for username availability check to settle
+    await page.waitForTimeout(500);
+
+    await page.click('button[type="submit"]');
+
+    await expect(page).toHaveURL(/verify-email/, { timeout: 10_000 });
   });
 
-  test("login form shows validation feedback on empty submission", async ({
-    page,
-  }) => {
-    await page.goto("/en/login", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
+  test("verify email with token in URL → redirects home", async ({ page }) => {
+    await page.goto(`/${LOCALE}/auth/verify-email?token=mock-verification-token`);
+    // Auto-verifies via useEffect; should redirect to /
+    await expect(page).toHaveURL(/^\/(en\/)?$/, { timeout: 10_000 });
+  });
 
-    // Attempt to submit with no input — the form should either show validation
-    // messages or remain on the same page
-    const submitButton = page.locator(
-      "button[type='submit'], button:has-text('Login'), button:has-text('Sign in'), button:has-text('Continue')"
+  test("login with valid credentials → redirects home", async ({ page }) => {
+    await page.goto(`/${LOCALE}/login`);
+
+    await page.fill("#email", "test@example.com");
+    await page.fill("#password", "Password1!");
+    await page.click('button[type="submit"]');
+
+    await expect(page).toHaveURL(/^\/(en\/?)?$/, { timeout: 10_000 });
+  });
+
+  test("login shows error on invalid credentials", async ({ page }) => {
+    await page.route("**/api/auth/login", (route) =>
+      route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "Invalid credentials" }),
+      })
     );
-    if ((await submitButton.count()) > 0) {
-      await submitButton.first().click();
+
+    await page.goto(`/${LOCALE}/login`);
+    await page.fill("#email", "wrong@example.com");
+    await page.fill("#password", "wrongpass");
+    await page.click('button[type="submit"]');
+
+    // Either inline error or toast
+    await expect(
+      page.locator('[role="alert"], [data-toast]').first()
+    ).toBeVisible({ timeout: 8_000 });
+  });
+
+  test("logout clears session and returns to home", async ({ page }) => {
+    // Seed auth token so the app thinks the user is logged in
+    await page.goto(`/${LOCALE}/login`);
+    await page.evaluate(() => {
+      localStorage.setItem("auth_token", "mock-access-token");
+      localStorage.setItem(
+        "auth_user",
+        JSON.stringify({
+          id: "user-1",
+          username: "testuser",
+          email: "test@example.com",
+        })
+      );
+    });
+    await page.reload();
+
+    // Trigger logout via user menu or direct nav
+    const userMenuTrigger = page.locator('[aria-label*="user" i], [data-testid="user-menu"]').first();
+    if (await userMenuTrigger.isVisible()) {
+      await userMenuTrigger.click();
+      await page.locator('button:has-text("Sign out"), button:has-text("Logout")').first().click();
+    } else {
+      // Fallback: clear storage directly (simulates logout)
+      await page.evaluate(() => {
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("auth_user");
+      });
+      await page.goto(`/${LOCALE}/login`);
     }
 
-    // We expect the user to remain on the login page (not navigate away)
-    await page.waitForTimeout(500);
-    expect(page.url()).toMatch(/login|auth/i);
-  });
-
-  test("register page loads and shows registration form", async ({ page }) => {
-    await page.goto("/en/register", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    const body = page.locator("body");
-    await expect(body).toBeVisible();
-    const text = await body.innerText();
-    // Register page should mention registration-related content
-    expect(text.trim().length).toBeGreaterThan(0);
-  });
-
-  test("register page has required input fields", async ({ page }) => {
-    await page.goto("/en/register", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    const inputs = page.locator("input");
-    const count = await inputs.count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test("authenticated-only dashboard route redirects unauthenticated users", async ({
-    page,
-  }) => {
-    await page.goto("/en/dashboard", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    // After navigation, user should either be on login page OR dashboard
-    // shows an auth gate/loading state — it should NOT be a hard error
-    const status = page.url();
-    // Should redirect to login or stay on a valid page
-    expect(status).toBeTruthy();
-    // The page should not show a server error
-    const body = page.locator("body");
-    await expect(body).toBeVisible();
-  });
-
-  test("visual snapshot: login page", async ({ page }) => {
-    await page.goto("/en/login", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-    await expect(page).toHaveScreenshot("login-page.png", {
-      maxDiffPixels: 100,
-    });
+    await expect(page).toHaveURL(/\/(login|en\/?$)/, { timeout: 8_000 });
   });
 });

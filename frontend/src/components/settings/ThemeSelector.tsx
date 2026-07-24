@@ -1,8 +1,9 @@
 "use client";
 import { Switch } from "@/components/ui/Switch";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sun, Moon, Monitor, Check, Save, Palette, Layout, Sparkles } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import type { ThemeSettings as ThemeSettingsType, AccentColor } from "@/types/settings";
@@ -22,6 +23,23 @@ export function ThemeSelector({
   isSaving,
 }: ThemeSelectorProps) {
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const { theme, setTheme, resolvedTheme } = useTheme();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // After mount, next-themes is the authoritative source for which mode is active.
+  const activeMode = (mounted ? (theme as ThemeSettingsType["mode"] | undefined) : undefined) ?? settings.mode;
+
+  // resolvedTheme gives the actual light/dark value even when mode is "system".
+  const previewMode = (mounted ? (resolvedTheme as ThemeSettingsType["mode"] | undefined) : undefined) ?? settings.mode;
+
+  const handleModeSelect = (mode: ThemeSettingsType["mode"]) => {
+    setTheme(mode);
+    onUpdate({ mode });
+  };
 
   const handleSave = async () => {
     const success = await onSave();
@@ -85,22 +103,22 @@ export function ThemeSelector({
             {(["light", "dark", "system"] as const).map((mode) => (
               <button
                 key={mode}
-                onClick={() => onUpdate({ mode })}
+                onClick={() => handleModeSelect(mode)}
                 className={`flex flex-col items-center gap-3 p-6 rounded-xl border-2 transition-all ${
-                  settings.mode === mode
+                  activeMode === mode
                     ? "border-primary bg-primary/10"
                     : "border-muted hover:border-muted-foreground/50"
                 }`}
               >
                 <div
                   className={`p-3 rounded-full ${
-                    settings.mode === mode ? "bg-primary text-white" : "bg-muted"
+                    activeMode === mode ? "bg-primary text-white" : "bg-muted"
                   }`}
                 >
                   {getThemeModeIcon(mode)}
                 </div>
                 <span className="text-sm font-medium">{getThemeModeLabel(mode)}</span>
-                {settings.mode === mode && (
+                {activeMode === mode && (
                   <div className="absolute top-3 right-3">
                     <Check className="h-4 w-4 text-primary" />
                   </div>
@@ -205,9 +223,9 @@ export function ThemeSelector({
         <CardContent>
           <div
             className={`p-6 rounded-lg border-2 ${
-              settings.mode === "dark"
+              previewMode === "dark"
                 ? "bg-background border-border"
-                : settings.mode === "light"
+                : previewMode === "light"
                 ? "bg-muted border-border"
                 : "bg-gradient-to-br from-gray-100 to-gray-900 border-gray-400"
             }`}
@@ -216,15 +234,15 @@ export function ThemeSelector({
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-full ${accentColors.find(c => c.value === settings.accentColor)?.hex}`} />
                 <div className="space-y-1">
-                  <div className={`h-3 w-32 rounded ${settings.mode === "dark" ? "bg-surface-raised" : "bg-gray-300"}`} />
-                  <div className={`h-2 w-24 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
+                  <div className={`h-3 w-32 rounded ${previewMode === "dark" ? "bg-surface-raised" : "bg-gray-300"}`} />
+                  <div className={`h-2 w-24 rounded ${previewMode === "dark" ? "bg-surface" : "bg-muted"}`} />
                 </div>
               </div>
-              <div className={`h-2 w-full rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
-              <div className={`h-2 w-3/4 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
+              <div className={`h-2 w-full rounded ${previewMode === "dark" ? "bg-surface" : "bg-muted"}`} />
+              <div className={`h-2 w-3/4 rounded ${previewMode === "dark" ? "bg-surface" : "bg-muted"}`} />
               <div className="flex gap-2">
                 <div className={`h-8 w-24 rounded ${accentColors.find(c => c.value === settings.accentColor)?.hex}`} />
-                <div className={`h-8 w-20 rounded ${settings.mode === "dark" ? "bg-surface" : "bg-muted"}`} />
+                <div className={`h-8 w-20 rounded ${previewMode === "dark" ? "bg-surface" : "bg-muted"}`} />
               </div>
             </div>
           </div>

@@ -35,7 +35,10 @@ pub async fn estimate(
         &body.signer_secret,
     )
     .await
-    .map_err(|e| ApiError::InternalServerError(format!("Gas estimation failed: {}", e)))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "Gas estimation failed for contract {}", body.contract_id);
+        ApiError::internal_error(format!("Gas estimation failed: {}", e))
+    })?;
 
     // Convert min resource fee (Stroops)
     let est_fee_stroops = res.min_resource_fee.parse::<u64>().unwrap_or(0);

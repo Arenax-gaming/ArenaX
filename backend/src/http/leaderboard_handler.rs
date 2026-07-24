@@ -4,52 +4,52 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
+use crate::models::{PaginatedResponse, PaginationParams};
 use crate::service::LeaderboardService;
-
-#[derive(Deserialize)]
-pub struct LeaderboardQuery {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-}
-
-#[derive(Deserialize)]
-pub struct RefreshLeaderboardRequest {
-    pub category: String,
-}
 
 /// GET /api/v1/leaderboards/:category
 pub async fn get_leaderboard(
     pool: web::Data<PgPool>,
     category: web::Path<String>,
-    query: web::Query<LeaderboardQuery>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     let service = LeaderboardService::new(pool.get_ref().clone());
-    let limit = query.limit.unwrap_or(100);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
 
     let leaderboard = service
         .get_leaderboard(&category, limit, offset)
         .await?;
 
-    Ok(HttpResponse::Ok().json(leaderboard))
+    Ok(HttpResponse::Ok().json(PaginatedResponse {
+        total: leaderboard.total_count,
+        page: query.resolved_page(),
+        limit,
+        data: leaderboard.entries,
+    }))
 }
 
 /// GET /api/v1/leaderboards/:category/season/:season
 pub async fn get_seasonal_leaderboard(
     pool: web::Data<PgPool>,
     path: web::Path<(String, String)>,
-    query: web::Query<LeaderboardQuery>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     let (category, season) = path.into_inner();
     let service = LeaderboardService::new(pool.get_ref().clone());
-    let limit = query.limit.unwrap_or(100);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
 
     let leaderboard = service
         .get_seasonal_leaderboard(&category, &season, limit, offset)
         .await?;
 
-    Ok(HttpResponse::Ok().json(leaderboard))
+    Ok(HttpResponse::Ok().json(PaginatedResponse {
+        total: leaderboard.total_participants,
+        page: query.resolved_page(),
+        limit,
+        data: leaderboard.entries,
+    }))
 }
 
 /// GET /api/v1/leaderboards/:category/player/:player_id

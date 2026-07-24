@@ -5,6 +5,9 @@ import { metricsService } from '../services/metrics.service';
 import { getEnv } from './env';
 import { getCorrelationId } from '../services/correlation.service';
 
+// PgBouncer configuration
+const PGBOUNCER_ENABLED = process.env.PGBOUNCER_ENABLED === 'true';
+
 // Database connection pool configuration — read from the validated env singleton.
 const buildPoolConfig = () => {
     try {
@@ -28,6 +31,16 @@ const buildPoolConfig = () => {
 
 const poolConfig = buildPoolConfig();
 
+// Determine which database URL to use (PgBouncer or direct)
+const getDatabaseUrl = () => {
+    if (PGBOUNCER_ENABLED && process.env.DATABASE_URL) {
+        logger.info('Using PgBouncer connection pooler');
+        return process.env.DATABASE_URL;
+    }
+    // Fallback to direct connection or DATABASE_DIRECT_URL
+    return process.env.DATABASE_DIRECT_URL || process.env.DATABASE_URL;
+};
+
 // Create Prisma client with connection pooling
 // Note: Prisma uses pg-pool internally for PostgreSQL
 // Connection pooling is configured via the DATABASE_URL connection string parameters
@@ -35,7 +48,7 @@ const poolConfig = buildPoolConfig();
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.DATABASE_URL,
+      url: getDatabaseUrl(),
     },
   },
   log: (() => {
@@ -108,7 +121,37 @@ export function getConnectionStats() {
   return {
     activeConnections: connectionCount,
     poolConfig,
+    pgbouncerEnabled: PGBOUNCER_ENABLED,
   };
+}
+
+// PgBouncer monitoring function
+export async function getPgBouncerStats(): Promise<any> {
+  if (!PGBOUNCER_ENABLED) {
+    return null;
+  }
+
+  try {
+    // Query PgBouncer's built-in statistics view
+    const stats = await prisma.$queryRaw`
+      SELECT 
+        pool_mode,
+        cl_active,
+        cl_waiting,
+        sv_active,
+        sv_idle,
+        sv_used,
+        sv_tested,
+        sv_login,
+        maxwait,
+        maxwait_us
+      FROM pgbouncer_stats
+    `;
+    return stats;
+  } catch (error) {
+    logger.warn('Failed to fetch PgBouncer stats', { error });
+    return null;
+  }
 }
 
 // Graceful shutdown

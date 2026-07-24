@@ -10,12 +10,13 @@ CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_game_mode_status
 
 -- Partial index for the common hot path: only waiting entries.
 -- Keeps the index small and fast for the matchmaker worker.
+-- status INTEGER: 0=waiting, 1=matched, 2=expired, 3=cancelled
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_waiting
     ON matchmaking_queue (game, game_mode, joined_at)
-    WHERE status = 'waiting';
+    WHERE status = 0;
 
 -- Composite index for the average-wait-time aggregate query which filters on
--- (status = 'matched', matched_at IS NOT NULL, created_at >= ...).
+-- (status = 1 (matched), matched_at IS NOT NULL, created_at >= ...).
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_matched_stats
     ON matchmaking_queue (game, game_mode, created_at)
-    WHERE status = 'matched' AND matched_at IS NOT NULL;
+    WHERE status = 1 AND matched_at IS NOT NULL;

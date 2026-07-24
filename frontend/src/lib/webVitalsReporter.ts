@@ -3,10 +3,10 @@
  *
  * A tiny, dependency-free helper that buffers Web Vitals as they fire,
  * compares each metric against its acceptance budget, and ships a
- * batched report to an analytics endpoint. The endpoint is the same
- * `/api/v1/analytics/events` controller the rest of the platform uses
- * — so frontend perf telemetry rides the same pipeline as gameplay
- * analytics.
+ * batched report to an analytics endpoint configured via
+ * NEXT_PUBLIC_ANALYTICS_ENDPOINT. Reporting is gated to production
+ * (NODE_ENV === 'production') so development runs never send outbound
+ * requests to the analytics pipeline.
  *
  * Why a custom reporter instead of `web-vitals` directly:
  *  - The repo doesn't ship `web-vitals` yet; we keep the helper
@@ -65,7 +65,7 @@ export const evaluateMetric = (metric: WebVitalMetric): WebVitalReport => {
 };
 
 export interface WebVitalsReporterOptions {
-    /** Endpoint to POST batched reports to. Defaults to /api/v1/analytics/events. */
+    /** Endpoint to POST batched reports to. Defaults to NEXT_PUBLIC_ANALYTICS_ENDPOINT. */
     endpoint?: string;
     /** Max metrics to buffer before flushing (default 10). */
     bufferSize?: number;
@@ -91,6 +91,8 @@ export interface WebVitalsReporter {
 
 const noop = () => {};
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 /**
  * Create a reporter. The factory style is the same we use for
  * `analytics.service.ts` on the backend — production gets a single
@@ -99,7 +101,7 @@ const noop = () => {};
 export const createWebVitalsReporter = (
     options: WebVitalsReporterOptions = {}
 ): WebVitalsReporter => {
-    const endpoint = options.endpoint ?? '/api/v1/analytics/events';
+    const endpoint = options.endpoint ?? process.env.NEXT_PUBLIC_ANALYTICS_ENDPOINT ?? '';
     const bufferSize = options.bufferSize ?? 10;
     const flushIntervalMs = options.flushIntervalMs ?? 5_000;
     const fetcher: typeof fetch =
@@ -121,10 +123,14 @@ export const createWebVitalsReporter = (
 
     const ship = async (reports: WebVitalReport[]) => {
         if (reports.length === 0) return;
+        // Never send metrics outside production to avoid polluting analytics.
+        if (!IS_PRODUCTION) return;
         if (options.sink) {
             await options.sink(reports);
             return;
         }
+        // Gracefully skip if the endpoint is not configured in production.
+        if (!endpoint) return;
         try {
             await fetcher(endpoint, {
                 method: 'POST',

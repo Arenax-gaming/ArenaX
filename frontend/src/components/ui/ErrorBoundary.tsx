@@ -4,24 +4,14 @@ import { Component, ReactNode } from "react";
 import { Button } from "./Button";
 import { AlertTriangle, RefreshCw, Home, Mail, Copy, Check } from "lucide-react";
 import { logError } from "@/lib/errorLogger";
-import { ErrorCategory } from "@/lib/errors";
-import { useState } from "react";
+import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
 
-interface ErrorBoundaryProps {
-  children: ReactNode;
-  fallback?: ReactNode;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
-}
+// ─── Error message catalogue ──────────────────────────────────────────────────
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-  errorInfo: React.ErrorInfo | null;
-  copied: boolean;
-}
-
-// Error messages by category
-const ERROR_MESSAGES = {
+const ERROR_MESSAGES: Record<
+  ErrorCategory,
+  { title: string; message: string; action: string }
+> = {
   [ErrorCategory.NETWORK]: {
     title: "Connection Lost",
     message: "Please check your internet connection and try again.",
@@ -54,6 +44,31 @@ const ERROR_MESSAGES = {
   },
 };
 
+// ─── Props / State ────────────────────────────────────────────────────────────
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: React.ErrorInfo | null;
+  copied: boolean;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+/**
+ * Top-level error boundary.  Wraps the entire locale layout so any uncaught
+ * React render error is caught here.
+ *
+ * Integrates with `errorLogger` for structured logging + analytics tracking.
+ * Uses `determineErrorCategory` from `errors.ts` rather than duplicating
+ * keyword-matching logic inline.
+ */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
@@ -64,147 +79,130 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     this.setState({ errorInfo });
-    logError(error, { componentStack: errorInfo.componentStack });
+    logError(error, {
+      source: "ErrorBoundary",
+      componentStack: errorInfo.componentStack,
+    });
     this.props.onError?.(error, errorInfo);
   }
 
-  handleRetry = () => {
+  // ── Actions ──────────────────────────────────────────────────────────────────
+
+  handleRetry = (): void => {
     this.setState({ hasError: false, error: null, errorInfo: null });
   };
 
-  handleGoHome = () => {
+  handleGoHome = (): void => {
     window.location.href = "/";
   };
 
-  handleGoToLogin = () => {
+  handleGoToLogin = (): void => {
     window.location.href = "/login";
   };
 
-  handleReportIssue = () => {
+  handleReportIssue = (): void => {
     window.location.href = "/contact?error=true";
   };
 
-  handleCopyErrorDetails = () => {
+  handleCopyErrorDetails = (): void => {
     const { error, errorInfo } = this.state;
-    const details = `Error: ${error?.message}\nStack: ${error?.stack}\nComponent Stack: ${errorInfo?.componentStack}`;
+    const details = [
+      `Error: ${error?.message ?? "unknown"}`,
+      `Stack: ${error?.stack ?? "–"}`,
+      `Component stack: ${errorInfo?.componentStack ?? "–"}`,
+    ].join("\n");
+
     navigator.clipboard.writeText(details).then(() => {
       this.setState({ copied: true });
-      setTimeout(() => this.setState({ copied: false }), 2000);
+      setTimeout(() => this.setState({ copied: false }), 2_000);
     });
   };
 
-  getErrorCategory = (): ErrorCategory => {
-    const { error } = this.state;
-    if (!error) return ErrorCategory.UNKNOWN;
-    if (error instanceof Error) {
-      const message = error.message.toLowerCase();
-      if (message.includes("network") || message.includes("fetch") || message.includes("timeout")) {
-        return ErrorCategory.NETWORK;
-      }
-      if (message.includes("unauthorized") || message.includes("forbidden") || message.includes("authentication")) {
-        return ErrorCategory.AUTHENTICATION;
-      }
-      if (message.includes("validation") || message.includes("invalid")) {
-        return ErrorCategory.VALIDATION;
-      }
-      if (message.includes("api") || message.includes("server")) {
-        return ErrorCategory.API;
-      }
-      return ErrorCategory.RUNTIME;
-    }
-    return ErrorCategory.UNKNOWN;
-  };
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   render() {
-    if (this.state.hasError) {
-      if (this.props.fallback) {
-        return this.props.fallback;
-      }
+    if (!this.state.hasError) return this.props.children;
 
-      const errorCategory = this.getErrorCategory();
-      const errorInfo = ERROR_MESSAGES[errorCategory];
+    if (this.props.fallback) return this.props.fallback;
 
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="w-full max-w-md text-center">
-            {/* Error Icon */}
-            <div className="mx-auto w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-6">
-              <AlertTriangle className="w-8 h-8 text-destructive" />
-            </div>
+    const { error, errorInfo, copied } = this.state;
+    const category = error ? determineErrorCategory(error) : ErrorCategory.UNKNOWN;
+    const { title, message, action } = ERROR_MESSAGES[category];
 
-            {/* Error Title */}
-            <h1 className="text-xl font-bold text-foreground mb-2">
-              {errorInfo.title}
-            </h1>
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-md text-center">
+          {/* Icon */}
+          <div className="mx-auto w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-6">
+            <AlertTriangle className="w-8 h-8 text-destructive" aria-hidden="true" />
+          </div>
 
-            {/* Error Message */}
-            <p className="text-sm text-muted-foreground mb-6">
-              {errorInfo.message}
-            </p>
+          {/* Title */}
+          <h1 className="text-xl font-bold text-foreground mb-2">{title}</h1>
 
-            {/* Error Details */}
-            {(this.state.error || this.state.errorInfo) && (
-              <details className="mb-6 text-left">
-                <summary className="text-xs text-muted-foreground cursor-pointer">
-                  Technical Details
-                </summary>
-                <div className="mt-2 space-y-2">
-                  {this.state.error && (
-                    <pre className="p-2 bg-muted rounded text-xs overflow-x-auto">
-                      {this.state.error.message}
-                    </pre>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 text-xs"
-                      onClick={this.handleCopyErrorDetails}
-                    >
-                      {this.state.copied ? (
-                        <Check className="w-3 h-3 mr-1" />
-                      ) : (
-                        <Copy className="w-3 h-3 mr-1" />
-                      )}
-                      {this.state.copied ? "Copied!" : "Copy Details"}
-                    </Button>
-                  </div>
+          {/* Message */}
+          <p className="text-sm text-muted-foreground mb-6">{message}</p>
+
+          {/* Collapsible technical details */}
+          {(error || errorInfo) && (
+            <details className="mb-6 text-left">
+              <summary className="text-xs text-muted-foreground cursor-pointer select-none">
+                Technical Details
+              </summary>
+              <div className="mt-2 space-y-2">
+                {error && (
+                  <pre className="p-2 bg-muted rounded text-xs overflow-x-auto">
+                    {error.message}
+                  </pre>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 text-xs"
+                    onClick={this.handleCopyErrorDetails}
+                    aria-label="Copy error details to clipboard"
+                  >
+                    {copied ? (
+                      <Check className="w-3 h-3 mr-1" aria-hidden="true" />
+                    ) : (
+                      <Copy className="w-3 h-3 mr-1" aria-hidden="true" />
+                    )}
+                    {copied ? "Copied!" : "Copy Details"}
+                  </Button>
                 </div>
-              </details>
+              </div>
+            </details>
+          )}
+
+          {/* Action buttons */}
+          <div className="space-y-3">
+            {category === ErrorCategory.AUTHENTICATION ? (
+              <Button onClick={this.handleGoToLogin} className="w-full" size="lg">
+                {action}
+              </Button>
+            ) : (
+              <Button onClick={this.handleRetry} className="w-full" size="lg">
+                <RefreshCw className="w-4 h-4 mr-2" aria-hidden="true" />
+                {action}
+              </Button>
             )}
 
-            {/* Action Buttons */}
-            <div className="space-y-3">
-              {errorCategory === ErrorCategory.AUTHENTICATION ? (
-                <Button onClick={this.handleGoToLogin} className="w-full" size="lg">
-                  {errorInfo.action}
-                </Button>
-              ) : (
-                <Button onClick={this.handleRetry} className="w-full" size="lg">
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  {errorInfo.action}
-                </Button>
-              )}
-
-              <div className="flex gap-3">
-                <Button onClick={this.handleGoHome} variant="outline" className="flex-1">
-                  <Home className="w-4 h-4 mr-2" />
-                  Home
-                </Button>
-
-                <Button onClick={this.handleReportIssue} variant="ghost" className="flex-1">
-                  <Mail className="w-4 h-4 mr-2" />
-                  Report
-                </Button>
-              </div>
+            <div className="flex gap-3">
+              <Button onClick={this.handleGoHome} variant="outline" className="flex-1">
+                <Home className="w-4 h-4 mr-2" aria-hidden="true" />
+                Home
+              </Button>
+              <Button onClick={this.handleReportIssue} variant="ghost" className="flex-1">
+                <Mail className="w-4 h-4 mr-2" aria-hidden="true" />
+                Report
+              </Button>
             </div>
           </div>
         </div>
-      );
-    }
-
-    return this.props.children;
+      </div>
+    );
   }
 }

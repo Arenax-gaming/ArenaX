@@ -5,8 +5,8 @@ use tracing::error;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
-    #[error("Internal server error")]
-    InternalServerError,
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
 
     #[error("Bad request: {0}")]
     BadRequest(String),
@@ -52,6 +52,7 @@ impl ApiError {
     /// to API consumers — the public response always says "Internal server
     /// error".
     pub fn internal_error(message: impl Into<String>) -> Self {
+        ApiError::InternalServerError(message.into())
         let msg = message.into();
         error!(error.message = %msg, "Internal server error");
         ApiError::InternalServerError
@@ -88,9 +89,9 @@ struct ErrorResponse {
 impl ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
         let (status, message) = match self {
-            ApiError::InternalServerError => (
+            ApiError::InternalServerError(_) => (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                self.to_string(),
+                "Internal server error".to_string(),
             ),
             ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
@@ -121,7 +122,8 @@ impl ResponseError for ApiError {
         let error_response = ErrorResponse {
             error: message,
             code: status.as_u16(),
-            details: Some(self.to_string()),
+            // Never echo internal details (DB errors, stack traces, etc.) back to the client.
+            details: None,
         };
 
         HttpResponse::build(status).json(error_response)

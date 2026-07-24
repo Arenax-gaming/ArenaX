@@ -1,41 +1,119 @@
 "use client";
 
-import { useState } from "react";
-import { Search, UserPlus, X, Check, Copy, Share2, Link as LinkIcon } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Search, UserPlus, Check, Copy, Share2, Link as LinkIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { AvatarWithStatus } from "./OnlineStatus";
-import type { Friend, SocialUser } from "@/types/social";
+import type { Friend, FriendRequest, SocialUser } from "@/types/social";
+import {
+  useFriendsList,
+  usePendingFriendRequests,
+  useAddFriend,
+  useAcceptFriendRequest,
+  useSuggestedUsers,
+} from "@/hooks/useSocial";
 
 interface InviteFriendsProps {
-  friends: Friend[];
-  allUsers: SocialUser[];
-  onInviteFriend: (userId: string) => void;
+  /** Pre-fetched friends list. Falls back to useFriendsList when omitted. */
+  friends?: Friend[];
+  /** Pre-fetched candidate users. Falls back to useSuggestedUsers when omitted. */
+  allUsers?: SocialUser[];
+  /**
+   * Pending incoming friend requests directed at the current user.
+   * Falls back to usePendingFriendRequests when omitted.
+   */
+  incomingRequests?: FriendRequest[];
+  /** Override invite handler (e.g. for testing). Defaults to useAddFriend mutation. */
+  onInviteFriend?: (userId: string) => void;
+  /** Override accept handler. Defaults to useAcceptFriendRequest mutation. */
+  onAcceptRequest?: (requestId: string) => void;
   onInviteByEmail?: (email: string) => void;
 }
 
 export function InviteFriends({
-  friends,
-  allUsers,
+  friends: propFriends,
+  allUsers: propAllUsers,
+  incomingRequests: propIncomingRequests,
   onInviteFriend,
+  onAcceptRequest,
   onInviteByEmail,
-}: InviteFriendsProps) {
+}: InviteFriendsProps = {}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [inviteTab, setInviteTab] = useState<"friends" | "link" | "email">("friends");
   const [emailInput, setEmailInput] = useState("");
   const [copied, setCopied] = useState(false);
 
-  // Get users who are not already friends
-  const friendIds = new Set(friends.map(f => f.id));
-  const suggestedUsers = allUsers.filter(u => !friendIds.has(u.id));
-
-  const filteredSuggestions = suggestedUsers.filter(u =>
-    u.username.toLowerCase().includes(searchQuery.toLowerCase())
+  // Session-scoped set of user IDs for which an invite has been sent.
+  // Persists across re-renders and server-data refreshes without a server round-trip.
+  const [invitedUserIds, setInvitedUserIds] = useState<ReadonlySet<string>>(
+    () => new Set()
   );
 
-  const inviteLink = typeof window !== "undefined"
-    ? `${window.location.origin}/invite?ref=${encodeURIComponent("ProGamer99")}`
-    : "";
+  const { data: friendsData } = useFriendsList();
+  const { data: suggestedData } = useSuggestedUsers();
+  const { data: requestsData } = usePendingFriendRequests();
+  const addFriendMutation = useAddFriend();
+  const acceptRequestMutation = useAcceptFriendRequest();
+
+  const friends = propFriends ?? friendsData?.friends ?? [];
+  const allUsers = propAllUsers ?? suggestedData ?? [];
+  const incomingRequests = propIncomingRequests ?? requestsData ?? [];
+
+  // Index pending incoming requests by sender ID for O(1) look-up per row.
+  const incomingRequestByUserId = useMemo(() => {
+    const map = new Map<string, FriendRequest>();
+    for (const req of incomingRequests) {
+      if (req.status === "pending") {
+        map.set(req.fromUserId, req);
+      }
+    }
+    return map;
+  }, [incomingRequests]);
+
+  const friendIds = useMemo(() => new Set(friends.map((f) => f.id)), [friends]);
+
+  const filteredSuggestions = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return allUsers.filter(
+      (u) => !friendIds.has(u.id) && u.username.toLowerCase().includes(q)
+    );
+  }, [allUsers, friendIds, searchQuery]);
+
+  const handleInvite = (userId: string) => {
+    if (invitedUserIds.has(userId)) return;
+
+    // Optimistic update — the button flips to "Invited" immediately.
+    setInvitedUserIds((prev) => new Set([...prev, userId]));
+
+    if (onInviteFriend) {
+      onInviteFriend(userId);
+    } else {
+      addFriendMutation.mutate(userId, {
+        onError: () => {
+          // Roll back if the server rejected the request.
+          setInvitedUserIds((prev) => {
+            const next = new Set(prev);
+            next.delete(userId);
+            return next;
+          });
+        },
+      });
+    }
+  };
+
+  const handleAccept = (requestId: string) => {
+    if (onAcceptRequest) {
+      onAcceptRequest(requestId);
+    } else {
+      acceptRequestMutation.mutate(requestId);
+    }
+  };
+
+  const inviteLink =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/invite?ref=${encodeURIComponent("ProGamer99")}`
+      : "";
 
   const handleCopyLink = async () => {
     try {
@@ -63,36 +141,19 @@ export function InviteFriends({
       <CardContent>
         {/* Tab Navigation */}
         <div className="flex border-b mb-4">
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              inviteTab === "friends"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => setInviteTab("friends")}
-          >
-            Find Friends
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              inviteTab === "link"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => setInviteTab("link")}
-          >
-            Invite Link
-          </button>
-          <button
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              inviteTab === "email"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => setInviteTab("email")}
-          >
-            Email
-          </button>
+          {(["friends", "link", "email"] as const).map((tab) => (
+            <button
+              key={tab}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                inviteTab === tab
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setInviteTab(tab)}
+            >
+              {tab === "friends" ? "Find Friends" : tab === "link" ? "Invite Link" : "Email"}
+            </button>
+          ))}
         </div>
 
         {/* Friends Tab */}
@@ -115,39 +176,67 @@ export function InviteFriends({
                   <p className="text-sm">No users found</p>
                 </div>
               ) : (
-                filteredSuggestions.map((user) => (
-                  <div
-                    key={user.id}
-                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/40 transition-colors"
-                  >
-                    <AvatarWithStatus
-                      avatar={user.avatar}
-                      username={user.username}
-                      status={user.status}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{user.username}</span>
-                        <span className="text-xs font-mono text-muted-foreground">
-                          ELO {user.elo}
+                filteredSuggestions.map((user) => {
+                  const incomingRequest = incomingRequestByUserId.get(user.id);
+                  const isInvited = invitedUserIds.has(user.id);
+
+                  return (
+                    <div
+                      key={user.id}
+                      className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/40 transition-colors"
+                    >
+                      <AvatarWithStatus
+                        avatar={user.avatar}
+                        username={user.username}
+                        status={user.status}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{user.username}</span>
+                          <span className="text-xs font-mono text-muted-foreground">
+                            ELO {user.elo}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {user.currentActivity || user.status}
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {user.currentActivity || user.status}
-                      </span>
+
+                      {incomingRequest ? (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          className="h-8 shrink-0"
+                          onClick={() => handleAccept(incomingRequest.id)}
+                        >
+                          <Check className="h-4 w-4 mr-1" />
+                          Accept request
+                        </Button>
+                      ) : isInvited ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 text-success"
+                          disabled
+                        >
+                          <Check className="h-4 w-4 mr-1" />
+                          Invited
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0"
+                          onClick={() => handleInvite(user.id)}
+                        >
+                          <UserPlus className="h-4 w-4 mr-1" />
+                          Invite
+                        </Button>
+                      )}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8"
-                      onClick={() => onInviteFriend(user.id)}
-                    >
-                      <UserPlus className="h-4 w-4 mr-1" />
-                      Invite
-                    </Button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -239,7 +328,9 @@ export function InviteFriends({
             {onInviteByEmail ? (
               <form onSubmit={handleEmailInvite} className="space-y-3">
                 <div>
-                  <label htmlFor="invite-email" className="text-sm font-medium mb-1 block">Email Address</label>
+                  <label htmlFor="invite-email" className="text-sm font-medium mb-1 block">
+                    Email Address
+                  </label>
                   <input
                     id="invite-email"
                     type="email"
@@ -285,7 +376,6 @@ export function QuickInviteButton({
     if (!invited && !isPending) {
       onInvite(userId);
       setInvited(true);
-      setTimeout(() => setInvited(false), 3000);
     }
   };
 

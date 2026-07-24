@@ -14,6 +14,9 @@ import dashboardRoutes from './dashboard.routes';
 import searchRoutes from './search.routes';
 import cacheRoutes from './cache.routes';
 import apiGatewayRoutes from './api-gateway.routes';
+import queueRoutes from './queue.routes';
+import accessControlRoutes from './access-control.routes';
+import crossGameAssetRoutes from './cross-game-asset.routes';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
@@ -49,6 +52,9 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/v1/search', searchRoutes);
 router.use('/api/v1/cache', cacheRoutes);
 router.use('/api/v1/gateway', apiGatewayRoutes);
+router.use('/api/v1/queue', queueRoutes);
+router.use('/api/v1/access-control', accessControlRoutes);
+router.use('/api/v1/assets', crossGameAssetRoutes);
 
 
 export default router;

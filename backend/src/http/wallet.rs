@@ -6,16 +6,10 @@ use uuid::Uuid;
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
 use crate::models::{
-    DepositRequest, TransactionResponse, TransactionStatus, TransactionType, WalletResponse,
-    WithdrawalRequest,
+    DepositRequest, PaginatedResponse, PaginationParams, TransactionResponse, TransactionStatus,
+    TransactionType, WalletResponse, WithdrawalRequest,
 };
 use crate::service::WalletService;
-
-#[derive(Deserialize)]
-pub struct TransactionHistoryQuery {
-    pub page: Option<i32>,
-    pub per_page: Option<i32>,
-}
 
 #[derive(Deserialize)]
 pub struct PaymentVerificationRequest {
@@ -49,21 +43,22 @@ pub async fn get_wallet(
 pub async fn get_transaction_history(
     pool: web::Data<PgPool>,
     req: actix_web::HttpRequest,
-    query: web::Query<TransactionHistoryQuery>,
+    query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = req
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
-    let page = query.page.unwrap_or(1).max(1);
-    let per_page = query.per_page.unwrap_or(20).min(100).max(1);
+    let limit = query.resolved_limit();
+    let offset = query.sql_offset();
 
     let service = WalletService::new(pool.get_ref().clone().into(), None);
-    let transactions = service
-        .get_transaction_history(user_id, page, per_page)
-        .await?;
+    let (transactions, total) = service
+        .get_transaction_history_paginated(user_id, limit, offset)
+        .await
+        .map_err(|e| ApiError::internal_error(format!("Failed to fetch transactions: {}", e)))?;
 
-    let response: Vec<TransactionResponse> = transactions
+    let data: Vec<TransactionResponse> = transactions
         .into_iter()
         .map(|t| TransactionResponse {
             id: t.id,
@@ -79,7 +74,7 @@ pub async fn get_transaction_history(
         })
         .collect();
 
-    Ok(HttpResponse::Ok().json(response))
+    Ok(HttpResponse::Ok().json(PaginatedResponse::new(data, total, &query)))
 }
 
 pub async fn initiate_deposit(

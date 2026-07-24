@@ -85,9 +85,16 @@ const envSchema = z.object({
     REDIS_URL: z.string().url().optional(),
     PROFILE_CACHE_TTL_SECONDS: intStr('300'),
 
+    // ── RabbitMQ ─────────────────────────────────────────────────────────────
+    RABBITMQ_URL: z.string().url().optional(),
+    RABBITMQ_PREFETCH_COUNT: intStr('10'),
+    RABBITMQ_HEARTBEAT_INTERVAL: intStr('30'),
+
     // ── Rate Limiting ────────────────────────────────────────────────────────
     RATE_LIMIT_TRUSTED_IPS: z.string().optional(),
     RATE_LIMIT_TRUSTED_ACCOUNTS: z.string().optional(),
+    RATE_LIMIT_REDIS_KEY_PREFIX: z.string().default('rl:'),
+    RATE_LIMIT_ANALYTICS_ENABLED: boolStr.default('true'),
 
     // ── Metrics ──────────────────────────────────────────────────────────────
     METRICS_ENABLED: boolStr.default('true'),

@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { AchievementFull } from '@/data/achievements';
 import { RarityIndicator } from './RarityIndicator';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 interface UnlockAnimationProps {
   achievement: AchievementFull;
@@ -25,8 +26,15 @@ interface UnlockAnimationProps {
 export function UnlockAnimation({ achievement, onClose }: UnlockAnimationProps) {
   const [visible, setVisible] = useState(false);
   const prefersReducedMotion = useReducedMotion();
+  const { track } = useAnalytics();
 
   useEffect(() => {
+    track("achievement_unlocked", {
+      achievementId: achievement.id,
+      achievementTitle: achievement.title,
+      rarity: achievement.rarity,
+      points: achievement.points,
+    });
     // Trigger entrance animation
     const t1 = setTimeout(() => setVisible(true), 50);
     // Auto-dismiss after 4 s

@@ -31,6 +31,13 @@ pub struct PlayerInsightsQuery {
     pub game_id: i32,
 }
 
+#[derive(Deserialize)]
+pub struct AggregationQuery {
+    pub period_start: Option<i64>,
+    pub period_end: Option<i64>,
+    pub game_id: Option<i32>,
+}
+
 pub async fn record_match(
     db: web::Data<PgPool>,
     body: web::Json<RecordMatchBody>,
@@ -94,4 +101,30 @@ pub async fn get_player_insights(
         Some(i) => Ok(HttpResponse::Ok().json(i)),
         None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "no data"}))),
     }
+}
+
+pub async fn get_aggregated_stats(
+    db: web::Data<PgPool>,
+    query: web::Query<AggregationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let svc = AnalyticsService::new(db.get_ref().clone());
+    let stats = svc.get_aggregated_stats(
+        query.game_id,
+        query.period_start,
+        query.period_end,
+    ).await?;
+    Ok(HttpResponse::Ok().json(stats))
+}
+
+pub async fn get_revenue_metrics(
+    db: web::Data<PgPool>,
+    query: web::Query<AggregationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let svc = AnalyticsService::new(db.get_ref().clone());
+    let metrics = svc.get_revenue_metrics(
+        query.game_id,
+        query.period_start,
+        query.period_end,
+    ).await?;
+    Ok(HttpResponse::Ok().json(metrics))
 }

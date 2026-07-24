@@ -1,7 +1,3 @@
-import type { Party, PartyMember, SocialUser } from "./social";
-
-// ─── Cursor & Presence (legacy HEAD types, used by collaboration components) ──
-
 export interface CursorPosition {
   x: number;
   y: number;
@@ -20,7 +16,7 @@ export interface PresenceUser {
   username: string;
   avatar?: string;
   color: string;
-  status: "online" | "away" | "busy" | "offline";
+  status: 'online' | 'away' | 'busy' | 'offline';
   lastSeen: number;
   currentView?: string;
 }
@@ -35,7 +31,7 @@ export interface CollaborativeAction {
 
 export interface ConflictResolution {
   actionId: string;
-  strategy: "lastWriteWins" | "merge" | "reject";
+  strategy: 'lastWriteWins' | 'merge' | 'reject';
   resolved: boolean;
   timestamp: number;
 }
@@ -69,11 +65,9 @@ export interface PresenceUpdate {
   username: string;
   avatar?: string;
   color: string;
-  status: "online" | "away" | "busy" | "offline";
+  status: 'online' | 'away' | 'busy' | 'offline';
   timestamp: number;
 }
-
-// ─── Channel & Event types (upstream/main) ────────────────────────────────────
 
 export enum CollaborationChannelType {
   PARTY = "party",

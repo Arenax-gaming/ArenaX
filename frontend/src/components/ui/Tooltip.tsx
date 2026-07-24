@@ -4,6 +4,7 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
@@ -17,6 +18,8 @@ interface TooltipContextValue {
   setOpen: (v: boolean) => void;
   placement: Placement;
   triggerRef: React.RefObject<HTMLElement>;
+  /** Stable id shared between trigger (aria-describedby) and content (id). */
+  contentId: string;
 }
 
 const TooltipContext = createContext<TooltipContextValue | null>(null);
@@ -38,20 +41,36 @@ export function Tooltip({ children, placement = 'top', delayMs = 200 }: TooltipP
   const [open, setOpenRaw] = useState(false);
   const triggerRef = useRef<HTMLElement>(null!);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // useId produces a stable, unique id per component instance (React 18+).
+  const contentId = useId();
 
   const setOpen = (v: boolean) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (v) {
       timerRef.current = setTimeout(() => setOpenRaw(true), delayMs);
     } else {
+      // Cancel a pending open before closing immediately.
       setOpenRaw(false);
     }
   };
 
+  // Close on Escape regardless of which element holds focus (WCAG 1.4.13).
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpenRaw(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
+
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
   return (
-    <TooltipContext.Provider value={{ open, setOpen, placement, triggerRef }}>
+    <TooltipContext.Provider value={{ open, setOpen, placement, triggerRef, contentId }}>
       <span className="relative inline-flex">{children}</span>
     </TooltipContext.Provider>
   );
@@ -62,7 +81,7 @@ export interface TooltipTriggerProps extends React.HTMLAttributes<HTMLSpanElemen
 }
 
 export function TooltipTrigger({ children, ...props }: TooltipTriggerProps) {
-  const { setOpen, triggerRef } = useTooltipContext();
+  const { setOpen, triggerRef, open, contentId } = useTooltipContext();
   return (
     <span
       ref={triggerRef as React.RefObject<HTMLSpanElement>}
@@ -70,7 +89,8 @@ export function TooltipTrigger({ children, ...props }: TooltipTriggerProps) {
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
-      aria-describedby={undefined}
+      // Link the trigger to the tooltip content for screen readers.
+      aria-describedby={open ? contentId : undefined}
       {...props}
     >
       {children}
@@ -98,14 +118,13 @@ export interface TooltipContentProps {
 }
 
 export function TooltipContent({ children, className }: TooltipContentProps) {
-  const { open, placement } = useTooltipContext();
-  const id = useRef(`tt-${Math.random().toString(36).slice(2)}`);
+  const { open, placement, contentId } = useTooltipContext();
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          id={id.current}
+          id={contentId}
           role="tooltip"
           initial={PLACEMENT_INITIAL[placement]}
           animate={{ opacity: 1, x: 0, y: 0 }}

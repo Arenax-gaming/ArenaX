@@ -12,6 +12,7 @@ export type AnalyticsEventName =
   | "page_view"
   | "game_start"
   | "game_end"
+  | "game_mode_selected"
   | "matchmaking_queued"
   | "matchmaking_matched"
   | "matchmaking_cancelled"
@@ -56,6 +57,11 @@ export interface PageViewPayload extends BaseEventPayload {
   event: "page_view";
   path: string;
   referrer?: string;
+}
+
+export interface GameModeSelectedPayload extends BaseEventPayload {
+  event: "game_mode_selected";
+  gameMode: string;
 }
 
 export interface GameStartPayload extends BaseEventPayload {
@@ -110,6 +116,7 @@ export interface GenericPayload extends BaseEventPayload {
 
 export type AnalyticsPayload =
   | PageViewPayload
+  | GameModeSelectedPayload
   | GameStartPayload
   | GameEndPayload
   | MatchmakingPayload
@@ -141,3 +148,32 @@ export interface ABAssignment {
   variant: ABVariant;
   assignedAt: number;
 }
+
+export const ALLOWED_EVENT_NAMES: readonly AnalyticsEventName[] = [
+  "page_view",
+  "game_start",
+  "game_end",
+  "game_mode_selected",
+  "matchmaking_queued",
+  "matchmaking_matched",
+  "matchmaking_cancelled",
+  "tournament_viewed",
+  "tournament_joined",
+  "tournament_left",
+  "match_score_reported",
+  "match_disputed",
+  "purchase_initiated",
+  "purchase_completed",
+  "purchase_failed",
+  "wallet_connected",
+  "wallet_deposited",
+  "wallet_withdrawn",
+  "auth_signup",
+  "auth_login",
+  "auth_logout",
+  "profile_viewed",
+  "profile_edited",
+  "achievement_unlocked",
+  "ab_test_assigned",
+  "funnel_step",
+] as const;

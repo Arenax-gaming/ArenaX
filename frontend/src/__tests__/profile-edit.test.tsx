@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import ProfileEditPage from '@/app/profile/edit/page';
+import ProfileEditPage from '@/app/[locale]/profile/edit/page';
+import { MAX_BIO_LENGTH } from '@/lib/validations/profile';
 
 jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'u1', username: 'TestUser', email: 'test@test.com' } }),
@@ -8,7 +9,7 @@ jest.mock('@/hooks/useAuth', () => ({
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
-  useSearchParams: () => ({ get: jest.fn(() => null) }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // CustomizationOptions uses lucide-react icons; mock to keep tests simple
@@ -17,15 +18,17 @@ jest.mock('@/components/profile/CustomizationOptions', () => ({
 }));
 
 describe('ProfileEditPage', () => {
-  it('disables submit button and shows error when bio exceeds 500 characters', () => {
+  it('disables submit button and shows error when bio exceeds MAX_BIO_LENGTH', () => {
     render(<ProfileEditPage />);
 
     const textarea = screen.getByRole('textbox', { name: /bio/i });
-    const longBio = 'a'.repeat(501);
+    const longBio = 'a'.repeat(MAX_BIO_LENGTH + 1);
 
     fireEvent.change(textarea, { target: { value: longBio } });
 
-    expect(screen.getByText('Bio must be 500 characters or less')).toBeInTheDocument();
+    expect(
+      screen.getByText(`Bio must be ${MAX_BIO_LENGTH} characters or less`)
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
   });
 

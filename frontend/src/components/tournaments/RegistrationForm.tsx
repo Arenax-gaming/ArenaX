@@ -1,12 +1,27 @@
 "use client";
 
-import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { CheckCircle, Loader2 } from "lucide-react";
 import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/Form";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { api } from "@/lib/api";
+import {
+  tournamentRegistrationSchema,
+  type TournamentRegistrationFormData,
+} from "@/lib/validations/tournament";
+import { useFormAnalytics } from "@/hooks/useFormAnalytics";
 
 interface RegistrationFormProps {
   tournament: Tournament;
@@ -14,45 +29,30 @@ interface RegistrationFormProps {
   onCancel?: () => void;
 }
 
-interface FormState {
-  username: string;
-  email: string;
-  discordHandle: string;
-  agreedToRules: boolean;
-}
-
-export function RegistrationForm({ tournament, onSuccess, onCancel }: RegistrationFormProps) {
+export function RegistrationForm({
+  tournament,
+  onSuccess,
+  onCancel,
+}: RegistrationFormProps) {
   const { notify } = useNotifications();
-  const [form, setForm] = useState<FormState>({
-    username: "",
-    email: "",
-    discordHandle: "",
-    agreedToRules: false,
+  const analytics = useFormAnalytics(`tournament-registration-${tournament.id}`);
+
+  const form = useForm<TournamentRegistrationFormData>({
+    resolver: zodResolver(tournamentRegistrationSchema),
+    defaultValues: {
+      username: "",
+      email: "",
+      discordHandle: "",
+      agreedToRules: false,
+    },
   });
-  const [errors, setErrors] = useState<Partial<FormState & { submit: string }>>({});
-  const [status, setStatus] = useState<"idle" | "submitting" | "success">("idle");
-  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const validate = (): boolean => {
-    const next: typeof errors = {};
-    if (!form.username.trim()) next.username = "Username is required";
-    if (!form.email.trim()) next.email = "Email is required";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = "Invalid email";
-    if (!form.agreedToRules) next.agreedToRules = false;
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  };
+  const isSuccess = form.formState.isSubmitSuccessful;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitError(null);
-    if (!validate()) return;
-
-    setStatus("submitting");
-
+  const onSubmit = async (_data: TournamentRegistrationFormData) => {
     try {
       await api.joinTournament(tournament.id);
-      setStatus("success");
+      analytics.trackSubmit({ success: true });
 
       notify({
         type: "match",
@@ -67,23 +67,25 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
 
       onSuccess?.();
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to complete registration. Please try again.";
-      setSubmitError(message);
-      setStatus("idle");
+      analytics.trackSubmit({ success: false });
+      form.setError("root", {
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to complete registration. Please try again.",
+      });
     }
   };
 
-  if (status === "success") {
+  if (isSuccess) {
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
         <CheckCircle className="h-16 w-16 text-success" />
         <h3 className="text-xl font-bold text-foreground">Registration Confirmed</h3>
         <p className="text-muted-foreground">
-          You&apos;re registered for <span className="font-semibold">{tournament.name}</span>.
-          We&apos;ll notify you when your first match is ready.
+          You&apos;re registered for{" "}
+          <span className="font-semibold">{tournament.name}</span>. We&apos;ll
+          notify you when your first match is ready.
         </p>
         <div className="rounded-lg border border-success/30 bg-success-muted p-4 text-sm text-green-800 dark:border-success/30 dark:bg-success-muted/20 dark:text-green-200">
           Tournament starts on{" "}
@@ -101,131 +103,173 @@ export function RegistrationForm({ tournament, onSuccess, onCancel }: Registrati
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-      {/* Tournament summary */}
-      <div className="rounded-lg border bg-muted/40 p-4 space-y-2">
-        <p className="text-sm font-semibold text-foreground">{tournament.name}</p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>Game: {tournament.gameType}</span>
-          <span>Format: {tournament.tournamentType.replace(/_/g, " ")}</span>
-          <span>
-            Entry:{" "}
-            <span className="font-medium text-foreground">
-              {tournament.entryFee === 0 ? "Free" : `$${tournament.entryFee}`}
+    <Form {...form}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="space-y-5"
+        noValidate
+      >
+        {/* Tournament summary */}
+        <div className="rounded-lg border bg-muted/40 p-4 space-y-2">
+          <p className="text-sm font-semibold text-foreground">{tournament.name}</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Game: {tournament.gameType}</span>
+            <span>Format: {tournament.tournamentType.replace(/_/g, " ")}</span>
+            <span>
+              Entry:{" "}
+              <span className="font-medium text-foreground">
+                {tournament.entryFee === 0 ? "Free" : `$${tournament.entryFee}`}
+              </span>
             </span>
-          </span>
-          <span>
-            Prize Pool:{" "}
-            <span className="font-medium text-foreground">${tournament.prizePool.toLocaleString()}</span>
-          </span>
+            <span>
+              Prize Pool:{" "}
+              <span className="font-medium text-foreground">
+                ${tournament.prizePool.toLocaleString()}
+              </span>
+            </span>
+          </div>
         </div>
-      </div>
 
-      {/* Fields */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <label htmlFor="reg-username" className="text-sm font-medium text-foreground">
-            In-game Username <span className="text-destructive">*</span>
-          </label>
-          <Input
-            id="reg-username"
-            placeholder="Your in-game name"
-            value={form.username}
-            onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-            aria-invalid={!!errors.username}
-          />
-          {errors.username && (
-            <p className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3 w-3" /> {errors.username}
-            </p>
+        {/* Username */}
+        <FormField
+          control={form.control}
+          name="username"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                In-game Username{" "}
+                <span className="text-destructive" aria-hidden="true">*</span>
+              </FormLabel>
+              <FormControl>
+                <Input
+                  {...field}
+                  placeholder="Your in-game name"
+                  error={!!form.formState.errors.username}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
           )}
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="reg-email" className="text-sm font-medium text-foreground">
-            Email <span className="text-destructive">*</span>
-          </label>
-          <Input
-            id="reg-email"
-            type="email"
-            placeholder="you@example.com"
-            value={form.email}
-            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-            aria-invalid={!!errors.email}
-          />
-          {errors.email && (
-            <p className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3 w-3" /> {errors.email}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="reg-discord" className="text-sm font-medium text-foreground">
-            Discord Handle <span className="text-muted-foreground text-xs">(optional)</span>
-          </label>
-          <Input
-            id="reg-discord"
-            placeholder="username#0000"
-            value={form.discordHandle}
-            onChange={(e) => setForm((f) => ({ ...f, discordHandle: e.target.value }))}
-          />
-        </div>
-      </div>
-
-      {submitError ? (
-        <div className="rounded-lg border border-red-200 bg-destructive/5 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-destructive/10/20 dark:text-destructive-foreground">
-          <p className="font-semibold">Registration failed</p>
-          <p className="mt-1">{submitError}</p>
-        </div>
-      ) : null}
-
-      {/* Rules agreement */}
-      <label className="flex cursor-pointer items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 rounded border-border accent-blue-600"
-          checked={form.agreedToRules}
-          onChange={(e) => setForm((f) => ({ ...f, agreedToRules: e.target.checked }))}
         />
-        <span className="text-sm text-muted-foreground">
-          I have read and agree to the{" "}
-          <span className="font-medium text-foreground">tournament rules</span> and understand
-          that entry fees are non-refundable.
-        </span>
-      </label>
-      {errors.agreedToRules === false && (
-        <p className="flex items-center gap-1 text-xs text-destructive">
-          <AlertCircle className="h-3 w-3" /> You must agree to the rules
-        </p>
-      )}
 
-      {/* Entry fee notice */}
-      {tournament.entryFee > 0 && (
-        <div className="rounded-lg border border-blue-200 bg-info-muted p-3 dark:border-info/30 dark:bg-info-muted/20">
-          <p className="text-xs text-info dark:text-info-muted-foreground">
-            <span className="font-semibold">Payment:</span> Your wallet will be charged{" "}
-            <span className="font-semibold">${tournament.entryFee}</span> upon confirmation.
-          </p>
-        </div>
-      )}
+        {/* Email */}
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Email{" "}
+                <span className="text-destructive" aria-hidden="true">*</span>
+              </FormLabel>
+              <FormControl>
+                <Input
+                  {...field}
+                  type="email"
+                  placeholder="you@example.com"
+                  error={!!form.formState.errors.email}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      {/* Actions */}
-      <div className="flex gap-3 pt-2">
-        {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel} className="flex-1">
-            Cancel
-          </Button>
+        {/* Discord */}
+        <FormField
+          control={form.control}
+          name="discordHandle"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Discord Handle{" "}
+                <span className="text-muted-foreground text-xs">(optional)</span>
+              </FormLabel>
+              <FormControl>
+                <Input {...field} placeholder="username#0000" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Root submission error */}
+        {form.formState.errors.root && (
+          <div
+            role="alert"
+            className="rounded-lg border border-red-200 bg-destructive/5 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-destructive/10 dark:text-destructive-foreground"
+          >
+            <p className="font-semibold">Registration failed</p>
+            <p className="mt-1">{form.formState.errors.root.message}</p>
+          </div>
         )}
-        <Button
-          type="submit"
-          disabled={status === "submitting"}
-          className="flex-1 gap-2"
-        >
-          {status === "submitting" && <Loader2 className="h-4 w-4 animate-spin" />}
-          {status === "submitting" ? "Registering..." : "Confirm Registration"}
-        </Button>
-      </div>
-    </form>
+
+        {/* Rules agreement */}
+        <FormField
+          control={form.control}
+          name="agreedToRules"
+          render={({ field }) => (
+            <FormItem>
+              <div className="flex items-start gap-3">
+                <FormControl>
+                  <input
+                    type="checkbox"
+                    id="agreed-to-rules"
+                    checked={field.value}
+                    onChange={field.onChange}
+                    className="mt-0.5 h-4 w-4 rounded border-border accent-blue-600"
+                  />
+                </FormControl>
+                <label
+                  htmlFor="agreed-to-rules"
+                  className="text-sm text-muted-foreground cursor-pointer"
+                >
+                  I have read and agree to the{" "}
+                  <span className="font-medium text-foreground">tournament rules</span>{" "}
+                  and understand that entry fees are non-refundable.
+                </label>
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Entry fee notice */}
+        {tournament.entryFee > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-info-muted p-3 dark:border-info/30 dark:bg-info-muted/20">
+            <p className="text-xs text-info dark:text-info-muted-foreground">
+              <span className="font-semibold">Payment:</span> Your wallet will be
+              charged{" "}
+              <span className="font-semibold">${tournament.entryFee}</span> upon
+              confirmation.
+            </p>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-2">
+          {onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          )}
+          <Button
+            type="submit"
+            disabled={form.formState.isSubmitting}
+            className="flex-1 gap-2"
+          >
+            {form.formState.isSubmitting && (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            {form.formState.isSubmitting ? "Registering..." : "Confirm Registration"}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

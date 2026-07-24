@@ -1,170 +1,118 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Image from 'next/image';
-import { useAuth } from '@/hooks/useAuth';
-import { CustomizationOptions } from '@/components/profile/CustomizationOptions';
-import { validateAvatarFile } from '@/lib/profile-utils';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { X, Camera, Upload, CheckCircle, AlertTriangle, Twitter, Github, Twitch } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import type { ProfileCustomization } from '@/types/profile';
-import type { UserProfileUpdate } from '@/types/user';
-
-const MAX_BIO_LENGTH = 500;
-const USERNAME_MIN_LENGTH = 3;
-const USERNAME_MAX_LENGTH = 20;
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { CheckCircle, AlertTriangle, Twitter, Github, Twitch } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
+import { useFormAnalytics } from "@/hooks/useFormAnalytics";
+import { validateAvatarFile } from "@/lib/profile-utils";
+import { profileEditSchema, type ProfileEditFormData } from "@/lib/validations/profile";
+import type { UserProfileUpdate } from "@/types/user";
+import type { ProfileCustomization } from "@/types/profile";
+import { FileUpload } from "@/components/ui/FileUpload";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/Form";
+import { CustomizationOptions } from "@/components/profile/CustomizationOptions";
+import { cn } from "@/lib/utils";
 
 const DEFAULT_CUSTOMIZATION: ProfileCustomization = {
-  banner: 'default',
-  colorTheme: 'blue',
+  banner: "default",
+  colorTheme: "blue",
 };
 
-// Mock usernames for uniqueness check
-const existingUsernames = new Set(['ProGamer99', 'EliteSniper', 'ShadowNinja', 'DragonSlayer', 'NightWalker']);
+// Mock existing usernames for uniqueness check
+const existingUsernames = new Set([
+  "ProGamer99",
+  "EliteSniper",
+  "ShadowNinja",
+  "DragonSlayer",
+  "NightWalker",
+]);
 
 function ProfileEditContent() {
   const { user } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const analytics = useFormAnalytics("profile-edit");
 
-  const [username, setUsername] = useState(user?.username ?? '');
-  const [bio, setBio] = useState(user?.bio ?? '');
-  const [socialLinks, setSocialLinks] = useState({
-    twitter: user?.socialLinks?.twitter ?? '',
-    discord: user?.socialLinks?.discord ?? '',
-    twitch: user?.socialLinks?.twitch ?? '',
-    github: user?.socialLinks?.github ?? '',
-  });
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(
+    user?.avatar ?? null
+  );
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [customization, setCustomization] = useState<ProfileCustomization>(
     DEFAULT_CUSTOMIZATION
   );
-
-  // Avatar state
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar ?? null);
-  const [showCropModal, setShowCropModal] = useState(false);
-
-  // Validation state
-  const [usernameError, setUsernameError] = useState<string | null>(null);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [bioError, setBioError] = useState<string | null>(null);
-
-  // UI state
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Track original values for unsaved changes detection
-  const originalValues = useRef({
-    username: user?.username ?? '',
-    bio: user?.bio ?? '',
-    socialLinks: {
-      twitter: user?.socialLinks?.twitter ?? '',
-      discord: user?.socialLinks?.discord ?? '',
-      twitch: user?.socialLinks?.twitch ?? '',
-      github: user?.socialLinks?.github ?? '',
+  const form = useForm<ProfileEditFormData>({
+    resolver: zodResolver(profileEditSchema),
+    defaultValues: {
+      username: user?.username ?? "",
+      bio: user?.bio ?? "",
+      twitter: user?.socialLinks?.twitter ?? "",
+      discord: user?.socialLinks?.discord ?? "",
+      twitch: user?.socialLinks?.twitch ?? "",
+      github: user?.socialLinks?.github ?? "",
     },
+    mode: "onTouched",
   });
 
-  const bioTooLong = bio.length > MAX_BIO_LENGTH;
-  const usernameInvalid = username.length < USERNAME_MIN_LENGTH || username.length > USERNAME_MAX_LENGTH;
+  const watchedUsername = form.watch("username");
+  const watchedBio = form.watch("bio") ?? "";
+  const usernameStatus = useUsernameAvailability(watchedUsername);
 
-  // Check for unsaved changes
+  // Surface async username check into RHF
   useEffect(() => {
-    const hasChanges =
-      username !== originalValues.current.username ||
-      bio !== originalValues.current.bio ||
-      socialLinks.twitter !== originalValues.current.socialLinks.twitter ||
-      socialLinks.discord !== originalValues.current.socialLinks.discord ||
-      socialLinks.twitch !== originalValues.current.socialLinks.twitch ||
-      socialLinks.github !== originalValues.current.socialLinks.github ||
-      avatarFile !== null;
-
-    setHasUnsavedChanges(hasChanges);
-  }, [username, bio, socialLinks, avatarFile]);
-
-  // Debounced username uniqueness check
-  const checkUsernameAvailability = useCallback(async (value: string) => {
-    if (value.length < USERNAME_MIN_LENGTH) {
-      setUsernameError(null);
-      return;
+    if (usernameStatus === "unavailable") {
+      form.setError("username", { message: "This username is already taken" });
+    } else if (usernameStatus === "error") {
+      form.setError("username", {
+        message: "Could not verify username availability. Please try again.",
+      });
+    } else if (
+      usernameStatus === "available" &&
+      (form.formState.errors.username?.message === "This username is already taken" ||
+        form.formState.errors.username?.message?.includes("verify"))
+    ) {
+      form.clearErrors("username");
     }
-
-    if (value === originalValues.current.username) {
-      setUsernameError(null);
-      return;
-    }
-
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    if (existingUsernames.has(value)) {
-      setUsernameError('This username is already taken');
-    } else {
-      setUsernameError(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (username && username !== originalValues.current.username) {
-        checkUsernameAvailability(username);
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [username, checkUsernameAvailability]);
+  }, [usernameStatus, form]);
 
   if (!user) {
-    router.push('/login');
+    router.push("/login");
     return null;
   }
 
-  function handleUsernameChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value;
-    setUsername(value);
+  const isDirty =
+    form.formState.isDirty ||
+    avatarFile !== null;
 
-    if (value.length < USERNAME_MIN_LENGTH || value.length > USERNAME_MAX_LENGTH) {
-      setUsernameError(`Username must be ${USERNAME_MIN_LENGTH}-${USERNAME_MAX_LENGTH} characters`);
-    } else {
-      setUsernameError(null);
-    }
-  }
-
-  function handleBioChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const value = e.target.value;
-    setBio(value);
-    if (value.length > MAX_BIO_LENGTH) {
-      setBioError('Bio must be 500 characters or less');
-    } else {
-      setBioError(null);
-    }
-  }
-
-  function handleSocialLinkChange(platform: string, value: string) {
-    setSocialLinks(prev => ({ ...prev, [platform]: value }));
-  }
-
-  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function handleAvatarChange(file: File | null) {
     if (!file) return;
-
     const result = validateAvatarFile({ size: file.size, type: file.type });
     if (!result.valid) {
-      setAvatarError(result.error ?? 'Invalid file');
+      setAvatarError(result.error ?? "Invalid file. Please check size and type.");
       setAvatarFile(null);
       setAvatarPreview(null);
     } else {
       setAvatarError(null);
       setAvatarFile(file);
-
-      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setAvatarPreview(reader.result as string);
@@ -179,309 +127,314 @@ function ProfileEditContent() {
     setAvatarError(null);
   }
 
-  async function handleSubmit() {
-    if (bioTooLong || usernameInvalid || usernameError) return;
-
-    setSaving(true);
-    setError(null);
+  const onSubmit = async (data: ProfileEditFormData) => {
+    setUploading(true);
+    setUploadProgress(0);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Create update object
-      const update: UserProfileUpdate = {};
-      if (username !== originalValues.current.username) {
-        update.username = username;
-      }
-      if (bio !== originalValues.current.bio) {
-        update.bio = bio;
-      }
       if (avatarFile) {
-        update.avatar = avatarPreview || undefined;
-      }
-      if (Object.values(socialLinks).some((v, i) => v !== Object.values(originalValues.current.socialLinks)[i])) {
-        update.socialLinks = socialLinks;
+        const progressInterval = setInterval(() => {
+          setUploadProgress((prev) => (prev >= 95 ? 95 : prev + 10));
+        }, 100);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        clearInterval(progressInterval);
       }
 
-      // Update original values
-      originalValues.current = {
-        username,
-        bio,
-        socialLinks: { ...socialLinks },
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const update: UserProfileUpdate = {
+        username: data.username,
+        bio: data.bio,
+        avatar: avatarFile ? (avatarPreview ?? undefined) : undefined,
+        socialLinks: {
+          twitter: data.twitter,
+          discord: data.discord,
+          twitch: data.twitch,
+          github: data.github,
+        },
       };
 
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-      setHasUnsavedChanges(false);
+      analytics.trackSubmit({ success: true });
+
+      // Reset dirty state after save
+      form.reset(data);
+      setAvatarFile(null);
+      setUploadProgress(100);
     } catch (err) {
-      setError('Failed to save profile. Please try again.');
+      analytics.trackSubmit({ success: false });
+      form.setError("root", {
+        message: "Failed to save profile. Please try again.",
+      });
     } finally {
-      setSaving(false);
+      setUploading(false);
     }
-  }
+  };
 
   function handleCancel() {
-    if (hasUnsavedChanges) {
+    if (isDirty) {
       setShowUnsavedWarning(true);
     } else {
       router.back();
     }
   }
 
-  function handleConfirmCancel() {
-    setShowUnsavedWarning(false);
-    router.back();
-  }
-
-  function handleDiscardChanges() {
-    setUsername(originalValues.current.username);
-    setBio(originalValues.current.bio);
-    setSocialLinks(originalValues.current.socialLinks);
-    setAvatarFile(null);
-    setAvatarPreview(user?.avatar ?? null);
-    setShowUnsavedWarning(false);
-    router.back();
-  }
-
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Edit Profile</h1>
-        {hasUnsavedChanges && (
+        {isDirty && (
           <span className="text-xs text-muted-foreground">Unsaved changes</span>
         )}
       </div>
 
-      {/* Avatar Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Avatar</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-start gap-6">
-            <div className="relative group">
-              <div className="w-32 h-32 rounded-full overflow-hidden bg-muted border-2 border-muted-foreground/20">
-                {avatarPreview ? (
-                  <Image
-                    src={avatarPreview}
-                    alt="Avatar preview"
-                    width={128}
-                    height={128}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                    <Camera className="h-12 w-12" />
-                  </div>
-                )}
-              </div>
-              {avatarPreview && (
-                <button
-                  onClick={handleRemoveAvatar}
-                  className="absolute -top-2 -right-2 p-1 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                  type="button"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex-1 space-y-4">
-              <div>
-                <label htmlFor="avatar-upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 cursor-pointer">
-                  <Upload className="h-4 w-4" />
-                  Upload New Avatar
-                </label>
-                <input
-                  id="avatar-upload"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleAvatarChange}
-                  className="hidden"
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  JPEG, PNG, or WebP. Max 5MB.
-                </p>
-              </div>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="space-y-6">
+          {/* Avatar */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Avatar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FileUpload
+                file={avatarFile}
+                preview={avatarPreview}
+                onFileAccepted={handleAvatarChange}
+                onRemove={handleRemoveAvatar}
+                uploading={uploading && !!avatarFile}
+                uploadProgress={uploadProgress}
+                accept={{ "image/jpeg": [], "image/png": [], "image/webp": [] }}
+                maxSize={5 * 1024 * 1024}
+                disabled={form.formState.isSubmitting}
+              />
               {avatarError && (
-                <p className="text-sm text-destructive flex items-center gap-1">
-                  <AlertTriangle className="h-4 w-4" />
+                <p className="text-sm text-destructive flex items-center gap-1 mt-2">
+                  <AlertTriangle className="h-4 w-4" aria-hidden="true" />
                   {avatarError}
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Username */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Username</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="Enter your username"
+                        error={!!form.formState.errors.username}
+                      />
+                    </FormControl>
+                    <div className="flex justify-between items-center">
+                      <FormDescription>
+                        {watchedUsername.length} / 20 characters
+                      </FormDescription>
+                      {usernameStatus === "available" &&
+                        !form.formState.errors.username && (
+                          <span className="text-xs text-success flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3" />
+                            Available
+                          </span>
+                        )}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Bio */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Bio</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FormField
+                control={form.control}
+                name="bio"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormControl>
+                      <textarea
+                        {...field}
+                        rows={4}
+                        className={cn(
+                          "w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring",
+                          form.formState.errors.bio && "border-destructive"
+                        )}
+                        placeholder="Tell others about yourself..."
+                      />
+                    </FormControl>
+                    <p
+                      aria-live="polite"
+                      className={cn(
+                        "text-xs text-right",
+                        watchedBio.length > 280
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      {watchedBio.length} / 280
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Social Links */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Social Links</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField
+                control={form.control}
+                name="twitter"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <Twitter className="h-4 w-4" /> Twitter
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="https://twitter.com/username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="discord"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <span className="h-4 w-4 bg-indigo-500 rounded-full inline-block" />
+                      Discord
+                    </FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Username#0000" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="twitch"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <Twitch className="h-4 w-4" /> Twitch
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="https://twitch.tv/username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="github"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      <Github className="h-4 w-4" /> GitHub
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="https://github.com/username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Customization */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Profile Customization</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CustomizationOptions
+                current={customization}
+                onChange={setCustomization}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Root error */}
+          {form.formState.errors.root && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 p-4 bg-destructive/10 border border-destructive rounded-md text-destructive"
+            >
+              <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+              <p className="text-sm">{form.formState.errors.root.message}</p>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Username Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Username</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Input
-            value={username}
-            onChange={handleUsernameChange}
-            placeholder="Enter your username"
-            className={cn(usernameError && 'border-destructive')}
-          />
-          <div className="flex justify-between items-center">
-            <p className="text-xs text-muted-foreground">
-              {username.length} / {USERNAME_MAX_LENGTH} characters
-            </p>
-            {username === originalValues.current.username && (
-              <span className="text-xs text-success flex items-center gap-1">
-                <CheckCircle className="h-3 w-3" />
-                Available
-              </span>
-            )}
-          </div>
-          {usernameError && (
-            <p className="text-sm text-destructive flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4" />
-              {usernameError}
-            </p>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Bio Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Bio</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <textarea
-            id="bio"
-            aria-label="Bio"
-            value={bio}
-            onChange={handleBioChange}
-            rows={4}
-            className={cn(
-              "w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring",
-              bioTooLong && "border-destructive"
-            )}
-            placeholder="Tell others about yourself..."
-          />
-          <p className={cn("text-xs text-right", bioTooLong ? "text-destructive" : "text-muted-foreground")}>
-            {bio.length} / {MAX_BIO_LENGTH}
-          </p>
-          {bioError && (
-            <p className="text-sm text-destructive flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4" />
-              {bioError}
-            </p>
+          {/* Success */}
+          {form.formState.isSubmitSuccessful && !form.formState.isDirty && (
+            <div
+              role="status"
+              className="flex items-center gap-2 p-4 bg-success/90 text-white rounded-md"
+            >
+              <CheckCircle className="h-5 w-5" aria-hidden="true" />
+              <p className="text-sm font-medium">Profile saved successfully!</p>
+            </div>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Social Links Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Social Links</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="twitter" className="flex items-center gap-2 text-sm font-medium">
-              <Twitter className="h-4 w-4" />
-              Twitter
-            </label>
-            <Input
-              id="twitter"
-              value={socialLinks.twitter}
-              onChange={(e) => handleSocialLinkChange('twitter', e.target.value)}
-              placeholder="https://twitter.com/username"
-            />
+          {/* Actions */}
+          <div className="flex gap-3">
+            <Button
+              type="submit"
+              disabled={
+                form.formState.isSubmitting ||
+                usernameStatus === "checking" ||
+                usernameStatus === "unavailable"
+              }
+              className="flex-1"
+            >
+              {form.formState.isSubmitting ? "Saving..." : "Save Changes"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancel}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
           </div>
+        </form>
+      </Form>
 
-          <div className="space-y-2">
-            <label htmlFor="discord" className="flex items-center gap-2 text-sm font-medium">
-              <span className="h-4 w-4 bg-indigo-500 rounded-full" />
-              Discord
-            </label>
-            <Input
-              id="discord"
-              value={socialLinks.discord}
-              onChange={(e) => handleSocialLinkChange('discord', e.target.value)}
-              placeholder="Username#0000"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="twitch" className="flex items-center gap-2 text-sm font-medium">
-              <Twitch className="h-4 w-4" />
-              Twitch
-            </label>
-            <Input
-              id="twitch"
-              value={socialLinks.twitch}
-              onChange={(e) => handleSocialLinkChange('twitch', e.target.value)}
-              placeholder="https://twitch.tv/username"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="github" className="flex items-center gap-2 text-sm font-medium">
-              <Github className="h-4 w-4" />
-              GitHub
-            </label>
-            <Input
-              id="github"
-              value={socialLinks.github}
-              onChange={(e) => handleSocialLinkChange('github', e.target.value)}
-              placeholder="https://github.com/username"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Customization */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile Customization</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <CustomizationOptions current={customization} onChange={setCustomization} />
-        </CardContent>
-      </Card>
-
-      {/* Error Message */}
-      {error && (
-        <div className="flex items-center gap-2 p-4 bg-destructive/10 border border-destructive rounded-md text-destructive">
-          <AlertTriangle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
-
-      {/* Success Message */}
-      {saved && (
-        <div className="flex items-center gap-2 p-4 bg-success/90 text-white rounded-md">
-          <CheckCircle className="h-5 w-5" />
-          <p className="text-sm font-medium">Profile saved successfully!</p>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex gap-3">
-        <Button
-          onClick={handleSubmit}
-          disabled={saving || bioTooLong || usernameInvalid || !!usernameError}
-          className="flex-1"
-        >
-          {saving ? 'Saving...' : 'Save Changes'}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={handleCancel}
-          className="flex-1"
-        >
-          Cancel
-        </Button>
-      </div>
-
-      {/* Unsaved Changes Warning Modal */}
+      {/* Unsaved Changes Warning */}
       {showUnsavedWarning && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="max-w-md w-full">
@@ -502,7 +455,10 @@ function ProfileEditContent() {
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={handleDiscardChanges}
+                  onClick={() => {
+                    setShowUnsavedWarning(false);
+                    router.back();
+                  }}
                   className="flex-1"
                 >
                   Discard Changes

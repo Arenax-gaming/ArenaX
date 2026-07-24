@@ -1,10 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { isValidStellarAddress } from "@/lib/wallet/transactions";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/Form";
 import { WalletAssetCode, WalletBalances, WithdrawRequest } from "@/lib/wallet/types";
+import { withdrawSchema, type WithdrawFormData } from "@/lib/validations/wallet";
 
 interface WithdrawModalProps {
   open: boolean;
@@ -16,12 +27,6 @@ interface WithdrawModalProps {
 
 const ASSETS: WalletAssetCode[] = ["XLM", "USDC", "ARENAX"];
 
-interface ValidationErrors {
-  asset?: string;
-  amount?: string;
-  destination?: string;
-}
-
 export function WithdrawModal({
   open,
   balances,
@@ -29,176 +34,184 @@ export function WithdrawModal({
   onClose,
   onSubmit,
 }: WithdrawModalProps) {
-  const [asset, setAsset] = useState<WalletAssetCode>("XLM");
-  const [amount, setAmount] = useState("");
-  const [destination, setDestination] = useState("");
-  const [memo, setMemo] = useState("");
-  const [errors, setErrors] = useState<ValidationErrors>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const form = useForm<WithdrawFormData>({
+    resolver: zodResolver(withdrawSchema),
+    defaultValues: {
+      asset: "XLM",
+      amount: "",
+      destination: "",
+      memo: "",
+    },
+  });
 
+  const watchedAsset = form.watch("asset") as WalletAssetCode;
+
+  // Reset form when modal closes
   useEffect(() => {
-    if (!open) {
-      setAmount("");
-      setDestination("");
-      setMemo("");
-      setErrors({});
-      setSubmitError(null);
-      setAsset("XLM");
-    }
-  }, [open]);
+    if (!open) form.reset();
+  }, [open, form]);
 
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
-  const validate = (): boolean => {
-    const nextErrors: ValidationErrors = {};
-    const selectedBalance = balances[asset];
-    const parsedAmount = Number(amount);
+  const selectedBalance = balances[watchedAsset];
 
-    if (!selectedBalance.hasTrustline && asset !== "XLM") {
-      nextErrors.asset = `Add ${asset} trustline in your wallet before withdrawing.`;
-    }
+  const handleSubmit = async (data: WithdrawFormData) => {
+    const parsedAmount = Number(data.amount);
 
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      nextErrors.amount = "Enter a valid amount greater than 0.";
-    } else if (parsedAmount > selectedBalance.available) {
-      nextErrors.amount = "Amount exceeds available balance.";
-    }
-
-    if (!destination.trim()) {
-      nextErrors.destination = "Destination address is required.";
-    } else if (!isValidStellarAddress(destination)) {
-      nextErrors.destination = "Destination must be a valid Stellar public key.";
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleSubmit = async () => {
-    if (!validate()) {
+    // Runtime balance checks (can't be in Zod since balances aren't in the schema)
+    if (!selectedBalance.hasTrustline && data.asset !== "XLM") {
+      form.setError("asset", {
+        message: `Add ${data.asset} trustline in your wallet before withdrawing.`,
+      });
       return;
     }
 
-    setSubmitError(null);
+    if (parsedAmount > selectedBalance.available) {
+      form.setError("amount", { message: "Amount exceeds available balance." });
+      return;
+    }
 
     try {
       await onSubmit({
-        asset,
-        amount: Number(amount),
-        destination: destination.trim(),
-        memo: memo.trim() || undefined,
+        asset: data.asset,
+        amount: parsedAmount,
+        destination: data.destination.trim(),
+        memo: data.memo?.trim() || undefined,
       });
       onClose();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Withdraw failed.");
+      form.setError("root", {
+        message: err instanceof Error ? err.message : "Withdraw failed.",
+      });
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="withdraw-modal-title"
+    >
       <div className="w-full max-w-lg rounded-lg border bg-card shadow-lg">
         <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold">Withdraw</h2>
+          <h2 id="withdraw-modal-title" className="text-lg font-semibold">
+            Withdraw
+          </h2>
           <p className="text-sm text-muted-foreground">
             Send assets from your connected wallet.
           </p>
         </div>
 
-        <div className="space-y-4 px-6 py-5">
-          <div className="space-y-2">
-            <label htmlFor="withdraw-asset" className="text-sm font-medium">
-              Asset
-            </label>
-            <select
-              id="withdraw-asset"
-              value={asset}
-              onChange={(event) => setAsset(event.target.value as WalletAssetCode)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            >
-              {ASSETS.map((assetCode) => (
-                <option key={assetCode} value={assetCode}>
-                  {assetCode}
-                </option>
-              ))}
-            </select>
-            {errors.asset && (
-              <p className="text-xs text-destructive" role="alert">
-                {errors.asset}
-              </p>
-            )}
-          </div>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleSubmit)} noValidate>
+            <div className="space-y-4 px-6 py-5">
+              {/* Asset */}
+              <FormField
+                control={form.control}
+                name="asset"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Asset</FormLabel>
+                    <FormControl>
+                      <select
+                        {...field}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        {ASSETS.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <div className="space-y-2">
-            <label htmlFor="withdraw-amount" className="text-sm font-medium">
-              Amount
-            </label>
-            <Input
-              id="withdraw-amount"
-              type="number"
-              min="0"
-              step="0.0000001"
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              error={Boolean(errors.amount)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Available: {balances[asset].available.toLocaleString("en-US", { maximumFractionDigits: 7 })}
-            </p>
-            {errors.amount && (
-              <p className="text-xs text-destructive" role="alert">
-                {errors.amount}
-              </p>
-            )}
-          </div>
+              {/* Amount */}
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="number"
+                        min="0"
+                        step="0.0000001"
+                        error={!!form.formState.errors.amount}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Available:{" "}
+                      {selectedBalance.available.toLocaleString("en-US", {
+                        maximumFractionDigits: 7,
+                      })}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <div className="space-y-2">
-            <label htmlFor="withdraw-destination" className="text-sm font-medium">
-              Destination Address
-            </label>
-            <Input
-              id="withdraw-destination"
-              value={destination}
-              onChange={(event) => setDestination(event.target.value)}
-              placeholder="G..."
-              error={Boolean(errors.destination)}
-            />
-            {errors.destination && (
-              <p className="text-xs text-destructive" role="alert">
-                {errors.destination}
-              </p>
-            )}
-          </div>
+              {/* Destination */}
+              <FormField
+                control={form.control}
+                name="destination"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Destination Address</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="G..."
+                        error={!!form.formState.errors.destination}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <div className="space-y-2">
-            <label htmlFor="withdraw-memo" className="text-sm font-medium">
-              Memo (optional)
-            </label>
-            <Input
-              id="withdraw-memo"
-              value={memo}
-              onChange={(event) => setMemo(event.target.value)}
-              maxLength={28}
-              placeholder="Optional memo"
-            />
-          </div>
+              {/* Memo */}
+              <FormField
+                control={form.control}
+                name="memo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Memo (optional)</FormLabel>
+                    <FormControl>
+                      <Input {...field} maxLength={28} placeholder="Optional memo" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          {submitError && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {submitError}
+              {/* Root submission error */}
+              {form.formState.errors.root && (
+                <div
+                  role="alert"
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
+                  {form.formState.errors.root.message}
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="flex flex-wrap justify-end gap-3 border-t px-6 py-4">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} loading={isSubmitting}>
-            Submit Withdrawal
-          </Button>
-        </div>
+            <div className="flex flex-wrap justify-end gap-3 border-t px-6 py-4">
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={isSubmitting}>
+                Submit Withdrawal
+              </Button>
+            </div>
+          </form>
+        </Form>
       </div>
     </div>
   );

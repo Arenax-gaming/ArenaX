@@ -13,7 +13,9 @@
         "prisma:migrate:deploy": "prisma migrate deploy",
         "prisma:seed": "ts-node prisma/seed.ts",
         "prisma:studio": "prisma studio",
-        "lint": "tsc --noEmit"
+        "lint": "tsc --noEmit",
+        "test:api": "node test/newman/run-all.js",
+        "test:api:report": "node test/newman/run-all.js --reporter htmlextra"
     },
     "dependencies": {
         "@opentelemetry/api": "^1.9.0",
@@ -29,6 +31,7 @@
         "@types/nodemailer": "^8.0.0",
         "@types/passport-discord": "^0.1.15",
         "@types/passport-google-oauth20": "^2.0.17",
+        "amqplib": "^0.10.9",
         "bcrypt": "^5.1.1",
         "compression": "^1.7.4",
         "cors": "^2.8.5",
@@ -40,6 +43,7 @@
         "ioredis": "^5.3.2",
         "jsonata": "^2.2.1",
         "jsonwebtoken": "^9.0.2",
+        "kafkajs": "^2.2.4",
         "nodemailer": "^8.0.9",
         "opossum": "^10.0.0",
         "passport": "^0.7.0",
@@ -58,6 +62,7 @@
         "zod": "^3.22.4"
     },
     "devDependencies": {
+        "@types/amqplib": "^0.10.8",
         "@types/bcrypt": "^5.0.2",
         "@types/compression": "^1.7.5",
         "@types/cors": "^2.8.17",
@@ -72,6 +77,8 @@
         "@types/swagger-jsdoc": "^6.0.4",
         "@types/swagger-ui-express": "^4.1.8",
         "@types/uuid": "^9.0.8",
+        "newman": "^6.2.1",
+        "newman-reporter-htmlextra": "^1.23.1",
         "prisma": "^5.10.2",
         "socket.io-client": "^4.8.3",
         "ts-node": "^10.9.2",
