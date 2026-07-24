@@ -41,3 +41,4 @@ pub mod access_control;
 pub mod emergency_pause;
 pub mod time_lock;
 pub mod zk_proof;
+pub mod manager;
