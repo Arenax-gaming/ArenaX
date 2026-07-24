@@ -88,11 +88,29 @@ jobs:
           toolchain: stable
           override: true
       
-      - name: Run fuzz tests
+      - name: Install proptest
         run: |
           cd contracts/testing-infrastructure
-          cargo test --test fuzz_tests
+          cargo install proptest
+      
+      - name: Run fuzz tests with proptest
+        run: |
+          cd contracts/testing-infrastructure
+          cargo test --test fuzz_tests -- --test-threads=1
         timeout-minutes: 30
+      
+      - name: Run fuzz tests with increased iterations
+        run: |
+          cd contracts/testing-infrastructure
+          PROPTEST_CASES=1000 cargo test --test fuzz_tests -- --test-threads=1
+        timeout-minutes: 45
+      
+      - name: Upload fuzz test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: fuzz-test-results
+          path: contracts/testing-infrastructure/target/
 
   security-scan:
     name: Security Vulnerability Scan
