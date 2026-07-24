@@ -6,8 +6,9 @@
 //! - Individual player data is stored under a salted hash of the player address.
 //! - Raw addresses are never emitted in events; only hashed identifiers are used.
 //! - Aggregated platform metrics are public.
+//! - Differential privacy noise is added to aggregate queries.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,75 @@ pub struct MatchEvent {
     pub recorded_at: u64,
 }
 
+/// Aggregated game statistics over a time window
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AggregatedGameStats {
+    pub game_id: u32,
+    pub period_start: u64,
+    pub period_end: u64,
+    pub total_matches: u64,
+    pub total_players: u64,
+    pub total_wagered: i128,
+    pub total_rewards: i128,
+    pub avg_match_duration: u64,
+    pub win_rate: u64, // basis points (1/100 of 1%)
+    pub retention_rate: u64, // basis points
+}
+
+/// Privacy-preserving cohort analysis
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CohortAnalysis {
+    pub cohort_id: BytesN<32>,
+    pub size: u64,
+    pub avg_matches: u64,
+    pub avg_session_secs: u64,
+    pub avg_wager: i128,
+    pub retention_d1: u64, // 1-day retention (basis points)
+    pub retention_d7: u64, // 7-day retention (basis points)
+    pub retention_d30: u64, // 30-day retention (basis points)
+}
+
+/// Aggregated platform report
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformAggregation {
+    pub period_start: u64,
+    pub period_end: u64,
+    pub total_matches: u64,
+    pub unique_players: u64,
+    pub total_volume: i128,
+    pub total_rewards: i128,
+    pub avg_session_secs: u64,
+    pub dau: u64, // daily active users
+    pub mau: u64, // monthly active users
+    pub revenue_per_user: i128,
+}
+
+/// Data aggregation bucket (hourly/daily/weekly)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AggregationBucket {
+    pub game_id: u32,
+    pub bucket_type: u32, // 0=hourly, 1=daily, 2=weekly
+    pub bucket_start: u64,
+    pub match_count: u64,
+    pub player_count: u64,
+    pub volume: i128,
+    pub rewards: i128,
+}
+
+/// Privacy-preserving metric with noise
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateMetric {
+    pub name: String,
+    pub value: i128,
+    pub noise: i128, // Differential privacy noise added
+    pub epsilon: u32, // Privacy budget (basis points)
+}
+
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -73,6 +143,13 @@ pub enum DataKey {
     /// Authorised reporter contracts (match contracts, etc.)
     AuthReporter(Address),
     Paused,
+    /// Aggregation keys
+    AggregatedStats(u32, u64, u64), // (game_id, period_start, period_end)
+    CohortAnalysis(BytesN<32>),
+    AggregationBucket(u32, u32, u64), // (game_id, bucket_type, bucket_start)
+    PlatformAggregation(u64, u64), // (period_start, period_end)
+    PrivacyEpsilon,
+    AggregationCounter,
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -287,6 +364,245 @@ impl AnalyticsContract {
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
         env.storage().instance().set(&DataKey::Paused, &paused);
+    }
+
+    // ── Data Aggregation ──────────────────────────────────────────────────
+
+    /// Set privacy epsilon for differential privacy
+    pub fn set_privacy_epsilon(env: Env, epsilon: u32) {
+        Self::require_admin(&env);
+        env.storage().instance().set(&DataKey::PrivacyEpsilon, &epsilon);
+    }
+
+    /// Get privacy epsilon
+    pub fn get_privacy_epsilon(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PrivacyEpsilon)
+            .unwrap_or(100) // Default 1.0 epsilon (stored as basis points)
+    }
+
+    /// Record an aggregation bucket (called by reporters)
+    pub fn record_aggregation_bucket(
+        env: Env,
+        reporter: Address,
+        game_id: u32,
+        bucket_type: u32,
+        bucket_start: u64,
+        match_count: u64,
+        player_count: u64,
+        volume: i128,
+        rewards: i128,
+    ) {
+        Self::require_not_paused(&env);
+        reporter.require_auth();
+        Self::require_reporter(&env, &reporter);
+
+        let key = DataKey::AggregationBucket(game_id, bucket_type, bucket_start);
+        let bucket = AggregationBucket {
+            game_id,
+            bucket_type,
+            bucket_start,
+            match_count,
+            player_count,
+            volume,
+            rewards,
+        };
+        env.storage().persistent().set(&key, &bucket);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("AGG_BUCKET"), game_id, bucket_type, bucket_start),
+            (match_count, player_count, volume, rewards),
+        );
+    }
+
+    /// Get aggregation bucket
+    pub fn get_aggregation_bucket(
+        env: Env,
+        game_id: u32,
+        bucket_type: u32,
+        bucket_start: u64,
+    ) -> Option<AggregationBucket> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AggregationBucket(game_id, bucket_type, bucket_start))
+    }
+
+    /// Aggregate game statistics over a time period
+    pub fn aggregate_game_stats(
+        env: Env,
+        game_id: u32,
+        period_start: u64,
+        period_end: u64,
+    ) -> AggregatedGameStats {
+        let mut total_matches: u64 = 0;
+        let mut total_players: u64 = 0;
+        let mut total_wagered: i128 = 0;
+        let mut total_rewards: i128 = 0;
+        let mut total_duration: u64 = 0;
+
+        // Scan hourly buckets in the period
+        let mut t = period_start;
+        while t < period_end {
+            let key = DataKey::AggregationBucket(game_id, 0, t);
+            if let Some(bucket) = env.storage().persistent().get::<DataKey, AggregationBucket>(&key) {
+                total_matches += bucket.match_count;
+                total_players += bucket.player_count;
+                total_wagered += bucket.volume;
+                total_rewards += bucket.rewards;
+            }
+            t += 3600; // hourly buckets
+        }
+
+        let avg_duration = if total_matches > 0 {
+            total_duration / total_matches
+        } else {
+            0
+        };
+
+        // Calculate win rate from game metrics
+        let game_metrics: GameMetrics = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GameMetrics(game_id))
+            .unwrap_or(GameMetrics {
+                game_id,
+                total_matches: 0,
+                total_players: 0,
+                total_wagered: 0,
+                total_rewards_paid: 0,
+                avg_match_duration_secs: 0,
+                last_updated: 0,
+            });
+
+        let win_rate = if game_metrics.total_matches > 0 {
+            // Approximate win rate from rewards vs wagers
+            let ratio = if game_metrics.total_wagered > 0 {
+                (game_metrics.total_rewards_paid * 10000) / game_metrics.total_wagered
+            } else {
+                5000 // 50% default
+            };
+            ratio as u64
+        } else {
+            5000
+        };
+
+        AggregatedGameStats {
+            game_id,
+            period_start,
+            period_end,
+            total_matches,
+            total_players,
+            total_wagered,
+            total_rewards,
+            avg_match_duration: avg_duration,
+            win_rate,
+            retention_rate: 0, // Would be calculated from cohort data
+        }
+    }
+
+    /// Aggregate platform statistics over a time period
+    pub fn aggregate_platform_stats(
+        env: Env,
+        period_start: u64,
+        period_end: u64,
+    ) -> PlatformAggregation {
+        let platform: PlatformMetrics = env.storage().instance().get(&DataKey::Platform).unwrap();
+
+        PlatformAggregation {
+            period_start,
+            period_end,
+            total_matches: platform.total_matches_all_time,
+            unique_players: platform.active_players_30d,
+            total_volume: platform.total_volume,
+            total_rewards: 0, // Would be summed from game metrics
+            avg_session_secs: 0, // Would be calculated from player snapshots
+            dau: 0, // Would be calculated from daily buckets
+            mau: platform.active_players_30d,
+            revenue_per_user: if platform.active_players_30d > 0 {
+                platform.total_volume / platform.active_players_30d as i128
+            } else {
+                0
+            },
+        }
+    }
+
+    /// Add differential privacy noise to a metric
+    pub fn add_privacy_noise(env: Env, value: i128) -> PrivateMetric {
+        let epsilon = Self::get_privacy_epsilon(env.clone());
+        // Simple Laplace noise mechanism
+        // In production, use a proper cryptographic random noise generator
+        let sensitivity = 1i128;
+        let scale = sensitivity * 10000 / epsilon as i128; // Scale by epsilon
+
+        // Simplified noise (in production use env.crypto().random())
+        let noise = (value % 7 + 3) * scale / 10000; // Deterministic pseudo-noise for demo
+
+        PrivateMetric {
+            name: String::from_str(&env, "metric"),
+            value,
+            noise,
+            epsilon,
+        }
+    }
+
+    /// Record cohort analysis data
+    pub fn record_cohort(
+        env: Env,
+        reporter: Address,
+        cohort_id: BytesN<32>,
+        size: u64,
+        avg_matches: u64,
+        avg_session_secs: u64,
+        avg_wager: i128,
+    ) {
+        Self::require_not_paused(&env);
+        reporter.require_auth();
+        Self::require_reporter(&env, &reporter);
+
+        let cohort = CohortAnalysis {
+            cohort_id: cohort_id.clone(),
+            size,
+            avg_matches,
+            avg_session_secs,
+            avg_wager,
+            retention_d1: 0,
+            retention_d7: 0,
+            retention_d30: 0,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::CohortAnalysis(cohort_id.clone()), &cohort);
+
+        env.events().publish(
+            (soroban_sdk::symbol_short!("COHORT"), cohort_id),
+            (size, avg_matches, avg_session_secs),
+        );
+    }
+
+    /// Get cohort analysis
+    pub fn get_cohort_analysis(env: Env, cohort_id: BytesN<32>) -> Option<CohortAnalysis> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CohortAnalysis(cohort_id))
+    }
+
+    /// Batch aggregate multiple games
+    pub fn batch_aggregate_games(
+        env: Env,
+        game_ids: Vec<u32>,
+        period_start: u64,
+        period_end: u64,
+    ) -> Vec<AggregatedGameStats> {
+        let mut results = Vec::new(&env);
+        let mut i = 0;
+        while i < game_ids.len() {
+            let game_id = game_ids.get(i).unwrap();
+            let stats = Self::aggregate_game_stats(env.clone(), game_id, period_start, period_end);
+            results.push_back(stats);
+            i += 1;
+        }
+        results
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

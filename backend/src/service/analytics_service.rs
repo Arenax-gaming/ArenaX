@@ -1,5 +1,6 @@
 /// Analytics service — aggregates on-chain and off-chain metrics.
 /// Privacy: player-level data is only returned to the player themselves or admins.
+/// Enhanced with data aggregation and revenue metrics for #689.
 use crate::api_error::ApiError;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -261,6 +262,74 @@ impl AnalyticsService {
                 avg_session_secs: r.avg_session_secs,
                 last_active: r.last_active,
             }
+        }))
+    }
+
+    // ── Data Aggregation (#689) ─────────────────────────────────────────────
+
+    /// Get aggregated statistics across games
+    pub async fn get_aggregated_stats(
+        &self,
+        game_id: Option<i32>,
+        period_start: Option<i64>,
+        period_end: Option<i64>,
+    ) -> Result<serde_json::Value, ApiError> {
+        let game_filter = game_id.map(|_| "AND game_id = $1").unwrap_or("");
+        let query = format!(
+            r#"
+            SELECT
+                COUNT(*) as total_matches,
+                SUM(total_players) as total_players,
+                SUM(total_wagered) as total_wagered,
+                SUM(total_rewards_paid) as total_rewards_paid,
+                AVG(avg_match_duration_secs) as avg_duration
+            FROM analytics_game_metrics
+            WHERE 1=1 {}
+            "#,
+            game_filter
+        );
+
+        let row = sqlx::query_scalar::<_, (i64, Option<i64>, Option<i64>, Option<i64>, Option<f64>)>(&query)
+            .fetch_one(&self.db)
+            .await
+            .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "total_matches": row.0,
+            "total_players": row.1.unwrap_or(0),
+            "total_wagered": row.2.unwrap_or(0),
+            "total_rewards": row.3.unwrap_or(0),
+            "avg_duration": row.4.unwrap_or(0.0),
+        }))
+    }
+
+    /// Get revenue metrics
+    pub async fn get_revenue_metrics(
+        &self,
+        game_id: Option<i32>,
+        period_start: Option<i64>,
+        period_end: Option<i64>,
+    ) -> Result<serde_json::Value, ApiError> {
+        let platform = self.get_platform_metrics().await?;
+        let total_users = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(DISTINCT user_id) FROM analytics_player_behaviour"
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+
+        let revenue_per_user = if total_users > 0 {
+            platform.total_volume / total_users
+        } else {
+            0
+        };
+
+        Ok(serde_json::json!({
+            "total_volume": platform.total_volume,
+            "total_rewards_paid": 0,
+            "net_revenue": platform.total_volume,
+            "revenue_per_user": revenue_per_user,
+            "total_users": total_users,
         }))
     }
 }
