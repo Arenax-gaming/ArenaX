@@ -8,6 +8,7 @@
  * - Standardised error mapping (ApiError, NetworkError, ValidationError)
  * - Analytics/monitoring middleware (latency, success-rate tracking)
  * - Request deduplication via in-flight cache
+ * - Response interceptor pipeline (normalization, transformation, governance)
  */
 
 "use client";
@@ -21,6 +22,11 @@ import {
   ErrorSeverity,
 } from "@/lib/errors";
 import type { ApiResponse, PaginatedResponse } from "@/types";
+import {
+  responseInterceptor,
+  type InterceptedRequest,
+} from "@/lib/responseInterceptor";
+import type { StandardResponse, PaginatedStandardResponse } from "@/types/response";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +41,12 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
   noAnalytics?: boolean;
   /** Additional query params appended to the URL */
   params?: Record<string, string | number | boolean | undefined | null>;
+  /**
+   * Skip the response interceptor pipeline for this request.
+   * Use only for internal calls (e.g. token refresh) that should not be
+   * tracked or transformed.
+   */
+  skipInterceptor?: boolean;
 }
 
 export interface ClientConfig {
@@ -225,13 +237,14 @@ export class EnhancedApiClient {
   private async fetchWithRetry<T>(
     url: string,
     init: RequestInit,
-    options: { noRetry?: boolean; noAnalytics?: boolean },
+    options: { noRetry?: boolean; noAnalytics?: boolean; skipInterceptor?: boolean },
     attempt = 0,
+    requestStartTime = performance.now(),
   ): Promise<T> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const startTime = performance.now();
+    const startTime = attempt === 0 ? requestStartTime : performance.now();
     let status: number | null = null;
     let success = false;
 
@@ -251,7 +264,7 @@ export class EnhancedApiClient {
               Authorization: `Bearer ${newToken}`,
             },
           };
-          return this.fetchWithRetry<T>(url, retryInit, options, attempt + 1);
+          return this.fetchWithRetry<T>(url, retryInit, options, attempt + 1, requestStartTime);
         }
         // Refresh failed — clear tokens and throw auth error
         clearTokens();
@@ -279,9 +292,39 @@ export class EnhancedApiClient {
         throw new ApiError(message, status, { url, code });
       }
 
-      const data = await response.json() as T;
+      const data = await response.json() as unknown;
+
+      // ── Response interceptor pipeline ──────────────────────────────────
+      if (!options.skipInterceptor) {
+        const latencyMs = Math.round(performance.now() - requestStartTime);
+        const traceId =
+          response.headers.get("x-trace-id") ??
+          response.headers.get("x-request-id") ??
+          undefined;
+
+        const interceptorRequest: InterceptedRequest = {
+          url,
+          method: (init.method ?? "GET").toUpperCase(),
+          statusCode: status,
+          latencyMs,
+          retries: attempt,
+          cached: false,
+          traceId,
+        };
+
+        const standardResponse = responseInterceptor.intercept<T>(
+          data,
+          interceptorRequest,
+        );
+
+        success = true;
+        // Return the raw transformed data (unwrapped from StandardResponse)
+        // so existing callers (TanStack Query hooks) continue working unchanged.
+        return standardResponse.data;
+      }
+
       success = true;
-      return data;
+      return data as T;
     } catch (err: unknown) {
       clearTimeout(timeoutId);
 
@@ -294,7 +337,7 @@ export class EnhancedApiClient {
         ) {
           const delay = retryDelay(attempt, this.retryBaseDelayMs, this.retryMaxDelayMs);
           await new Promise((r) => setTimeout(r, delay));
-          return this.fetchWithRetry<T>(url, init, options, attempt + 1);
+          return this.fetchWithRetry<T>(url, init, options, attempt + 1, requestStartTime);
         }
         throw err;
       }
@@ -305,7 +348,7 @@ export class EnhancedApiClient {
         if (!options.noRetry && attempt < this.maxRetries) {
           const delay = retryDelay(attempt, this.retryBaseDelayMs, this.retryMaxDelayMs);
           await new Promise((r) => setTimeout(r, delay));
-          return this.fetchWithRetry<T>(url, init, options, attempt + 1);
+          return this.fetchWithRetry<T>(url, init, options, attempt + 1, requestStartTime);
         }
         throw netErr;
       }
@@ -316,7 +359,7 @@ export class EnhancedApiClient {
         if (!options.noRetry && attempt < this.maxRetries) {
           const delay = retryDelay(attempt, this.retryBaseDelayMs, this.retryMaxDelayMs);
           await new Promise((r) => setTimeout(r, delay));
-          return this.fetchWithRetry<T>(url, init, options, attempt + 1);
+          return this.fetchWithRetry<T>(url, init, options, attempt + 1, requestStartTime);
         }
         throw netErr;
       }
@@ -346,7 +389,7 @@ export class EnhancedApiClient {
   // ─── Public request API ─────────────────────────────────────────────────────
 
   async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { body, noRetry, timeoutMs: _t, noAnalytics, params, ...fetchOpts } = options;
+    const { body, noRetry, timeoutMs: _t, noAnalytics, params, skipInterceptor, ...fetchOpts } = options;
     const url = buildURL(this.baseURL, endpoint, params);
     const token = getStoredToken();
 
@@ -362,7 +405,7 @@ export class EnhancedApiClient {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     };
 
-    return this.fetchWithRetry<T>(url, init, { noRetry, noAnalytics });
+    return this.fetchWithRetry<T>(url, init, { noRetry, noAnalytics, skipInterceptor }, 0, performance.now());
   }
 
   /** GET with in-flight deduplication */
@@ -417,6 +460,87 @@ export class EnhancedApiClient {
 
   clearAuth(): void {
     clearTokens();
+  }
+
+  // ─── Standard response API (returns full StandardResponse envelope) ─────────
+
+  /**
+   * Like `.get()` but returns the full `StandardResponse<T>` envelope,
+   * including `meta`, `status`, and `message` fields.
+   * Use when you need access to traceId, latency, or governance data.
+   */
+  async getStandard<T>(endpoint: string, options?: RequestOptions): Promise<StandardResponse<T>> {
+    const url = buildURL(this.baseURL, endpoint, options?.params);
+    const token = getStoredToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const startTime = performance.now();
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    const raw = await response.json() as unknown;
+    const latencyMs = Math.round(performance.now() - startTime);
+    const traceId =
+      response.headers.get("x-trace-id") ??
+      response.headers.get("x-request-id") ??
+      undefined;
+
+    return responseInterceptor.intercept<T>(raw, {
+      url,
+      method: "GET",
+      statusCode: response.status,
+      latencyMs,
+      retries: 0,
+      cached: false,
+      traceId,
+    });
+  }
+
+  /**
+   * Like `.getPaginated()` but returns the full `PaginatedStandardResponse<T>` envelope.
+   */
+  async getPaginatedStandard<T>(
+    endpoint: string,
+    options?: RequestOptions,
+  ): Promise<PaginatedStandardResponse<T>> {
+    const url = buildURL(this.baseURL, endpoint, options?.params);
+    const token = getStoredToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const startTime = performance.now();
+    const response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    const raw = await response.json() as unknown;
+    const latencyMs = Math.round(performance.now() - startTime);
+    const traceId =
+      response.headers.get("x-trace-id") ??
+      response.headers.get("x-request-id") ??
+      undefined;
+
+    return responseInterceptor.interceptPaginated<T>(raw, {
+      url,
+      method: "GET",
+      statusCode: response.status,
+      latencyMs,
+      retries: 0,
+      cached: false,
+      traceId,
+    });
   }
 }
 
