@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
+import { useState, useMemo, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
+import { Trophy, Users } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
 import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
 import { TournamentFilter } from "@/components/tournaments/TournamentFilter";
@@ -10,23 +10,19 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/Button";
 import {
   TournamentStatus,
-  Tournament,
   TournamentFilters,
   TournamentPageStatus,
   TOURNAMENT_PAGE_STATUS_COLORS,
   TOURNAMENT_PAGE_STATUSES,
-  toTournamentPageStatus,
 } from "@/types/tournament";
-import { mockTournaments } from "@/data/mockTournaments";
+import { useTournaments, useJoinedTournaments } from "@/hooks/useTournaments";
 import { useAuth } from "@/hooks/useAuth";
 import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
 
-const statusColors = TOURNAMENT_PAGE_STATUS_COLORS;
-
 function getStatusStyles(pageStatus: TournamentPageStatus) {
-  return statusColors[pageStatus];
+  return TOURNAMENT_PAGE_STATUS_COLORS[pageStatus];
 }
 
 function TournamentsContent() {
@@ -34,154 +30,75 @@ function TournamentsContent() {
   const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<TabType>("available");
-  const [isLoading, setIsLoading] = useState(true);
+
+  // Filters — each change triggers a new API call
   const [filters, setFilters] = useState<TournamentFilters>({
-    search: searchParams.get("search") || undefined,
-    status: (searchParams.get("status") as TournamentStatus) || undefined,
-    gameType: searchParams.get("gameType") || undefined,
-    tournamentType: (searchParams.get("tournamentType") as any) || undefined,
-    minEntryFee: searchParams.get("minEntryFee")
-      ? Number(searchParams.get("minEntryFee"))
-      : undefined,
-    maxEntryFee: searchParams.get("maxEntryFee")
-      ? Number(searchParams.get("maxEntryFee"))
-      : undefined,
-    minPrizePool: searchParams.get("minPrizePool")
-      ? Number(searchParams.get("minPrizePool"))
-      : undefined,
-    maxPrizePool: searchParams.get("maxPrizePool")
-      ? Number(searchParams.get("maxPrizePool"))
-      : undefined,
-    sortBy:
-      (searchParams.get("sortBy") as TournamentFilters["sortBy"]) || "date",
-    sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
+    search:          searchParams.get("search")          || undefined,
+    status:          (searchParams.get("status") as TournamentStatus) || undefined,
+    gameType:        searchParams.get("gameType")        || undefined,
+    tournamentType:  (searchParams.get("tournamentType") as any) || undefined,
+    minEntryFee:     searchParams.get("minEntryFee")     ? Number(searchParams.get("minEntryFee"))  : undefined,
+    maxEntryFee:     searchParams.get("maxEntryFee")     ? Number(searchParams.get("maxEntryFee"))  : undefined,
+    minPrizePool:    searchParams.get("minPrizePool")    ? Number(searchParams.get("minPrizePool")) : undefined,
+    maxPrizePool:    searchParams.get("maxPrizePool")    ? Number(searchParams.get("maxPrizePool")) : undefined,
+    sortBy:          (searchParams.get("sortBy") as TournamentFilters["sortBy"]) || "date",
+    sortOrder:       (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
   });
 
-  const [joinedTournamentIds, setJoinedTournamentIds] = useState<Set<string>>(
-    new Set(["2"]),
+  // --- Real API calls ---
+  const {
+    data: tournaments = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useTournaments(filters);
+
+  const { data: joinedIds = [] } = useJoinedTournaments(user?.id);
+
+  // Local optimistic joined state — starts from server value, updated on join
+  const [localJoined, setLocalJoined] = useState<string[]>([]);
+
+  const allJoinedIds = useMemo(
+    () => new Set([...joinedIds, ...localJoined]),
+    [joinedIds, localJoined],
   );
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1200);
+  // Partition into tabs (the API already returns all tournaments matching the
+  // filter params; we split joined/available on the client so we don't need
+  // two separate API calls for each tab).
+  const visibleTournaments = useMemo(() => {
+    return tournaments.filter((t) => {
+      const isJoined = allJoinedIds.has(t.id);
+      return activeTab === "joined" ? isJoined : !isJoined;
+    });
+  }, [tournaments, allJoinedIds, activeTab]);
 
-    return () => clearTimeout(timer);
-  }, []);
-
+  // Derive available game types from the current result set for the filter UI
   const availableGameTypes = useMemo(() => {
-    const types = new Set(mockTournaments.map((t) => t.gameType));
+    const types = new Set(tournaments.map((t) => t.gameType));
     return Array.from(types).sort();
-  }, []);
-
-  const filteredTournaments = useMemo(() => {
-    let tournaments = mockTournaments.filter((tournament) => {
-      const isJoined = joinedTournamentIds.has(tournament.id);
-
-      if (activeTab === "joined") {
-        return isJoined;
-      } else {
-        return !isJoined;
-      }
-    });
-
-    if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      tournaments = tournaments.filter(
-        (tournament) =>
-          tournament.name.toLowerCase().includes(searchLower) ||
-          tournament.gameType.toLowerCase().includes(searchLower) ||
-          (tournament.description?.toLowerCase().includes(searchLower) ??
-            false),
-      );
-    }
-
-    if (filters.status) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.status === filters.status,
-      );
-    }
-
-    if (filters.pageStatus) {
-      tournaments = tournaments.filter(
-        (tournament) =>
-          toTournamentPageStatus(tournament.status) === filters.pageStatus,
-      );
-    }
-
-    if (filters.gameType) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.gameType === filters.gameType,
-      );
-    }
-
-    if (filters.tournamentType) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.tournamentType === filters.tournamentType,
-      );
-    }
-
-    if (filters.minEntryFee !== undefined) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.entryFee >= filters.minEntryFee!,
-      );
-    }
-    if (filters.maxEntryFee !== undefined) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.entryFee <= filters.maxEntryFee!,
-      );
-    }
-
-    if (filters.minPrizePool !== undefined) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.prizePool >= filters.minPrizePool!,
-      );
-    }
-    if (filters.maxPrizePool !== undefined) {
-      tournaments = tournaments.filter(
-        (tournament) => tournament.prizePool <= filters.maxPrizePool!,
-      );
-    }
-
-    tournaments = [...tournaments].sort((a, b) => {
-      let comparison = 0;
-
-      switch (filters.sortBy) {
-        case "date":
-          comparison =
-            new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
-          break;
-        case "prize_pool":
-          comparison = a.prizePool - b.prizePool;
-          break;
-        case "participants":
-          comparison = a.currentParticipants - b.currentParticipants;
-          break;
-        default:
-          comparison =
-            new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
-      }
-
-      return filters.sortOrder === "asc" ? comparison : -comparison;
-    });
-
-    return tournaments;
-  }, [filters, activeTab, joinedTournamentIds]);
+  }, [tournaments]);
 
   const handleJoinSuccess = useCallback((tournamentId: string) => {
-    setJoinedTournamentIds((prev) => {
-      const newSet = new Set<string>(prev);
-      newSet.add(tournamentId);
-      return newSet;
-    });
+    setLocalJoined((prev) => [...prev, tournamentId]);
   }, []);
 
   const handleFiltersChange = useCallback((newFilters: TournamentFilters) => {
     setFilters(newFilters);
   }, []);
 
-  const joinedCount = joinedTournamentIds.size;
-  const availableCount = mockTournaments.length - joinedCount;
+  const joinedCount = allJoinedIds.size;
+  const availableCount = tournaments.length - joinedCount;
+  const hasActiveFilters = !!(
+    filters.search ||
+    filters.status ||
+    filters.gameType ||
+    filters.tournamentType ||
+    filters.minEntryFee !== undefined ||
+    filters.maxEntryFee !== undefined ||
+    filters.minPrizePool !== undefined ||
+    filters.maxPrizePool !== undefined
+  );
 
   return (
     <div className="min-h-screen px-4 py-8 bg-background">
@@ -194,6 +111,7 @@ function TournamentsContent() {
         </p>
       </div>
 
+      {/* Tab switcher */}
       <div className="flex justify-center mb-8">
         <div className="inline-flex rounded-lg border bg-muted p-1">
           <button
@@ -207,7 +125,7 @@ function TournamentsContent() {
             <Trophy className="h-4 w-4" />
             Available
             <span className="ml-1 text-xs bg-muted-foreground/20 px-2 py-0.5 rounded-full">
-              {availableCount}
+              {isLoading ? "…" : availableCount}
             </span>
           </button>
           <button
@@ -221,12 +139,13 @@ function TournamentsContent() {
             <Users className="h-4 w-4" />
             Joined
             <span className="ml-1 text-xs bg-muted-foreground/20 px-2 py-0.5 rounded-full">
-              {joinedCount}
+              {isLoading ? "…" : joinedCount}
             </span>
           </button>
         </div>
       </div>
 
+      {/* Filter panel */}
       <div className="bg-card border rounded-lg p-6 mb-6">
         <TournamentFilter
           availableGameTypes={availableGameTypes}
@@ -234,11 +153,12 @@ function TournamentsContent() {
         />
       </div>
 
+      {/* Result count + status legend */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <p className="text-sm text-muted-foreground">
-          {filteredTournaments.length} tournament
-          {filteredTournaments.length !== 1 ? "s" : ""} found
-          {activeTab === "joined" ? " (joined)" : " (available)"}
+          {isLoading
+            ? "Loading tournaments…"
+            : `${visibleTournaments.length} tournament${visibleTournaments.length !== 1 ? "s" : ""} found${activeTab === "joined" ? " (joined)" : " (available)"}`}
         </p>
         <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
           {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
@@ -255,19 +175,31 @@ function TournamentsContent() {
         </div>
       </div>
 
+      {/* Content */}
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <TournamentCardSkeleton key={index} />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <TournamentCardSkeleton key={i} />
           ))}
         </div>
-      ) : filteredTournaments.length > 0 ? (
+      ) : isError ? (
+        <div className="flex flex-col items-center gap-4 py-20 text-center">
+          <Trophy className="h-12 w-12 text-muted-foreground opacity-40" />
+          <p className="text-lg font-semibold">Failed to load tournaments</p>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            Something went wrong fetching tournament data. Please try again.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : visibleTournaments.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTournaments.map((tournament) => (
+          {visibleTournaments.map((tournament) => (
             <TournamentCardWithQuickJoin
               key={tournament.id}
               tournament={tournament}
-              isJoined={joinedTournamentIds.has(tournament.id)}
+              isJoined={allJoinedIds.has(tournament.id)}
               onJoinSuccess={handleJoinSuccess}
               bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
             />
@@ -280,14 +212,7 @@ function TournamentsContent() {
           description={
             activeTab === "joined"
               ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
-              : filters.search ||
-                  filters.status ||
-                  filters.gameType ||
-                  filters.tournamentType ||
-                  filters.minEntryFee ||
-                  filters.maxEntryFee ||
-                  filters.minPrizePool ||
-                  filters.maxPrizePool
+              : hasActiveFilters
                 ? "Try adjusting your search or filters"
                 : "No tournaments are currently available"
           }
@@ -310,15 +235,17 @@ function TournamentsContent() {
 
 export default function TournamentsPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen px-4 py-8 bg-background">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <TournamentCardSkeleton key={i} />
-          ))}
+    <Suspense
+      fallback={
+        <div className="min-h-screen px-4 py-8 bg-background">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <TournamentCardSkeleton key={i} />
+            ))}
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <TournamentsContent />
     </Suspense>
   );

@@ -1,22 +1,122 @@
 import { ApiResponse, ApiError } from "../types";
+import {
+  Tournament,
+  CreateTournamentRequest,
+  TournamentFilters,
+} from "../types/tournament";
+import {
+  Match,
+  MatchFilters,
+  ReportScoreRequest,
+} from "../types/match";
+import {
+  Proposal,
+  CreateProposalDto,
+} from "../types/governance";
+import {
+  Dispute,
+  ResolveDisputePayload,
+  AuditLog,
+  AuditLogFilters,
+  PaginatedAuditLogs,
+  KycReview,
+  KycFilters,
+  ProcessKycPayload,
+} from "../types/admin";
 import { AuthApiError } from "./authErrors";
+
+const TOKEN_KEY = "auth_token";
+const REFRESH_TOKEN_KEY = "auth_refresh_token";
+
+function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
+}
+
+function getStoredRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return (
+    localStorage.getItem(REFRESH_TOKEN_KEY) ??
+    sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  );
+}
+
+function updateStoredTokens(accessToken: string, refreshToken: string): void {
+  if (typeof window === "undefined") return;
+  // Preserve the storage location (local vs session) the user originally chose
+  const inLocal = !!localStorage.getItem(TOKEN_KEY);
+  const storage = inLocal ? localStorage : sessionStorage;
+  storage.setItem(TOKEN_KEY, accessToken);
+  storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
 
 class ApiClient {
   private baseURL: string;
+
+  // Shared in-flight refresh promise so parallel requests all await the same call
+  private refreshPromise: Promise<string> | null = null;
+  public isRefreshing = false;
+
+  // Callback set by useAuth so the client can trigger logout + redirect
+  private onAuthFailure?: () => void;
 
   constructor(baseURL: string = "/api") {
     this.baseURL = baseURL;
   }
 
+  /** Called once by AuthProvider so the client knows how to log the user out. */
+  setOnAuthFailure(callback: () => void): void {
+    this.onAuthFailure = callback;
+  }
+
+  /**
+   * Refresh the access token using the stored refresh token.
+   * Multiple concurrent callers share the same promise so only one HTTP
+   * request is made regardless of how many 401s fire simultaneously.
+   */
+  async refreshAccessToken(): Promise<string> {
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.isRefreshing = true;
+    this.refreshPromise = (async () => {
+      const refreshToken = getStoredRefreshToken();
+      if (!refreshToken) throw new Error("No refresh token available");
+
+      const url = `${this.baseURL}/auth/refresh`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Refresh failed");
+      }
+
+      const data = await response.json() as {
+        access_token: string;
+        refresh_token: string;
+      };
+
+      updateStoredTokens(data.access_token, data.refresh_token);
+      return data.access_token;
+    })()
+      .finally(() => {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      });
+
+    return this.refreshPromise;
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
+    _isRetry = false,
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
 
-    // Add authorization header if token exists (localStorage or sessionStorage)
-    const token =
-      localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token");
+    const token = getStoredToken();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
@@ -26,10 +126,20 @@ class ApiClient {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    const response = await fetch(url, { ...options, headers });
+
+    // Intercept 401 — attempt a silent token refresh and retry once
+    if (response.status === 401 && !_isRetry) {
+      try {
+        await this.refreshAccessToken();
+      } catch {
+        // Refresh itself failed — session is unrecoverable
+        this.onAuthFailure?.();
+        throw new Error("SESSION_EXPIRED");
+      }
+      // Retry the original request with the new token
+      return this.request<T>(endpoint, options, true);
+    }
 
     if (!response.ok) {
       const errorData: ApiError = await response.json().catch(() => ({
@@ -45,7 +155,10 @@ class ApiClient {
   }
 
   // Auth endpoints — backend returns { user, tokens } directly (no .data wrapper)
-  private async authRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async authRequest<T>(
+    endpoint: string,
+    options: RequestInit = {},
+  ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -61,10 +174,34 @@ class ApiClient {
       const code =
         (json as { error?: { code?: string } })?.error?.code ??
         (json as { code?: string })?.code ??
-        'UNKNOWN';
+        "UNKNOWN";
       throw new AuthApiError(message, code);
     }
     return json as T;
+  }
+
+  /** Fetch the session detail used by the lobby page. */
+  async getMatchSession(sessionId: string): Promise<{
+    session_id: string;
+    game_mode: string;
+    status: string;
+    players: Array<{
+      id: string;
+      username: string;
+      elo_rating: number;
+      avatar_url?: string;
+      is_ready: boolean;
+    }>;
+    created_at: string;
+  }> {
+    return this.request(`/matchmaking/sessions/${sessionId}`);
+  }
+
+  /** Mark the current user as ready in a lobby session. */
+  async readyUp(sessionId: string): Promise<{ success: boolean }> {
+    return this.request(`/matchmaking/sessions/${sessionId}/ready`, {
+      method: "POST",
+    });
   }
 
   async login(credentials: { email: string; password: string }) {
@@ -107,44 +244,95 @@ class ApiClient {
       is_verified: boolean;
       created_at: string;
       elo?: number;
+      bio?: string;
+      avatar?: string;
+      global_rank?: number;
+      current_streak?: number;
+      wins?: number;
+      losses?: number;
     }>("/users/me");
   }
 
+  async updateProfile(data: {
+    username?: string;
+    bio?: string;
+    avatar?: string;
+    socialLinks?: {
+      twitter?: string;
+      discord?: string;
+      twitch?: string;
+      github?: string;
+    };
+  }) {
+    return this.request<{
+      id: string;
+      username: string;
+      email: string | null;
+      is_verified: boolean;
+      created_at: string;
+      elo?: number;
+      bio?: string;
+      avatar?: string;
+    }>("/users/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getProfileStats() {
+    return this.request<{
+      elo: number;
+      global_rank: number;
+      wins: number;
+      losses: number;
+      win_rate: number;
+      current_streak: number;
+    }>("/users/me/stats");
+  }
+
+  async getJoinedTournaments() {
+    return this.request<{ id: string }[]>("/users/me/tournaments");
+  }
+
   // Tournament endpoints
-  async getTournaments(params?: Record<string, any>) {
-    const queryString = params ? "?" + new URLSearchParams(params) : "";
-    return this.request(`/tournaments${queryString}`);
+  async getTournaments(params?: TournamentFilters): Promise<Tournament[]> {
+    const queryString = params
+      ? "?" + new URLSearchParams(params as Record<string, string>)
+      : "";
+    return this.request<Tournament[]>(`/tournaments${queryString}`);
   }
 
-  async getTournament(id: string) {
-    return this.request(`/tournaments/${id}`);
+  async getTournament(id: string): Promise<Tournament> {
+    return this.request<Tournament>(`/tournaments/${id}`);
   }
 
-  async createTournament(tournament: any) {
-    return this.request("/tournaments", {
+  async createTournament(tournament: CreateTournamentRequest): Promise<Tournament> {
+    return this.request<Tournament>("/tournaments", {
       method: "POST",
       body: JSON.stringify(tournament),
     });
   }
 
-  async joinTournament(id: string) {
-    return this.request(`/tournaments/${id}/register`, {
+  async joinTournament(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/tournaments/${id}/register`, {
       method: "POST",
     });
   }
 
   // Match endpoints
-  async getMatches(params?: Record<string, any>) {
-    const queryString = params ? "?" + new URLSearchParams(params) : "";
-    return this.request(`/matches${queryString}`);
+  async getMatches(params?: MatchFilters): Promise<Match[]> {
+    const queryString = params
+      ? "?" + new URLSearchParams(params as Record<string, string>)
+      : "";
+    return this.request<Match[]>(`/matches${queryString}`);
   }
 
-  async getMatch(id: string) {
-    return this.request(`/matches/${id}`);
+  async getMatch(id: string): Promise<Match> {
+    return this.request<Match>(`/matches/${id}`);
   }
 
-  async reportMatchScore(id: string, result: any) {
-    return this.request(`/matches/${id}/report`, {
+  async reportMatchScore(id: string, result: ReportScoreRequest): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/matches/${id}/report`, {
       method: "POST",
       body: JSON.stringify(result),
     });
@@ -207,51 +395,51 @@ class ApiClient {
   }
 
   // Governance endpoints
-  async getProposals(): Promise<any[]> {
+  async getProposals(): Promise<Proposal[]> {
     try {
-      return await this.request<any[]>("/governance");
+      return await this.request<Proposal[]>("/governance");
     } catch {
       return [];
     }
   }
 
-  async getProposal(id: string): Promise<any> {
-    return this.request<any>(`/governance/${id}`);
+  async getProposal(id: string): Promise<Proposal> {
+    return this.request<Proposal>(`/governance/${id}`);
   }
 
-  async createProposal(data: any) {
-    return this.request("/governance", {
+  async createProposal(data: CreateProposalDto): Promise<Proposal> {
+    return this.request<Proposal>("/governance", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async startVoting(id: string) {
-    return this.request(`/governance/${id}/start-voting`, {
+  async startVoting(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/governance/${id}/start-voting`, {
       method: "POST",
     });
   }
 
-  async voteOnProposal(id: string, signature?: string) {
-    return this.request(`/governance/${id}/vote`, {
+  async voteOnProposal(id: string, signature?: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/governance/${id}/vote`, {
       method: "POST",
       body: JSON.stringify({ signature }),
     });
   }
 
-  async executeProposal(id: string) {
-    return this.request(`/governance/${id}/execute`, {
+  async executeProposal(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/governance/${id}/execute`, {
       method: "POST",
     });
   }
 
   // Admin/Dispute endpoints
-  async getDisputes() {
-    return this.request("/admin/disputes");
+  async getDisputes(): Promise<Dispute[]> {
+    return this.request<Dispute[]>("/admin/disputes");
   }
 
-  async resolveDispute(id: string, data: { status: string; resolution: string; winnerOverrideId?: string }) {
-    return this.request(`/admin/disputes/${id}/resolve`, {
+  async resolveDispute(id: string, data: ResolveDisputePayload): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/admin/disputes/${id}/resolve`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -265,22 +453,26 @@ class ApiClient {
     }
   }
 
-  async getAuditLogs(params?: Record<string, any>) {
-    const queryString = params ? "?" + new URLSearchParams(params) : "";
-    return this.request(`/admin/audit-logs${queryString}`);
+  async getAuditLogs(params?: AuditLogFilters): Promise<PaginatedAuditLogs> {
+    const queryString = params
+      ? "?" + new URLSearchParams(params as Record<string, string>)
+      : "";
+    return this.request<PaginatedAuditLogs>(`/admin/audit-logs${queryString}`);
   }
 
-  async getKycReviews(params?: Record<string, any>) {
-    const queryString = params ? "?" + new URLSearchParams(params) : "";
-    return this.request(`/admin/kyc${queryString}`);
+  async getKycReviews(params?: KycFilters): Promise<KycReview[]> {
+    const queryString = params
+      ? "?" + new URLSearchParams(params as Record<string, string>)
+      : "";
+    return this.request<KycReview[]>(`/admin/kyc${queryString}`);
   }
 
-  async getKycReview(id: string) {
-    return this.request(`/admin/kyc/${id}`);
+  async getKycReview(id: string): Promise<KycReview> {
+    return this.request<KycReview>(`/admin/kyc/${id}`);
   }
 
-  async processKycReview(id: string, data: { status: string; notes?: string }) {
-    return this.request(`/admin/kyc/${id}/process`, {
+  async processKycReview(id: string, data: ProcessKycPayload): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/admin/kyc/${id}/process`, {
       method: "POST",
       body: JSON.stringify(data),
     });

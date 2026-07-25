@@ -4,12 +4,13 @@ import { QueryClient, QueryClientProvider, MutationCache, QueryCache } from "@ta
 import { useState } from "react";
 import { logError } from "@/lib/errorLogger";
 import { ArenaXError, ErrorCategory, ErrorSeverity } from "@/lib/errors";
+import { datadogRum } from "@datadog/browser-rum";
 
 // ─── Query error handler ──────────────────────────────────────────────────────
 
 /**
  * Translates a TanStack Query error into an `ArenaXError` so it flows through
- * the structured logging / analytics pipeline.
+ * the structured logging / analytics pipeline, and forwards it to Datadog RUM.
  */
 function handleQueryError(error: unknown, context?: Record<string, unknown>): void {
   const err =
@@ -22,6 +23,13 @@ function handleQueryError(error: unknown, context?: Record<string, unknown>): vo
         );
 
   logError(err, { source: "QueryClient", ...context });
+
+  // Forward to Datadog RUM. Context only contains query/mutation keys —
+  // no tokens, passwords, or user PII.
+  datadogRum.addError(err, {
+    source: "QueryClient",
+    ...context,
+  });
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────

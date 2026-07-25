@@ -30,11 +30,14 @@ export interface GamePreferences {
   controls: KeyBinding[];
 }
 
-// Key binding
+// Key binding presets & options
+export type KeyBindingPresetProfile = "qwerty" | "dvorak" | "moba_gaming";
+
 export interface KeyBinding {
   action: string;
   primaryKey: string;
   secondaryKey?: string;
+  modifier?: "Ctrl" | "Shift" | "Alt" | "None";
 }
 
 // Notification settings
