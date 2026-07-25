@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
@@ -20,6 +20,10 @@ export default function ProfilePage() {
   // bio field, but the page-level button was a no-op before this PR.
   const [isEditing, setIsEditing] = useState(false);
   const [draftUsername, setDraftUsername] = useState(user.username);
+  const [isBioDirty, setIsBioDirty] = useState(false);
+
+  const isUsernameDirty = isEditing && draftUsername !== user.username;
+  const isDirty = isUsernameDirty || isBioDirty;
 
   const handleUpdateUser = (updatedFields: Partial<User>) => {
     setUser((prev) => ({ ...prev, ...updatedFields }));
@@ -41,6 +45,52 @@ export default function ProfilePage() {
     setDraftUsername(user.username);
     setIsEditing(false);
   };
+
+  useEffect(() => {
+    if (!isDirty) return;
+
+    const confirmLeave = () =>
+      window.confirm(
+        "You have unsaved changes. Are you sure you want to leave?"
+      );
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    const handleLinkClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement)?.closest("a");
+      if (!anchor || anchor.target === "_blank") return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      if (!confirmLeave()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+
+    const handlePopState = () => {
+      if (!confirmLeave()) {
+        window.history.pushState(null, "", window.location.href);
+      }
+    };
+
+    window.history.pushState(null, "", window.location.href);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleLinkClick, true);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleLinkClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [isDirty]);
+
+  const handleBioDirtyChange = useCallback((dirty: boolean) => {
+    setIsBioDirty(dirty);
+  }, []);
 
   return (
     <ProtectedPage>
@@ -131,7 +181,7 @@ export default function ProfilePage() {
         {/* Left Column - Stats & Bio */}
         <div className="lg:col-span-2 space-y-8">
           <EloChart data={mockEloHistory} />
-          <ProfileBio user={user} onSave={handleUpdateUser} />
+          <ProfileBio user={user} onSave={handleUpdateUser} onDirtyChange={handleBioDirtyChange} />
         </div>
 
         {/* Right Column - Match History */}
