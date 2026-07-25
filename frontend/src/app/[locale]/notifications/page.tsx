@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Bell, CheckCheck, Trash2, Settings, BellOff } from "lucide-react";
 import Link from "next/link";
 import { useNotifications } from "@/contexts/NotificationContext";
@@ -91,12 +91,36 @@ function NotificationItem({
   );
 }
 
+const PAGE_SIZE = 20;
+
 export default function NotificationsPage() {
   const {
     persistentNotifications,
     unreadCount,
     markAllAsRead,
+    hasMoreNotifications,
+    loadMoreNotifications,
   } = useNotifications();
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  const visibleNotifications = persistentNotifications.slice(0, visibleCount);
+  const canLoadMore =
+    visibleCount < persistentNotifications.length || hasMoreNotifications;
+
+  const handleLoadMore = async () => {
+    if (visibleCount < persistentNotifications.length) {
+      setVisibleCount((prev) => prev + PAGE_SIZE);
+      return;
+    }
+    setIsLoadingMore(true);
+    try {
+      await loadMoreNotifications();
+      setVisibleCount((prev) => prev + PAGE_SIZE);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -147,12 +171,24 @@ export default function NotificationsPage() {
             </div>
           ) : (
             <div className="divide-y divide-border/50">
-              {persistentNotifications.map((n) => (
+              {visibleNotifications.map((n) => (
                 <NotificationItem
                   key={n.id}
                   notification={n}
                 />
               ))}
+            </div>
+          )}
+          {canLoadMore && (
+            <div className="flex justify-center p-4 border-t border-border/50">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? "Loading..." : "Load more"}
+              </Button>
             </div>
           )}
         </div>

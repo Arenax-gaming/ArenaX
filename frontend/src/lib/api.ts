@@ -156,7 +156,7 @@ class ApiClient {
   }
 
   // Notification endpoints (persistent, stored in DB)
-  async getNotifications(): Promise<
+  async getNotifications(params?: { offset?: number; limit?: number }): Promise<
     Array<{
       id: string;
       type: string;
@@ -169,7 +169,11 @@ class ApiClient {
     }>
   > {
     try {
-      return await this.request("/notifications");
+      const query = new URLSearchParams();
+      if (params?.offset !== undefined) query.set("offset", String(params.offset));
+      if (params?.limit !== undefined) query.set("limit", String(params.limit));
+      const qs = query.toString();
+      return await this.request(`/notifications${qs ? `?${qs}` : ""}`);
     } catch {
       return [];
     }
