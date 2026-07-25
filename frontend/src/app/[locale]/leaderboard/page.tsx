@@ -235,37 +235,31 @@ function LeaderboardContent() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset to page 1 whenever filters change
+  // Reset to page 1 whenever filters or search change
   useEffect(() => {
     setPage(1);
   }, [category, debouncedSearch, sortBy, sortDir, pageSize]);
 
   const offset = (page - 1) * pageSize;
 
-  // Fetch from the real API via useLeaderboard
+  // Fetch from the real API via useLeaderboard — search is sent as a query param
   const { data, isLoading, isFetching, isError, refetch } = useLeaderboard(
     category,
     pageSize,
     offset,
     season,
+    debouncedSearch || undefined,
   );
 
   // Derived values
-  const entries = useMemo(() => data?.entries ?? [], [data]);
+  const entries = data?.entries ?? [];
   const totalCount = data?.totalCount ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const rangeStart = totalCount === 0 ? 0 : offset + 1;
   const rangeEnd = Math.min(offset + pageSize, totalCount);
 
-  // Client-side search filter (applied on top of server data while the API
-  // doesn't yet support a search param — remove once the backend supports it)
-  const visibleEntries = useMemo(() => {
-    return debouncedSearch
-      ? entries.filter((e) =>
-          e.username.toLowerCase().includes(debouncedSearch.toLowerCase())
-        )
-      : entries;
-  }, [entries, debouncedSearch]);
+  // Server handles search — no client-side filter needed
+  const visibleEntries = entries;
 
   // Sort toggle
   const handleSort = useCallback(
@@ -492,8 +486,8 @@ function LeaderboardContent() {
                         </td>
                       </tr>
                     ) : (
-                      visibleEntries.map((player) => {
-                        const globalRank = offset + (entries.indexOf(player) + 1);
+                      visibleEntries.map((player, idx) => {
+                        const globalRank = offset + idx + 1;
                         const rankStyle = RANK_STYLES[globalRank];
                         return (
                           <tr
