@@ -285,6 +285,18 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // Settings endpoints
+  async getSettings(): Promise<any> {
+    return this.request('/users/me/settings');
+  }
+
+  async updateSettings(data: any): Promise<any> {
+    return this.request('/users/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 export const api = new ApiClient();
