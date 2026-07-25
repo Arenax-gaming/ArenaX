@@ -1,27 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAnalytics } from "@/hooks/useAnalytics";
+import { useConsentStore } from "@/hooks/useConsentStore";
 
 export function ConsentBanner() {
-  const { getConsent, setConsent } = useAnalytics();
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const { analytics } = getConsent();
-    setVisible(analytics === "pending");
-  }, [getConsent]);
+  const { consent, grant, revoke } = useConsentStore();
+  const visible = consent === "pending";
 
   if (!visible) return null;
 
   function handleAccept() {
-    setConsent("granted");
-    setVisible(false);
+    grant();
   }
 
   function handleDecline() {
-    setConsent("denied");
-    setVisible(false);
+    revoke();
   }
 
   return (

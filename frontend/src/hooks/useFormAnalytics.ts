@@ -13,6 +13,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
+import { hasAnalyticsConsent } from "@/lib/consentCookie";
 
 type FormEvent =
   | { type: "form_start" }
@@ -21,6 +22,8 @@ type FormEvent =
   | { type: "form_abandon"; durationMs: number };
 
 function sendEvent(formId: string, event: FormEvent) {
+  if (!hasAnalyticsConsent()) return;
+
   // Datadog RUM integration — only runs client-side when RUM is initialised
   if (
     typeof window !== "undefined" &&
