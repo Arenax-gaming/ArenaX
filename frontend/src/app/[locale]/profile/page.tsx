@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
+import { ReputationBadge } from "@/components/profile/ReputationBadge";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Button } from "@/components/ui/Button";
 import { useAuth, AUTH_PROFILE_QUERY_KEY } from "@/hooks/useAuth";
