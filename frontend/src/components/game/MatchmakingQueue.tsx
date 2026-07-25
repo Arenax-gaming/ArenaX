@@ -38,6 +38,9 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const remainingEstimate = Math.max(0, estimatedTime - waitTime);
+  const estimateLabel = remainingEstimate > 0 ? `~${remainingEstimate}s` : 'Almost there...';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center">
       <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-12 border border-white/20 max-w-md w-full mx-4">
@@ -70,7 +73,7 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
               <div className="text-muted-foreground text-xs">Players Found</div>
             </div>
             <div className="bg-surface/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-success/80">~{estimatedTime - waitTime}s</div>
+              <div className="text-2xl font-bold text-success/80">{estimateLabel}</div>
               <div className="text-muted-foreground text-xs">Estimated</div>
             </div>
           </div>
