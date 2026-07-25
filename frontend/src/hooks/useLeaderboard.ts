@@ -13,15 +13,17 @@ export const useLeaderboard = (
     limit = 100,
     offset = 0,
     season?: string,
+    search?: string,
 ) => {
     return useQuery({
-        queryKey: ['leaderboard', category, limit, offset, season],
+        queryKey: ['leaderboard', category, limit, offset, season, search],
         queryFn: async () => {
             const params = new URLSearchParams({
                 limit: String(limit),
                 offset: String(offset),
             })
             if (season) params.set('season', season)
+            if (search) params.set('search', search)
             const res = await fetch(
                 `${API_BASE}/leaderboards/${category}?${params}`
             )
