@@ -84,6 +84,9 @@ const envSchema = z.object({
     // ── Redis / Cache ────────────────────────────────────────────────────────
     REDIS_URL: z.string().url().optional(),
     PROFILE_CACHE_TTL_SECONDS: intStr('300'),
+    /** Comma-separated `host:port` list. When set, the cache connects via
+     *  ioredis Cluster mode instead of a single REDIS_URL instance. */
+    REDIS_CLUSTER_NODES: z.string().optional(),
 
     // ── RabbitMQ ─────────────────────────────────────────────────────────────
     RABBITMQ_URL: z.string().url().optional(),
