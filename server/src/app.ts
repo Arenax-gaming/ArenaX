@@ -135,6 +135,39 @@ export const createApp = (): Express => {
         });
     });
 
+    // Compression metrics endpoint
+    app.get('/api/compression/metrics', async (_req: Request, res: Response) => {
+        try {
+            const { metricsService } = await import('./services/metrics.service');
+            const metrics = await client.register.metrics();
+            
+            // Parse compression-specific metrics
+            const compressionMetrics = {
+                brotli: {
+                    enabled: process.env.COMPRESSION_ENABLE_BROTLI !== 'false',
+                    quality: parseInt(process.env.COMPRESSION_BROTLI_QUALITY || '4', 10),
+                    mode: parseInt(process.env.COMPRESSION_BROTLI_MODE || '0', 10),
+                },
+                gzip: {
+                    level: parseInt(process.env.COMPRESSION_LEVEL || '6', 10),
+                },
+                threshold: parseInt(process.env.COMPRESSION_THRESHOLD_BYTES || '1024', 10),
+                stats: {
+                    // These would be extracted from prom-client metrics in a real implementation
+                    // For now, we return the raw Prometheus metrics
+                },
+                prometheusMetrics: metrics,
+            };
+            
+            res.json(compressionMetrics);
+        } catch (error) {
+            logger.error('Failed to fetch compression metrics', { error });
+            res.status(500).json({
+                error: 'Failed to fetch compression metrics',
+            });
+        }
+    });
+
     app.use(requestIdMiddleware);
     app.use(correlationMiddleware);
     app.use(requestLogger());
