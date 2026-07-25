@@ -93,28 +93,28 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
           onMouseLeave={() => setHoveredMode(null)}
           className={`
             relative overflow-hidden rounded-xl cursor-pointer transition-all duration-300 transform text-left
-            ${selectedMode === mode.id 
-              ? 'ring-4 ring-purple-500 scale-105 shadow-2xl shadow-purple-500/50' 
+            ${selectedMode === mode.id
+              ? 'ring-4 ring-primary scale-105 shadow-2xl shadow-primary/50'
               : 'hover:scale-105 hover:shadow-xl'
             }
           `}
         >
-          <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 border border-border h-full">
+          <div className="bg-card p-6 border border-border h-full">
             <div className="text-5xl mb-4">{mode.icon}</div>
-            <h3 className="text-2xl font-bold text-white mb-2">{mode.name}</h3>
+            <h3 className="text-2xl font-bold text-foreground mb-2">{mode.name}</h3>
             <p className="text-muted-foreground mb-4">{mode.description}</p>
-            
+
             <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground/80 bg-surface-raised px-3 py-1 rounded-full">
+              <span className="text-foreground/80 bg-muted px-3 py-1 rounded-full">
                 {mode.players}
               </span>
-              <span className="text-purple-400 font-semibold">
+              <span className="text-primary font-semibold">
                 {mode.difficulty}
               </span>
             </div>
 
             {hoveredMode === mode.id && (
-              <div className="absolute inset-0 bg-purple-500/10 transition-all duration-300" />
+              <div className="absolute inset-0 bg-primary/10 transition-all duration-300" />
             )}
           </div>
         </button>
