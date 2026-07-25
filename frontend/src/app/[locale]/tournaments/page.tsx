@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search, Filter, SortAsc, Trophy, Users, Plus } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
@@ -183,6 +183,51 @@ function TournamentsContent() {
   const joinedCount = joinedTournamentIds.size;
   const availableCount = mockTournaments.length - joinedCount;
 
+  const tabs = useMemo(
+    () =>
+      [
+        { id: "available" as TabType, label: "Available", icon: Trophy, count: availableCount },
+        { id: "joined" as TabType, label: "Joined", icon: Users, count: joinedCount },
+      ],
+    [availableCount, joinedCount],
+  );
+
+  const tabRefs = useRef<Record<TabType, HTMLButtonElement | null>>({
+    available: null,
+    joined: null,
+  });
+
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null;
+
+      switch (event.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (index + 1) % tabs.length;
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex = (index - 1 + tabs.length) % tabs.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = tabs.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      const nextTab = tabs[nextIndex].id;
+      setActiveTab(nextTab);
+      tabRefs.current[nextTab]?.focus();
+    },
+    [tabs],
+  );
+
   return (
     <div className="min-h-screen px-4 py-8 bg-background">
       <div className="space-y-2 mb-8 text-center">
@@ -195,35 +240,38 @@ function TournamentsContent() {
       </div>
 
       <div className="flex justify-center mb-8">
-        <div className="inline-flex rounded-lg border bg-muted p-1">
-          <button
-            onClick={() => setActiveTab("available")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
-              activeTab === "available"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Trophy className="h-4 w-4" />
-            Available
-            <span className="ml-1 text-xs bg-muted-foreground/20 px-2 py-0.5 rounded-full">
-              {availableCount}
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveTab("joined")}
-            className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
-              activeTab === "joined"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Users className="h-4 w-4" />
-            Joined
-            <span className="ml-1 text-xs bg-muted-foreground/20 px-2 py-0.5 rounded-full">
-              {joinedCount}
-            </span>
-          </button>
+        <div role="tablist" aria-label="Tournament tabs" className="inline-flex rounded-lg border bg-muted p-1">
+          {tabs.map((tab, index) => {
+            const Icon = tab.icon;
+            const isSelected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                ref={(el) => {
+                  tabRefs.current[tab.id] = el;
+                }}
+                id={`tab-${tab.id}`}
+                role="tab"
+                type="button"
+                aria-selected={isSelected}
+                aria-controls={`tabpanel-${tab.id}`}
+                tabIndex={isSelected ? 0 : -1}
+                onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
+                className={`inline-flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
+                  isSelected
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+                <span className="ml-1 text-xs bg-muted-foreground/20 px-2 py-0.5 rounded-full">
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -234,76 +282,83 @@ function TournamentsContent() {
         />
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <p className="text-sm text-muted-foreground">
-          {filteredTournaments.length} tournament
-          {filteredTournaments.length !== 1 ? "s" : ""} found
-          {activeTab === "joined" ? " (joined)" : " (available)"}
-        </p>
-        <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
-          {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
-            const { badgeClass, label } = getStatusStyles(pageStatus);
-            return (
-              <span
-                key={pageStatus}
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClass}`}
-              >
-                {label}
-              </span>
-            );
-          })}
+      <div
+        role="tabpanel"
+        id={`tabpanel-${activeTab}`}
+        aria-labelledby={`tab-${activeTab}`}
+        tabIndex={0}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+          <p className="text-sm text-muted-foreground">
+            {filteredTournaments.length} tournament
+            {filteredTournaments.length !== 1 ? "s" : ""} found
+            {activeTab === "joined" ? " (joined)" : " (available)"}
+          </p>
+          <div className="flex flex-wrap gap-2" aria-label="Tournament status legend">
+            {TOURNAMENT_PAGE_STATUSES.map((pageStatus) => {
+              const { badgeClass, label } = getStatusStyles(pageStatus);
+              return (
+                <span
+                  key={pageStatus}
+                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClass}`}
+                >
+                  {label}
+                </span>
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <TournamentCardSkeleton key={index} />
-          ))}
-        </div>
-      ) : filteredTournaments.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTournaments.map((tournament) => (
-            <TournamentCardWithQuickJoin
-              key={tournament.id}
-              tournament={tournament}
-              isJoined={joinedTournamentIds.has(tournament.id)}
-              onJoinSuccess={handleJoinSuccess}
-              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Trophy}
-          title="No tournaments found"
-          description={
-            activeTab === "joined"
-              ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
-              : filters.search ||
-                  filters.status ||
-                  filters.gameType ||
-                  filters.tournamentType ||
-                  filters.minEntryFee ||
-                  filters.maxEntryFee ||
-                  filters.minPrizePool ||
-                  filters.maxPrizePool
-                ? "Try adjusting your search or filters"
-                : "No tournaments are currently available"
-          }
-        >
-          {activeTab === "joined" && (
-            <Button
-              onClick={() => setActiveTab("available")}
-              variant="outline"
-              size="sm"
-              className="mt-4"
-            >
-              Browse Available Tournaments
-            </Button>
-          )}
-        </EmptyState>
-      )}
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <TournamentCardSkeleton key={index} />
+            ))}
+          </div>
+        ) : filteredTournaments.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredTournaments.map((tournament) => (
+              <TournamentCardWithQuickJoin
+                key={tournament.id}
+                tournament={tournament}
+                isJoined={joinedTournamentIds.has(tournament.id)}
+                onJoinSuccess={handleJoinSuccess}
+                bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={Trophy}
+            title="No tournaments found"
+            description={
+              activeTab === "joined"
+                ? "You haven't joined any tournaments yet. Browse available tournaments to join!"
+                : filters.search ||
+                    filters.status ||
+                    filters.gameType ||
+                    filters.tournamentType ||
+                    filters.minEntryFee ||
+                    filters.maxEntryFee ||
+                    filters.minPrizePool ||
+                    filters.maxPrizePool
+                  ? "Try adjusting your search or filters"
+                  : "No tournaments are currently available"
+            }
+          >
+            {activeTab === "joined" && (
+              <Button
+                onClick={() => setActiveTab("available")}
+                variant="outline"
+                size="sm"
+                className="mt-4"
+              >
+                Browse Available Tournaments
+              </Button>
+            )}
+          </EmptyState>
+        )}
+      </div>
     </div>
   );
 }
