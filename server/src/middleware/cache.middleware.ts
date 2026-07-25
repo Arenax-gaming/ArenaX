@@ -34,8 +34,8 @@ const setCacheHeaders = (
     sMaxAge,
     staleWhileRevalidate = 86400,
     staleIfError = 86400,
-    public = true,
-    private = false,
+    public: isPublic = true,
+    private: isPrivate = false,
     noCache = false,
     noStore = false,
     mustRevalidate = false,
@@ -51,8 +51,8 @@ const setCacheHeaders = (
   } else if (noCache) {
     directives.push('no-cache');
   } else {
-    if (public) directives.push('public');
-    if (private) directives.push('private');
+    if (isPublic) directives.push('public');
+    if (isPrivate) directives.push('private');
     if (mustRevalidate) directives.push('must-revalidate');
     directives.push(`max-age=${maxAge}`);
     if (sMaxAge) directives.push(`s-maxage=${sMaxAge}`);
@@ -120,7 +120,7 @@ export const cacheMiddleware = (ttl: number = 300) => {
       
       if (cached) {
         const etag = generateETag(cached);
-        const lastModified = cached.lastModified ? new Date(cached.lastModified) : undefined;
+        const lastModified = (cached as any)?.lastModified ? new Date((cached as any).lastModified) : undefined;
 
         // Check if client has fresh cache
         if (isFreshCache(req, etag, lastModified)) {
@@ -179,7 +179,6 @@ export const staticCacheMiddleware = (maxAge: number = 31536000) => {
       sMaxAge: maxAge,
       staleWhileRevalidate: 86400,
       public: true,
-      immutable: true,
     });
     next();
   };

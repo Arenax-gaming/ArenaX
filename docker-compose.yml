@@ -92,6 +92,26 @@ services:
     networks:
       - arenax-network
 
+  # RabbitMQ Message Queue
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: arenax
+      RABBITMQ_DEFAULT_PASS: arenax
+      RABBITMQ_DEFAULT_VHOST: arenax
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - arenax-network
+
   # Zookeeper (Kafka dependency)
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
@@ -168,6 +188,7 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_CLIENT_ID: arenax-server
       PGBOUNCER_ENABLED: "true"
+      RABBITMQ_URL: amqp://arenax:arenax@rabbitmq:5672/arenax
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -211,4 +232,5 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  rabbitmq_data:
   cargo_cache:

@@ -170,6 +170,14 @@ pub struct AntiCheatParams {
     pub pattern_detection_sensitivity: u32, // Sensitivity for pattern detection
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MlModelParams {
+    pub weights: Map<u32, i32>, // Feature ID -> Weight (scaled by 100)
+    pub bias: i32,              // Bias (scaled by 100)
+    pub threshold: u32,         // Prediction threshold (0-100)
+}
+
 // Storage keys
 #[contracttype]
 pub enum DataKey {
@@ -190,6 +198,7 @@ pub enum DataKey {
     WhistleblowerProtection(Address), // Reporter protection status
     BehaviorProfile(Address),         // Player behavior profile
     PatternDatabase(u32),             // Pattern detection database
+    MlModelParams,
 }
 
 // Anti-cheat contract
@@ -378,6 +387,18 @@ impl AntiCheatContract {
         action: Bytes,
         game_state: Bytes,
     ) -> bool {
+        // Run ML inference
+        let features = Self::extract_features(&env, &action);
+        let model = Self::get_ml_model(env.clone());
+        let ml_prob = Self::run_ml_inference(&env, &features, &model);
+
+        if ml_prob > model.threshold {
+            arenax_events::anti_cheat::emit_trust_score_updated(&env, &player, 100 - ml_prob);
+            if ml_prob >= 95 {
+                return false; // ML cheat detection auto-reject
+            }
+        }
+
         let trust_score: Option<TrustScore> = env
             .storage()
             .persistent()
@@ -410,6 +431,11 @@ impl AntiCheatContract {
 
     // Calculate cheat probability with sophisticated analysis
     pub fn calculate_cheat_probability(env: Env, player: Address, behavior_data: Bytes) -> u32 {
+        // Run ML inference
+        let features = Self::extract_features(&env, &behavior_data);
+        let model = Self::get_ml_model(env.clone());
+        let ml_probability = Self::run_ml_inference(&env, &features, &model);
+
         let trust_score: Option<TrustScore> = env
             .storage()
             .persistent()
@@ -448,7 +474,8 @@ impl AntiCheatContract {
             0
         };
 
-        let probability = (base_probability + behavior_factor + profile_factor) / 3;
+        // Combine base probability, behavior analysis factor, profile anomalies factor, and ML inference probability
+        let probability = (base_probability + behavior_factor + profile_factor + ml_probability as u32) / 4;
 
         // Clamp to 0-100
         if probability > 100 {
@@ -814,6 +841,48 @@ impl AntiCheatContract {
         env.storage()
             .persistent()
             .set(&DataKey::AntiCheatParams, &params);
+    }
+
+    // Update ML model weights (admin only)
+    pub fn update_ml_model(
+        env: Env,
+        caller: Address,
+        weights: Map<u32, i32>,
+        bias: i32,
+        threshold: u32,
+    ) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+
+        if caller != admin {
+            panic!("only admin can update ml model");
+        }
+        caller.require_auth();
+
+        let model = MlModelParams {
+            weights,
+            bias,
+            threshold,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::MlModelParams, &model);
+    }
+
+    // Get ML model params
+    pub fn get_ml_model(env: Env) -> MlModelParams {
+        let default_weights = Map::new(&env);
+        env.storage()
+            .persistent()
+            .get(&DataKey::MlModelParams)
+            .unwrap_or(MlModelParams {
+                weights: default_weights,
+                bias: 0,
+                threshold: 75,
+            })
     }
 
     // Get analytics data
@@ -1223,5 +1292,44 @@ impl AntiCheatContract {
         } else {
             total_severity / count
         }
+    }
+
+    // Helper: Extract features from behavioral raw bytes
+    fn extract_features(env: &Env, behavior_data: &Bytes) -> Map<u32, i32> {
+        let mut features = Map::new(env);
+        let len = behavior_data.len();
+
+        let reaction_val = if len > 0 {
+            behavior_data.get(0).unwrap_or(0) as i32
+        } else {
+            120
+        };
+        let reaction_dev = (reaction_val - 120).abs();
+        features.set(0, reaction_dev);
+
+        let action_freq = len as i32;
+        features.set(1, action_freq);
+
+        let speed_val = if len > 1 {
+            behavior_data.get(1).unwrap_or(0) as i32
+        } else {
+            10
+        };
+        let speed_dev = (speed_val - 10).abs();
+        features.set(2, speed_dev);
+
+        features
+    }
+
+    // Helper: Execute a linear forward inference pass
+    fn run_ml_inference(_env: &Env, features: &Map<u32, i32>, model: &MlModelParams) -> u32 {
+        let mut score = model.bias;
+        for (feature_id, value) in features.iter() {
+            let weight = model.weights.get(feature_id).unwrap_or(0);
+            score += weight * value;
+        }
+
+        let prob = (score / 100).clamp(0, 100) as u32;
+        prob
     }
 }

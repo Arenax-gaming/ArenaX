@@ -103,6 +103,20 @@ export const resetDatabaseClient = (): void => {
 // Connection pre-warming
 // ---------------------------------------------------------------------------
 
+export interface PoolServiceConfig {
+  minConnections?: number;
+  healthCheckIntervalMs?: number;
+}
+
+let _idleCount = 0;
+let _activeCount = 0;
+
+const dbIdleConnections = { set: (_v: number) => {} };
+const dbActiveConnections = { set: (_v: number) => {} };
+
+const incActive = () => { _activeCount++; dbActiveConnections.set(_activeCount); };
+const decActive = () => { if (_activeCount > 0) _activeCount--; dbActiveConnections.set(_activeCount); };
+
 /**
  * Pre-warms the pool by firing `minConnections` concurrent `SELECT 1` probes.
  * Call this during service startup, before accepting traffic.
