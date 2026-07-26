@@ -269,13 +269,21 @@ export function ChatInterface({
                       className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`max-w-[70%] ${
+                        className={`max-w-[70%] min-w-0 ${
                           isOwn
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted"
-                        } rounded-2xl px-4 py-2`}
+                        } rounded-2xl px-4 py-2 break-words overflow-hidden [overflow-wrap:anywhere]`}
                       >
-                        <p className="text-sm">{message.content}</p>
+                        {!isOwn && (
+                          <span
+                            className="block text-xs font-semibold text-primary truncate max-w-full mb-1"
+                            data-testid="chat-sender-username"
+                          >
+                            {(message as any).senderName || (message as any).fromUsername || (activeConversation.type === "party" ? "Party Member" : getConversationName(activeConversation))}
+                          </span>
+                        )}
+                        <p className="text-sm break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{message.content}</p>
                         <div
                           className={`flex items-center justify-end gap-1 mt-1 ${
                             isOwn
