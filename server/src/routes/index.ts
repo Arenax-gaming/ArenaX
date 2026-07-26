@@ -17,6 +17,7 @@ import apiGatewayRoutes from './api-gateway.routes';
 import queueRoutes from './queue.routes';
 import accessControlRoutes from './access-control.routes';
 import crossGameAssetRoutes from './cross-game-asset.routes';
+import i18nRoutes from './i18n.routes';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
@@ -55,6 +56,7 @@ router.use('/api/v1/gateway', apiGatewayRoutes);
 router.use('/api/v1/queue', queueRoutes);
 router.use('/api/v1/access-control', accessControlRoutes);
 router.use('/api/v1/assets', crossGameAssetRoutes);
+router.use('/api/v1/i18n', i18nRoutes);
 
 
 export default router;

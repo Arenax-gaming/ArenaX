@@ -1,0 +1,6 @@
+{
+  "errors.validation.required": "Aaye ni nilo",
+  "errors.validation.invalid": "Ohun ti ko tọ",
+  "errors.server.internal": "Aṣiṣe Nẹtiwọọ ọrọ",
+  "success.saved": "A fi pamọ"
+}

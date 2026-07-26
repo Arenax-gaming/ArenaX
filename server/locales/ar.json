@@ -1,0 +1,6 @@
+{
+  "errors.validation.required": "هذا الحقل مطلوب",
+  "errors.validation.invalid": "قيمة غير صالحة",
+  "errors.server.internal": "خطأ داخلي في الخادم",
+  "success.saved": "تم الحفظ بنجاح"
+}
