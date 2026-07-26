@@ -23,6 +23,30 @@ import {
   KycFilters,
   ProcessKycPayload,
 } from "../types/admin";
+import {
+  Achievement,
+  PlayerAchievementsResponse,
+  AchievementStats,
+  AchievementUnlockedEvent,
+  ShareAchievementResponse,
+} from "../types/achievement";
+import {
+  LeaderboardResponse,
+  PlayerRankResponse,
+  RankHistory,
+  SeasonalLeaderboard,
+  LeaderboardStats,
+} from "../types/leaderboard";
+import {
+  Friend,
+  FriendRequest,
+  Message,
+  Conversation,
+  Party,
+  OnlineStatus,
+  FriendsListResponse,
+  SocialUser,
+} from "../types/social";
 import { AuthApiError } from "./authErrors";
 
 const TOKEN_KEY = "auth_token";
@@ -476,6 +500,166 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // ── Achievement endpoints ──────────────────────────────────────────────────
+
+  async getAchievements(): Promise<Achievement[]> {
+    return this.request<Achievement[]>("/achievements");
+  }
+
+  async getPlayerAchievements(playerId: string): Promise<PlayerAchievementsResponse> {
+    return this.request<PlayerAchievementsResponse>(
+      `/achievements/player/${playerId}`
+    );
+  }
+
+  async getAchievementStats(achievementId: string): Promise<AchievementStats> {
+    return this.request<AchievementStats>(
+      `/achievements/${achievementId}/stats`
+    );
+  }
+
+  async updateAchievementProgress(
+    achievementId: string,
+    progress: number,
+  ): Promise<AchievementUnlockedEvent | null> {
+    return this.request<AchievementUnlockedEvent | null>(
+      `/achievements/${achievementId}/progress`,
+      { method: "POST", body: JSON.stringify({ progress }) },
+    );
+  }
+
+  async shareAchievement(achievementId: string): Promise<ShareAchievementResponse> {
+    return this.request<ShareAchievementResponse>(
+      `/achievements/${achievementId}/share`,
+      { method: "POST" },
+    );
+  }
+
+  async checkAchievements(
+    eventType: string,
+    eventData: Record<string, unknown>,
+  ): Promise<AchievementUnlockedEvent[]> {
+    const result = await this.request<{ unlocked_achievements: AchievementUnlockedEvent[] }>(
+      "/achievements/check",
+      {
+        method: "POST",
+        body: JSON.stringify({ event_type: eventType, event_data: eventData }),
+      },
+    );
+    return result.unlocked_achievements;
+  }
+
+  // ── Leaderboard endpoints ─────────────────────────────────────────────────
+
+  async getLeaderboard(
+    category: string,
+    limit = 100,
+    offset = 0,
+    season?: string,
+    search?: string,
+  ): Promise<LeaderboardResponse> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    if (season) params.set("season", season);
+    if (search) params.set("search", search);
+    return this.request<LeaderboardResponse>(`/leaderboards/${category}?${params}`);
+  }
+
+  async getSeasonalLeaderboard(
+    category: string,
+    season: string,
+    limit = 100,
+    offset = 0,
+  ): Promise<SeasonalLeaderboard> {
+    return this.request<SeasonalLeaderboard>(
+      `/leaderboards/${category}/season/${season}?limit=${limit}&offset=${offset}`,
+    );
+  }
+
+  async getPlayerRank(category: string, playerId: string): Promise<PlayerRankResponse> {
+    return this.request<PlayerRankResponse>(
+      `/leaderboards/${category}/player/${playerId}`,
+    );
+  }
+
+  async getRankHistory(
+    category: string,
+    playerId: string,
+    days = 30,
+  ): Promise<RankHistory> {
+    return this.request<RankHistory>(
+      `/leaderboards/${category}/history/${playerId}?days=${days}`,
+    );
+  }
+
+  async getLeaderboardStats(category: string): Promise<LeaderboardStats> {
+    return this.request<LeaderboardStats>(`/leaderboards/${category}/stats`);
+  }
+
+  async refreshLeaderboard(category: string): Promise<unknown> {
+    return this.request(`/leaderboards/${category}/refresh`, { method: "POST" });
+  }
+
+  // ── Social / Friends endpoints ────────────────────────────────────────────
+
+  async getFriendsList(): Promise<FriendsListResponse> {
+    return this.request<FriendsListResponse>("/friends");
+  }
+
+  async getPendingFriendRequests(): Promise<FriendRequest[]> {
+    return this.request<FriendRequest[]>("/friends/requests");
+  }
+
+  async getSuggestedUsers(): Promise<SocialUser[]> {
+    return this.request<SocialUser[]>("/friends/suggestions");
+  }
+
+  async addFriend(friendId: string): Promise<FriendRequest> {
+    return this.request<FriendRequest>("/friends/add", {
+      method: "POST",
+      body: JSON.stringify({ friend_id: friendId }),
+    });
+  }
+
+  async acceptFriendRequest(requestId: string): Promise<unknown> {
+    return this.request("/friends/requests/accept", {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId }),
+    });
+  }
+
+  async sendMessage(toUserId: string, content: string): Promise<Message> {
+    return this.request<Message>("/messages/send", {
+      method: "POST",
+      body: JSON.stringify({ to_user_id: toUserId, content }),
+    });
+  }
+
+  async getConversations(): Promise<Conversation[]> {
+    return this.request<Conversation[]>("/messages/conversations");
+  }
+
+  async createParty(params: {
+    name: string;
+    description?: string;
+    maxMembers?: number;
+  }): Promise<Party> {
+    return this.request<Party>("/party/create", {
+      method: "POST",
+      body: JSON.stringify({
+        name: params.name,
+        description: params.description,
+        max_members: params.maxMembers,
+      }),
+    });
+  }
+
+  async getOnlineStatus(userId: string): Promise<OnlineStatus> {
+    return this.request<OnlineStatus>(`/status/${userId}`);
   }
 }
 
