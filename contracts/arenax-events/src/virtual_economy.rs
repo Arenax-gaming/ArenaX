@@ -224,3 +224,124 @@ pub fn emit_emergency_resumed(env: &Env) {
     }
     .publish(env);
 }
+
+// ─── Dynamic Pricing: Dutch Auctions ─────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "AUCTION_CREATED"])]
+pub struct DutchAuctionCreated {
+    pub listing_id: BytesN<32>,
+    pub seller: Address,
+    pub token_id: BytesN<32>,
+    pub start_price: i128,
+    pub floor_price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "AUCTION_PURCHASED"])]
+pub struct DutchAuctionPurchased {
+    pub listing_id: BytesN<32>,
+    pub buyer: Address,
+    pub price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "AUCTION_CANCELLED"])]
+pub struct DutchAuctionCancelled {
+    pub listing_id: BytesN<32>,
+}
+
+pub fn emit_dutch_auction_created(
+    env: &Env,
+    listing_id: &BytesN<32>,
+    seller: &Address,
+    token_id: &BytesN<32>,
+    start_price: i128,
+    floor_price: i128,
+) {
+    DutchAuctionCreated {
+        listing_id: listing_id.clone(),
+        seller: seller.clone(),
+        token_id: token_id.clone(),
+        start_price,
+        floor_price,
+    }
+    .publish(env);
+}
+
+pub fn emit_dutch_auction_purchased(env: &Env, listing_id: &BytesN<32>, buyer: &Address, price: i128) {
+    DutchAuctionPurchased {
+        listing_id: listing_id.clone(),
+        buyer: buyer.clone(),
+        price,
+    }
+    .publish(env);
+}
+
+pub fn emit_dutch_auction_cancelled(env: &Env, listing_id: &BytesN<32>) {
+    DutchAuctionCancelled {
+        listing_id: listing_id.clone(),
+    }
+    .publish(env);
+}
+
+// ─── Dynamic Pricing: Bonding Curve Drops ────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "DROP_CREATED"])]
+pub struct BondingCurveDropCreated {
+    pub drop_id: BytesN<32>,
+    pub creator: Address,
+    pub base_price: i128,
+    pub slope_bps: u32,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "DROP_MINTED"])]
+pub struct BondingCurveDropMinted {
+    pub drop_id: BytesN<32>,
+    pub buyer: Address,
+    pub token_id: BytesN<32>,
+    pub price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "DROP_UPDATED"])]
+pub struct BondingCurveDropUpdated {
+    pub drop_id: BytesN<32>,
+    pub active: bool,
+}
+
+pub fn emit_bonding_curve_drop_created(
+    env: &Env,
+    drop_id: &BytesN<32>,
+    creator: &Address,
+    base_price: i128,
+    slope_bps: u32,
+) {
+    BondingCurveDropCreated {
+        drop_id: drop_id.clone(),
+        creator: creator.clone(),
+        base_price,
+        slope_bps,
+    }
+    .publish(env);
+}
+
+pub fn emit_bonding_curve_drop_minted(
+    env: &Env,
+    drop_id: &BytesN<32>,
+    buyer: &Address,
+    token_id: &BytesN<32>,
+    price: i128,
+) {
+    BondingCurveDropMinted {
+        drop_id: drop_id.clone(),
+        buyer: buyer.clone(),
+        token_id: token_id.clone(),
+        price,
+    }
+    .publish(env);
+}
+
+pub fn emit_bonding_curve_drop_updated(env: &Env, drop_id: &BytesN<32>, active: bool) {
+    BondingCurveDropUpdated {
+        drop_id: drop_id.clone(),
+        active,
+    }
+    .publish(env);
+}
