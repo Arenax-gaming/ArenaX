@@ -158,6 +158,52 @@ export default function ProfilePage() {
   // After auth loads, authUser should be present (ProtectedPage redirects otherwise)
   const user = authUser!;
 
+  useEffect(() => {
+    if (!isDirty) return;
+
+    const confirmLeave = () =>
+      window.confirm(
+        "You have unsaved changes. Are you sure you want to leave?"
+      );
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    const handleLinkClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement)?.closest("a");
+      if (!anchor || anchor.target === "_blank") return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      if (!confirmLeave()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+
+    const handlePopState = () => {
+      if (!confirmLeave()) {
+        window.history.pushState(null, "", window.location.href);
+      }
+    };
+
+    window.history.pushState(null, "", window.location.href);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleLinkClick, true);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleLinkClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [isDirty]);
+
+  const handleBioDirtyChange = useCallback((dirty: boolean) => {
+    setIsBioDirty(dirty);
+  }, []);
+
   return (
     <ProtectedPage>
       <div className="py-4 max-w-[100vw] overflow-hidden mx-auto space-y-8 animate-in fade-in duration-500">
