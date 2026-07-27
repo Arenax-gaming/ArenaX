@@ -247,6 +247,17 @@ class ApiClient {
     );
   }
 
+  /** Check whether a username is available for registration/profile updates. */
+  async checkUsernameAvailability(
+    username: string,
+    signal?: AbortSignal,
+  ): Promise<{ available: boolean }> {
+    return this.request<{ available: boolean }>(
+      `/auth/check-username?username=${encodeURIComponent(username)}`,
+      { signal },
+    );
+  }
+
   async verifyEmail(token: string) {
     return this.authRequest<{ message: string }>(
       "/auth/verify-email",
