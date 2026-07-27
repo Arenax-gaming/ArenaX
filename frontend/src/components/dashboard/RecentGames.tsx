@@ -2,15 +2,69 @@
 
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { RefreshCw } from "lucide-react";
 import { MatchWithPlayers } from "@/types/match";
 import { cn } from "@/lib/utils";
 
 interface RecentGamesProps {
   matches: MatchWithPlayers[];
   currentUserId: string;
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
-export function RecentGames({ matches, currentUserId }: RecentGamesProps) {
+function RecentGamesSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="h-4 w-28 bg-muted rounded animate-pulse" />
+          <div className="h-3 w-12 bg-muted rounded animate-pulse" />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-6 py-3">
+              <div className="h-6 w-8 bg-muted rounded animate-pulse" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 w-32 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-20 bg-muted rounded animate-pulse" />
+              </div>
+              <div className="h-4 w-12 bg-muted rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentGamesError({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold">Recent Games</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+        <p className="text-sm text-muted-foreground">Could not load recent games — please try again.</p>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function RecentGames({ matches, currentUserId, isLoading = false, isError = false, onRetry }: RecentGamesProps) {
+  if (isLoading) return <RecentGamesSkeleton />;
+  if (isError) return <RecentGamesError onRetry={onRetry} />;
+
   return (
     <Card>
       <CardHeader className="pb-3">

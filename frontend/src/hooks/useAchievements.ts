@@ -6,8 +6,7 @@ import {
     AchievementUnlockedEvent,
     ShareAchievementResponse,
 } from '@/types/achievement'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1'
+import { API_BASE } from '@/lib/constants'
 
 export const useAchievements = () => {
     return useQuery({

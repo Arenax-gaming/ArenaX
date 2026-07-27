@@ -39,10 +39,19 @@ export interface MatchResult {
 export interface MatchFilters {
   tournamentId?: string;
   playerId?: string;
+  userId?: string;
   status?: MatchStatus;
   gameType?: string;
+  mine?: boolean;
   page?: number;
   limit?: number;
+}
+
+export interface ReportScoreRequest {
+  score: number;
+  opponentScore: number;
+  proofUrl?: string;
+  telemetryData?: Record<string, unknown>;
 }
 
 // Enhanced types for detailed match view

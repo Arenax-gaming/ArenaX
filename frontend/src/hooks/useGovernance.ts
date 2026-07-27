@@ -7,6 +7,39 @@ import { api } from "@/lib/api";
 import type { Proposal, VoteChoice } from "@/types/governance";
 
 // ---------------------------------------------------------------------------
+// Auth helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a JWT access token is present in storage.
+ * Works in both localStorage (remember-me) and sessionStorage (session-only).
+ */
+function isAuthenticated(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!(
+    localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token")
+  );
+}
+
+/**
+ * Converts a raw API error into a user-friendly auth error when it looks like
+ * an unauthenticated / forbidden response.
+ */
+function rethrowAuthError(error: unknown, defaultMessage: string): never {
+  const message =
+    error instanceof Error ? error.message : String(error ?? defaultMessage);
+
+  // Backend returns "Unauthorized" or "Forbidden" on 401 / 403
+  if (
+    /unauthori[zs]ed|forbidden|invalid token|jwt|authentication/i.test(message)
+  ) {
+    throw new Error("Please log in to perform this action.");
+  }
+
+  throw error instanceof Error ? error : new Error(message);
+}
+
+// ---------------------------------------------------------------------------
 // Query keys
 // ---------------------------------------------------------------------------
 export const GOVERNANCE_KEYS = {
@@ -45,24 +78,30 @@ export function useProposal(id: string) {
 /**
  * Cast a vote on a proposal.
  *
- * The existing API endpoint POST /governance/:id/vote accepts an optional
- * `signature`. We map the UX choice (yes / no / abstain) to that payload.
- * When the backend extends the endpoint to accept a `vote` field this hook
- * only needs updating here.
+ * Guards the mutation: throws a user-visible "Please log in to vote" error
+ * when no auth token is present, rather than letting a silent 401 propagate.
  */
 export function useVoteOnProposal() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       id,
-      choice,
+      choice: _choice,
       signature,
     }: {
       id: string;
       choice: VoteChoice;
       signature?: string;
-    }) =>
-      api.voteOnProposal(id, signature) as Promise<unknown>,
+    }) => {
+      if (!isAuthenticated()) {
+        throw new Error("Please log in to vote.");
+      }
+      try {
+        return await (api.voteOnProposal(id, signature) as Promise<unknown>);
+      } catch (error) {
+        rethrowAuthError(error, "Failed to cast vote.");
+      }
+    },
     onSuccess: (_data, { id }) => {
       // Invalidate both the list and the individual proposal so counts refresh.
       qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposals() });
@@ -75,7 +114,16 @@ export function useVoteOnProposal() {
 export function useExecuteProposal() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.executeProposal(id) as Promise<unknown>,
+    mutationFn: async (id: string) => {
+      if (!isAuthenticated()) {
+        throw new Error("Please log in to execute proposals.");
+      }
+      try {
+        return await (api.executeProposal(id) as Promise<unknown>);
+      } catch (error) {
+        rethrowAuthError(error, "Failed to execute proposal.");
+      }
+    },
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposals() });
       qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposal(id) });
@@ -87,10 +135,39 @@ export function useExecuteProposal() {
 export function useStartVoting() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.startVoting(id) as Promise<unknown>,
+    mutationFn: async (id: string) => {
+      if (!isAuthenticated()) {
+        throw new Error("Please log in to start voting.");
+      }
+      try {
+        return await (api.startVoting(id) as Promise<unknown>);
+      } catch (error) {
+        rethrowAuthError(error, "Failed to start voting.");
+      }
+    },
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposals() });
       qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposal(id) });
+    },
+  });
+}
+
+/** Create a new governance proposal */
+export function useCreateProposal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      if (!isAuthenticated()) {
+        throw new Error("Please log in to create a proposal.");
+      }
+      try {
+        return await (api.createProposal(data) as Promise<unknown>);
+      } catch (error) {
+        rethrowAuthError(error, "Failed to create proposal.");
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: GOVERNANCE_KEYS.proposals() });
     },
   });
 }
