@@ -1,4 +1,4 @@
-import { logger } from './logger.service';
+import { logger } from './logger.service.js';
 
 export interface AssetDefinition {
     assetId: string;
@@ -20,6 +20,7 @@ export interface AssetBalance {
     nftSerial?: number;
     acquiredAt: number;
     sourceGameId: number;
+    version: number;
 }
 
 export interface BridgeRequest {
@@ -62,6 +63,27 @@ export class CrossGameAssetService {
     private balances: Map<string, AssetBalance> = new Map();
     private bridgeRequests: Map<string, BridgeRequest> = new Map();
     private chains: Map<string, ChainConfig> = new Map();
+    private userLocks: Map<string, Promise<unknown>> = new Map();
+
+    private async withUserLock<T>(userId: string, fn: () => T | Promise<T>): Promise<T> {
+        const existingLock = this.userLocks.get(userId) || Promise.resolve();
+        let resolveNext: () => void;
+        const nextLock = new Promise<void>((resolve) => {
+            resolveNext = resolve;
+        });
+
+        this.userLocks.set(userId, nextLock);
+
+        try {
+            await existingLock;
+            return await fn();
+        } finally {
+            resolveNext!();
+            if (this.userLocks.get(userId) === nextLock) {
+                this.userLocks.delete(userId);
+            }
+        }
+    }
 
     registerAsset(asset: AssetDefinition): void {
         this.assets.set(asset.assetId, asset);
@@ -104,6 +126,7 @@ export class CrossGameAssetService {
         const existing = this.balances.get(key);
         if (existing) {
             existing.amount += amount;
+            existing.version = (existing.version || 1) + 1;
         } else {
             this.balances.set(key, {
                 owner: to,
@@ -111,6 +134,7 @@ export class CrossGameAssetService {
                 amount,
                 acquiredAt: Date.now(),
                 sourceGameId,
+                version: 1,
             });
         }
 
@@ -141,6 +165,8 @@ export class CrossGameAssetService {
         }
 
         fromBalance.amount -= amount;
+        fromBalance.version = (fromBalance.version || 1) + 1;
+
         if (fromBalance.amount === 0) {
             this.balances.delete(fromKey);
         }
@@ -149,6 +175,7 @@ export class CrossGameAssetService {
         const toBalance = this.balances.get(toKey);
         if (toBalance) {
             toBalance.amount += amount;
+            toBalance.version = (toBalance.version || 1) + 1;
         } else {
             this.balances.set(toKey, {
                 owner: to,
@@ -156,10 +183,24 @@ export class CrossGameAssetService {
                 amount,
                 acquiredAt: Date.now(),
                 sourceGameId: fromGameId,
+                version: 1,
             });
         }
 
         return true;
+    }
+
+    async transferAssetSync(
+        from: string,
+        to: string,
+        assetId: string,
+        amount: number,
+        fromGameId: number,
+        toGameId: number
+    ): Promise<boolean> {
+        return this.withUserLock(from, () =>
+            this.transferAsset(from, to, assetId, amount, fromGameId, toGameId)
+        );
     }
 
     initiateBridge(
@@ -192,6 +233,7 @@ export class CrossGameAssetService {
 
         // Lock assets
         balance.amount -= amount;
+        balance.version = (balance.version || 1) + 1;
         if (balance.amount === 0) {
             this.balances.delete(key);
         }
@@ -239,6 +281,7 @@ export class CrossGameAssetService {
         const balance = this.balances.get(key);
         if (balance) {
             balance.amount += request.amount;
+            balance.version = (balance.version || 1) + 1;
         } else {
             this.balances.set(key, {
                 owner: request.owner,
@@ -246,6 +289,7 @@ export class CrossGameAssetService {
                 amount: request.amount,
                 acquiredAt: Date.now(),
                 sourceGameId: request.sourceGameId,
+                version: 1,
             });
         }
 
@@ -266,6 +310,7 @@ export class CrossGameAssetService {
         const balance = this.balances.get(key);
         if (balance) {
             balance.amount += request.amount;
+            balance.version = (balance.version || 1) + 1;
         } else {
             this.balances.set(key, {
                 owner: request.owner,
@@ -273,6 +318,7 @@ export class CrossGameAssetService {
                 amount: request.amount,
                 acquiredAt: Date.now(),
                 sourceGameId: request.sourceGameId,
+                version: 1,
             });
         }
 

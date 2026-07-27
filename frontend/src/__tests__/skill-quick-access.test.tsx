@@ -62,4 +62,39 @@ describe("SkillQuickAccessBar Component", () => {
       defaultSkills.find((s) => s.actionName === "Skill Quick Boost")
     );
   });
+
+  it("renders floating combat text and activation feedback effect on skill activation (Issue #772)", () => {
+    const handleActivate = jest.fn();
+    render(
+      <SkillQuickAccessBar
+        skills={defaultSkills}
+        keyBindings={mockKeyBindings}
+        onActivateSkill={handleActivate}
+      />
+    );
+
+    const firstSkillBtn = screen.getByRole("button", { name: /Plasma Blast/i });
+    fireEvent.click(firstSkillBtn);
+
+    const combatText = screen.getByTestId("floating-combat-text");
+    expect(combatText).toBeInTheDocument();
+    expect(combatText).toHaveTextContent("-150 DMG");
+  });
+
+  it("renders animated cooldown overlay when ability is on cooldown (Issue #772)", () => {
+    render(
+      <SkillQuickAccessBar
+        skills={defaultSkills}
+        keyBindings={mockKeyBindings}
+      />
+    );
+
+    const firstSkillBtn = screen.getByRole("button", { name: /Plasma Blast/i });
+    fireEvent.click(firstSkillBtn);
+
+    // Immediately after activation, button enters cooldown state
+    expect(firstSkillBtn).toBeDisabled();
+    expect(firstSkillBtn).toHaveClass("opacity-60");
+  });
 });
+

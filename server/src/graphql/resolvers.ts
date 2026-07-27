@@ -183,6 +183,57 @@ export const resolvers = {
         recentMatches(parent: { id: string }, args: { limit?: number }) {
             return [];
         },
+
+        // Federation entity resolver: lets other subgraphs reference a
+        // `User` by `id` (e.g. `{ __typename: "User", id }`) and have this
+        // subgraph resolve the remaining fields it owns.
+        async __resolveReference(reference: { id: string }) {
+            const prisma = getDatabaseClient();
+            const user = await (prisma as any).user.findUnique({
+                where: { id: reference.id },
+                select: { id: true, username: true, createdAt: true },
+            });
+            if (!user) return null;
+            return {
+                id: user.id,
+                displayName: user.username,
+                rating: 1000,
+                createdAt: user.createdAt,
+            };
+        },
+    },
+
+    Match: {
+        async __resolveReference(reference: { id: string }) {
+            const prisma = getDatabaseClient();
+            const match = await (prisma as any).match.findUnique({ where: { id: reference.id } });
+            if (!match) return null;
+            return {
+                id: match.id,
+                gameMode: match.metadata?.gameMode || 'unknown',
+                teamA: [],
+                teamB: [],
+                startedAt: match.createdAt,
+            };
+        },
+    },
+
+    Tournament: {
+        async __resolveReference(reference: { id: string }) {
+            const prisma = getDatabaseClient();
+            const t = await (prisma as any).tournament.findUnique({
+                where: { id: reference.id },
+                select: { id: true, name: true, startDate: true, endDate: true, _count: { select: { participants: true } } },
+            });
+            if (!t) return null;
+            return {
+                id: t.id,
+                name: t.name,
+                startsAt: t.startDate,
+                endsAt: t.endDate,
+                participantCount: t._count.participants,
+            };
+        },
     },
 };
 
