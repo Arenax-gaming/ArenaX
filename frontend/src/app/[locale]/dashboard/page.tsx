@@ -14,6 +14,7 @@ import { FriendsList } from "@/components/dashboard/FriendsList";
 import { QuickPlay } from "@/components/dashboard/QuickPlay";
 import { LeaderboardPreview } from "@/components/dashboard/LeaderboardPreview";
 import { NewsFeed } from "@/components/dashboard/NewsFeed";
+import { RouteGuard } from "@/components/navigation/RouteGuard";
 
 // Skeleton for the stats row while data loads
 function StatsSkeleton() {
@@ -79,11 +80,12 @@ export default function DashboardPage() {
   const streak = statsData?.current_streak ?? 0;
 
   if (!user) {
-    // AuthProvider/ProtectedPage will redirect; show nothing while resolving
+    // RouteGuard handles redirect; show nothing while resolving
     return null;
   }
 
   return (
+    <RouteGuard requirement="verified">
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Welcome header */}
       <div className="flex items-center gap-4">
@@ -153,5 +155,6 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+    </RouteGuard>
   );
 }
