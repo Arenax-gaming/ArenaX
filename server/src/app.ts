@@ -24,7 +24,7 @@ import { isRateLimitRedisConnected, getRateLimitRedisClient } from './middleware
 import xss from 'xss-clean';
 // @ts-ignore
 import hpp from 'hpp';
-import { setupSwagger } from './openapi/swagger';
+import { setupSwagger, setupRedoc } from './openapi/swagger';
 import { logger } from './services/logger.service';
 
 const defaultArenaXOrigins = [
@@ -164,6 +164,9 @@ export const createApp = (): Express => {
 
     // Mount Swagger UI
     setupSwagger(app);
+
+    // Mount Redoc
+    setupRedoc(app);
 
     app.use(errorHandler);
 
