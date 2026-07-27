@@ -131,7 +131,11 @@ async fn main() -> io::Result<()> {
     let address_book = Arc::new(WsAddressBook::new());
 
     // Initialize Auth Services for Realtime
-    let jwt_config = crate::auth::jwt_service::JwtConfig::default();
+    let jwt_config = crate::auth::jwt_service::JwtConfig::from_config(
+        config.auth.jwt_secret.clone(),
+        &config.auth.jwt_expires_in,
+        &config.auth.jwt_refresh_expires_in,
+    );
     let jwt_service = Arc::new(crate::auth::jwt_service::JwtService::new(jwt_config.clone(), redis_conn.clone()));
     let auth_guard = Arc::new(crate::realtime::auth::RealtimeAuth::new(db_pool.clone()));
 
