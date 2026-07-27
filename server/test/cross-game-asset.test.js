@@ -127,3 +127,28 @@ test('CrossGameAssetService returns analytics', async () => {
   assert.strictEqual(analytics.totalAssetsRegistered, 1)
   assert.strictEqual(analytics.totalMinted, 10)
 })
+
+test('CrossGameAssetService handles rapid concurrent inventory transfers without race conditions (Issue #769)', async () => {
+  const { CrossGameAssetService } = await import('../dist/services/cross-game-asset.service.js')
+  const service = new CrossGameAssetService()
+  service.registerAsset({
+    assetId: 'asset-sync', kind: 'currency', rarity: 'common', name: 'Coins',
+    compatibleGames: [1, 2], maxSupply: 0, currentSupply: 0,
+    isTransferable: true, isTradeable: true, createdAt: Date.now(),
+  })
+  service.mintAsset('asset-sync', 'player-sync-1', 1000, 1)
+
+  // Rapid simultaneous transfers
+  const promises = Array.from({ length: 10 }).map(() =>
+    service.transferAssetSync('player-sync-1', 'player-sync-2', 'asset-sync', 10, 1, 2)
+  )
+  const results = await Promise.all(promises)
+
+  assert.strictEqual(results.every(Boolean), true)
+  const inv1 = service.getPlayerInventory('player-sync-1')
+  const inv2 = service.getPlayerInventory('player-sync-2')
+  assert.strictEqual(inv1[0].amount, 900)
+  assert.strictEqual(inv2[0].amount, 100)
+  assert.strictEqual(inv1[0].version > 1, true)
+})
+

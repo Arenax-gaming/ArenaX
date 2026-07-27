@@ -81,6 +81,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link href="/about" className="text-muted-foreground hover:text-foreground transition-colors">About</Link>
               <Link href="/tournaments" className="text-muted-foreground hover:text-foreground transition-colors">Tournaments</Link>
               <Link href="/leaderboard" className="text-muted-foreground hover:text-foreground transition-colors">Leaderboard</Link>
+              <Link href="/reputation" className="text-muted-foreground hover:text-foreground transition-colors">Reputation</Link>
               <Link href="/contact" className="text-muted-foreground hover:text-foreground transition-colors">Contact</Link>
               <Link href="/privacy" className="text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="text-muted-foreground hover:text-foreground transition-colors">Terms of Service</Link>

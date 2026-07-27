@@ -1,0 +1,86 @@
+version: '3.8'
+
+# ELK stack (Elasticsearch, Logstash, Kibana) + Filebeat for #660.
+#
+# Log flow: winston (src/services/logger.service.ts) already writes
+# structured JSON logs to server/logs/*.log via winston-daily-rotate-file.
+# Filebeat tails those files and ships them to Logstash, which parses the
+# JSON and forwards to Elasticsearch; Kibana visualizes/searches it.
+#
+# The app process is never coupled to Logstash's availability — logs are
+# always written to disk first, so a down ELK stack never affects request
+# handling, only how quickly logs become searchable.
+#
+# Single-node, security-disabled settings below are for local development
+# only. See docs/ELK_LOGGING.md for production hardening notes.
+#
+# Usage:
+#   docker compose -f infra/elk/docker-compose.yml up -d
+#   open http://localhost:5601   # Kibana
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - elk-network
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    environment:
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+    ports:
+      - "5044:5044" # Beats input
+      - "9600:9600" # Logstash monitoring API
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elk-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - elk-network
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.0
+    user: root # required to read the bind-mounted log directory
+    command: ["--strict.perms=false", "-e"]
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # arenax-server's own log directory (LOG_DIR, defaults to server/logs).
+      - ../../logs:/var/log/arenax:ro
+    depends_on:
+      logstash:
+        condition: service_started
+    networks:
+      - elk-network
+
+networks:
+  elk-network:
+    driver: bridge
+
+volumes:
+  elasticsearch_data:

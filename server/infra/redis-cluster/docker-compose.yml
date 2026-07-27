@@ -1,0 +1,40 @@
+version: '3.8'
+
+# Local Redis Cluster for development/testing of the #655 cluster-mode
+# cache backend. Six nodes (3 masters + 3 replicas) sharing one container
+# via `grokzen/redis-cluster`, the standard image for local Redis Cluster
+# development — no manual `redis-cli --cluster create` bootstrap needed.
+#
+# Usage:
+#   docker compose -f infra/redis-cluster/docker-compose.yml up -d
+#   REDIS_CLUSTER_NODES=localhost:7000,localhost:7001,localhost:7002,localhost:7003,localhost:7004,localhost:7005 npm run dev
+#
+# For production, run an actual multi-host cluster (e.g. via the Bitnami
+# redis-cluster Helm chart or AWS ElastiCache/MemoryDB in cluster mode) and
+# point REDIS_CLUSTER_NODES at the real node addresses instead.
+services:
+  redis-cluster:
+    image: grokzen/redis-cluster:7.0.10
+    environment:
+      IP: "0.0.0.0"
+      INITIAL_PORT: 7000
+      MASTERS: 3
+      SLAVES_PER_MASTER: 1
+    ports:
+      - "7000-7005:7000-7005"
+    volumes:
+      - redis_cluster_data:/redis-data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7000", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - redis-cluster-network
+
+networks:
+  redis-cluster-network:
+    driver: bridge
+
+volumes:
+  redis_cluster_data:

@@ -1,0 +1,95 @@
+_format_version: "3.0"
+_transform: true
+
+# Declarative (DB-less) Kong configuration for #653.
+#
+# Kong sits in front of arenax-server as the edge API gateway: centralized
+# routing, global rate limiting, CORS, and request/response shaping. It is
+# deliberately *not* where per-API-key business authorization happens —
+# that stays in the app's own key-management system
+# (src/middleware/api-gateway.middleware.ts, src/routes/api-gateway.routes.ts),
+# which already owns key issuance, rotation, and per-key permissions.
+# Kong's job is the concerns a gateway is actually good at: uniform
+# rate limiting/CORS/observability across every route without every
+# service reimplementing it.
+#
+# DB-less mode is used for reproducibility — this file *is* the config,
+# checked into git, with no separate Postgres/Cassandra store to migrate
+# or drift from. See docs/API_GATEWAY_KONG.md for how to switch to a
+# database-backed deployment for production if dynamic (Admin API-driven)
+# configuration is later required.
+
+services:
+  - name: arenax-server
+    # host.docker.internal resolves to the Docker host from inside the
+    # Kong container; the TypeScript server runs on the host via `npm run
+    # dev`, not in this compose file. See docker-compose.yml's extra_hosts
+    # for Linux compatibility.
+    url: http://host.docker.internal:3001
+    routes:
+      - name: arenax-api
+        paths:
+          - /api
+        strip_path: false
+        # GraphQL and websockets both need to reach the same upstream.
+        preserve_host: false
+
+      - name: arenax-health
+        paths:
+          - /health
+        strip_path: false
+
+plugins:
+  # Global CORS so the gateway — not every downstream service — is the
+  # single place browser access policy is defined.
+  - name: cors
+    config:
+      origins:
+        - http://localhost:3000
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-API-Key
+        - X-Request-Id
+      credentials: true
+      max_age: 3600
+
+  # Global request-level rate limiting at the edge, independent of and in
+  # addition to the app's own per-API-key limiter
+  # (apiKeyRateLimiter in api-gateway.middleware.ts). This one protects
+  # the whole service from anonymous/unauthenticated traffic spikes.
+  - name: rate-limiting
+    config:
+      minute: 300
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # Correlation id propagation: reuses the same header the app's own
+  # correlation.middleware.ts reads, so a request traced at the gateway is
+  # traceable through to the structured application/ELK logs.
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid
+      echo_downstream: true
+
+  # Basic request size guard at the edge.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 10
+
+  # Structured access logs to stdout, consumed by the ELK stack's
+  # Filebeat/Docker log driver alongside application logs (#660).
+  - name: file-log
+    config:
+      path: /dev/stdout
+      reopen: false

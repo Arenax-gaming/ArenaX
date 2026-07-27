@@ -20,17 +20,11 @@ export interface ToastItem {
 // ─── Singleton event bus ──────────────────────────────────────────────────────
 
 type ToastListener = (toast: ToastItem) => void;
-type DismissListener = (id: string) => void;
 
 const addListeners: Set<ToastListener> = new Set();
-const dismissListeners: Set<DismissListener> = new Set();
 
 function emitAdd(toast: ToastItem) {
   addListeners.forEach((fn) => fn(toast));
-}
-
-function emitDismiss(id: string) {
-  dismissListeners.forEach((fn) => fn(id));
 }
 
 let counter = 0;
@@ -41,8 +35,8 @@ let counter = 0;
  * Imperative toast helper — can be called outside React components.
  *
  * @example
- * toast.success("Settings saved");
- * toast.error("Failed to save", "ERR_500");
+ * toast.success("Action completed");
+ * toast.error("Something went wrong", "ERR_403");
  */
 export const toast = {
   success(message: string, duration = 4000) {
@@ -59,52 +53,45 @@ export const toast = {
   },
 };
 
-// ─── useToast hook ────────────────────────────────────────────────────────────
-
-/** Returns the same imperative toast API bound to the active ToastContainer. */
+/** Returns the same imperative toast API. */
 export function useToast() {
   return toast;
 }
 
-// ─── Individual toast item ────────────────────────────────────────────────────
+// ─── Variant styles ───────────────────────────────────────────────────────────
 
 const VARIANT_CONFIG: Record<
   ToastVariant,
-  { icon: React.ReactNode; bg: string; border: string; text: string }
+  { icon: React.ReactNode; border: string }
 > = {
   success: {
     icon: <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" aria-hidden="true" />,
-    bg: "bg-background",
     border: "border-green-500/40",
-    text: "text-foreground",
   },
   error: {
     icon: <XCircle className="h-5 w-5 shrink-0 text-destructive" aria-hidden="true" />,
-    bg: "bg-background",
     border: "border-destructive/40",
-    text: "text-foreground",
   },
   warning: {
     icon: <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-500" aria-hidden="true" />,
-    bg: "bg-background",
     border: "border-yellow-500/40",
-    text: "text-foreground",
   },
   info: {
     icon: <Info className="h-5 w-5 shrink-0 text-blue-500" aria-hidden="true" />,
-    bg: "bg-background",
     border: "border-blue-500/40",
-    text: "text-foreground",
   },
 };
 
-interface ToastItemComponentProps {
+// ─── Single toast item ────────────────────────────────────────────────────────
+
+function ToastItemComponent({
+  item,
+  onDismiss,
+}: {
   item: ToastItem;
   onDismiss: (id: string) => void;
-}
-
-function ToastItemComponent({ item, onDismiss }: ToastItemComponentProps) {
-  const { icon, bg, border, text } = VARIANT_CONFIG[item.variant];
+}) {
+  const { icon, border } = VARIANT_CONFIG[item.variant];
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -121,10 +108,10 @@ function ToastItemComponent({ item, onDismiss }: ToastItemComponentProps) {
       transition={{ duration: 0.22, ease: "easeOut" }}
       role="alert"
       aria-live="polite"
-      className={`flex items-start gap-3 w-full max-w-sm rounded-lg border shadow-lg px-4 py-3 ${bg} ${border}`}
+      className={`flex items-start gap-3 w-full max-w-sm rounded-lg border shadow-lg px-4 py-3 bg-background ${border}`}
     >
       {icon}
-      <div className={`flex-1 min-w-0 ${text}`}>
+      <div className="flex-1 min-w-0 text-foreground">
         <p className="text-sm font-medium leading-snug">{item.message}</p>
         {item.code && (
           <p className="text-xs text-muted-foreground mt-0.5 font-mono">
@@ -147,7 +134,7 @@ function ToastItemComponent({ item, onDismiss }: ToastItemComponentProps) {
 
 /**
  * Renders all active toasts in a fixed bottom-right stack.
- * Mount once near the root of your app (e.g. in layout.tsx).
+ * Mount once near the root of your app or on the page that needs toasts.
  */
 export function ToastContainer() {
   const [items, setItems] = useState<ToastItem[]>([]);
@@ -158,7 +145,6 @@ export function ToastContainer() {
 
   const handleDismiss = useCallback((id: string) => {
     setItems((prev) => prev.filter((t) => t.id !== id));
-    emitDismiss(id);
   }, []);
 
   useEffect(() => {
