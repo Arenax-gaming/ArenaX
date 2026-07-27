@@ -15,7 +15,12 @@
         "prisma:studio": "prisma studio",
         "lint": "tsc --noEmit",
         "test:api": "node test/newman/run-all.js",
-        "test:api:report": "node test/newman/run-all.js --reporter htmlextra"
+        "test:api:report": "node test/newman/run-all.js --reporter htmlextra",
+        "test:security": "./test/security/run-zap-scan.sh",
+        "test:performance": "./test/performance/run-k6-tests.sh all",
+        "test:performance:load": "./test/performance/run-k6-tests.sh load",
+        "test:performance:stress": "./test/performance/run-k6-tests.sh stress",
+        "test:performance:benchmark": "./test/performance/run-k6-tests.sh benchmark"
     },
     "dependencies": {
         "@apollo/subgraph": "^2.9.3",

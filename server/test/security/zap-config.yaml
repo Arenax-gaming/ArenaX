@@ -1,0 +1,161 @@
+# OWASP ZAP Configuration for ArenaX API Security Testing
+# This configuration defines security test scenarios for vulnerability scanning
+
+zap:
+  # Basic configuration
+  context:
+    name: "ArenaX API Context"
+    include_urls:
+      - "http://localhost:3001/api.*"
+    exclude_urls:
+      - ".*\\.css"
+      - ".*\\.js"
+      - ".*\\.png"
+      - ".*\\.jpg"
+      - ".*\\.svg"
+      - ".*\\.ico"
+  
+  # Authentication configuration
+  authentication:
+    type: "bearer"
+    token: "${API_TOKEN}"
+    token_location: "header"
+    token_header_name: "Authorization"
+  
+  # Scan policy configuration
+  scan_policy:
+    # Enable all active scan rules
+    active_scan:
+      enabled: true
+      strength: "MEDIUM"
+      # Specific rules to enable
+      rules:
+        - id: 10021  # X-Content-Type-Options
+        - id: 10096  # User Agent
+        - id: 10061  # Directory Browsing
+        - id: 10023  # X-Frame-Options
+        - id: 10024  # Server Header
+        - id: 10025  # X-AspNet-Version
+        - id: 10027  # X-Powered-By
+        - id: 10031  # Content Security Policy
+        - id: 10032  # Cross-Domain JavaScript Source
+        - id: 10033  # Cross-Domain CSS Source
+        - id: 10034  # Cross-Domain Font Source
+        - id: 10035  # Cross-Domain Object Source
+        - id: 10036  # Cross-Domain Media Source
+        - id: 10037  # Cross-Domain Form Action
+        - id: 10038  # Cross-Domain Image Source
+        - id: 10039  # Cross-Domain Script Source
+        - id: 10041  # Information Disclosure
+        - id: 10042  # HTTP Strict Transport Security
+        - id: 10045  # X-Debug-Token
+        - id: 10054  # Directory Listing
+        - id: 10055  # Cookie Without SameSite
+        - id: 10056  # Cookie Without HttpOnly
+        - id: 10057  # Cookie Without Secure
+        - id: 10061  # Directory Browsing
+        - id: 10062  # Source Code Disclosure
+        - id: 10063  # Server Error
+        - id: 10064  # Timestamp Disclosure
+        - id: 10065  # Email Address
+        - id: 10066  # Credit Card
+        - id: 10067  # Social Security Number
+        - id: 10068  # Private IP
+        - id: 10069  # Strong Password
+        - id: 10070  # Anti-CSRF
+        - id: 10071  # HTTP Parameter Override
+        - id: 10072  # HTTPoxy
+        - id: 10073  # Cross-Frame Scripting
+        - id: 10074  # MIME Sniffing
+        - id: 10075  # HTTP Header Injection
+        - id: 10076  # HTTP Response Splitting
+        - id: 10077  # HTTP Parameter Pollution
+        - id: 10078  # SQL Injection
+        - id: 10079  # NoSQL Injection
+        - id: 10080  # Command Injection
+        - id: 10081  # LDAP Injection
+        - id: 10082  # XPath Injection
+        - id: 10083  # XML Injection
+        - id: 10084  # SSI Injection
+        - id: 10085  # XSS
+        - id: 10086  # CSRF
+        - id: 10087  # Path Traversal
+        - id: 10088  # File Inclusion
+        - id: 10089  10089  # XXE
+        - id: 10090  # SSRF
+        - id: 10091  # Open Redirect
+        - id: 10092  # Deserialization
+        - id: 10093  # EL Injection
+        - id: 10094  # OGNL Injection
+        - id: 10095  # Expression Language Injection
+        - id: 10096  # User Agent
+        - id: 10097  # HTTP Parameter Pollution
+        - id: 10098  # HTTP Parameter Tampering
+        - id: 10099  # HTTP Header Tampering
+    
+    # Passive scan configuration
+    passive_scan:
+      enabled: true
+      # Passive scan rules to enable
+      rules:
+        - id: 10021  # X-Content-Type-Options
+        - id: 10096  # User Agent
+        - id: 10061  # Directory Browsing
+        - id: 10023  # X-Frame-Options
+        - id: 10024  # Server Header
+        - id: 10025  # X-AspNet-Version
+        - id: 10027  # X-Powered-By
+        - id: 10031  # Content Security Policy
+        - id: 10041  # Information Disclosure
+        - id: 10042  # HTTP Strict Transport Security
+        - id: 10045  # X-Debug-Token
+        - id: 10054  # Directory Listing
+        - id: 10055  # Cookie Without SameSite
+        - id: 10056  # Cookie Without HttpOnly
+        - id: 10057  # Cookie Without Secure
+        - id: 10061  # Directory Browsing
+        - id: 10062  # Source Code Disclosure
+        - id: 10063  # Server Error
+        - id: 10064  # Timestamp Disclosure
+        - id: 10065  # Email Address
+        - id: 10066  # Credit Card
+        - id: 10067  # Social Security Number
+        - id: 10068  # Private IP
+        - id: 10069  # Strong Password
+
+  # Spider configuration
+  spider:
+    enabled: true
+    depth: 5
+    max_duration: 300  # 5 minutes
+    max_pages: 1000
+    post_form: true
+    handle_parameters: true
+
+  # AJAX Spider configuration
+  ajax_spider:
+    enabled: true
+    max_duration: 300  # 5 minutes
+
+  # Report configuration
+  reports:
+    - type: "HTML"
+      filename: "zap-report.html"
+    - type: "JSON"
+      filename: "zap-report.json"
+    - type: "XML"
+      filename: "zap-report.xml"
+    - type: "MD"
+      filename: "zap-report.md"
+
+  # Alert thresholds
+  alert_thresholds:
+    high: 0
+    medium: 5
+    low: 20
+    informational: 50
+
+  # API-specific configuration
+  api:
+    format: "openapi"
+    spec_url: "http://localhost:3001/api-docs.json"
