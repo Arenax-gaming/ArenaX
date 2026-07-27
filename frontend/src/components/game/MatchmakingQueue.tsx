@@ -38,6 +38,8 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const progressPercent = Math.min((waitTime / estimatedTime) * 100, 100);
+
   return (
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
       <div className="bg-card/60 backdrop-blur-lg rounded-2xl p-12 border border-border max-w-md w-full mx-4">
@@ -82,8 +84,9 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
                 style={{ width: `${Math.min((waitTime / estimatedTime) * 100, 100)}%` }}
               />
             </div>
-            
+
             <button
+              type="button"
               onClick={onCancel}
               className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive rounded-lg transition-colors duration-200 border border-destructive/30"
             >
