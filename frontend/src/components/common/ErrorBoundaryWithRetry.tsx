@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
 import { cn } from "@/lib/utils";
+import { navigate } from "@/lib/routerUtils";
 
 // ─── Props / State ────────────────────────────────────────────────────────────
 
@@ -131,7 +132,7 @@ export class ErrorBoundaryWithRetry extends Component<
           <Button
             size="sm"
             variant="outline"
-            onClick={() => { window.location.href = "/login"; }}
+            onClick={() => { navigate("/login"); }}
           >
             Sign in again
           </Button>

@@ -6,6 +6,7 @@ import { AlertTriangle, RefreshCw, Home, Mail, Copy, Check } from "lucide-react"
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
 import { datadogRum } from "@datadog/browser-rum";
+import { navigate } from "@/lib/routerUtils";
 
 // ─── Error message catalogue ──────────────────────────────────────────────────
 
@@ -105,15 +106,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   };
 
   handleGoHome = (): void => {
-    window.location.href = "/";
+    navigate("/");
   };
 
   handleGoToLogin = (): void => {
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   handleReportIssue = (): void => {
-    window.location.href = "/contact?error=true";
+    navigate("/contact?error=true");
   };
 
   handleCopyErrorDetails = (): void => {
