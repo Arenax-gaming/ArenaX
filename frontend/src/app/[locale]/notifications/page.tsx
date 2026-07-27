@@ -102,20 +102,16 @@ function NotificationItem({
         // No link — whole row is a div button, delete button still sits outside
         // interactive content via absolute positioning
         <>
-          <div
+          <button
+            type="button"
             className={cn(
-              "p-4 rounded-lg transition-colors cursor-pointer",
+              "w-full text-left p-4 rounded-lg transition-colors cursor-pointer",
               !isRead && "bg-primary/5",
             )}
-            role="button"
-            tabIndex={0}
             onClick={handleMarkRead}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") handleMarkRead();
-            }}
           >
             {innerContent}
-          </div>
+          </button>
           {deleteButton}
         </>
       )}

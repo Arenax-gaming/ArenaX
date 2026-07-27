@@ -53,7 +53,7 @@ jest.mock('@/hooks/useMatches', () => ({
   },
 }));
 
-import MatchHubPage from '@/app/matches/[id]/page';
+import MatchHubPage from '@/app/[locale]/matches/[id]/page';
 
 function renderWithQuery(ui: React.ReactElement) {
   const queryClient = new QueryClient({

@@ -24,7 +24,7 @@ jest.mock('@/hooks/useAuth', () => ({
 }));
 
 // Import after mocks so the page picks them up.
-import TournamentResultsPage from '@/app/tournaments/[id]/results/page';
+import TournamentResultsPage from '@/app/[locale]/tournaments/[id]/results/page';
 
 describe('TournamentResultsPage (#324)', () => {
   beforeEach(() => {
