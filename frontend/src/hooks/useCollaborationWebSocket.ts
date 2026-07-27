@@ -40,6 +40,8 @@ export function useCollaborationWebSocket({
   const [channel, setChannel] = useState<CollaborationChannel | null>(null);
   const [events, setEvents] = useState<CollaborationEvent[]>([]);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [suspended, setSuspended] = useState(false);
+  const [connectionNonce, setConnectionNonce] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const closedRef = useRef(false);
@@ -51,6 +53,7 @@ export function useCollaborationWebSocket({
       wsRef.current.close();
       wsRef.current = null;
     }
+    if (typeof window === "undefined") return;
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -67,7 +70,24 @@ export function useCollaborationWebSocket({
       return;
     }
 
-    closedRef.current = false;
+      if (message.type === "ping") {
+        wsRef.current?.send(JSON.stringify({ type: "pong" }));
+        return;
+      }
+      if (message.type === "channel_state") {
+        setChannel(message.channel);
+        return;
+      }
+      setEvents((prev) => appendEvent(prev, message));
+      setChannel((prev) => applyEventToChannel(prev, message));
+    };
+
+    const scheduleReconnect = () => {
+      if (closed) return;
+      const delay = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * 2 ** retry);
+      retry += 1;
+      reconnectTimeoutRef.current = setTimeout(connect, delay);
+    };
 
     // TODO: Replace with real WebSocket URL once the collaboration backend is ready.
     // const wsUrl = `${process.env.NEXT_PUBLIC_WS_BASE_URL}/collaboration/${channelId}`;
@@ -84,9 +104,9 @@ export function useCollaborationWebSocket({
   }, [enabled, channelId, channelType]);
 
   const reconnect = useCallback(() => {
-    disconnect();
-    connect();
-  }, [connect, disconnect]);
+    setSuspended(false);
+    setConnectionNonce((nonce) => nonce + 1);
+  }, []);
 
   const sendEvent = useCallback(
     (event: Omit<CollaborationEvent, "timestamp" | "userId">) => {
