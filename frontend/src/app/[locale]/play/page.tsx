@@ -7,8 +7,9 @@ import MatchmakingQueue from '@/components/game/MatchmakingQueue';
 import SkillQuickAccessBar from '@/components/game/SkillQuickAccessBar';
 import MobileGameControls from '@/components/game/MobileGameControls';
 import { useSettings } from '@/hooks/useSettings';
+import { ProtectedPage } from '@/components/navigation/ProtectedPage';
 
-export default function PlayPage() {
+function PlayPageContent() {
   const router = useRouter();
   const { settings } = useSettings();
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
@@ -83,5 +84,22 @@ export default function PlayPage() {
       </div>
       <MobileGameControls />
     </div>
+  );
+}
+
+/**
+ * #761: `/play` had no auth guard. The matchmaking UI rendered for anyone who
+ * guessed the URL — the backend rejected their queue attempts, but only after
+ * they had picked a mode and waited, which reads as a broken product rather
+ * than a locked door.
+ *
+ * ProtectedPage redirects to /login?redirect=<path> and returns the user here
+ * after signing in, matching wallet/page.tsx.
+ */
+export default function PlayPage() {
+  return (
+    <ProtectedPage>
+      <PlayPageContent />
+    </ProtectedPage>
   );
 }
