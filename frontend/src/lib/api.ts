@@ -23,6 +23,30 @@ import {
   KycFilters,
   ProcessKycPayload,
 } from "../types/admin";
+import {
+  Achievement,
+  PlayerAchievementsResponse,
+  AchievementStats,
+  AchievementUnlockedEvent,
+  ShareAchievementResponse,
+} from "../types/achievement";
+import {
+  LeaderboardResponse,
+  PlayerRankResponse,
+  RankHistory,
+  SeasonalLeaderboard,
+  LeaderboardStats,
+} from "../types/leaderboard";
+import {
+  Friend,
+  FriendRequest,
+  Message,
+  Conversation,
+  Party,
+  OnlineStatus,
+  FriendsListResponse,
+  SocialUser,
+} from "../types/social";
 import { AuthApiError } from "./authErrors";
 import { API_BASE } from "./constants";
 

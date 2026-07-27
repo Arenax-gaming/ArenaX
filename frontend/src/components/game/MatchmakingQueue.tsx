@@ -38,8 +38,7 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const remainingEstimate = Math.max(0, estimatedTime - waitTime);
-  const estimateLabel = remainingEstimate > 0 ? `~${remainingEstimate}s` : 'Almost there...';
+  const progressPercent = Math.min((waitTime / estimatedTime) * 100, 100);
 
   return (
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
@@ -85,8 +84,9 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
                 style={{ width: `${Math.min((waitTime / estimatedTime) * 100, 100)}%` }}
               />
             </div>
-            
+
             <button
+              type="button"
               onClick={onCancel}
               className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive rounded-lg transition-colors duration-200 border border-destructive/30"
             >

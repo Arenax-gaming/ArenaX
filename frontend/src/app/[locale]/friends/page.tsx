@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { UserPlus, Users, Search, MessageSquare } from "lucide-react";
 import { FriendsList } from "@/components/social/FriendsList";
 import { FriendRequests } from "@/components/social/FriendRequests";
@@ -8,6 +9,7 @@ import { InviteFriends } from "@/components/social/InviteFriends";
 import { useFriendsList, usePendingFriendRequests } from "@/hooks/useSocial";
 
 export default function FriendsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"list" | "requests" | "invite">(
     "list",
   );
@@ -95,7 +97,7 @@ export default function FriendsPage() {
               friends={filteredFriends}
               isLoading={friendsLoading}
               onMessage={(friendId) => {
-                window.location.href = `/messages?friend=${friendId}`;
+                router.push(`/messages?friend=${friendId}`);
               }}
             />
           )}
