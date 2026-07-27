@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type {
   UserSettings,
   AccountSettings,
@@ -11,74 +11,144 @@ import type {
   ThemeSettings,
   ValidationError,
   SettingsExport,
-  KeyBinding,
 } from "@/types/settings";
 import { mockUserSettings, defaultSettings } from "@/data/settings";
+import { api } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
 
 // Local storage keys
 const SETTINGS_STORAGE_KEY = "arenax_user_settings";
 const SETTINGS_VERSION = "1.0";
 
-// Settings validation functions
-const validateEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-};
+// Debounce delay for backend sync (ms)
+const SYNC_DEBOUNCE_MS = 800;
 
-const validatePassword = (password: string): boolean => {
-  // At least 8 characters, one uppercase, one lowercase, one number
-  return password.length >= 8;
-};
+// ─── Validation helpers ───────────────────────────────────────────────────────
+
+const validateEmail = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const validatePassword = (password: string): boolean =>
+  password.length >= 8;
+
+// ─── Strip sensitive account fields before syncing to backend ─────────────────
+
+function sanitiseForSync(settings: UserSettings): Record<string, unknown> {
+  const { account, ...rest } = settings;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { newPassword: _np, confirmNewPassword: _cnp, ...safeAccount } = account as Record<string, unknown>;
+  return { ...rest, account: safeAccount };
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export type SyncStatus = "idle" | "syncing" | "error";
 
 export function useSettings() {
   const [settings, setSettings] = useState<UserSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [originalSettings, setOriginalSettings] = useState<UserSettings>(defaultSettings);
 
-  // Load settings from localStorage on mount
+  // Track whether the initial load is complete so the debounce doesn't fire
+  // on the very first state hydration.
+  const isInitialLoad = useRef(true);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Load settings on mount ──────────────────────────────────────────────────
+
   useEffect(() => {
-    const loadSettings = () => {
+    const loadSettings = async () => {
+      // 1. Optimistically load from localStorage so the UI is instant.
+      let localSettings: UserSettings = mockUserSettings;
       try {
-        const savedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
-        if (savedSettings) {
-          const parsed = JSON.parse(savedSettings) as UserSettings;
-          setSettings(parsed);
-          setOriginalSettings(parsed);
-        } else {
-          // Use mock settings for development
-          setSettings(mockUserSettings);
-          setOriginalSettings(mockUserSettings);
+        const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (saved) {
+          localSettings = JSON.parse(saved) as UserSettings;
         }
-      } catch (error) {
-        console.error("Failed to load settings:", error);
-        setSettings(mockUserSettings);
-        setOriginalSettings(mockUserSettings);
+      } catch {
+        // ignore JSON parse errors
       }
+      setSettings(localSettings);
+      setOriginalSettings(localSettings);
       setIsLoading(false);
+
+      // 2. Fetch from server and merge (server authoritative for non-account fields).
+      try {
+        const serverData = await api.getSettings();
+        if (serverData && typeof serverData === "object") {
+          setSettings((prev) => {
+            const merged: UserSettings = {
+              ...prev,
+              ...(serverData as Partial<UserSettings>),
+              // Always keep local account credentials; only take server fields.
+              account: prev.account,
+            };
+            // Persist merged result to localStorage.
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
+            return merged;
+          });
+          setOriginalSettings((prev) => ({
+            ...prev,
+            ...(serverData as Partial<UserSettings>),
+            account: prev.account,
+          }));
+        }
+      } catch {
+        // Server fetch failed — silently stay with local data.
+      } finally {
+        isInitialLoad.current = false;
+      }
     };
 
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Check for unsaved changes
+  // ── Detect unsaved changes ──────────────────────────────────────────────────
+
   useEffect(() => {
-    const hasChanges = JSON.stringify(settings) !== JSON.stringify(originalSettings);
-    setUnsavedChanges(hasChanges);
+    setUnsavedChanges(JSON.stringify(settings) !== JSON.stringify(originalSettings));
   }, [settings, originalSettings]);
 
-  // Validate settings
+  // ── Debounced backend sync ──────────────────────────────────────────────────
+
+  const syncToBackend = useCallback(async (data: UserSettings) => {
+    setSyncStatus("syncing");
+    try {
+      await api.updateSettings(sanitiseForSync(data) as Record<string, unknown>);
+      setSyncStatus("idle");
+    } catch (err) {
+      setSyncStatus("error");
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.warning(`Settings sync failed: ${msg}. Your changes are saved locally.`);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Skip the first render (initial hydration).
+    if (isInitialLoad.current) return;
+
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      syncToBackend(settings);
+    }, SYNC_DEBOUNCE_MS);
+
+    return () => clearTimeout(debounceTimer.current);
+  }, [settings, syncToBackend]);
+
+  // ── Validation ──────────────────────────────────────────────────────────────
+
   const validateSettings = useCallback((): ValidationError[] => {
     const newErrors: ValidationError[] = [];
 
-    // Validate email
     if (!validateEmail(settings.account.email)) {
       newErrors.push({ field: "email", message: "Please enter a valid email address" });
     }
 
-    // Validate password if changing
     if (settings.account.newPassword) {
       if (!validatePassword(settings.account.newPassword)) {
         newErrors.push({
@@ -94,7 +164,6 @@ export function useSettings() {
       }
     }
 
-    // Validate game settings
     if (settings.game.fov < 60 || settings.game.fov > 120) {
       newErrors.push({ field: "fov", message: "FOV must be between 60 and 120" });
     }
@@ -103,7 +172,6 @@ export function useSettings() {
       newErrors.push({ field: "sensitivity", message: "Sensitivity must be between 1 and 100" });
     }
 
-    // Validate accessibility settings
     if (settings.accessibility.textScale < 50 || settings.accessibility.textScale > 200) {
       newErrors.push({ field: "textScale", message: "Text scale must be between 50% and 200%" });
     }
@@ -116,7 +184,8 @@ export function useSettings() {
     return newErrors;
   }, [settings]);
 
-  // Save settings to localStorage
+  // ── Save settings (explicit save + backend sync) ────────────────────────────
+
   const saveSettings = useCallback(async (): Promise<boolean> => {
     setIsSaving(true);
     const validationErrors = validateSettings();
@@ -127,10 +196,13 @@ export function useSettings() {
     }
 
     try {
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
+      // Persist locally first for instant feedback.
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+
+      // Flush debounce and sync to backend immediately on explicit save.
+      clearTimeout(debounceTimer.current);
+      await syncToBackend(settings);
+
       setOriginalSettings(settings);
       setErrors([]);
       setUnsavedChanges(false);
@@ -142,15 +214,15 @@ export function useSettings() {
     } finally {
       setIsSaving(false);
     }
-  }, [settings, validateSettings]);
+  }, [settings, validateSettings, syncToBackend]);
 
-  // Reset settings to original values
+  // ── Reset ───────────────────────────────────────────────────────────────────
+
   const resetSettings = useCallback(() => {
     setSettings(originalSettings);
     setErrors([]);
   }, [originalSettings]);
 
-  // Reset to default settings
   const resetToDefaults = useCallback(() => {
     setSettings(defaultSettings);
     setOriginalSettings(defaultSettings);
@@ -158,70 +230,62 @@ export function useSettings() {
     setUnsavedChanges(false);
   }, []);
 
-  // Update account settings
+  // ── Section updaters ────────────────────────────────────────────────────────
+
   const updateAccount = useCallback((updates: Partial<AccountSettings>) => {
-    setSettings((prev) => ({
-      ...prev,
-      account: { ...prev.account, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, account: { ...prev.account, ...updates } }));
   }, []);
 
-  // Update game preferences
   const updateGame = useCallback((updates: Partial<GamePreferences>) => {
-    setSettings((prev) => ({
-      ...prev,
-      game: { ...prev.game, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, game: { ...prev.game, ...updates } }));
   }, []);
 
-  // Update notification settings
   const updateNotifications = useCallback((updates: Partial<NotificationPreference>) => {
-    setSettings((prev) => ({
-      ...prev,
-      notifications: { ...prev.notifications, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, notifications: { ...prev.notifications, ...updates } }));
   }, []);
 
-  // Update privacy settings
   const updatePrivacy = useCallback((updates: Partial<PrivacySettings>) => {
-    setSettings((prev) => ({
-      ...prev,
-      privacy: { ...prev.privacy, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, privacy: { ...prev.privacy, ...updates } }));
   }, []);
 
-  // Update accessibility settings
   const updateAccessibility = useCallback((updates: Partial<AccessibilityOptions>) => {
-    setSettings((prev) => ({
-      ...prev,
-      accessibility: { ...prev.accessibility, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, accessibility: { ...prev.accessibility, ...updates } }));
   }, []);
 
-  // Update theme settings
   const updateTheme = useCallback((updates: Partial<ThemeSettings>) => {
-    setSettings((prev) => ({
-      ...prev,
-      theme: { ...prev.theme, ...updates },
-    }));
+    setSettings((prev) => ({ ...prev, theme: { ...prev.theme, ...updates } }));
   }, []);
 
-  // Update key binding
-  const updateKeyBinding = useCallback((action: string, key: string, isPrimary: boolean = true) => {
-    setSettings((prev) => ({
-      ...prev,
-      game: {
-        ...prev.game,
-        controls: prev.game.controls.map((binding) =>
-          binding.action === action
-            ? { ...binding, ...(isPrimary ? { primaryKey: key } : { secondaryKey: key }) }
-            : binding
-        ),
-      },
-    }));
-  }, []);
+  const updateKeyBinding = useCallback(
+    (
+      action: string,
+      key: string,
+      isPrimary: boolean = true,
+      modifier?: "Ctrl" | "Shift" | "Alt" | "None"
+    ) => {
+      setSettings((prev) => {
+        const existing = prev.game.controls.find((b) => b.action === action);
+        const newControls = existing
+          ? prev.game.controls.map((binding) =>
+              binding.action === action
+                ? {
+                    ...binding,
+                    ...(isPrimary ? { primaryKey: key } : { secondaryKey: key }),
+                    ...(modifier !== undefined ? { modifier } : {}),
+                  }
+                : binding
+            )
+          : [
+              ...prev.game.controls,
+              { action, primaryKey: key, modifier: modifier || "None" },
+            ];
 
-  // Reset key binding
+        return { ...prev, game: { ...prev.game, controls: newControls } };
+      });
+    },
+    []
+  );
+
   const resetKeyBinding = useCallback((action: string) => {
     const defaultBinding = defaultSettings.game.controls.find((b) => b.action === action);
     if (defaultBinding) {
@@ -237,7 +301,8 @@ export function useSettings() {
     }
   }, []);
 
-  // Export settings
+  // ── Import / export ─────────────────────────────────────────────────────────
+
   const exportSettings = useCallback((): string => {
     const exportData: SettingsExport = {
       version: SETTINGS_VERSION,
@@ -252,7 +317,6 @@ export function useSettings() {
     return JSON.stringify(exportData, null, 2);
   }, [settings]);
 
-  // Import settings
   const importSettings = useCallback((importData: string): boolean => {
     try {
       const parsed = JSON.parse(importData) as SettingsExport;
@@ -273,7 +337,6 @@ export function useSettings() {
     }
   }, []);
 
-  // Download settings file
   const downloadSettings = useCallback(() => {
     const exportData = exportSettings();
     const blob = new Blob([exportData], { type: "application/json" });
@@ -287,15 +350,14 @@ export function useSettings() {
     URL.revokeObjectURL(url);
   }, [exportSettings]);
 
-  // Get error for specific field
+  // ── Error accessor ──────────────────────────────────────────────────────────
+
   const getFieldError = useCallback(
-    (field: string): string | undefined => {
-      return errors.find((e) => e.field === field)?.message;
-    },
+    (field: string): string | undefined =>
+      errors.find((e) => e.field === field)?.message,
     [errors]
   );
 
-  // Computed values
   const hasErrors = useMemo(() => errors.length > 0, [errors]);
 
   return {
@@ -303,6 +365,7 @@ export function useSettings() {
     settings,
     isLoading,
     isSaving,
+    syncStatus,
     errors,
     unsavedChanges,
     hasErrors,

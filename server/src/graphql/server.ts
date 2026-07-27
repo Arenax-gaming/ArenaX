@@ -1,7 +1,16 @@
 import type { Express, RequestHandler } from 'express';
+import { parse } from 'graphql';
+import { buildSubgraphSchema } from '@apollo/subgraph';
 import { typeDefs } from './schema';
 import { resolvers } from './resolvers';
 import { buildGraphQLContext, type GraphQLContext } from './context';
+
+// Built once at module load: a real Apollo Federation v2 subgraph schema
+// (adds `_service { sdl }` and `_entities(representations: [_Any!]!)` on
+// top of the application schema). A future gateway/router composes this
+// together with other subgraphs into a supergraph — see
+// server/docs/GRAPHQL_FEDERATION.md.
+const federatedSchema = buildSubgraphSchema({ typeDefs: parse(typeDefs), resolvers: resolvers as any });
 
 export interface GraphQLRegistration {
     path: string
@@ -27,10 +36,9 @@ class YogaExecutor implements GraphQLExecutor {
                 this.yoga(req, res, next);
                 return;
             }
-            // @ts-expect-error - graphql-yoga is ESM-only; dynamic import works at runtime
             import('graphql-yoga').then(({ createYoga }: any) => {
                 this.yoga = createYoga({
-                    schema: { typeDefs, resolvers },
+                    schema: federatedSchema,
                     context: async ({ request }: { request: any }) =>
                         buildGraphQLContext(request as unknown as import('express').Request),
                     graphiql: process.env.NODE_ENV !== 'production',

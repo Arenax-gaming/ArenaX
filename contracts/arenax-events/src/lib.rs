@@ -40,5 +40,6 @@ pub mod tournament;
 pub mod access_control;
 pub mod emergency_pause;
 pub mod time_lock;
+pub mod virtual_economy;
 pub mod zk_proof;
 pub mod manager;

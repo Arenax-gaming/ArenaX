@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ToastContainer, toast } from "@/components/ui/Toast";
 import type { Dispute, ResolveDisputePayload } from "@/types/admin";
 import { PageHeaderSkeleton, ListItemSkeleton } from "@/components/common/PageSkeleton";
 import { PageError } from "@/components/common/PageError";
@@ -26,6 +28,16 @@ import {
   Clock,
   Gamepad2,
 } from "lucide-react";
+
+// ─── Client-side audit logger ─────────────────────────────────────────────────
+
+function auditLog(action: string, details: Record<string, unknown>) {
+  console.info("[AUDIT]", {
+    action,
+    ...details,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 // ─── Status badge ────────────────────────────────────────────────────────────
 
@@ -93,22 +105,7 @@ interface ResolveFormProps {
 function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
   const [winner, setWinner] = useState<"A" | "B" | "void" | null>(null);
   const [note, setNote] = useState("");
-
-  const handleSubmit = () => {
-    if (!winner) return;
-    const payload: ResolveDisputePayload =
-      winner === "void"
-        ? { status: "VOIDED", resolution: note || "Match voided by admin" }
-        : {
-            status: "RESOLVED",
-            resolution: note || `Admin declared winner`,
-            winnerOverrideId:
-              winner === "A"
-                ? dispute.match.playerAId
-                : dispute.match.playerBId,
-          };
-    onResolve(dispute.id, payload);
-  };
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const playerALabel =
     dispute.match.playerAUsername ?? `Player A (${dispute.match.playerAId.slice(0, 8)}…)`;
@@ -142,58 +139,132 @@ function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
     },
   ];
 
-  return (
-    <div className="space-y-4 pt-4 border-t border-border mt-4">
-      <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">
-        Resolution
-      </h4>
+  const resolvedStatus = winner === "void" ? "VOIDED" : "RESOLVED";
+  const winnerLabel =
+    winner === "A"
+      ? playerALabel
+      : winner === "B"
+      ? playerBLabel
+      : "N/A (match voided)";
 
-      {/* Winner / Void selection */}
-      <div
-        role="radiogroup"
-        aria-label="Select outcome"
-        className="grid sm:grid-cols-3 gap-2"
-      >
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            role="radio"
-            aria-checked={winner === opt.value}
-            onClick={() => setWinner(opt.value)}
-            className={`text-sm font-medium py-2 px-3 rounded-lg border-2 transition-colors text-left ${opt.colour}`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Resolution note */}
-      <div>
-        <label
-          htmlFor={`note-${dispute.id}`}
-          className="block text-sm font-medium mb-1"
+  const confirmDescription = (
+    <div className="space-y-1">
+      <p>
+        <strong>Dispute:</strong>{" "}
+        <span className="font-mono">{dispute.id.slice(0, 10)}…</span>
+      </p>
+      <p>
+        <strong>Outcome:</strong>{" "}
+        <span
+          className={
+            resolvedStatus === "VOIDED" ? "text-destructive font-semibold" : "font-semibold"
+          }
         >
-          Resolution note{" "}
-          <span className="text-muted-foreground font-normal">(optional)</span>
-        </label>
-        <Input
-          id={`note-${dispute.id}`}
-          placeholder="Describe your decision…"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
+          {resolvedStatus}
+        </span>
+      </p>
+      <p>
+        <strong>Winner:</strong> {winnerLabel}
+      </p>
+      {note && (
+        <p>
+          <strong>Note:</strong> {note}
+        </p>
+      )}
+      <p className="pt-1 text-xs text-muted-foreground">
+        This action cannot be undone.
+      </p>
+    </div>
+  );
+
+  const handleConfirmClick = () => {
+    if (!winner) return;
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmed = () => {
+    if (!winner) return;
+    setConfirmOpen(false);
+    const payload: ResolveDisputePayload =
+      winner === "void"
+        ? { status: "VOIDED", resolution: note || "Match voided by admin" }
+        : {
+            status: "RESOLVED",
+            resolution: note || `Admin declared winner`,
+            winnerOverrideId:
+              winner === "A"
+                ? dispute.match.playerAId
+                : dispute.match.playerBId,
+          };
+    onResolve(dispute.id, payload);
+  };
+
+  return (
+    <>
+      <div className="space-y-4 pt-4 border-t border-border mt-4">
+        <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest">
+          Resolution
+        </h4>
+
+        {/* Winner / Void selection */}
+        <div
+          role="radiogroup"
+          aria-label="Select outcome"
+          className="grid sm:grid-cols-3 gap-2"
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              role="radio"
+              aria-checked={winner === opt.value}
+              onClick={() => setWinner(opt.value)}
+              className={`text-sm font-medium py-2 px-3 rounded-lg border-2 transition-colors text-left ${opt.colour}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Resolution note */}
+        <div>
+          <label
+            htmlFor={`note-${dispute.id}`}
+            className="block text-sm font-medium mb-1"
+          >
+            Resolution note{" "}
+            <span className="text-muted-foreground font-normal">(optional)</span>
+          </label>
+          <Input
+            id={`note-${dispute.id}`}
+            placeholder="Describe your decision…"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
+
+        <Button
+          variant="primary"
+          onClick={handleConfirmClick}
+          disabled={!winner || isPending}
+          className="w-full sm:w-auto"
+        >
+          Confirm resolution
+        </Button>
       </div>
 
-      <Button
-        variant="primary"
-        onClick={handleSubmit}
-        disabled={!winner || isPending}
-        className="w-full sm:w-auto"
-        aria-busy={isPending}
-      >
-        {isPending ? "Saving…" : "Confirm resolution"}
-      </Button>
-    </div>
+      {/* Confirmation dialog */}
+      <ConfirmDialog
+        isOpen={confirmOpen}
+        onConfirm={handleConfirmed}
+        onCancel={() => setConfirmOpen(false)}
+        title="Confirm dispute resolution"
+        description={confirmDescription}
+        confirmLabel="Yes, resolve"
+        cancelLabel="Cancel"
+        variant={winner === "void" ? "danger" : "warning"}
+        isPending={isPending}
+      />
+    </>
   );
 }
 
@@ -214,10 +285,8 @@ function DisputeRow({ dispute, onResolve, resolvingId }: DisputeRowProps) {
     ? new Date(dispute.createdAt).toLocaleString()
     : "—";
 
-  const playerALabel =
-    dispute.match.playerAUsername ?? `Player A`;
-  const playerBLabel =
-    dispute.match.playerBUsername ?? `Player B`;
+  const playerALabel = dispute.match.playerAUsername ?? `Player A`;
+  const playerBLabel = dispute.match.playerBUsername ?? `Player B`;
 
   const alreadyClosed = ["RESOLVED", "DISMISSED", "VOIDED"].includes(
     dispute.status
@@ -436,11 +505,20 @@ export default function DisputeDashboard() {
       setResolvingId(id);
       return api.resolveDispute(id, payload);
     },
-    onSuccess: () => {
+    onSuccess: (_data, { id, payload }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "disputes"] });
+      toast.success("Dispute resolved successfully.");
+      auditLog("resolve_dispute", {
+        disputeId: id,
+        status: payload.status,
+        winnerOverrideId: payload.winnerOverrideId ?? null,
+      });
     },
-    onError: (err) => {
-      alert("Failed to resolve dispute: " + (err as Error).message);
+    onError: (err, { id }) => {
+      const message = (err as Error).message ?? "Unknown error";
+      const code = message.match(/\d{3}/)?.[0];
+      toast.error(`Failed to resolve dispute: ${message}`, code);
+      auditLog("resolve_dispute_failed", { disputeId: id, error: message });
     },
     onSettled: () => {
       setResolvingId(null);
@@ -530,6 +608,9 @@ export default function DisputeDashboard() {
           )}
         </div>
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </ProtectedPage>
   );
 }

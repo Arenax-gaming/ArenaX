@@ -23,6 +23,7 @@ const PERSISTENT_STORAGE_KEY = "arenax_notifications";
 const PREFERENCES_STORAGE_KEY = "arenax_notification_preferences";
 const MAX_LOCAL_NOTIFICATIONS = 50;
 const MAX_TOASTS = 4;
+const NOTIFICATIONS_PAGE_SIZE = 20;
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
   info: true,
@@ -39,7 +40,13 @@ interface NotificationContextType {
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
-  refreshNotifications: () => Promise<void>;
+  refreshNotifications: (options?: {
+    offset?: number;
+    limit?: number;
+    append?: boolean;
+  }) => Promise<void>;
+  hasMoreNotifications: boolean;
+  loadMoreNotifications: () => Promise<void>;
 
   // Ephemeral toasts
   toasts: ToastNotification[];
@@ -136,36 +143,65 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
   const toastTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const preferencesRef = useRef(preferences);
+  const notificationsCountRef = useRef(persistentNotifications.length);
+  const [hasMoreNotifications, setHasMoreNotifications] = useState(true);
 
   useEffect(() => {
     preferencesRef.current = preferences;
   }, [preferences]);
 
+  useEffect(() => {
+    notificationsCountRef.current = persistentNotifications.length;
+  }, [persistentNotifications.length]);
+
   const unreadCount = persistentNotifications.filter((n) => !n.read).length;
 
-  const refreshNotifications = useCallback(async () => {
-    if (!user?.id) {
-      setPersistentNotifications(loadLocalNotifications());
-      return;
-    }
-    try {
-      const data = await api.getNotifications();
-      if (Array.isArray(data)) {
-        const mapped: PersistentNotification[] = data.map((n) => ({
-          ...n,
-          type: (n.type as PersistentNotification["type"]) ?? "info",
-        }));
-        setPersistentNotifications(mapped);
-        saveLocalNotifications(mapped);
+  const refreshNotifications = useCallback(
+    async (options?: { offset?: number; limit?: number; append?: boolean }) => {
+      const append = options?.append ?? false;
+      const offset = options?.offset ?? 0;
+      const limit =
+        options?.limit ?? Math.max(NOTIFICATIONS_PAGE_SIZE, notificationsCountRef.current);
+
+      if (!user?.id) {
+        setPersistentNotifications(loadLocalNotifications());
+        setHasMoreNotifications(false);
+        return;
       }
-    } catch {
-      setPersistentNotifications(loadLocalNotifications());
-    }
-  }, [user?.id]);
+      try {
+        const data = await api.getNotifications({ offset, limit });
+        if (Array.isArray(data)) {
+          const mapped: PersistentNotification[] = data.map((n) => ({
+            ...n,
+            type: (n.type as PersistentNotification["type"]) ?? "info",
+          }));
+          setHasMoreNotifications(mapped.length >= limit);
+          setPersistentNotifications((prev) => {
+            const next = append
+              ? [...prev, ...mapped.filter((n) => !prev.some((p) => p.id === n.id))]
+              : mapped;
+            saveLocalNotifications(next);
+            return next;
+          });
+        }
+      } catch {
+        if (!append) setPersistentNotifications(loadLocalNotifications());
+      }
+    },
+    [user?.id]
+  );
+
+  const loadMoreNotifications = useCallback(async () => {
+    await refreshNotifications({
+      offset: notificationsCountRef.current,
+      limit: NOTIFICATIONS_PAGE_SIZE,
+      append: true,
+    });
+  }, [refreshNotifications]);
 
   useEffect(() => {
     refreshNotifications();
-    const interval = setInterval(refreshNotifications, 60_000);
+    const interval = setInterval(() => refreshNotifications(), 60_000);
     return () => clearInterval(interval);
   }, [refreshNotifications]);
 
@@ -378,18 +414,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retry = 0;
     let closed = false;
+    let authFailed = false;
+
+    // 1008 = policy violation, 4401/4403 = app-level auth failure codes
+    const AUTH_FAILURE_CLOSE_CODES = [1008, 4401, 4403];
+
+    const getAuthToken = () =>
+      localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token");
 
     const buildWsUrl = () => {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const token =
-        localStorage.getItem("auth_token") ??
-        sessionStorage.getItem("auth_token");
-      const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-      return `${protocol}://${window.location.host}/ws/notifications${qs}`;
+      // The token is deliberately NOT part of the URL: query strings end up
+      // in server access logs, browser history, and Referer headers. Auth is
+      // performed via the first message after the socket opens instead.
+      return `${protocol}://${window.location.host}/ws/notifications`;
     };
 
     const scheduleReconnect = () => {
-      if (closed) return;
+      if (closed || authFailed) return;
       const delay = Math.min(10000, 1000 * 2 ** retry);
       retry += 1;
       reconnectTimer = setTimeout(connect, delay);
@@ -428,6 +470,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           ws?.send(JSON.stringify({ type: "pong" }));
           return;
         }
+        if (parsed?.type === "auth_ok" || parsed?.type === "auth_success") {
+          return;
+        }
+        if (
+          parsed?.type === "auth_error" ||
+          parsed?.type === "auth_failed" ||
+          parsed?.type === "unauthorized"
+        ) {
+          authFailed = true;
+          ws?.close();
+          return;
+        }
         const notification = normalizeNotification(parsed);
         if (notification) handleIncomingNotification(notification);
       } catch {
@@ -446,10 +500,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
       ws.onopen = () => {
         retry = 0;
+        const token = getAuthToken();
+        if (token) {
+          ws?.send(JSON.stringify({ type: "auth", token }));
+        }
       };
       ws.onmessage = (event) => handleMessage(event.data);
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (closed) return;
+        if (AUTH_FAILURE_CLOSE_CODES.includes(event.code)) {
+          authFailed = true;
+          return;
+        }
         scheduleReconnect();
       };
       ws.onerror = () => {
@@ -473,6 +535,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     markAllAsRead,
     removeNotification,
     refreshNotifications,
+    hasMoreNotifications,
+    loadMoreNotifications,
     toasts,
     addToast,
     removeToast,

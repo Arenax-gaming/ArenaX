@@ -1,10 +1,17 @@
 /**
- * GraphQL schema foundation for #467.
+ * GraphQL schema foundation for #467, promoted to an Apollo Federation v2
+ * subgraph for #652.
  *
  * Defined in raw SDL so the layer is independent of the executor
  * (Apollo, Yoga, …). The maintainer can pick the runtime later; this
  * file is the schema-as-source-of-truth for clients and for the
  * resolver registry in resolvers.ts.
+ *
+ * `User`, `Match` and `Tournament` are declared as federated entities
+ * (`@key(fields: "id")`) so other subgraphs (e.g. a future wallet or
+ * social service) can extend them with their own fields without this
+ * service knowing about it. See server/docs/GRAPHQL_FEDERATION.md for
+ * how to compose this subgraph into a supergraph.
  *
  * Only the entities that already exist on the REST surface are
  * included. Subscriptions and field-level authorisation are sketched
@@ -13,6 +20,9 @@
  * sub-items.
  */
 export const typeDefs = /* GraphQL */ `
+    extend schema
+        @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
     """
     Field-level authorisation directive. Resolvers gate on the role
     name supplied at the field; missing or insufficient roles map to
@@ -22,7 +32,7 @@ export const typeDefs = /* GraphQL */ `
 
     scalar DateTime
 
-    type User {
+    type User @key(fields: "id") {
         id: ID!
         displayName: String!
         rating: Int!
@@ -37,7 +47,7 @@ export const typeDefs = /* GraphQL */ `
         CANCELLED
     }
 
-    type Match {
+    type Match @key(fields: "id") {
         id: ID!
         gameMode: String!
         teamA: [User!]!
@@ -48,7 +58,7 @@ export const typeDefs = /* GraphQL */ `
         ratingDelta: Int
     }
 
-    type Tournament {
+    type Tournament @key(fields: "id") {
         id: ID!
         name: String!
         startsAt: DateTime!
