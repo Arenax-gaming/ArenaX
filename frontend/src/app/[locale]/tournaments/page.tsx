@@ -100,6 +100,51 @@ function TournamentsContent() {
     filters.maxPrizePool !== undefined
   );
 
+  const tabs = useMemo(
+    () =>
+      [
+        { id: "available" as TabType, label: "Available", icon: Trophy, count: availableCount },
+        { id: "joined" as TabType, label: "Joined", icon: Users, count: joinedCount },
+      ],
+    [availableCount, joinedCount],
+  );
+
+  const tabRefs = useRef<Record<TabType, HTMLButtonElement | null>>({
+    available: null,
+    joined: null,
+  });
+
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null;
+
+      switch (event.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (index + 1) % tabs.length;
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex = (index - 1 + tabs.length) % tabs.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = tabs.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      const nextTab = tabs[nextIndex].id;
+      setActiveTab(nextTab);
+      tabRefs.current[nextTab]?.focus();
+    },
+    [tabs],
+  );
+
   return (
     <div className="min-h-screen px-4 py-8 bg-background">
       <div className="space-y-2 mb-8 text-center">
@@ -173,7 +218,6 @@ function TournamentsContent() {
             );
           })}
         </div>
-      </div>
 
       {/* Content */}
       {isLoading ? (
