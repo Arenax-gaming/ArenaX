@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import Image from 'next/image';
 
 interface GameMode {
   id: string;
@@ -77,7 +78,12 @@ interface GameModeSelectorProps {
 
 export default function GameModeSelector({ onSelect, selectedMode }: GameModeSelectorProps) {
   const [hoveredMode, setHoveredMode] = useState<string | null>(null);
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const { track } = useAnalytics();
+
+  const handleImageError = (modeId: string) => {
+    setImageErrors(prev => new Set(prev).add(modeId));
+  };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -99,22 +105,43 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
             }
           `}
         >
-          <div className="bg-card p-6 border border-border h-full">
-            <div className="text-5xl mb-4">{mode.icon}</div>
-            <h3 className="text-2xl font-bold text-foreground mb-2">{mode.name}</h3>
-            <p className="text-muted-foreground mb-4">{mode.description}</p>
+          <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-border h-full flex flex-col">
+            {/* Image container with reserved space */}
+            <div className="relative w-full aspect-video bg-muted/20">
+              {!imageErrors.has(mode.id) ? (
+                <Image
+                  src={mode.image}
+                  alt={`${mode.name} preview`}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                  loading="lazy"
+                  onError={() => handleImageError(mode.id)}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-6xl">
+                  {mode.icon}
+                </div>
+              )}
+            </div>
 
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground/80 bg-muted px-3 py-1 rounded-full">
-                {mode.players}
-              </span>
-              <span className="text-primary font-semibold">
-                {mode.difficulty}
-              </span>
+            {/* Content */}
+            <div className="p-6 flex-1 flex flex-col">
+              <h3 className="text-2xl font-bold text-white mb-2">{mode.name}</h3>
+              <p className="text-muted-foreground mb-4 flex-1">{mode.description}</p>
+              
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-foreground/80 bg-surface-raised px-3 py-1 rounded-full">
+                  {mode.players}
+                </span>
+                <span className="text-purple-400 font-semibold">
+                  {mode.difficulty}
+                </span>
+              </div>
             </div>
 
             {hoveredMode === mode.id && (
-              <div className="absolute inset-0 bg-primary/10 transition-all duration-300" />
+              <div className="absolute inset-0 bg-purple-500/10 transition-all duration-300 pointer-events-none" />
             )}
           </div>
         </button>

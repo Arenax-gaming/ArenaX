@@ -35,4 +35,16 @@ pub enum VirtualEconomyError {
     CreatorNotFound = 51,
     LicenseViolation = 52,
     InvalidLicenseType = 53,
+
+    // Dynamic pricing errors
+    AuctionNotFound = 60,
+    AuctionNotActive = 61,
+    AuctionNotStarted = 62,
+    AuctionEnded = 63,
+    InvalidAuctionParams = 64,
+
+    DropNotFound = 70,
+    DropInactive = 71,
+    DropSupplyExceeded = 72,
+    InvalidCurveParams = 73,
 }

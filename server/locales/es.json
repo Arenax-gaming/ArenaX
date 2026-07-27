@@ -1,0 +1,6 @@
+{
+  "errors.validation.required": "Este campo es obligatorio",
+  "errors.validation.invalid": "Valor inválido",
+  "errors.server.internal": "Error interno del servidor",
+  "success.saved": "Guardado exitosamente"
+}

@@ -33,8 +33,17 @@ pub enum DataKey {
     RoyaltyAnalytics,
     RoyaltyExempt(Address),
 
+    // Dynamic Pricing: Dutch Auctions
+    DutchAuction(BytesN<32>),
+    AuctionCounter,
+
+    // Dynamic Pricing: Bonding Curve Drops
+    BondingCurveDrop(BytesN<32>),
+    DropCounter,
+
     // Analytics
     EconomyAnalytics,
+    PricingAnalytics,
 }
 
 #[contracttype]
@@ -146,4 +155,71 @@ pub struct RoyaltyAnalytics {
     pub total_royalties_paid: i128,
     pub total_royalty_transactions: u64,
     pub total_exemptions_applied: u32,
+}
+
+// -----------------------------------------------------------------------------
+// Dynamic Pricing
+// -----------------------------------------------------------------------------
+
+/// Shape of the price decay curve used by a [`DutchAuctionListing`].
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PriceCurve {
+    /// Price falls by a constant amount per second.
+    Linear = 0,
+    /// Price falls faster early, slower as it approaches the floor
+    /// (approximated by halving the remaining premium in four steps across
+    /// the auction duration).
+    Exponential = 1,
+}
+
+/// A single NFT listed for sale at a price that decays over time from
+/// `start_price` down to `floor_price`, instead of a fixed price. Anyone can
+/// buy at the current computed price; the earlier someone buys, the more
+/// they pay.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DutchAuctionListing {
+    pub listing_id: BytesN<32>,
+    pub seller: Address,
+    pub token_id: BytesN<32>,
+    pub start_price: i128,
+    pub floor_price: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub curve: PriceCurve,
+    pub status: OrderStatus,
+}
+
+/// A repeatable NFT "drop" whose mint price rises algorithmically with the
+/// number of units already minted (a bonding curve), so early buyers pay
+/// less than later buyers. Useful for collections where demand should be
+/// reflected directly in price rather than left to secondary-market
+/// speculation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BondingCurveDrop {
+    pub drop_id: BytesN<32>,
+    pub creator: Address,
+    pub base_price: i128,
+    /// Price increases by `slope_bps` (basis points of `base_price`) for
+    /// every unit already minted: `price = base_price + base_price *
+    /// slope_bps * minted / 10_000`.
+    pub slope_bps: u32,
+    pub max_supply: Option<u32>,
+    pub minted: u32,
+    pub metadata_template: NFTMetadata,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingAnalytics {
+    pub total_auctions_created: u64,
+    pub total_auctions_settled: u64,
+    pub total_auction_volume: i128,
+    pub total_drops_created: u64,
+    pub total_drop_mints: u64,
+    pub total_drop_volume: i128,
 }
