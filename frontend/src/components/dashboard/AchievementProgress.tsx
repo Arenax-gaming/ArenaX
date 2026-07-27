@@ -1,6 +1,8 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { RefreshCw } from "lucide-react";
 
 interface Achievement {
   id: string;
@@ -20,19 +22,80 @@ const mockAchievements: Achievement[] = [
   { id: "a5", title: "Sharpshooter", description: "Reach 1500 ELO", icon: "🎯", progress: 1250, total: 1500, unlocked: false },
 ];
 
-export function AchievementProgress() {
-  const unlocked = mockAchievements.filter((a) => a.unlocked).length;
+interface AchievementProgressProps {
+  achievements?: Achievement[];
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
+}
+
+function AchievementSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="h-4 w-28 bg-muted rounded animate-pulse" />
+          <div className="h-3 w-16 bg-muted rounded animate-pulse" />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className="h-8 w-8 bg-muted rounded animate-pulse" />
+            <div className="flex-1 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="h-3 w-24 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-10 bg-muted rounded animate-pulse" />
+              </div>
+              <div className="h-1.5 bg-muted rounded-full" />
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AchievementError({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold">Achievements</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+        <p className="text-sm text-muted-foreground">Could not load achievements — please try again.</p>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function AchievementProgress({
+  achievements = mockAchievements,
+  isLoading = false,
+  isError = false,
+  onRetry,
+}: AchievementProgressProps) {
+  if (isLoading) return <AchievementSkeleton />;
+  if (isError) return <AchievementError onRetry={onRetry} />;
+
+  const unlocked = achievements.filter((a) => a.unlocked).length;
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">Achievements</CardTitle>
-          <span className="text-xs text-muted-foreground">{unlocked}/{mockAchievements.length} unlocked</span>
+          <span className="text-xs text-muted-foreground">{unlocked}/{achievements.length} unlocked</span>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {mockAchievements.map((a) => {
+        {achievements.map((a) => {
           const pct = Math.min(100, Math.round((a.progress / a.total) * 100));
           return (
             <div key={a.id} className={`flex items-center gap-3 ${a.unlocked ? "opacity-100" : "opacity-70"}`}>

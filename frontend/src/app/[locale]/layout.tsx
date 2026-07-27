@@ -17,7 +17,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { DragAndDropProvider } from "@/components/providers/DragAndDropProvider";
 import { RumProvider } from "@/components/providers/RumProvider";
-import { RouterInitializer } from "@/components/providers/RouterInitializer";
+import { RouteChangeMonitor } from "@/components/navigation/RouteChangeMonitor";
 
 
 export function generateStaticParams() {
@@ -91,7 +91,7 @@ export default function RootLayout({
                             <NotificationProvider>
                               <RumProvider>
                                 <DragAndDropProvider>
-                                  <RouterInitializer />
+                                  <RouteChangeMonitor />
                                   <AppLayout>{children}</AppLayout>
                                 </DragAndDropProvider>
                               </RumProvider>

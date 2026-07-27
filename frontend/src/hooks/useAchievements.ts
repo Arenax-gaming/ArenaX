@@ -6,7 +6,7 @@ import {
   AchievementUnlockedEvent,
   ShareAchievementResponse,
 } from '@/types/achievement'
-import { api } from '@/lib/api'
+import { API_BASE } from '@/lib/constants'
 
 export const useAchievements = () => {
   return useQuery({

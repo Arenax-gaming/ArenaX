@@ -8,7 +8,7 @@ import {
   FriendsListResponse,
   SocialUser,
 } from '@/types/social'
-import { api } from '@/lib/api'
+import { API_BASE } from '@/lib/constants'
 
 export const useFriendsList = () => {
   return useQuery({
