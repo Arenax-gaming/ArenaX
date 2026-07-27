@@ -99,8 +99,8 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
           onMouseLeave={() => setHoveredMode(null)}
           className={`
             relative overflow-hidden rounded-xl cursor-pointer transition-all duration-300 transform text-left
-            ${selectedMode === mode.id 
-              ? 'ring-4 ring-purple-500 scale-105 shadow-2xl shadow-purple-500/50' 
+            ${selectedMode === mode.id
+              ? 'ring-4 ring-primary scale-105 shadow-2xl shadow-primary/50'
               : 'hover:scale-105 hover:shadow-xl'
             }
           `}
