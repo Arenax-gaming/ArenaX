@@ -6,7 +6,9 @@ import Redis from 'ioredis';
 import { configurePassport } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { localeMiddleware } from './middleware/locale.middleware';
 import { correlationMiddleware } from './middleware/correlation.middleware';
+import { requestLogger } from './middleware/request-logger.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
 import routes from './routes/index';
 import { getEnv } from './config/env';
@@ -20,6 +22,7 @@ import { initAdaptiveRateLimitRedis } from './middleware/adaptiveRateLimit.middl
 import { RateLimitAnalytics } from './services/rate-limit-analytics.service';
 import { isRateLimitRedisConnected, getRateLimitRedisClient } from './middleware/rate-limit.middleware';
 import xss from 'xss-clean';
+// @ts-ignore
 import hpp from 'hpp';
 import { setupSwagger } from './openapi/swagger';
 import { logger } from './services/logger.service';
@@ -133,8 +136,25 @@ export const createApp = (): Express => {
         });
     });
 
+    // Compression metrics endpoint
+    app.get('/api/compression/metrics', (_req: Request, res: Response) => {
+        res.json({
+            brotli: {
+                enabled: process.env.COMPRESSION_ENABLE_BROTLI !== 'false',
+                quality: parseInt(process.env.COMPRESSION_BROTLI_QUALITY || '4', 10),
+                mode: parseInt(process.env.COMPRESSION_BROTLI_MODE || '0', 10),
+            },
+            gzip: {
+                level: parseInt(process.env.COMPRESSION_LEVEL || '6', 10),
+            },
+            threshold: parseInt(process.env.COMPRESSION_THRESHOLD_BYTES || '1024', 10),
+        });
+    });
+
     app.use(requestIdMiddleware);
     app.use(correlationMiddleware);
+    app.use(requestLogger());
+    app.use(localeMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
     app.use('/api', routes);

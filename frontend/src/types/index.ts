@@ -31,6 +31,22 @@ export * from "./tournament";
 export * from "./transaction";
 export * from "./user";
 
+// ─── Response interceptor types ───────────────────────────────────────────────
+export type {
+  StandardResponse,
+  PaginatedStandardResponse,
+  StandardErrorResponse,
+  ResponseMeta,
+  PaginationMeta,
+  ResponseAnalyticsEvent,
+  ResponseMonitorSnapshot,
+  InterceptorConfig,
+  GovernancePolicy,
+  GovernanceViolation,
+  GovernanceViolationSeverity,
+  ResponseStatus,
+} from "./response";
+
 // ─── API envelope types ───────────────────────────────────────────────────────
 
 /** Standard success envelope returned by all non-auth API endpoints. */

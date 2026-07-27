@@ -33,6 +33,14 @@
     --ring: 222.2 84% 4.9%;
 
     --radius: 0.5rem;
+
+    /* Hero gradient — light theme keeps a soft purple tint on a light base */
+    --gradient-hero: linear-gradient(
+      to bottom right,
+      hsl(var(--background)),
+      hsl(270 60% 92%),
+      hsl(var(--background))
+    );
   }
 
   .dark {
@@ -63,6 +71,14 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+
+    /* Hero gradient — dark theme mirrors the original gray-900 → purple-900 look */
+    --gradient-hero: linear-gradient(
+      to bottom right,
+      hsl(var(--background)),
+      hsl(273 55% 26%),
+      hsl(var(--background))
+    );
   }
 }
 
@@ -77,6 +93,11 @@
 
 /* Mobile-first responsive utilities */
 @layer utilities {
+  /* Theme-aware hero gradient (stops defined in :root / .dark above) */
+  .bg-gradient-hero {
+    background-image: var(--gradient-hero);
+  }
+
   /* Safe area insets for notched devices */
   .safe-area-t {
     padding-top: env(safe-area-inset-top);

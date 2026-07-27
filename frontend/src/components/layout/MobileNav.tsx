@@ -80,6 +80,17 @@ export function MobileNav() {
     };
   }, [isOpen]);
 
+  // Basic focus trapping: focus the drawer when it opens
+  useEffect(() => {
+    if (!isOpen) return;
+    const drawer = document.getElementById("mobile-navigation-drawer");
+    if (!drawer) return;
+    const focusable = drawer.querySelectorAll<HTMLElement>(
+      'a, button, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length) focusable[0].focus();
+  }, [isOpen]);
+
   const authItems = loading ? [] : user ? [] : authNav.unauthenticated;
 
   // Mock wallet balance - in production, this would come from a wallet hook
@@ -127,6 +138,7 @@ export function MobileNav() {
               role="dialog"
               aria-modal="true"
               aria-label="Mobile navigation"
+              tabIndex={-1}
             >
               <div className="flex flex-col h-full">
                 {/* User profile section */}
@@ -193,7 +205,7 @@ export function MobileNav() {
                               className="flex items-center justify-between w-full"
                               onClick={() => setIsOpen(false)}
                             >
-                              {item.label}
+                              <span>{item.label}</span>
                               <ChevronRight className="h-4 w-4 opacity-50" />
                             </button>
                           </ProtectedLink>
