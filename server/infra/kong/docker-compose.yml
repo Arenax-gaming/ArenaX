@@ -1,0 +1,47 @@
+version: '3.8'
+
+# Kong API Gateway (DB-less / declarative mode) for #653.
+#
+# Usage:
+#   npm run dev                                              # start arenax-server on :3001
+#   docker compose -f infra/kong/docker-compose.yml up -d    # start Kong
+#   curl http://localhost:8000/health
+#   curl http://localhost:8000/api/graphql -X POST ...
+#
+# Admin API (http://localhost:8001) is read-only in DB-less mode — config
+# changes are made by editing kong.yml and restarting the container:
+#   docker compose -f infra/kong/docker-compose.yml restart kong
+services:
+  kong:
+    image: kong:3.6
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./kong.yml:/kong/declarative/kong.yml:ro
+    ports:
+      - "8000:8000" # Proxy — public traffic goes here instead of :3001 directly
+      - "8001:8001" # Admin API (read-only status/introspection in DB-less mode)
+    extra_hosts:
+      # Lets Kong reach the arenax-server process running on the Docker
+      # host (`npm run dev`) from inside the container. Docker Desktop
+      # (Mac/Windows) supports host.docker.internal natively; this entry
+      # makes it resolve on Linux too.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kong-network
+
+networks:
+  kong-network:
+    driver: bridge

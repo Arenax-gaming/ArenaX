@@ -6,23 +6,24 @@ import {
     SeasonalLeaderboard,
     LeaderboardStats,
 } from '@/types/leaderboard'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1'
+import { API_BASE } from '@/lib/constants'
 
 export const useLeaderboard = (
     category: string,
     limit = 100,
     offset = 0,
     season?: string,
+    search?: string,
 ) => {
     return useQuery({
-        queryKey: ['leaderboard', category, limit, offset, season],
+        queryKey: ['leaderboard', category, limit, offset, season, search],
         queryFn: async () => {
             const params = new URLSearchParams({
                 limit: String(limit),
                 offset: String(offset),
             })
             if (season) params.set('season', season)
+            if (search) params.set('search', search)
             const res = await fetch(
                 `${API_BASE}/leaderboards/${category}?${params}`
             )

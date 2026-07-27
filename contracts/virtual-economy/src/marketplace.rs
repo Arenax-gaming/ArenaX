@@ -1,58 +1,91 @@
-// Marketplace-specific functionality
-// This module can be expanded with advanced marketplace features like:
-// - Auction systems
-// - Bulk trading
-// - Order matching algorithms
-// - Price discovery mechanisms
+// Marketplace pricing engine.
+//
+// Pure, side-effect-free price calculations shared by the dynamic pricing
+// contract methods in `lib.rs`: Dutch auctions (price falls over time until
+// bought or expired) and bonding curve drops (mint price rises with units
+// already minted). Kept separate from `lib.rs` so the math is easy to reason
+// about and unit test in isolation from storage/auth concerns.
 
 use crate::error::VirtualEconomyError;
-use crate::storage::*;
-use soroban_sdk::{Address, BytesN, Env, Vec};
+use crate::storage::{BondingCurveDrop, DutchAuctionListing, PriceCurve};
+use soroban_sdk::Env;
 
 pub struct MarketplaceManager;
 
 impl MarketplaceManager {
-    /// Get active orders for a specific asset type
-    pub fn get_orders_by_asset_type(env: &Env, asset_type: &str) -> Vec<BytesN<32>> {
-        // Implementation would iterate through orders and filter by asset type
-        // For now, return empty vector as placeholder
-        Vec::new(env)
-    }
+    /// Compute the current price of a Dutch auction listing given the
+    /// current ledger time.
+    ///
+    /// * Before `start_time`: returns `start_price`.
+    /// * After `end_time`: returns `floor_price`.
+    /// * In between: decays from `start_price` to `floor_price` following
+    ///   the listing's [`PriceCurve`].
+    pub fn dutch_auction_price(env: &Env, listing: &DutchAuctionListing) -> i128 {
+        let now = env.ledger().timestamp();
+        if now <= listing.start_time {
+            return listing.start_price;
+        }
+        if now >= listing.end_time {
+            return listing.floor_price;
+        }
 
-    /// Get orders by seller
-    pub fn get_orders_by_seller(env: &Env, seller: &Address) -> Vec<BytesN<32>> {
-        // Implementation would iterate through orders and filter by seller
-        Vec::new(env)
-    }
+        let elapsed = (now - listing.start_time) as i128;
+        let duration = (listing.end_time - listing.start_time) as i128;
+        let premium = listing.start_price - listing.floor_price;
 
-    /// Calculate dynamic pricing based on market conditions
-    pub fn calculate_suggested_price(
-        env: &Env,
-        asset: &MarketplaceAsset,
-    ) -> Result<i128, VirtualEconomyError> {
-        // Placeholder for dynamic pricing algorithm
-        // Could analyze recent trades, supply/demand, etc.
-        match asset {
-            MarketplaceAsset::NFT(_) => Ok(1000), // Base NFT price
-            MarketplaceAsset::Currency(amount) => Ok(*amount), // 1:1 for currency
+        match listing.curve {
+            PriceCurve::Linear => {
+                let decayed = premium * elapsed / duration;
+                listing.start_price - decayed
+            }
+            PriceCurve::Exponential => {
+                // Approximate exponential decay without floating point:
+                // halve the remaining premium every quarter of the auction
+                // duration (4 halvings across the full duration).
+                let steps = (elapsed * 4 / duration).min(4).max(0);
+                let remaining_premium = premium >> steps;
+                listing.floor_price + remaining_premium
+            }
         }
     }
 
-    /// Batch order operations for efficiency
-    pub fn batch_create_orders(
-        env: &Env,
-        orders: Vec<(Address, MarketplaceAsset, i128)>,
-    ) -> Result<Vec<BytesN<32>>, VirtualEconomyError> {
-        let mut order_ids = Vec::new(env);
+    /// Compute the current mint price of a bonding curve drop:
+    /// `base_price + base_price * slope_bps * minted / 10_000`.
+    pub fn bonding_curve_price(drop: &BondingCurveDrop) -> i128 {
+        drop.base_price + (drop.base_price * drop.slope_bps as i128 * drop.minted as i128) / 10_000
+    }
 
-        for (seller, asset, price) in orders.iter() {
-            // Would call create_marketplace_order for each
-            // For now, just create placeholder IDs
-            let mut id_bytes = [0u8; 32];
-            let order_id = BytesN::from_array(env, &id_bytes);
-            order_ids.push_back(order_id);
+    /// Validate Dutch auction parameters before a listing is created.
+    pub fn validate_auction_params(
+        start_price: i128,
+        floor_price: i128,
+        start_time: u64,
+        end_time: u64,
+    ) -> Result<(), VirtualEconomyError> {
+        if start_price <= 0 || floor_price <= 0 || floor_price > start_price {
+            return Err(VirtualEconomyError::InvalidAuctionParams);
         }
+        if end_time <= start_time {
+            return Err(VirtualEconomyError::InvalidAuctionParams);
+        }
+        Ok(())
+    }
 
-        Ok(order_ids)
+    /// Validate bonding curve drop parameters before a drop is created.
+    pub fn validate_curve_params(
+        base_price: i128,
+        slope_bps: u32,
+        max_supply: Option<u32>,
+    ) -> Result<(), VirtualEconomyError> {
+        if base_price <= 0 {
+            return Err(VirtualEconomyError::InvalidCurveParams);
+        }
+        if let Some(max) = max_supply {
+            if max == 0 {
+                return Err(VirtualEconomyError::InvalidCurveParams);
+            }
+        }
+        let _ = slope_bps; // any non-negative slope is valid, including 0 (flat price)
+        Ok(())
     }
 }

@@ -16,23 +16,23 @@
  *      bandwidth reduction.
  *   3. Honours the existing `compression` package's `filter` API and
  *      `req.headers['x-no-compression']` escape hatch.
+ *   4. Supports Brotli compression with automatic fallback to gzip based
+ *      on client Accept-Encoding header.
  *
- * ## Brotli
+ * ## Brotli Support
  *
- * The `compression` package is gzip-only by design. Production-grade
- * brotli for Express either needs `shrink-ray-current` (which compiles
- * native deps, breaks on Alpine) or a custom transform stream. We do
- * not add it here to keep the install surface tight; clients will
- * negotiate gzip via Accept-Encoding, which is supported by every
- * browser shipped in the last decade. If brotli becomes a hard
- * requirement, this is the place to add it — bump
- * `EXPECTED_ENCODINGS` and plug an iltorb-backed branch in.
- *
- * See ADR 005 in docs/adr/ for the full rationale.
+ * This middleware now supports Brotli compression (br) which typically
+ * provides 15-25% better compression ratios than gzip. The implementation:
+ *   - Negotiates compression based on client Accept-Encoding header
+ *   - Prefers Brotli when supported, falls back to gzip otherwise
+ *   - Uses the `brotli` package for Brotli compression
+ *   - Maintains backward compatibility with gzip-only clients
+ *   - Tracks separate metrics for Brotli vs gzip compression
  */
 
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import compression from 'compression';
+import * as brotli from 'brotli';
 import { metricsService } from '../services/metrics.service';
 import { logger } from '../services/logger.service';
 
@@ -68,12 +68,28 @@ export interface CompressionConfig {
    * for no bandwidth win.
    */
   excludedContentTypes: string[];
+  /**
+   * Enable Brotli compression. Defaults to true.
+   */
+  enableBrotli: boolean;
+  /**
+   * Brotli compression quality (0-11). Higher values = better compression
+   * but slower. Defaults to 4 (good balance of speed/compression).
+   */
+  brotliQuality: number;
+  /**
+   * Brotli mode (0 = generic, 1 = text, 2 = font). Defaults to 0.
+   */
+  brotliMode: number;
 }
 
 export const DEFAULT_COMPRESSION_CONFIG: CompressionConfig = {
   level: 6,
   threshold: 1024,
   excludedContentTypes: EXCLUDED_DEFAULT_PREFIXES,
+  enableBrotli: true,
+  brotliQuality: 4,
+  brotliMode: 0,
 };
 
 export const resolveCompressionConfigFromEnv = (
@@ -89,7 +105,17 @@ export const resolveCompressionConfigFromEnv = (
   const exclusions = env.COMPRESSION_EXCLUDED_TYPES
     ? env.COMPRESSION_EXCLUDED_TYPES.split(',').map((s) => s.trim()).filter(Boolean)
     : DEFAULT_COMPRESSION_CONFIG.excludedContentTypes;
-  return { level, threshold, excludedContentTypes: exclusions };
+  const enableBrotli = env.COMPRESSION_ENABLE_BROTLI !== 'false';
+  const brotliQuality = clampInt(env.COMPRESSION_BROTLI_QUALITY, 0, 11, DEFAULT_COMPRESSION_CONFIG.brotliQuality);
+  const brotliMode = clampInt(env.COMPRESSION_BROTLI_MODE, 0, 2, DEFAULT_COMPRESSION_CONFIG.brotliMode);
+  return { 
+    level, 
+    threshold, 
+    excludedContentTypes: exclusions,
+    enableBrotli,
+    brotliQuality,
+    brotliMode,
+  };
 };
 
 const clampInt = (raw: string | undefined, min: number, max: number, fallback: number): number => {
@@ -107,9 +133,37 @@ export const shouldBypass = (contentType: string | undefined, excluded: string[]
 };
 
 /**
+ * Parse Accept-Encoding header and determine preferred encoding.
+ * Returns 'br' for Brotli, 'gzip' for gzip, or 'identity' for no compression.
+ */
+const getPreferredEncoding = (req: Request, enableBrotli: boolean): string => {
+  const acceptEncoding = req.headers['accept-encoding'] as string | undefined;
+  if (!acceptEncoding) return 'identity';
+  
+  const lower = acceptEncoding.toLowerCase();
+  
+  // Check for Brotli support if enabled
+  if (enableBrotli && (lower.includes('br') || lower.includes('brotli'))) {
+    return 'br';
+  }
+  
+  // Fall back to gzip
+  if (lower.includes('gzip')) {
+    return 'gzip';
+  }
+  
+  // Check for deflate as another fallback
+  if (lower.includes('deflate')) {
+    return 'deflate';
+  }
+  
+  return 'identity';
+};
+
+/**
  * Build the compression middleware stack. Returns a single
  * `RequestHandler` that records metrics + delegates to the underlying
- * `compression` package.
+ * `compression` package or Brotli compression.
  */
 export const createCompressionMiddleware = (
   config: CompressionConfig = DEFAULT_COMPRESSION_CONFIG,
@@ -125,6 +179,12 @@ export const createCompressionMiddleware = (
       if (typeof contentType === 'string' && shouldBypass(contentType, config.excludedContentTypes)) {
         return false;
       }
+      
+      // If Brotli is enabled and client supports it, let the Brotli handler deal with it
+      if (config.enableBrotli && getPreferredEncoding(req, true) === 'br') {
+        return false;
+      }
+      
       return compression.filter(req, res);
     },
   });
@@ -133,12 +193,88 @@ export const createCompressionMiddleware = (
     let uncompressedBytes = 0;
     const write = res.write.bind(res);
     const end = res.end.bind(res);
+    const originalWrite = res.write;
+    const originalEnd = res.end;
+    const chunks: Buffer[] = [];
 
-    // Patch write/end so we can count the bytes the application would
-    // have sent without compression. The `compression` package wraps
-    // res internally; both gzipped and raw paths go through the same
-    // res.write hook below the wrapper, so this counter is accurate
-    // for the un-compressed payload.
+    // Determine preferred encoding
+    const preferredEncoding = getPreferredEncoding(req, config.enableBrotli);
+    
+    // If Brotli is preferred and enabled, use Brotli compression
+    if (preferredEncoding === 'br' && config.enableBrotli) {
+      res.setHeader('Content-Encoding', 'br');
+      res.removeHeader('Content-Length');
+      
+      (res as Response).write = function patchedWrite(chunk: any, ...args: any[]): boolean {
+        if (chunk) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          uncompressedBytes += buffer.length;
+          chunks.push(buffer);
+        }
+        return true;
+      } as Response['write'];
+
+      (res as Response).end = function patchedEnd(chunk?: any, ...args: any[]): Response {
+        if (chunk) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          uncompressedBytes += buffer.length;
+          chunks.push(buffer);
+        }
+        
+        try {
+          const fullBuffer = Buffer.concat(chunks);
+          
+          // Only compress if above threshold
+          if (fullBuffer.length >= config.threshold) {
+            const compressed = brotli.compress(fullBuffer, {
+              quality: config.brotliQuality,
+              mode: config.brotliMode,
+            });
+            
+            res.setHeader('Content-Length', compressed.length);
+            originalWrite.call(res, compressed);
+            
+            // Record metrics
+            metricsService.recordCompression?.('br', {
+              uncompressedBytes,
+              compressedBytes: compressed.length,
+              ratio: compressed.length / uncompressedBytes,
+            });
+          } else {
+            // Below threshold, send uncompressed
+            res.setHeader('Content-Length', fullBuffer.length);
+            originalWrite.call(res, fullBuffer);
+            
+            // Remove Content-Encoding since we didn't compress
+            res.removeHeader('Content-Encoding');
+            
+            metricsService.recordCompression?.('identity', {
+              uncompressedBytes,
+              compressedBytes: uncompressedBytes,
+              ratio: 1,
+            });
+          }
+        } catch (err) {
+          logger.error('Brotli compression failed, falling back to uncompressed', { error: err });
+          res.removeHeader('Content-Encoding');
+          const fullBuffer = Buffer.concat(chunks);
+          res.setHeader('Content-Length', fullBuffer.length);
+          originalWrite.call(res, fullBuffer);
+          
+          metricsService.recordCompression?.('identity', {
+            uncompressedBytes,
+            compressedBytes: uncompressedBytes,
+            ratio: 1,
+          });
+        }
+        
+        return originalEnd.call(res, ...args);
+      } as Response['end'];
+      
+      return next();
+    }
+    
+    // Otherwise, use gzip compression (original behavior)
     (res as Response).write = function patchedWrite(chunk: any, ...args: any[]): boolean {
       if (chunk) uncompressedBytes += Buffer.byteLength(chunk);
       return write(chunk, ...args);

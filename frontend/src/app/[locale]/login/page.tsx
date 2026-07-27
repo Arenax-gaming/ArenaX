@@ -28,6 +28,21 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof LoginFormData, string>>>({});
 
+  // Show a toast if the user was redirected due to an expired session
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reason") === "session_expired") {
+      addToast({
+        type: "warning",
+        title: "Session expired",
+        message: "Your session has expired. Please sign in again.",
+        duration: 8000,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Error toast when auth error is set
   useEffect(() => {
     if (error) {
