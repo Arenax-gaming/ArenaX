@@ -96,6 +96,7 @@ export default function RootLayout({
                                   <AppLayout>{children}</AppLayout>
                                 </DragAndDropProvider>
                               </RumProvider>
+                              <ConsentBanner />
                             </NotificationProvider>
                           </TxStatusProvider>
                         </WalletProvider>
