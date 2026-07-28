@@ -40,12 +40,13 @@ export const metadata: Metadata = {
   },
 };
 
+// WCAG 2.1 SC 1.4.4 (Resize Text, AA): never disable pinch-to-zoom.
+// iOS auto-zoom on input focus is prevented by font-size: 16px in globals.css
+// (see the `input, textarea, select { font-size: 16px }` rule under @supports).
 export const viewport: Viewport = {
   themeColor: "#111827",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({

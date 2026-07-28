@@ -419,14 +419,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     // 1008 = policy violation, 4401/4403 = app-level auth failure codes
     const AUTH_FAILURE_CLOSE_CODES = [1008, 4401, 4403];
 
-    const getAuthToken = () =>
-      localStorage.getItem("auth_token") ?? sessionStorage.getItem("auth_token");
-
     const buildWsUrl = () => {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      // The token is deliberately NOT part of the URL: query strings end up
-      // in server access logs, browser history, and Referer headers. Auth is
-      // performed via the first message after the socket opens instead.
+      // Token is NOT part of the URL — query strings appear in server access
+      // logs, browser history, and Referer headers.  Auth is performed via
+      // the first JSON message sent after the socket opens.
       return `${protocol}://${window.location.host}/ws/notifications`;
     };
 
@@ -491,32 +488,48 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
     const connect = () => {
       if (closed) return;
-      try {
-        ws = new WebSocket(buildWsUrl());
-      } catch {
-        scheduleReconnect();
-        return;
-      }
 
-      ws.onopen = () => {
-        retry = 0;
-        const token = getAuthToken();
-        if (token) {
-          ws?.send(JSON.stringify({ type: "auth", token }));
-        }
-      };
-      ws.onmessage = (event) => handleMessage(event.data);
-      ws.onclose = (event) => {
-        if (closed) return;
-        if (AUTH_FAILURE_CLOSE_CODES.includes(event.code)) {
-          authFailed = true;
-          return;
-        }
-        scheduleReconnect();
-      };
-      ws.onerror = () => {
-        ws?.close();
-      };
+      // Fetch a short-lived (60 s) WS token from the server immediately
+      // before opening the socket.  The token is obtained via the httpOnly
+      // cookie session — it is never read from localStorage.
+      // It is held only in this closure and discarded once sent.
+      api
+        .getWsToken()
+        .then(({ ws_token }) => {
+          if (closed) return;
+
+          try {
+            ws = new WebSocket(buildWsUrl());
+          } catch {
+            scheduleReconnect();
+            return;
+          }
+
+          ws.onopen = () => {
+            retry = 0;
+            // Send the short-lived token as the first message — this is the
+            // only moment it exists in JS memory.
+            ws?.send(JSON.stringify({ type: "auth", token: ws_token }));
+          };
+          ws.onmessage = (event) => handleMessage(event.data);
+          ws.onclose = (event) => {
+            if (closed) return;
+            if (AUTH_FAILURE_CLOSE_CODES.includes(event.code)) {
+              authFailed = true;
+              return;
+            }
+            scheduleReconnect();
+          };
+          ws.onerror = () => {
+            ws?.close();
+          };
+        })
+        .catch(() => {
+          // Could not obtain a WS token (e.g. session expired) — back off and
+          // retry; the auth-failure handler in ApiClient will redirect to
+          // login if the session is truly gone.
+          if (!closed) scheduleReconnect();
+        });
     };
 
     connect();

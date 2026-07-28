@@ -1,11 +1,22 @@
 "use client";
 
-import { useState, createContext, useContext, useCallback, useEffect, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 import { api } from "@/lib/api";
 import { AuthApiError, REGISTER_ERROR_MAP } from "@/lib/authErrors";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -17,59 +28,72 @@ interface AuthContextType {
   clearError: () => void;
   verifyEmail: (token: string) => Promise<void>;
   resendVerificationEmail: (email: string) => Promise<void>;
-  /** Exposed so components can manually trigger a token refresh if needed. */
-  refreshAccessToken: () => Promise<string>;
+  /** Trigger a silent token refresh. Returns the new TTL in seconds. */
+  refreshAccessToken: () => Promise<number>;
   /** True while a token refresh is in flight. */
   isRefreshing: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = "auth_token";
-const REFRESH_TOKEN_KEY = "auth_refresh_token";
+// ---------------------------------------------------------------------------
+// Non-sensitive storage keys
+//
+// Tokens are NEVER stored in localStorage / sessionStorage.
+// Only the public user profile (no secrets) is cached here so the UI can
+// render immediately on page reload without a network round-trip.
+// ---------------------------------------------------------------------------
+
 const STORAGE_KEY = "arenax_auth_user";
-const REMEMBER_KEY = "arenax_remember_me";
 const PENDING_VERIFICATION_EMAIL_KEY = "arenax_pending_email";
 
 export const AUTH_PROFILE_QUERY_KEY = ["auth", "profile"] as const;
 
-function getStorage(remember: boolean): Storage {
-  return remember ? localStorage : sessionStorage;
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function mapBackendUserToAuthUser(
+function mapBackendUser(
   backendUser: {
     id: string;
-    email: string;
+    email?: string;
     username: string;
-    isVerified: boolean;
+    isVerified?: boolean;
+    is_verified?: boolean;
     [key: string]: unknown;
   },
-  accessToken: string,
-  refreshToken: string
 ): AuthUser {
   return {
     id: backendUser.id,
     username: backendUser.username,
-    email: backendUser.email,
-    isVerified: backendUser.isVerified,
-    elo: typeof (backendUser as Record<string, unknown>).elo === "number"
-      ? ((backendUser as Record<string, unknown>).elo as number)
-      : 0,
+    email: (backendUser.email as string | undefined) ?? "",
+    isVerified:
+      (backendUser.isVerified as boolean | undefined) ??
+      (backendUser.is_verified as boolean | undefined) ??
+      false,
+    elo:
+      typeof backendUser.elo === "number" ? (backendUser.elo as number) : 0,
     createdAt:
-      typeof (backendUser as Record<string, unknown>).createdAt === "string"
-        ? ((backendUser as Record<string, unknown>).createdAt as string)
-        : new Date().toISOString(),
-    token: accessToken,
-    refreshToken,
+      typeof backendUser.createdAt === "string"
+        ? (backendUser.createdAt as string)
+        : typeof backendUser.created_at === "string"
+          ? (backendUser.created_at as string)
+          : new Date().toISOString(),
+    // token / refreshToken fields are intentionally omitted — tokens live
+    // exclusively in httpOnly cookies and are invisible to JavaScript.
+    token: "",
+    refreshToken: "",
   };
 }
 
-function readStoredUser(): AuthUser | null {
+/** Read the cached public profile from sessionStorage (no secrets). */
+function readCachedUser(): AuthUser | null {
   if (typeof window === "undefined") return null;
-  const remember = localStorage.getItem(REMEMBER_KEY) === "true";
-  const storage = getStorage(remember);
-  const stored = storage.getItem(STORAGE_KEY);
+  const stored = sessionStorage.getItem(STORAGE_KEY);
   if (!stored) return null;
   try {
     return JSON.parse(stored) as AuthUser;
@@ -78,128 +102,156 @@ function readStoredUser(): AuthUser | null {
   }
 }
 
-function getStoredToken(): { token: string; refreshToken: string } | null {
-  if (typeof window === "undefined") return null;
-  const token = localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
-  const refresh = localStorage.getItem(REFRESH_TOKEN_KEY) ?? sessionStorage.getItem(REFRESH_TOKEN_KEY);
-  if (token && refresh) return { token, refreshToken: refresh };
-  return null;
+/** Persist the public profile to sessionStorage for hydration speed. */
+function cacheUser(user: AuthUser | null): void {
+  if (typeof window === "undefined") return;
+  if (user) {
+    // Strip any accidental token fields before caching.
+    const safe = { ...user, token: "", refreshToken: "" };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
+  } else {
+    sessionStorage.removeItem(STORAGE_KEY);
+  }
 }
 
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
+  const ctx = useContext(AuthContext);
+  if (ctx === undefined) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
-  return context;
+  return ctx;
 };
 
-export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+export const AuthProvider = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [hasToken, setHasToken] = useState(() => !!getStoredToken());
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  // Track isRefreshing via a ref so the stable callback can read it
   const isRefreshingRef = useRef(false);
 
   const clearError = useCallback(() => setError(null), []);
 
+  // ── Session probe ──────────────────────────────────────────────────────────
+  // We determine whether the user is logged in by fetching their profile.
+  // The httpOnly cookie is sent automatically; a 401 means no active session.
+  // `placeholderData` hydrates the UI instantly from the sessionStorage cache.
+
   const profileQuery = useQuery({
     queryKey: AUTH_PROFILE_QUERY_KEY,
     queryFn: async (): Promise<AuthUser | null> => {
-      const stored = getStoredToken();
-      if (!stored) return null;
-      const profile = await api.getProfile();
-      return {
-        id: profile.id,
-        username: profile.username,
-        email: profile.email ?? "",
-        isVerified: profile.is_verified,
-        elo: typeof profile.elo === "number" ? profile.elo : 0,
-        createdAt: profile.created_at,
-        token: stored.token,
-        refreshToken: stored.refreshToken,
-      };
+      try {
+        const profile = await api.getProfile();
+        const user = mapBackendUser({
+          id: profile.id,
+          username: profile.username,
+          email: profile.email ?? undefined,
+          is_verified: profile.is_verified,
+          elo: profile.elo,
+          created_at: profile.created_at,
+        });
+        cacheUser(user);
+        return user;
+      } catch {
+        // 401 or network error → not authenticated
+        cacheUser(null);
+        return null;
+      }
     },
-    enabled: hasToken,
     staleTime: 60_000,
     gcTime: 300_000,
-    placeholderData: () => readStoredUser(),
+    placeholderData: readCachedUser,
+    // Always attempt the probe — the cookie (not a localStorage flag) is the
+    // source of truth.
+    enabled: true,
+    retry: false,
   });
 
   const user = profileQuery.data ?? null;
 
-  const persistSession = useCallback(
-    (authUser: AuthUser, rememberMe: boolean) => {
-      localStorage.setItem(REMEMBER_KEY, String(rememberMe));
-      const storage = getStorage(rememberMe);
-      storage.setItem(STORAGE_KEY, JSON.stringify(authUser));
-      storage.setItem(TOKEN_KEY, authUser.token);
-      storage.setItem(REFRESH_TOKEN_KEY, authUser.refreshToken);
-    },
-    []
-  );
+  // ── Login ──────────────────────────────────────────────────────────────────
 
   const login = async (
-    credentials: LoginRequest & { rememberMe?: boolean }
+    credentials: LoginRequest & { rememberMe?: boolean },
   ) => {
     try {
       setLoading(true);
       setError(null);
-      const { rememberMe = false } = credentials;
+
       const response = await api.login({
         email: credentials.email,
         password: credentials.password,
       });
-      const authUser = mapBackendUserToAuthUser(
-        response.user as Parameters<typeof mapBackendUserToAuthUser>[0],
-        response.tokens.accessToken,
-        response.tokens.refreshToken
+
+      // The server has now set the httpOnly cookies.  Pull the user object
+      // from the response body — it carries no token values.
+      const authUser = mapBackendUser(
+        response.user as Parameters<typeof mapBackendUser>[0],
       );
-      persistSession(authUser, rememberMe);
+
+      cacheUser(authUser);
       queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
-      setHasToken(true);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Invalid email or password";
       setError(message);
+      throw err;
     } finally {
       setLoading(false);
     }
   };
+
+  // ── Register ───────────────────────────────────────────────────────────────
 
   const register = async (userData: RegisterRequest) => {
     try {
       setLoading(true);
       setError(null);
+
       const response = await api.register({
         username: userData.username,
         email: userData.email,
         password: userData.password,
       });
-      const authUser = mapBackendUserToAuthUser(
-        response.user as Parameters<typeof mapBackendUserToAuthUser>[0],
-        response.tokens.accessToken,
-        response.tokens.refreshToken
+
+      // Cookies are set by the server; store only the public profile locally.
+      const authUser = mapBackendUser(
+        response.user as Parameters<typeof mapBackendUser>[0],
       );
+
       queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
-      setHasToken(true);
-      localStorage.setItem(PENDING_VERIFICATION_EMAIL_KEY, userData.email);
-      // Don't persist session yet - user needs to verify email
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem(PENDING_VERIFICATION_EMAIL_KEY, userData.email);
+      }
+      // Do not cache the full profile until email is verified.
     } catch (err) {
       if (err instanceof AuthApiError && REGISTER_ERROR_MAP[err.code]) {
-        // Field-specific error — let the form surface it inline; don't set context error
         throw err;
       }
       const message =
         err instanceof Error ? err.message : "Registration failed";
       setError(message);
+      throw err;
     } finally {
       setLoading(false);
     }
   };
+
+  // ── Verify email ───────────────────────────────────────────────────────────
 
   const verifyEmail = async (token: string) => {
     try {
@@ -207,20 +259,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setError(null);
       await api.verifyEmail(token);
       if (user) {
-        const updatedUser = { ...user, isVerified: true };
-        queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, updatedUser);
-        const remember = localStorage.getItem(REMEMBER_KEY) === "true";
-        persistSession(updatedUser, remember);
+        const updated = { ...user, isVerified: true };
+        cacheUser(updated);
+        queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, updated);
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Verification failed";
-      setError(message);
+      setError(err instanceof Error ? err.message : "Verification failed");
       throw err;
     } finally {
       setLoading(false);
     }
   };
+
+  // ── Resend verification ────────────────────────────────────────────────────
 
   const resendVerificationEmail = async (email: string) => {
     try {
@@ -229,7 +280,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await api.resendVerificationEmail(email);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to resend verification email";
+        err instanceof Error
+          ? err.message
+          : "Failed to resend verification email";
       setError(message);
       throw err;
     } finally {
@@ -237,20 +290,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // ── Logout ─────────────────────────────────────────────────────────────────
+
   const logout = useCallback(() => {
-    [localStorage, sessionStorage].forEach((storage) => {
-      storage.removeItem(STORAGE_KEY);
-      storage.removeItem(TOKEN_KEY);
-      storage.removeItem(REFRESH_TOKEN_KEY);
-    });
-    localStorage.removeItem(REMEMBER_KEY);
-    localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
-    setHasToken(false);
+    // Tell the server to blacklist the current token and clear cookies.
+    // Fire-and-forget — clear local state immediately regardless of outcome.
+    api.logout().catch(() => {});
+
+    cacheUser(null);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
+    }
     setError(null);
     queryClient.removeQueries({ queryKey: AUTH_PROFILE_QUERY_KEY });
   }, [queryClient]);
 
-  const refreshAccessToken = useCallback(async (): Promise<string> => {
+  // ── Token refresh ──────────────────────────────────────────────────────────
+
+  const refreshAccessToken = useCallback(async (): Promise<number> => {
+    if (isRefreshingRef.current) return 0;
     isRefreshingRef.current = true;
     setIsRefreshing(true);
     try {
@@ -261,8 +319,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  // Register the auth-failure handler with ApiClient once on mount so it can
-  // trigger logout + redirect when a refresh attempt fails inside request().
+  // ── Wire auth-failure handler ──────────────────────────────────────────────
+  // When ApiClient can't refresh (session truly expired), it calls this so
+  // we log the user out and redirect to the login page.
+
   useEffect(() => {
     api.setOnAuthFailure(() => {
       logout();
@@ -270,9 +330,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
   }, [logout, router]);
 
+  // ── Context value ──────────────────────────────────────────────────────────
+
   return (
     <AuthContext.Provider
-      value={{ user, login, register, logout, loading, error, clearError, verifyEmail, resendVerificationEmail, refreshAccessToken, isRefreshing }}
+      value={{
+        user,
+        login,
+        register,
+        logout,
+        loading,
+        error,
+        clearError,
+        verifyEmail,
+        resendVerificationEmail,
+        refreshAccessToken,
+        isRefreshing,
+      }}
     >
       {children}
     </AuthContext.Provider>
