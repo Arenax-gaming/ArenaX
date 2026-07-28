@@ -28,13 +28,16 @@ jobs:
     
     - name: Install dependencies
       run: npm ci
-    
+
+    - name: Check PWA assets
+      run: npm run check:pwa-assets
+
     - name: Lint code
       run: npm run lint
-    
+
     - name: Build
       run: npm run build
-    
+
     - name: Run tests
       run: npm test
 
