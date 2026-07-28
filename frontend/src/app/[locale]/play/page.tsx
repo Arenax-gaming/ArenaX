@@ -7,8 +7,9 @@ import MatchmakingQueue from '@/components/game/MatchmakingQueue';
 import SkillQuickAccessBar from '@/components/game/SkillQuickAccessBar';
 import MobileGameControls from '@/components/game/MobileGameControls';
 import { useSettings } from '@/hooks/useSettings';
+import { ProtectedPage } from '@/components/navigation/ProtectedPage';
 
-export default function PlayPage() {
+function PlayPageContent() {
   const router = useRouter();
   const { settings } = useSettings();
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
@@ -39,10 +40,10 @@ export default function PlayPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
+    <div className="min-h-screen bg-gradient-hero">
       <div className="container mx-auto px-4 py-8">
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-white mb-4">
+          <h1 className="text-5xl font-bold text-foreground mb-4">
             Choose Your Battle
           </h1>
           <p className="text-xl text-foreground/80">
@@ -56,25 +57,25 @@ export default function PlayPage() {
         />
 
         <div className="mt-8">
-          <h2 className="text-xl font-bold text-white mb-3 text-center">Skill Quick-Access Bar</h2>
+          <h2 className="text-xl font-bold text-foreground mb-3 text-center">Skill Quick-Access Bar</h2>
           <SkillQuickAccessBar keyBindings={settings.game.controls} />
         </div>
 
         <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
-            <h3 className="text-xl font-bold text-white mb-2">Quick Play</h3>
+          <div className="bg-card/60 backdrop-blur-lg rounded-xl p-6 border border-border">
+            <h3 className="text-xl font-bold text-foreground mb-2">Quick Play</h3>
             <p className="text-foreground/80 text-sm">
               Jump into a game instantly with casual matchmaking
             </p>
           </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
-            <h3 className="text-xl font-bold text-white mb-2">Ranked Matches</h3>
+          <div className="bg-card/60 backdrop-blur-lg rounded-xl p-6 border border-border">
+            <h3 className="text-xl font-bold text-foreground mb-2">Ranked Matches</h3>
             <p className="text-foreground/80 text-sm">
               Compete in skill-based matches and climb the leaderboard
             </p>
           </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
-            <h3 className="text-xl font-bold text-white mb-2">Custom Games</h3>
+          <div className="bg-card/60 backdrop-blur-lg rounded-xl p-6 border border-border">
+            <h3 className="text-xl font-bold text-foreground mb-2">Custom Games</h3>
             <p className="text-foreground/80 text-sm">
               Create private lobbies and play with friends
             </p>
@@ -83,5 +84,22 @@ export default function PlayPage() {
       </div>
       <MobileGameControls />
     </div>
+  );
+}
+
+/**
+ * #761: `/play` had no auth guard. The matchmaking UI rendered for anyone who
+ * guessed the URL — the backend rejected their queue attempts, but only after
+ * they had picked a mode and waited, which reads as a broken product rather
+ * than a locked door.
+ *
+ * ProtectedPage redirects to /login?redirect=<path> and returns the user here
+ * after signing in, matching wallet/page.tsx.
+ */
+export default function PlayPage() {
+  return (
+    <ProtectedPage>
+      <PlayPageContent />
+    </ProtectedPage>
   );
 }

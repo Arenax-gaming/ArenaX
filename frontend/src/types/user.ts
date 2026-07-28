@@ -35,7 +35,15 @@ export interface EloPoint {
 }
 
 export interface AuthUser extends User {
+  /**
+   * @deprecated Tokens are stored in httpOnly cookies. This field is always
+   * an empty string and exists only for backward compatibility with existing
+   * type consumers.
+   */
   token: string;
+  /**
+   * @deprecated See `token` above.
+   */
   refreshToken: string;
 }
 

@@ -1,30 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Admin route protection middleware.
+ * ArenaX Route Protection Middleware (Edge Runtime).
  *
- * Runs on the Next.js Edge Runtime — no Node.js APIs available.
+ * Runs on every request matched by the config.matcher below.
+ * Enforces authentication and role requirements before the page renders.
  *
- * Protection layers:
- *  1. No token present          → redirect to /login?redirect=<path>
- *  2. Token present but expired → redirect to /login?redirect=<path>&reason=expired
- *  3. Token valid, role ≠ admin → redirect to /admin/access-denied (403 page)
- *  4. Token valid, role = admin → allow through
+ * Protection layers applied in order:
+ *  1. Token absent            → redirect to /[locale]/login?redirect=<path>
+ *  2. Token malformed         → redirect to /[locale]/login
+ *  3. Token expired           → redirect to /[locale]/login?reason=expired
+ *  4. Signature invalid       → redirect to /[locale]/login  (when JWT_SECRET set)
+ *  5. Admin route, non-admin  → redirect to /[locale]/admin/access-denied
+ *  6. All checks pass         → forward with x-user-id / x-user-roles headers
  *
- * The JWT payload is decoded (base64url) to read the `roles` claim.
- * Full signature verification uses the Web Crypto API (HMAC-SHA256) when
- * ADMIN_JWT_SECRET is set. If the env var is absent the middleware falls back
- * to payload-only inspection — the backend still enforces the signature on
- * every API call, so this is defence-in-depth, not the sole gate.
+ * The backend verifies signatures on every API call; this middleware is
+ * defence-in-depth and UX (avoid a server round-trip before redirecting).
  */
 
 // ---------------------------------------------------------------------------
-// Helpers
+// JWT helpers (Edge-safe — no Node.js APIs)
 // ---------------------------------------------------------------------------
 
-/** Decode a base64url string to a UTF-8 string (Edge-safe). */
 function base64UrlDecode(input: string): string {
-  // Pad to a multiple of 4 and replace URL-safe chars
   const padded = input.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4;
   const padded2 = pad ? padded + "=".repeat(4 - pad) : padded;
@@ -36,65 +34,139 @@ interface JwtPayload {
   exp?: number;
   iat?: number;
   roles?: string[];
+  email_verified?: boolean;
   token_type?: string;
   [key: string]: unknown;
 }
 
-/** Parse the JWT payload without verifying the signature. */
 function parseJwtPayload(token: string): JwtPayload | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
-    const raw = base64UrlDecode(parts[1]);
-    return JSON.parse(raw) as JwtPayload;
+    return JSON.parse(base64UrlDecode(parts[1])) as JwtPayload;
   } catch {
     return null;
   }
 }
 
-/** Verify HMAC-SHA256 signature using the Web Crypto API. */
-async function verifyJwtSignature(token: string, secret: string): Promise<boolean> {
+async function verifyJwtSignature(
+  token: string,
+  secret: string
+): Promise<boolean> {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return false;
 
     const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const signingInput = encoder.encode(`${parts[0]}.${parts[1]}`);
-
-    const cryptoKey = await crypto.subtle.importKey(
+    const key = await crypto.subtle.importKey(
       "raw",
-      keyData,
+      encoder.encode(secret),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["verify"]
     );
 
-    // Decode the signature from base64url
     const sigPadded = parts[2].replace(/-/g, "+").replace(/_/g, "/");
     const sigPad = sigPadded.length % 4;
-    const sigPadded2 = sigPad ? sigPadded + "=".repeat(4 - sigPad) : sigPadded;
-    const sigBytes = Uint8Array.from(atob(sigPadded2), (c) => c.charCodeAt(0));
+    const sig = Uint8Array.from(
+      atob(sigPad ? sigPadded + "=".repeat(4 - sigPad) : sigPadded),
+      (c) => c.charCodeAt(0)
+    );
 
-    return await crypto.subtle.verify("HMAC", cryptoKey, sigBytes, signingInput);
+    return crypto.subtle.verify(
+      "HMAC",
+      key,
+      sig,
+      encoder.encode(`${parts[0]}.${parts[1]}`)
+    );
   } catch {
     return false;
   }
 }
 
-/** Extract the Bearer token from the Authorization header or auth_token cookie. */
 function extractToken(request: NextRequest): string | null {
-  // 1. Authorization: Bearer <token>  (set by API calls / SSR fetch)
   const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
+  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+  return request.cookies.get("auth_token")?.value ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Route classification (locale-agnostic)
+// ---------------------------------------------------------------------------
+
+/** Supported locale codes — keep in sync with src/i18n/routing.ts */
+const SUPPORTED_LOCALES = ["en", "es", "ar", "fr", "yo"] as const;
+
+/**
+ * Strip the locale prefix from a pathname so the path table below is
+ * locale-agnostic.  "/en/dashboard" → "/dashboard"
+ */
+function stripLocale(pathname: string): string {
+  for (const locale of SUPPORTED_LOCALES) {
+    if (pathname === `/${locale}`) return "/";
+    if (pathname.startsWith(`/${locale}/`)) return pathname.slice(locale.length + 1);
+  }
+  return pathname;
+}
+
+/**
+ * Detect the locale from the pathname, falling back to "en".
+ */
+function detectLocale(pathname: string): string {
+  for (const locale of SUPPORTED_LOCALES) {
+    if (pathname === `/${locale}` || pathname.startsWith(`/${locale}/`)) {
+      return locale;
+    }
+  }
+  return "en";
+}
+
+type RouteType = "public" | "auth" | "admin";
+
+/**
+ * Classify a locale-stripped path.
+ * First match wins (most-specific patterns listed first).
+ */
+function classifyRoute(path: string): RouteType {
+  // ── Always public ────────────────────────────────────────────────────────
+  const publicPrefixes = [
+    "/",
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/auth/",
+    "/verify-email",
+    "/about",
+    "/contact",
+    "/privacy",
+    "/terms",
+    "/accessibility",
+    "/offline",
+    "/admin/access-denied",
+    // Public browsing — detail pages also public for SEO
+    "/tournaments",
+    "/leaderboard",
+    "/leaderboards",
+    "/community",
+    "/profile/",
+  ];
+
+  if (
+    path === "/" ||
+    publicPrefixes.some(
+      (p) => p !== "/" && (path === p.replace(/\/$/, "") || path.startsWith(p))
+    )
+  ) {
+    return "public";
   }
 
-  // 2. auth_token cookie  (set by the client after login)
-  const cookieToken = request.cookies.get("auth_token")?.value;
-  if (cookieToken) return cookieToken;
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  if (path === "/admin" || path.startsWith("/admin/")) {
+    return "admin";
+  }
 
-  return null;
+  // ── Everything else requires auth ─────────────────────────────────────────
+  return "auth";
 }
 
 // ---------------------------------------------------------------------------
@@ -103,66 +175,78 @@ function extractToken(request: NextRequest): string | null {
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
+  const locale = detectLocale(pathname);
+  const strippedPath = stripLocale(pathname);
+  const routeType = classifyRoute(strippedPath);
 
-  // Build the redirect-back URL for post-login return
-  const loginUrl = new URL("/login", request.url);
+  // Public routes pass straight through
+  if (routeType === "public") {
+    return NextResponse.next();
+  }
+
+  // Build locale-aware login redirect URL
+  const loginUrl = new URL(`/${locale}/login`, request.url);
   loginUrl.searchParams.set("redirect", pathname);
 
-  // ── 1. Extract token ──────────────────────────────────────────────────────
+  // ── 1. Token extraction ───────────────────────────────────────────────────
   const token = extractToken(request);
-
   if (!token) {
-    // No token at all → send to login
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── 2. Parse payload ──────────────────────────────────────────────────────
+  // ── 2. Payload parsing ────────────────────────────────────────────────────
   const payload = parseJwtPayload(token);
-
   if (!payload) {
-    // Malformed token → send to login
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── 3. Check expiry ───────────────────────────────────────────────────────
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  if (payload.exp !== undefined && payload.exp < nowSeconds) {
+  // ── 3. Expiry check ───────────────────────────────────────────────────────
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp !== undefined && payload.exp < now) {
     loginUrl.searchParams.set("reason", "expired");
     return NextResponse.redirect(loginUrl);
   }
 
-  // ── 4. Verify signature (when secret is available) ────────────────────────
-  const jwtSecret = process.env.ADMIN_JWT_SECRET;
+  // ── 4. Signature verification (optional, requires env var) ────────────────
+  const jwtSecret = process.env.JWT_SECRET ?? process.env.ADMIN_JWT_SECRET;
   if (jwtSecret) {
     const valid = await verifyJwtSignature(token, jwtSecret);
     if (!valid) {
-      // Tampered token → send to login
       return NextResponse.redirect(loginUrl);
     }
   }
 
-  // ── 5. Check admin role ───────────────────────────────────────────────────
+  // ── 5. Role enforcement for admin routes ──────────────────────────────────
   const roles: string[] = Array.isArray(payload.roles) ? payload.roles : [];
-  const isAdmin = roles.includes("admin");
 
-  if (!isAdmin) {
-    // Authenticated but not admin → 403 page
-    const deniedUrl = new URL("/admin/access-denied", request.url);
+  if (routeType === "admin" && !roles.includes("admin")) {
+    const deniedUrl = new URL(`/${locale}/admin/access-denied`, request.url);
     return NextResponse.redirect(deniedUrl);
   }
 
-  // ── 6. Allow through ─────────────────────────────────────────────────────
-  // Forward the decoded user info as a request header so server components
-  // can read it without re-parsing the token.
+  // ── 6. Forward with user context headers ─────────────────────────────────
   const response = NextResponse.next();
   response.headers.set("x-user-id", String(payload.sub ?? ""));
   response.headers.set("x-user-roles", roles.join(","));
+  response.headers.set("x-locale", locale);
   return response;
 }
 
 // ---------------------------------------------------------------------------
-// Route matcher — only run on /admin/* paths
+// Route matcher — run on all non-static paths
+// Note: this file is src/middleware.ts and is distinct from the top-level
+// middleware.ts which handles next-intl locale routing. Both are composed
+// by Next.js automatically since src/ middleware takes precedence.
 // ---------------------------------------------------------------------------
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: [
+    /*
+     * Match all paths EXCEPT:
+     *  - _next/static  (static assets)
+     *  - _next/image   (image optimisation)
+     *  - favicon.ico, manifest.json, icons/, public assets
+     *  - API routes (handled by backend guards)
+     */
+    "/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|icons/|api/).*)",
+  ],
 };

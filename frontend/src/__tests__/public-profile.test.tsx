@@ -33,8 +33,8 @@ jest.mock('@/data/user', () => ({
 }));
 
 import { getProfileById } from '@/data/user';
-import { ProfilePageClient } from '@/app/profile/[id]/ProfilePageClient';
-import { generateMetadata } from '@/app/profile/[id]/page';
+import { ProfilePageClient } from '@/app/[locale]/profile/[id]/ProfilePageClient';
+import { generateMetadata } from '@/app/[locale]/profile/[id]/page';
 import type { PublicProfile, PlayerStats } from '@/types/profile';
 
 const mockGetProfileById = getProfileById as jest.MockedFunction<typeof getProfileById>;

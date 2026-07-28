@@ -61,7 +61,11 @@ pub struct PaymentsConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     pub jwt_secret: String,
+    /// Duration string for the short-lived access token, e.g. "15m".
     pub jwt_expires_in: String,
+    /// Duration string for the long-lived refresh token, e.g. "7d".
+    /// Defaults to "7d" when the env var is absent.
+    pub jwt_refresh_expires_in: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -113,6 +117,8 @@ impl Config {
         let flutterwave_secret = env::var("FLUTTERWAVE_SECRET")?;
         let jwt_secret = env::var("JWT_SECRET")?;
         let jwt_expires_in = env::var("JWT_EXPIRES_IN")?;
+        let jwt_refresh_expires_in =
+            env::var("JWT_REFRESH_EXPIRES_IN").unwrap_or_else(|_| "7d".to_string());
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")?;
         let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")?;
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
@@ -147,6 +153,7 @@ impl Config {
             auth: AuthConfig {
                 jwt_secret,
                 jwt_expires_in,
+                jwt_refresh_expires_in,
             },
             stellar: StellarConfig {
                 network_url: stellar_network_url,

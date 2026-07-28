@@ -5,6 +5,8 @@ import { Button } from "./Button";
 import { AlertTriangle, RefreshCw, Home, Mail, Copy, Check } from "lucide-react";
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
+import { datadogRum } from "@datadog/browser-rum";
+import { navigate } from "@/lib/routerUtils";
 
 // ─── Error message catalogue ──────────────────────────────────────────────────
 
@@ -85,6 +87,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       source: "ErrorBoundary",
       componentStack: errorInfo.componentStack,
     });
+
+    // Forward to Datadog RUM for production monitoring.
+    // Only include non-sensitive breadcrumbs — no tokens, passwords or PII.
+    datadogRum.addError(error, {
+      source: "ErrorBoundary",
+      componentStack: errorInfo.componentStack ?? undefined,
+      route: typeof window !== "undefined" ? window.location.pathname : undefined,
+    });
+
     this.props.onError?.(error, errorInfo);
   }
 
@@ -95,15 +106,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   };
 
   handleGoHome = (): void => {
-    window.location.href = "/";
+    navigate("/");
   };
 
   handleGoToLogin = (): void => {
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   handleReportIssue = (): void => {
-    window.location.href = "/contact?error=true";
+    navigate("/contact?error=true");
   };
 
   handleCopyErrorDetails = (): void => {

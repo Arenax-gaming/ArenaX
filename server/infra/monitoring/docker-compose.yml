@@ -1,0 +1,60 @@
+version: '3.8'
+
+# Prometheus + Grafana monitoring stack for #661.
+#
+# arenax-server already exposes Prometheus-format metrics at
+# `/api/metrics` via prom-client (src/services/metrics.service.ts,
+# src/routes/metrics.routes.ts) — this adds the scraping/storage/
+# visualization/alerting side around that existing instrumentation,
+# without changing how the app itself records metrics.
+#
+# Usage:
+#   docker compose -f server/infra/monitoring/docker-compose.yml up -d
+#   open http://localhost:9090   # Prometheus
+#   open http://localhost:3002   # Grafana (admin / admin, change on first login)
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - monitoring-network
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3002:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - monitoring-network
+
+networks:
+  monitoring-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:

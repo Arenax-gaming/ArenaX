@@ -36,7 +36,7 @@ jest.mock('@/data/matches', () => ({
 }));
 
 // Render the page after the mocks are in place.
-import ProfilePage from '@/app/profile/page';
+import ProfilePage from '@/app/[locale]/profile/page';
 
 describe('ProfilePage edit mode (#323)', () => {
   it('shows a static heading by default and reveals the edit input on click', () => {

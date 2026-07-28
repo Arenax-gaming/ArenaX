@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { UserPlus } from "lucide-react";
+import { UserPlus, RefreshCw } from "lucide-react";
 
 interface Friend {
   id: string;
@@ -28,10 +28,70 @@ const statusConfig = {
 
 interface FriendsListProps {
   compact?: boolean;
+  friends?: Friend[];
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
 }
 
-export function FriendsList({ compact = false }: FriendsListProps) {
-  const sorted = [...mockFriends].sort((a, b) => {
+function FriendsListSkeleton({ compact = false }: { compact?: boolean }) {
+  const count = compact ? 4 : 5;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+          <div className="h-7 w-7 bg-muted rounded animate-pulse" />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y">
+          {Array.from({ length: count }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-6 py-2.5">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 w-24 bg-muted rounded animate-pulse" />
+                <div className="h-3 w-14 bg-muted rounded animate-pulse" />
+              </div>
+              <div className="h-3 w-10 bg-muted rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FriendsListError({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold">Friends</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+        <p className="text-sm text-muted-foreground">Could not load friends — please try again.</p>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function FriendsList({
+  compact = false,
+  friends = mockFriends,
+  isLoading = false,
+  isError = false,
+  onRetry,
+}: FriendsListProps) {
+  if (isLoading) return <FriendsListSkeleton compact={compact} />;
+  if (isError) return <FriendsListError onRetry={onRetry} />;
+
+  const sorted = [...friends].sort((a, b) => {
     const order = { online: 0, "in-game": 1, offline: 2 };
     return order[a.status] - order[b.status];
   });
@@ -41,7 +101,7 @@ export function FriendsList({ compact = false }: FriendsListProps) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">
-            Friends <span className="text-muted-foreground font-normal text-sm">({mockFriends.filter(f => f.status !== "offline").length} online)</span>
+            Friends <span className="text-muted-foreground font-normal text-sm">({friends.filter(f => f.status !== "offline").length} online)</span>
           </CardTitle>
           <Button variant="ghost" size="sm" className="h-7 px-2">
             <UserPlus className="h-4 w-4" />
