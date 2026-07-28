@@ -6,6 +6,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { MobileHeaderActions } from "@/components/layout/MobileHeaderActions";
 import { Logo } from "@/components/common/Logo";
 import { ToastContainer } from "@/components/notifications/Toast";
+import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import { SkipLink } from "@/components/ui/SkipLink";
 import { BottomNav } from "@/components/ui/BottomNav";
 import { PageTransition } from "@/components/layout/PageTransition";
@@ -54,6 +55,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="min-h-screen bg-background font-sans antialiased flex flex-col">
+      <OfflineBanner />
       <SkipLink targetId="main-content" />
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between">
