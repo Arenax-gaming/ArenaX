@@ -1,5 +1,5 @@
 import cors from 'cors';
-import express, { Express, Request, Response } from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import passport from 'passport';
 import Redis from 'ioredis';
@@ -10,6 +10,8 @@ import { localeMiddleware } from './middleware/locale.middleware';
 import { correlationMiddleware } from './middleware/correlation.middleware';
 import { requestLogger } from './middleware/request-logger.middleware';
 import { metricsMiddleware } from './middleware/metrics.middleware';
+import { apiVersionMiddleware } from './middleware/api-version.middleware';
+import { apiVersionRegistry } from './config/api-versions';
 import routes from './routes/index';
 import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
@@ -157,6 +159,17 @@ export const createApp = (): Express => {
     app.use(localeMiddleware);
     app.use(passport.initialize());
     app.use(metricsMiddleware);
+
+    // Resolves the requested API version from the URL (`/api/v1/...`) or
+    // `Accept` header, attaches it to `res.locals.apiVersion`, and sets
+    // RFC 8594 Deprecation/Sunset headers once a version is deprecated.
+    app.use(apiVersionMiddleware(apiVersionRegistry));
+    app.use((req: Request, res: Response, next: NextFunction) => {
+        const apiVersion = (res.locals as { apiVersion?: { name: string } }).apiVersion;
+        if (apiVersion) res.setHeader('X-API-Version', apiVersion.name);
+        next();
+    });
+
     app.use('/api', routes);
 
     const graphql = getGraphQLExecutor();
