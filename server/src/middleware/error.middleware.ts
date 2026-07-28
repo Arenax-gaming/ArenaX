@@ -1,9 +1,25 @@
+import { createHash } from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
 import { BaseError, InternalServerError, isBaseError } from '../errors';
 import { logger } from '../services/logger.service';
 import { captureException } from '../services/telemetry.service';
 import { HttpError } from '../utils/http-error';
 import { getEnv } from '../config/env';
+import { sanitizeData, sanitizeHeaders } from './request-logger.middleware';
+
+/**
+ * Groups repeated occurrences of "the same" error together for log
+ * search/aggregation, independent of the per-request correlation ID
+ * (which only ties together logs from a single request). IDs and
+ * numbers in the message are normalized out first so e.g. "User 123 not
+ * found" and "User 456 not found" produce the same fingerprint.
+ */
+const ID_LIKE_PATTERN = /[0-9a-fA-F-]{6,}|\d+/g;
+
+const buildErrorFingerprint = (route: string, code: string, message: string): string => {
+    const normalizedMessage = message.replace(ID_LIKE_PATTERN, '#');
+    return createHash('sha1').update(`${code}:${route}:${normalizedMessage}`).digest('hex').slice(0, 12);
+};
 
 const normalizeError = (err: unknown): BaseError => {
     if (isBaseError(err)) {
@@ -36,14 +52,24 @@ export const errorHandler = (
     const { isProductionLike } = getEnv();
     const requestId = req.requestId ?? 'unknown';
     const requestLogger = req.log ?? logger;
+    const route = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path;
+    const rawMessage = err instanceof Error ? err.message : String(err);
 
     requestLogger.error('Unhandled request error', {
         requestId,
+        correlationId: req.correlationId ?? requestId,
         method: req.method,
         path: req.originalUrl,
+        route,
+        query: sanitizeData(req.query || {}),
+        headers: sanitizeHeaders(req.headers || {}),
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        user: req.user ? { id: req.user.id, role: req.user.role } : undefined,
         status: normalizedError.statusCode,
         errorCode: normalizedError.code,
-        message: err instanceof Error ? err.message : String(err),
+        errorFingerprint: buildErrorFingerprint(route, normalizedError.code, rawMessage),
+        message: rawMessage,
         stack: err instanceof Error ? err.stack : undefined,
         details: isBaseError(err) ? err.details : undefined
     });

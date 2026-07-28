@@ -121,7 +121,10 @@ describe('useUsernameAvailability', () => {
     await waitFor(() =>
       expect(screen.getByTestId('status')).toHaveTextContent('available'),
     { timeout: 3000 });
-    expect(api.checkUsernameAvailability).toHaveBeenCalledWith('Arena123');
+    expect(api.checkUsernameAvailability).toHaveBeenCalledWith(
+      'Arena123',
+      expect.any(AbortSignal),
+    );
   });
 
   it('returns unavailable when API returns available: false', async () => {
@@ -168,7 +171,7 @@ jest.mock('@/hooks/useUsernameAvailability', () => ({
   useUsernameAvailability: jest.fn(() => 'idle'),
 }));
 
-import RegisterPage from '@/app/register/page';
+import RegisterPage from '@/app/[locale]/register/page';
 import { useUsernameAvailability as mockUseAvailability } from '@/hooks/useUsernameAvailability';
 
 describe('RegisterPage — form submission guard', () => {

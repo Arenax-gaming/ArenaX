@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { AlertTriangle, RefreshCw, Home, Mail } from "lucide-react";
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
+import { navigate } from "@/lib/routerUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,11 +83,11 @@ export class MobileErrorBoundary extends Component<
   };
 
   handleGoHome = (): void => {
-    window.location.href = "/";
+    navigate("/");
   };
 
   handleReportIssue = (): void => {
-    window.location.href = "/contact?error=true";
+    navigate("/contact?error=true");
   };
 
   getErrorType(): MobileErrorType {
@@ -146,7 +147,7 @@ export class MobileErrorBoundary extends Component<
           <div className="space-y-3">
             {errorType === "auth" ? (
               <Button
-                onClick={() => { window.location.href = "/login"; }}
+                onClick={() => { navigate("/login"); }}
                 className="w-full"
                 size="lg"
               >

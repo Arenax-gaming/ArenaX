@@ -150,3 +150,87 @@ pub fn emit_contract_paused(env: &Env, paused: bool, paused_by: &Address) {
     }
     .publish(env);
 }
+
+// ─── Flexible Reward Pools ───────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXStake_v1", "POOL_CREATED"])]
+pub struct RewardPoolCreated {
+    pub pool_id: u32,
+    pub apy_bps: u32,
+    pub lock_duration: u64,
+}
+
+#[contractevent(topics = ["ArenaXStake_v1", "POOL_UPDATED"])]
+pub struct RewardPoolUpdated {
+    pub pool_id: u32,
+    pub apy_bps: u32,
+    pub active: bool,
+}
+
+#[contractevent(topics = ["ArenaXStake_v1", "FLEX_STAKED"])]
+pub struct FlexibleStaked {
+    pub user: Address,
+    pub pool_id: u32,
+    pub amount: i128,
+}
+
+#[contractevent(topics = ["ArenaXStake_v1", "FLEX_CLAIMED"])]
+pub struct FlexibleClaimed {
+    pub user: Address,
+    pub pool_id: u32,
+    pub amount: i128,
+}
+
+#[contractevent(topics = ["ArenaXStake_v1", "FLEX_UNSTAKED"])]
+pub struct FlexibleUnstaked {
+    pub user: Address,
+    pub pool_id: u32,
+    pub amount: i128,
+    pub penalty: i128,
+}
+
+pub fn emit_reward_pool_created(env: &Env, pool_id: u32, apy_bps: u32, lock_duration: u64) {
+    RewardPoolCreated {
+        pool_id,
+        apy_bps,
+        lock_duration,
+    }
+    .publish(env);
+}
+
+pub fn emit_reward_pool_updated(env: &Env, pool_id: u32, apy_bps: u32, active: bool) {
+    RewardPoolUpdated {
+        pool_id,
+        apy_bps,
+        active,
+    }
+    .publish(env);
+}
+
+pub fn emit_flexible_staked(env: &Env, user: &Address, pool_id: u32, amount: i128) {
+    FlexibleStaked {
+        user: user.clone(),
+        pool_id,
+        amount,
+    }
+    .publish(env);
+}
+
+pub fn emit_flexible_claimed(env: &Env, user: &Address, pool_id: u32, amount: i128) {
+    FlexibleClaimed {
+        user: user.clone(),
+        pool_id,
+        amount,
+    }
+    .publish(env);
+}
+
+pub fn emit_flexible_unstaked(env: &Env, user: &Address, pool_id: u32, amount: i128, penalty: i128) {
+    FlexibleUnstaked {
+        user: user.clone(),
+        pool_id,
+        amount,
+        penalty,
+    }
+    .publish(env);
+}

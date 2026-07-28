@@ -89,6 +89,17 @@ const cacheMissesTotal = getOrCreateCounter({
   labelNames: ['namespace'],
 });
 
+// Redis Cluster metrics (#655)
+const redisClusterNodesTotal = getOrCreateGauge({
+  name: 'redis_cluster_nodes_total',
+  help: 'Number of nodes configured in the Redis Cluster',
+});
+
+const redisClusterNodesReady = getOrCreateGauge({
+  name: 'redis_cluster_nodes_ready',
+  help: 'Number of Redis Cluster nodes currently reachable and ready',
+});
+
 // Compression metrics (issue #477)
 const compressionUncompressedBytes = getOrCreateCounter({
   name: 'http_response_uncompressed_bytes_total',
@@ -153,6 +164,12 @@ export class MetricsService {
     cacheMissesTotal.inc({ namespace });
   }
 
+  // Redis Cluster metrics (#655)
+  setRedisClusterHealth(nodesTotal: number, nodesReady: number) {
+    redisClusterNodesTotal.set(nodesTotal);
+    redisClusterNodesReady.set(nodesReady);
+  }
+
   // Compression metrics (issue #477)
   recordCompression(
     encoding: string,
@@ -193,6 +210,8 @@ export class MetricsService {
     responseSizeBytes.reset();
     cacheHitsTotal.reset();
     cacheMissesTotal.reset();
+    redisClusterNodesTotal.reset();
+    redisClusterNodesReady.reset();
     logger.info('Metrics reset');
   }
 

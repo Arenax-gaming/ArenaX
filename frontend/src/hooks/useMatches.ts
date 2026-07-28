@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { Match, MatchWithPlayers, MatchDetail, MatchFilters } from '@/types/match'
+import { Match, MatchWithPlayers, MatchDetail, MatchFilters, ReportScoreRequest } from '@/types/match'
 import { MatchHubDetails } from '@/data/matchHub'
 
 // Fetch a single match
@@ -38,7 +38,7 @@ export const useReportMatchScore = () => {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: async ({ id, result }: { id: string; result: any }) => {
+    mutationFn: async ({ id, result }: { id: string; result: ReportScoreRequest }) => {
       return await api.reportMatchScore(id, result)
     },
     onSuccess: (_, { id }) => {

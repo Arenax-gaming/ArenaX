@@ -1,0 +1,24 @@
+filebeat.inputs:
+  - type: filestream
+    id: arenax-server-logs
+    paths:
+      - /var/log/arenax/application-*.log
+      - /var/log/arenax/error-*.log
+    parsers:
+      # Each line is already a single JSON object emitted by winston
+      # (winston.format.json() in src/services/logger.service.ts) —
+      # decode it here so Filebeat forwards structured fields instead of
+      # a raw string for Logstash to re-parse.
+      - ndjson:
+          target: ""
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      service: arenax-server
+    fields_under_root: true
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: info
+logging.to_stderr: true

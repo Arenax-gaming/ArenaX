@@ -1,17 +1,95 @@
 use crate::api_error::ApiError;
-use crate::auth::jwt_service::TokenPair;
+use crate::auth::jwt_service::{JwtConfig, JwtService, TokenPair};
 use crate::auth::middleware::ClaimsExt;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest};
 use crate::service::auth_service::{ActiveSession, AuthService};
+use actix_web::cookie::{Cookie, SameSite};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
-/// Refresh token request
+// ── Cookie names ──────────────────────────────────────────────────────────────
+
+pub const ACCESS_TOKEN_COOKIE: &str = "auth_token";
+pub const REFRESH_TOKEN_COOKIE: &str = "auth_refresh_token";
+
+// ── Cookie builders ───────────────────────────────────────────────────────────
+
+/// Build the `auth_token` (access) cookie.
+///
+/// - `HttpOnly` — not readable by JavaScript.
+/// - `Secure`   — only sent over HTTPS (browsers ignore on localhost).
+/// - `SameSite=Strict` — never sent on cross-site requests.
+/// - `Path=/api` — scoped so it isn't sent for unrelated requests.
+fn build_access_cookie(token: &str, max_age_secs: i64) -> Cookie<'static> {
+    Cookie::build(ACCESS_TOKEN_COOKIE, token.to_owned())
+        .path("/api")
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .max_age(actix_web::cookie::time::Duration::seconds(max_age_secs))
+        .finish()
+}
+
+/// Build the `auth_refresh_token` cookie.
+///
+/// Scoped to `/api/auth/refresh` so it is only sent for token refresh
+/// requests, minimising the attack surface.
+fn build_refresh_cookie(token: &str, max_age_secs: i64) -> Cookie<'static> {
+    Cookie::build(REFRESH_TOKEN_COOKIE, token.to_owned())
+        .path("/api/auth/refresh")
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .max_age(actix_web::cookie::time::Duration::seconds(max_age_secs))
+        .finish()
+}
+
+/// Build expired (clearing) versions of both cookies.
+fn clear_access_cookie() -> Cookie<'static> {
+    Cookie::build(ACCESS_TOKEN_COOKIE, "")
+        .path("/api")
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .max_age(actix_web::cookie::time::Duration::seconds(0))
+        .finish()
+}
+
+fn clear_refresh_cookie() -> Cookie<'static> {
+    Cookie::build(REFRESH_TOKEN_COOKIE, "")
+        .path("/api/auth/refresh")
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .max_age(actix_web::cookie::time::Duration::seconds(0))
+        .finish()
+}
+
+// ── Helper: attach cookie pair to any response builder ───────────────────────
+
+/// Attach the access + refresh httpOnly cookies to `response_builder` and
+/// return the finalised `HttpResponse`.
+fn response_with_auth_cookies(
+    mut builder: actix_web::HttpResponseBuilder,
+    tokens: &TokenPair,
+    refresh_max_age: i64,
+) -> HttpResponse {
+    builder
+        .cookie(build_access_cookie(&tokens.access_token, tokens.expires_in))
+        .cookie(build_refresh_cookie(&tokens.refresh_token, refresh_max_age))
+        .finish()
+}
+
+// ── Request / response DTOs ───────────────────────────────────────────────────
+
+/// Refresh token request — accepted from JSON body as a fallback, but the
+/// preferred path is the `auth_refresh_token` cookie set at login.
 #[derive(Debug, Deserialize)]
 pub struct RefreshTokenRequest {
-    pub refresh_token: String,
+    pub refresh_token: Option<String>,
 }
 
 /// Change password request
@@ -21,12 +99,6 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-/// Logout request
-#[derive(Debug, Deserialize)]
-pub struct LogoutRequest {
-    pub token: String,
-}
-
 /// Sessions response
 #[derive(Debug, Serialize)]
 pub struct SessionsResponse {
@@ -34,74 +106,167 @@ pub struct SessionsResponse {
     pub total: usize,
 }
 
+/// Response body returned to the client on login / register.
+///
+/// Tokens are delivered as httpOnly cookies; this body carries only the user
+/// profile plus `expires_in` so the frontend knows when to expect a 401.
+#[derive(Debug, Serialize)]
+pub struct AuthSuccessResponse {
+    pub user: crate::models::user::UserProfile,
+    /// Access token TTL in seconds — the frontend uses this to proactively
+    /// refresh before expiry without ever touching the token value itself.
+    pub expires_in: i64,
+}
+
+/// Short-lived token for WebSocket authentication handshakes.
+#[derive(Debug, Serialize)]
+pub struct WsTokenResponse {
+    /// A signed JWT valid for 60 seconds, used only to authenticate the
+    /// initial WebSocket message.  It must NOT be stored — request a fresh
+    /// one immediately before opening a socket.
+    pub ws_token: String,
+    pub expires_in: i64,
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
 /// POST /api/auth/register
-/// Register a new user
 pub async fn register(
     auth_service: web::Data<AuthService>,
+    jwt_service: web::Data<Arc<JwtService>>,
     request: web::Json<CreateUserRequest>,
 ) -> Result<impl Responder, ApiError> {
     info!(
         username = %request.username,
-        email = %request.email,
+        email = %request.email.as_deref().unwrap_or("(none)"),
         "Registration request received"
     );
 
-    let response = auth_service.register(request.into_inner()).await?;
+    let response: AuthResponse = auth_service.register(request.into_inner()).await?;
 
-    Ok(HttpResponse::Created().json(response))
+    // Retrieve the refresh TTL from the JwtService config so the cookie
+    // max-age matches the token lifetime exactly.
+    let refresh_max_age = jwt_service
+        .refresh_token_expiry_secs();
+
+    let body = AuthSuccessResponse {
+        user: response.user,
+        expires_in: {
+            // We don't have direct access to the access TTL here, but the
+            // TokenPair carries it — reconstruct a temporary pair just for
+            // the expires_in field.
+            jwt_service.access_token_expiry_secs()
+        },
+    };
+
+    let tokens = TokenPair {
+        access_token: response.token,
+        refresh_token: response.refresh_token,
+        expires_in: body.expires_in,
+        token_type: "Bearer".to_string(),
+    };
+
+    let mut builder = HttpResponse::Created();
+    builder
+        .cookie(build_access_cookie(&tokens.access_token, tokens.expires_in))
+        .cookie(build_refresh_cookie(&tokens.refresh_token, refresh_max_age));
+    Ok(builder.json(body))
 }
 
 /// POST /api/auth/login
-/// Login user and get tokens
 pub async fn login(
     auth_service: web::Data<AuthService>,
+    jwt_service: web::Data<Arc<JwtService>>,
     request: web::Json<LoginRequest>,
 ) -> Result<impl Responder, ApiError> {
     info!(email = %request.email, "Login request received");
 
-    let response = auth_service.login(request.into_inner()).await?;
+    let response: AuthResponse = auth_service.login(request.into_inner()).await?;
 
-    Ok(HttpResponse::Ok().json(response))
+    let refresh_max_age = jwt_service.refresh_token_expiry_secs();
+    let access_expires_in = jwt_service.access_token_expiry_secs();
+
+    let body = AuthSuccessResponse {
+        user: response.user,
+        expires_in: access_expires_in,
+    };
+
+    let tokens = TokenPair {
+        access_token: response.token,
+        refresh_token: response.refresh_token,
+        expires_in: access_expires_in,
+        token_type: "Bearer".to_string(),
+    };
+
+    let mut builder = HttpResponse::Ok();
+    builder
+        .cookie(build_access_cookie(&tokens.access_token, tokens.expires_in))
+        .cookie(build_refresh_cookie(&tokens.refresh_token, refresh_max_age));
+    Ok(builder.json(body))
 }
 
 /// POST /api/auth/refresh
-/// Refresh access token using refresh token
+///
+/// Reads the refresh token from the `auth_refresh_token` cookie (preferred)
+/// or from a JSON body field `refresh_token` (legacy / mobile clients).
 pub async fn refresh_token(
     auth_service: web::Data<AuthService>,
-    request: web::Json<RefreshTokenRequest>,
+    jwt_service: web::Data<Arc<JwtService>>,
+    req: HttpRequest,
+    body: web::Json<RefreshTokenRequest>,
 ) -> Result<impl Responder, ApiError> {
     info!("Token refresh request received");
 
-    let token_pair = auth_service.refresh_token(&request.refresh_token).await?;
+    // Prefer the httpOnly cookie; fall back to the JSON body field.
+    let refresh_token_value = req
+        .cookie(REFRESH_TOKEN_COOKIE)
+        .map(|c| c.value().to_owned())
+        .or_else(|| body.refresh_token.clone())
+        .ok_or_else(|| ApiError::bad_request("No refresh token provided"))?;
 
-    Ok(HttpResponse::Ok().json(token_pair))
+    let token_pair = auth_service.refresh_token(&refresh_token_value).await?;
+
+    let refresh_max_age = jwt_service.refresh_token_expiry_secs();
+
+    let mut builder = HttpResponse::Ok();
+    builder
+        .cookie(build_access_cookie(&token_pair.access_token, token_pair.expires_in))
+        .cookie(build_refresh_cookie(&token_pair.refresh_token, refresh_max_age));
+    Ok(builder.json(serde_json::json!({ "expires_in": token_pair.expires_in })))
 }
 
 /// POST /api/auth/logout
-/// Logout user (blacklist token)
+///
+/// Blacklists the current access token (extracted from cookie or Authorization
+/// header) and clears both auth cookies.
 pub async fn logout(
     auth_service: web::Data<AuthService>,
     req: HttpRequest,
 ) -> Result<impl Responder, ApiError> {
-    // Extract token from Authorization header
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or_else(|| ApiError::bad_request("Missing or invalid Authorization header"))?;
+    // Accept token from cookie or Authorization header.
+    let token = req
+        .cookie(ACCESS_TOKEN_COOKIE)
+        .map(|c| c.value().to_owned())
+        .or_else(|| {
+            req.headers()
+                .get("Authorization")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| ApiError::bad_request("No auth token found"))?;
 
-    auth_service.logout(auth_header).await?;
+    auth_service.logout(&token).await?;
 
     info!("User logged out successfully");
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Logged out successfully"
-    })))
+    Ok(HttpResponse::Ok()
+        .cookie(clear_access_cookie())
+        .cookie(clear_refresh_cookie())
+        .json(serde_json::json!({ "message": "Logged out successfully" })))
 }
 
 /// GET /api/auth/me
-/// Get current user profile (requires authentication)
 pub async fn get_current_user(
     auth_service: web::Data<AuthService>,
     req: HttpRequest,
@@ -122,7 +287,6 @@ pub async fn get_current_user(
 }
 
 /// POST /api/auth/change-password
-/// Change user password (requires authentication)
 pub async fn change_password(
     auth_service: web::Data<AuthService>,
     req: HttpRequest,
@@ -138,13 +302,16 @@ pub async fn change_password(
 
     info!(user_id = %user_id, "Password changed successfully");
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Password changed successfully. All sessions have been revoked."
-    })))
+    // Clear cookies — the user must log in again after a password change.
+    Ok(HttpResponse::Ok()
+        .cookie(clear_access_cookie())
+        .cookie(clear_refresh_cookie())
+        .json(serde_json::json!({
+            "message": "Password changed successfully. All sessions have been revoked."
+        })))
 }
 
 /// POST /api/auth/revoke-sessions
-/// Revoke all user sessions (requires authentication)
 pub async fn revoke_all_sessions(
     auth_service: web::Data<AuthService>,
     req: HttpRequest,
@@ -157,14 +324,16 @@ pub async fn revoke_all_sessions(
 
     info!(user_id = %user_id, count = count, "Sessions revoked");
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": format!("{} session(s) revoked successfully", count),
-        "count": count
-    })))
+    Ok(HttpResponse::Ok()
+        .cookie(clear_access_cookie())
+        .cookie(clear_refresh_cookie())
+        .json(serde_json::json!({
+            "message": format!("{} session(s) revoked successfully", count),
+            "count": count
+        })))
 }
 
 /// GET /api/auth/sessions
-/// Get all active sessions for current user (requires authentication)
 pub async fn get_sessions(
     auth_service: web::Data<AuthService>,
     req: HttpRequest,
@@ -179,13 +348,11 @@ pub async fn get_sessions(
     Ok(HttpResponse::Ok().json(SessionsResponse { sessions, total }))
 }
 
-/// GET /api/auth/analytics
-/// Get token analytics (admin only)
+/// GET /api/auth/analytics  (admin only)
 pub async fn get_analytics(
-    auth_service: web::Data<AuthService>,
+    _auth_service: web::Data<AuthService>,
     req: HttpRequest,
 ) -> Result<impl Responder, ApiError> {
-    // Check if user is admin
     let claims = req
         .claims()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
@@ -203,12 +370,36 @@ pub async fn get_analytics(
     })))
 }
 
-/// Configure authentication routes.
+/// GET /api/auth/ws-token
 ///
-/// This function is intended to be called via `.configure(...)` inside an
-/// existing `/api` scope.  It therefore opens a `/auth` sub-scope — **not**
-/// `/api/auth` — so the resulting paths resolve to `/api/auth/…` without a
-/// duplicate `/api` prefix.
+/// Issues a short-lived (60-second) signed access token for authenticating
+/// the initial WebSocket handshake message.  The token is NOT stored in a
+/// cookie — it is returned in the JSON body and used immediately.
+///
+/// Requires: valid `auth_token` cookie (i.e. the user must already be logged in).
+pub async fn get_ws_token(
+    jwt_service: web::Data<Arc<JwtService>>,
+    req: HttpRequest,
+) -> Result<impl Responder, ApiError> {
+    let claims = req
+        .claims()
+        .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
+
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::internal_error("Invalid user ID in token"))?;
+
+    let ws_token = jwt_service
+        .generate_ws_token(user_id, claims.roles)
+        .await
+        .map_err(|e| ApiError::internal_error(format!("WS token generation failed: {}", e)))?;
+
+    Ok(HttpResponse::Ok().json(WsTokenResponse {
+        ws_token,
+        expires_in: 60,
+    }))
+}
+
+/// Configure authentication routes.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/auth")
@@ -220,7 +411,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/change-password", web::post().to(change_password))
             .route("/revoke-sessions", web::post().to(revoke_all_sessions))
             .route("/sessions", web::get().to(get_sessions))
-            .route("/analytics", web::get().to(get_analytics)),
+            .route("/analytics", web::get().to(get_analytics))
+            .route("/ws-token", web::get().to(get_ws_token)),
     );
 }
 
@@ -229,10 +421,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_request_deserialization() {
+    fn test_refresh_request_optional_field() {
+        // Fully absent field
+        let json = r#"{}"#;
+        let req: RefreshTokenRequest = serde_json::from_str(json).unwrap();
+        assert!(req.refresh_token.is_none());
+
+        // Present field
         let json = r#"{"refresh_token":"test_token"}"#;
         let req: RefreshTokenRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.refresh_token, "test_token");
+        assert_eq!(req.refresh_token.as_deref(), Some("test_token"));
     }
 
     #[test]

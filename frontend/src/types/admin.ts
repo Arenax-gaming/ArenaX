@@ -70,3 +70,48 @@ export interface GovernanceProposal {
   targetContract: string;
   _count: { votes: number };
 }
+
+// ─── Audit log ────────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+  id: string;
+  adminId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  details?: Record<string, unknown>;
+  ipAddress?: string;
+  requestId?: string;
+  createdAt: string;
+}
+
+export interface AuditLogFilters {
+  adminId?: string;
+  action?: string;
+  targetType?: string;
+  targetId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedAuditLogs {
+  data: AuditLog[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+// ─── KYC process ─────────────────────────────────────────────────────────────
+
+export interface ProcessKycPayload {
+  status: KycStatus;
+  notes?: string;
+}
+
+export interface KycFilters {
+  status?: KycStatus;
+  page?: number;
+  limit?: number;
+}
