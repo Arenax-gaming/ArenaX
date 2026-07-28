@@ -126,6 +126,12 @@ scrape_configs:
     metrics_path: '/api/metrics'
 ```
 
+A ready-to-run Prometheus + Grafana stack (scrape config, alerting
+rules, and a provisioned Grafana dashboard) is bundled under
+`server/infra/monitoring/` — see
+[`docs/PROMETHEUS_GRAFANA_MONITORING.md`](docs/PROMETHEUS_GRAFANA_MONITORING.md)
+instead of hand-rolling the config above.
+
 ## Usage in Code
 
 ### Recording HTTP Metrics
@@ -221,8 +227,8 @@ METRICS_ENABLED="false"
 
 ## Future Enhancements
 
-- Add Grafana dashboard templates
-- Implement alerting rules
+- ~~Add Grafana dashboard templates~~ / ~~Implement alerting rules~~ —
+  done, see [`docs/PROMETHEUS_GRAFANA_MONITORING.md`](docs/PROMETHEUS_GRAFANA_MONITORING.md)
 - Add custom metric labels
 - Support for histogram quantiles
 - Real-time WebSocket updates for dashboard

@@ -24,6 +24,7 @@ import { publicRateLimiter } from '../middleware/rate-limit.middleware';
 import { auditMiddleware } from '../middleware/audit.middleware';
 import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
 import { MaintenanceService } from '../services/maintenance.service';
+import { apiVersionRegistry } from '../config/api-versions';
 
 const router: Router = Router();
 
@@ -35,28 +36,49 @@ router.get('/maintenance/status', (req, res) => {
     res.status(200).json(MaintenanceService.getInstance().getStatus());
 });
 
+router.get('/versions', (req, res) => {
+    res.status(200).json({
+        current: apiVersionRegistry.getDefault().name,
+        versions: apiVersionRegistry.list(),
+    });
+});
+
 router.use(maintenanceMiddleware);
 
-router.use('/api/v1/auth', authRoutes);
-router.use('/profiles', profileRoutes);
-router.use('/matches', matchRoutes);
-router.use('/api/v1/admin', adminRoutes);
-router.use('/governance', governanceRoutes);
-router.use('/soroban', sorobanRoutes);
-router.use('/wallets', walletRoutes);
-router.use('/wallet', walletRoutes);
+// This router is mounted at `/api` in app.ts, so a canonical v1 route only
+// needs a `/v1/...` prefix here — mounting `/api/v1/...` under it produced
+// unreachable `/api/api/v1/...` paths (see #657). Routes that previously
+// had that double prefix, or none at all, are given a single `/v1/...`
+// mount here. `mountVersioned` additionally keeps the pre-versioning
+// unversioned path alive as a deprecated alias for clients/tests that
+// haven't migrated yet, so both `/api/v1/<resource>` and `/api/<resource>`
+// keep working during the transition.
+const mountVersioned = (base: string, handler: Router) => {
+    router.use(`/v1${base}`, handler);
+    router.use(base, handler);
+};
+
+mountVersioned('/auth', authRoutes);
+mountVersioned('/profiles', profileRoutes);
+mountVersioned('/matches', matchRoutes);
+mountVersioned('/admin', adminRoutes);
+mountVersioned('/governance', governanceRoutes);
+mountVersioned('/soroban', sorobanRoutes);
+mountVersioned('/wallets', walletRoutes);
+mountVersioned('/wallet', walletRoutes);
+mountVersioned('/analytics', analyticsRoutes);
 router.use('/v1/achievements', achievementRoutes);
 router.use('/v1/tournaments', tournamentRoutes);
-router.use('/api/v1/analytics', analyticsRoutes);
+router.use('/v1/search', searchRoutes);
+router.use('/v1/cache', cacheRoutes);
+router.use('/v1/gateway', apiGatewayRoutes);
+router.use('/v1/queue', queueRoutes);
+router.use('/v1/access-control', accessControlRoutes);
+router.use('/v1/assets', crossGameAssetRoutes);
+router.use('/v1/i18n', i18nRoutes);
+
+// Unversioned infrastructure endpoints — not part of the public API surface.
 router.use('/metrics', metricsRoutes);
 router.use('/dashboard', dashboardRoutes);
-router.use('/v1/search', searchRoutes);
-router.use('/api/v1/cache', cacheRoutes);
-router.use('/api/v1/gateway', apiGatewayRoutes);
-router.use('/api/v1/queue', queueRoutes);
-router.use('/api/v1/access-control', accessControlRoutes);
-router.use('/api/v1/assets', crossGameAssetRoutes);
-router.use('/api/v1/i18n', i18nRoutes);
-
 
 export default router;
