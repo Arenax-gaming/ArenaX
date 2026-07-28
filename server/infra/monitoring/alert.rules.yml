@@ -1,0 +1,55 @@
+groups:
+  - name: arenax-server
+    rules:
+      - alert: ArenaXServerDown
+        expr: up{job="arenax-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "arenax-server is not being scraped"
+          description: "Prometheus has not been able to scrape /api/metrics on arenax-server for 1 minute."
+
+      - alert: HighHttpErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx error rate above 5%"
+          description: "More than 5% of HTTP responses have been 5xx over the last 5 minutes."
+
+      - alert: HighHttpLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 HTTP latency above 1s"
+          description: "95th percentile request duration has been above 1 second for 5 minutes."
+
+      - alert: HighProcessMemory
+        expr: process_resident_memory_bytes{job="arenax-server"} > 1.5e9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "arenax-server resident memory above 1.5GB"
+          description: "Process RSS has been above 1.5GB for 10 minutes — check for leaks or scale up."
+
+      - alert: ElevatedApplicationErrors
+        expr: sum(rate(errors_total{severity=~"high|critical"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High/critical application errors trending up"
+          description: "More than 1/s of high or critical severity errors recorded via errors_total over the last 5 minutes."
