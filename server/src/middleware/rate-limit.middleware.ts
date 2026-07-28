@@ -1,7 +1,7 @@
 import rateLimit, { MemoryStore, Store } from 'express-rate-limit';
 import { Request, Response } from 'express';
 import Redis from 'ioredis';
-import { RedisRateLimitStore } from './rate-limit-redis.store';
+import { SlidingWindowRateLimitStore } from './sliding-window-rate-limit.store';
 import { FailoverStore } from './rate-limit-failover';
 import { logger } from '../services/logger.service';
 
@@ -54,10 +54,13 @@ function getRateLimitRedis(): Redis | null {
 function createRateLimitStore(windowMs: number, prefix: string): Store {
     const redis = getRateLimitRedis();
     if (!redis) {
+        // No Redis configured: fall back to express-rate-limit's in-process
+        // fixed-window MemoryStore. Sliding-window accuracy requires the
+        // shared Redis counters below.
         return new MemoryStore();
     }
 
-    const redisStore = new RedisRateLimitStore({ redis, prefix, windowMs });
+    const redisStore = new SlidingWindowRateLimitStore({ redis, prefix, windowMs });
     const memoryStore = new MemoryStore();
 
     return new FailoverStore(redisStore, memoryStore, {
