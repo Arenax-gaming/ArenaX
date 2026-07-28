@@ -15,7 +15,7 @@ import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
 import rateLimit from 'express-rate-limit';
 import { MemoryStore } from 'express-rate-limit';
-import { RedisRateLimitStore } from './middleware/rate-limit-redis.store';
+import { SlidingWindowRateLimitStore } from './middleware/sliding-window-rate-limit.store';
 import { FailoverStore } from './middleware/rate-limit-failover';
 import { createRateLimitHealthCheck, registerRateLimitMetricsProvider, getRateLimitMetrics } from './middleware/rate-limit-monitoring';
 import { initAdaptiveRateLimitRedis } from './middleware/adaptiveRateLimit.middleware';
@@ -100,12 +100,13 @@ export const createApp = (): Express => {
     app.use(xss()); // Prevent XSS attacks
     app.use(hpp()); // Prevent HTTP Parameter Pollution
 
-    // Global API rate limiter with Redis-backed store and in-memory failover
+    // Global API rate limiter with a sliding-window Redis-backed store and
+    // in-memory failover
     const globalRateLimitWindowMs = 15 * 60 * 1000;
     const redis = getRateLimitRedisClient();
     let apiLimiterStore: any;
     if (redis) {
-        const redisStore = new RedisRateLimitStore({
+        const redisStore = new SlidingWindowRateLimitStore({
             redis,
             prefix: 'rl:global:',
             windowMs: globalRateLimitWindowMs,
