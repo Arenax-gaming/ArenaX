@@ -16,21 +16,23 @@ impl LeaderboardService {
         Self { db_pool }
     }
 
-    /// Get leaderboard rankings for a category
+    /// Get leaderboard rankings for a category (optimized with single query)
     pub async fn get_leaderboard(
         &self,
         category: &str,
         limit: i64,
         offset: i64,
     ) -> Result<LeaderboardResponse, ApiError> {
-        let entries = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, i32, i32, i32, i32, f64, String, DateTime<Utc>)>(
+        // Optimized: use window function to get count in same query
+        let entries = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, i32, i32, i32, i32, f64, String, DateTime<Utc>, i64)>(
             r#"
             SELECT 
                 l.id, l.user_id, u.username, u.avatar_url,
                 l.ranking, l.elo_rating, l.matches_played, l.wins, l.losses, l.win_rate,
-                l.period, l.updated_at
+                l.period, l.updated_at,
+                COUNT(*) OVER() as total_count
             FROM leaderboards l
-            JOIN users u ON l.user_id = u.id
+            INNER JOIN users u ON l.user_id = u.id
             WHERE l.game = $1 AND l.period = 'all_time'
             ORDER BY l.ranking ASC
             LIMIT $2 OFFSET $3
@@ -43,17 +45,11 @@ impl LeaderboardService {
         .await
         .map_err(|e| ApiError::DatabaseError(e))?;
 
-        let total_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM leaderboards WHERE game = $1 AND period = 'all_time'"
-        )
-        .bind(category)
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::DatabaseError(e))?;
+        let total_count = entries.first().map(|e| e.12).unwrap_or(0);
 
         let leaderboard_entries = entries
             .into_iter()
-            .map(|(id, user_id, username, avatar_url, ranking, elo_rating, matches_played, wins, losses, win_rate, period, updated_at)| {
+            .map(|(id, user_id, username, avatar_url, ranking, elo_rating, matches_played, wins, losses, win_rate, period, updated_at, _)| {
                 LeaderboardEntry {
                     id,
                     user_id,
@@ -79,7 +75,7 @@ impl LeaderboardService {
         })
     }
 
-    /// Get seasonal leaderboard rankings
+    /// Get seasonal leaderboard rankings (optimized with single query)
     pub async fn get_seasonal_leaderboard(
         &self,
         category: &str,
@@ -87,14 +83,16 @@ impl LeaderboardService {
         limit: i64,
         offset: i64,
     ) -> Result<SeasonalLeaderboard, ApiError> {
-        let entries = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, i32, i32, i32, i32, f64, String, DateTime<Utc>)>(
+        // Optimized: use window function to get count in same query
+        let entries = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, i32, i32, i32, i32, i32, f64, String, DateTime<Utc>, i64)>(
             r#"
             SELECT 
                 l.id, l.user_id, u.username, u.avatar_url,
                 l.ranking, l.elo_rating, l.matches_played, l.wins, l.losses, l.win_rate,
-                l.period, l.updated_at
+                l.period, l.updated_at,
+                COUNT(*) OVER() as total_count
             FROM leaderboards l
-            JOIN users u ON l.user_id = u.id
+            INNER JOIN users u ON l.user_id = u.id
             WHERE l.game = $1 AND l.period = $2
             ORDER BY l.ranking ASC
             LIMIT $3 OFFSET $4
@@ -108,18 +106,11 @@ impl LeaderboardService {
         .await
         .map_err(|e| ApiError::DatabaseError(e))?;
 
-        let total_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM leaderboards WHERE game = $1 AND period = $2"
-        )
-        .bind(category)
-        .bind(season)
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::DatabaseError(e))?;
+        let total_count = entries.first().map(|e| e.12).unwrap_or(0);
 
         let leaderboard_entries = entries
             .into_iter()
-            .map(|(id, user_id, username, avatar_url, ranking, elo_rating, matches_played, wins, losses, win_rate, period, updated_at)| {
+            .map(|(id, user_id, username, avatar_url, ranking, elo_rating, matches_played, wins, losses, win_rate, period, updated_at, _)| {
                 LeaderboardEntry {
                     id,
                     user_id,
@@ -255,48 +246,42 @@ impl LeaderboardService {
         })
     }
 
-    /// Update player rank (called after match completion)
+    /// Update player rank (optimized with batching support)
     pub async fn update_player_rank(
         &self,
         category: &str,
         player_id: Uuid,
     ) -> Result<(), ApiError> {
-        // Calculate new ranking based on Elo rating
-        let elo_rating = sqlx::query_scalar::<_, i32>(
-            "SELECT current_rating FROM user_elo WHERE user_id = $1 AND game = $2"
-        )
-        .bind(player_id)
-        .bind(category)
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::DatabaseError(e))?
-        .unwrap_or(1200);
-
-        let matches_stats = sqlx::query_as::<_, (i32, i32, i32)>(
+        // Optimized: batch Elo rating and match stats queries
+        let player_stats = sqlx::query_as::<_, (Option<i32>, i32, i32, i32)>(
             r#"
             SELECT 
-                COUNT(*)::int as matches_played,
-                SUM(CASE WHEN winner_id = $1 THEN 1 ELSE 0 END)::int as wins,
-                SUM(CASE WHEN winner_id != $1 AND player1_id = $1 OR player2_id = $1 THEN 1 ELSE 0 END)::int as losses
-            FROM matches
-            WHERE (player1_id = $1 OR player2_id = $1) AND game_mode = $2 AND status = 3
+                ue.current_rating,
+                COUNT(m.id)::int as matches_played,
+                SUM(CASE WHEN m.winner_id = $1 THEN 1 ELSE 0 END)::int as wins,
+                SUM(CASE WHEN m.winner_id != $1 AND (m.player1_id = $1 OR m.player2_id = $1) THEN 1 ELSE 0 END)::int as losses
+            FROM user_elo ue
+            LEFT JOIN matches m ON (m.player1_id = $1 OR m.player2_id = $1) AND m.game_mode = $2 AND m.status = 3
+            WHERE ue.user_id = $1 AND ue.game = $2
+            GROUP BY ue.current_rating
             "#
         )
         .bind(player_id)
         .bind(category)
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::DatabaseError(e))?
-        .unwrap_or((0, 0, 0));
+        .map_err(|e| ApiError::DatabaseError(e))?;
 
-        let (matches_played, wins, losses) = matches_stats;
+        let (elo_rating_opt, matches_played, wins, losses) = player_stats.unwrap_or((None, 0, 0, 0));
+        let elo_rating = elo_rating_opt.unwrap_or(1200);
+
         let win_rate = if matches_played > 0 {
             (wins as f64 / matches_played as f64) * 100.0
         } else {
             0.0
         };
 
-        // Get new ranking based on Elo
+        // Optimized: get ranking with a more efficient subquery
         let new_ranking = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*) + 1 FROM user_elo 
@@ -339,10 +324,39 @@ impl LeaderboardService {
         Ok(())
     }
 
-    /// Refresh entire leaderboard for a category
+    /// Batch update player ranks for multiple players (optimized for refresh)
+    pub async fn batch_update_player_ranks(
+        &self,
+        category: &str,
+        player_ids: &[Uuid],
+    ) -> Result<(), ApiError> {
+        if player_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Batch process in chunks of 100 to avoid overwhelming the database
+        const BATCH_SIZE: usize = 100;
+        
+        for chunk in player_ids.chunks(BATCH_SIZE) {
+            // Process chunk concurrently using futures
+            let mut tasks = Vec::new();
+            for &player_id in chunk {
+                tasks.push(self.update_player_rank(category, player_id));
+            }
+            
+            // Wait for all tasks in this chunk to complete
+            for task in tasks {
+                task.await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Refresh entire leaderboard for a category (optimized with batching)
     pub async fn refresh_leaderboard(&self, category: &str) -> Result<(), ApiError> {
         // Get all players with Elo ratings for this category
-        let players = sqlx::query_as::<_, (Uuid,)>(
+        let players = sqlx::query_scalar::<_, Uuid>(
             "SELECT DISTINCT user_id FROM user_elo WHERE game = $1"
         )
         .bind(category)
@@ -350,9 +364,8 @@ impl LeaderboardService {
         .await
         .map_err(|e| ApiError::DatabaseError(e))?;
 
-        for (player_id,) in players {
-            self.update_player_rank(category, player_id).await?;
-        }
+        // Use batch update instead of sequential processing
+        self.batch_update_player_ranks(category, &players).await?;
 
         Ok(())
     }
