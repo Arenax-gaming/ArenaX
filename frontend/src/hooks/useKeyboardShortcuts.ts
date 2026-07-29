@@ -199,7 +199,15 @@ export function useKeyboardShortcuts(
     };
 
     window.addEventListener("keydown", handler, { capture: true });
-    return () => window.removeEventListener("keydown", handler, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handler, { capture: true });
+      // Clean up chord timer on unmount
+      if (chordTimerRef.current) {
+        clearTimeout(chordTimerRef.current);
+        chordTimerRef.current = null;
+      }
+      pendingChordRef.current = null;
+    };
   }, [allShortcuts, effectiveKey, fire]);
 
   const registerShortcuts = useCallback((newShortcuts: Shortcut[]): (() => void) => {
