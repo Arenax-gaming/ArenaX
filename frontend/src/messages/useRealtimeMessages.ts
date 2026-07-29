@@ -131,8 +131,11 @@ export function useRealtimeMessages({
     }
 
     return () => {
-      // Don't disconnect on unmount — the manager is shared across conversations
-      // Actual disconnect happens when explicitly called or page unloads
+      // Disconnect on unmount to prevent memory leaks
+      // The manager is shared but should be cleaned up when no longer needed
+      if (managerRef.current) {
+        managerRef.current.disconnect();
+      }
     };
   }, [resolvedUrl, autoConnect, getToken]);
 

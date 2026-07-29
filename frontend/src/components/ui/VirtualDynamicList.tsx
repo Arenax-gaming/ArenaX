@@ -125,13 +125,17 @@ export function VirtualDynamicList<T>({
     []
   );
 
-  // Clean up observers on unmount
+  // Clean up observers on unmount and when items change
   useEffect(() => {
     const observers = observersRef.current;
     return () => {
       Object.values(observers).forEach((o) => o.disconnect());
+      // Clear the observers reference to prevent memory leaks
+      Object.keys(observersRef.current).forEach((key) => {
+        delete observersRef.current[key];
+      });
     };
-  }, []);
+  }, [items]);
 
   const handleScroll = useCallback(
     ({ scrollOffset }: { scrollOffset: number }) => {
