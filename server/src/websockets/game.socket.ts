@@ -99,6 +99,9 @@ export function initGameSocket(io: Server) {
           cleanupSocketFromSession(socket, io, gameSessionService, sessionId, 'disconnect');
         }
       }
+      
+      // Remove all event listeners for this socket to prevent memory leaks
+      socket.removeAllListeners();
     });
   });
 }
@@ -139,6 +142,15 @@ function cleanupSocketFromSession(
   if (connectedSockets.size === 0) {
     sessionSockets.delete(sessionId);
     gameSessionService.removeSession(sessionId);
+    
+    // Clean up action queue and timer for this session
+    actionQueues.delete(sessionId);
+    const timer = actionTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      actionTimers.delete(sessionId);
+    }
+    
     logger.info('Game session deleted (no connected sockets remaining)', { sessionId, reason });
     return;
   }
