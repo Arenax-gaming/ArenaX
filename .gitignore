@@ -157,4 +157,5 @@ PULL_REQUEST.md
 pr-*.md
 PR-*.md
 PR-issue-*.md
+pr_description_*.md
 logs/
