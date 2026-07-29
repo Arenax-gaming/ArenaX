@@ -2,6 +2,7 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::match_authority::*;
 use crate::service::soroban_service::{SorobanService, SorobanTxResult};
+use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use chrono::Utc;
 use sqlx::Row;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ impl MatchAuthorityService {
     // CREATE MATCH
     // =============================================================================
 
-    /// Create a new match (CREATED state)
+    /// Create a new match (CREATED state) with transaction isolation
     /// Idempotent: same idempotency_key returns existing match
     pub async fn create_match(
         &self,
@@ -45,88 +46,141 @@ impl MatchAuthorityService {
         validator::Validate::validate(&dto)
             .map_err(|e| ApiError::bad_request(format!("Validation error: {}", e)))?;
 
-        // Check for idempotency
-        if let Some(ref key) = dto.idempotency_key {
-            if let Some(existing) = self.get_match_by_idempotency_key(key).await? {
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
+
+        let dto_clone = dto.clone();
+        let signer_secret_clone = signer_secret.to_string();
+        let db_pool = self.db_pool.clone();
+        let soroban_service = self.soroban_service.clone();
+        let match_lifecycle_contract = self.match_lifecycle_contract.clone();
+
+        let match_id = execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                // Check for idempotency within transaction
+                if let Some(ref key) = dto_clone.idempotency_key {
+                    let existing = sqlx::query_as!(
+                        MatchAuthorityEntity,
+                        r#"
+                        SELECT
+                            id, on_chain_match_id, player_a, player_b, winner,
+                            state as "state: MatchAuthorityState",
+                            created_at, started_at, ended_at, last_chain_tx,
+                            idempotency_key, metadata
+                        FROM match_authority
+                        WHERE idempotency_key = $1
+                        FOR UPDATE
+                        "#,
+                        key
+                    )
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))?;
+
+                    if let Some(existing) = existing {
+                        info!(
+                            idempotency_key = key,
+                            match_id = %existing.id,
+                            "Returning existing match for idempotent request"
+                        );
+                        return Ok::<Uuid, ApiError>(existing.id);
+                    }
+                }
+
                 info!(
-                    idempotency_key = key,
-                    match_id = %existing.id,
-                    "Returning existing match for idempotent request"
+                    player_a = %dto_clone.player_a,
+                    player_b = %dto_clone.player_b,
+                    "Creating new match"
                 );
-                return self.get_match_with_transitions(existing.id).await;
-            }
-        }
 
-        info!(
-            player_a = %dto.player_a,
-            player_b = %dto.player_b,
-            "Creating new match"
-        );
+                // Step 1: Create match on blockchain
+                let chain_result = create_match_on_chain_helper(
+                    &soroban_service,
+                    &match_lifecycle_contract,
+                    &dto_clone,
+                    &signer_secret_clone,
+                ).await.map_err(|e| {
+                    error!(error = %e, "Failed to create match on blockchain");
+                    ApiError::internal_error(format!("Blockchain creation failed: {}", e))
+                })?;
 
-        // Step 1: Create match on blockchain
-        let chain_result = self
-            .create_match_on_chain(&dto, signer_secret)
-            .await
-            .map_err(|e| {
-                error!(error = %e, "Failed to create match on blockchain");
-                ApiError::internal_error(format!("Blockchain creation failed: {}", e))
-            })?;
+                // Step 2: Create match entity in database
+                let match_id = Uuid::new_v4();
+                sqlx::query!(
+                    r#"
+                    INSERT INTO match_authority (
+                        id, on_chain_match_id, player_a, player_b, state,
+                        last_chain_tx, idempotency_key, metadata
+                    ) VALUES (
+                        $1, $2, $3, $4, 'CREATED'::match_authority_state, $5, $6, $7
+                    )
+                    "#,
+                    match_id,
+                    chain_result.hash,
+                    dto_clone.player_a,
+                    dto_clone.player_b,
+                    chain_result.hash.clone(),
+                    dto_clone.idempotency_key,
+                    serde_json::json!({})
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
 
-        // Step 2: Create match entity in database
-        let match_id = Uuid::new_v4();
-        let match_entity = sqlx::query_as!(
-            MatchAuthorityEntity,
-            r#"
-            INSERT INTO match_authority (
-                id, on_chain_match_id, player_a, player_b, state,
-                last_chain_tx, idempotency_key, metadata
-            ) VALUES (
-                $1, $2, $3, $4, 'CREATED'::match_authority_state, $5, $6, $7
-            )
-            RETURNING
-                id, on_chain_match_id, player_a, player_b, winner,
-                state as "state: MatchAuthorityState",
-                created_at, started_at, ended_at, last_chain_tx,
-                idempotency_key, metadata
-            "#,
-            match_id,
-            chain_result.hash,
-            dto.player_a,
-            dto.player_b,
-            chain_result.hash.clone(),
-            dto.idempotency_key,
-            serde_json::json!({})
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+                // Step 3: Record blockchain sync
+                sqlx::query!(
+                    r#"
+                    INSERT INTO match_chain_sync (
+                        id, match_id, operation_type, tx_hash, tx_status, error_message, metadata
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7
+                    )
+                    "#,
+                    Uuid::new_v4(),
+                    match_id,
+                    "create_match",
+                    chain_result.hash,
+                    "pending",
+                    None::<String>,
+                    serde_json::json!({})
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
 
-        // Step 3: Record blockchain sync
-        self.record_chain_sync(
-            match_id,
-            "create_match",
-            &chain_result.hash,
-            "pending",
-            None,
-        )
-        .await?;
+                // Step 4: Record state transition
+                sqlx::query!(
+                    r#"
+                    INSERT INTO match_transitions (
+                        id, match_id, from_state, to_state, actor, chain_tx, metadata
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7
+                    )
+                    "#,
+                    Uuid::new_v4(),
+                    match_id,
+                    MatchAuthorityState::Created as MatchAuthorityState,
+                    MatchAuthorityState::Created as MatchAuthorityState,
+                    dto_clone.player_a,
+                    chain_result.hash,
+                    serde_json::json!({})
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
 
-        // Step 4: Record state transition
-        self.record_transition(
-            match_id,
-            MatchAuthorityState::Created,
-            MatchAuthorityState::Created,
-            &dto.player_a,
-            Some(&chain_result.hash),
-            None,
-        )
-        .await?;
+                info!(
+                    match_id = %match_id,
+                    on_chain_id = %chain_result.hash,
+                    "Match created successfully"
+                );
 
-        info!(
-            match_id = %match_id,
-            on_chain_id = %chain_result.hash,
-            "Match created successfully"
-        );
+                Ok(match_id)
+            })
+        }).await?;
 
         self.get_match_with_transitions(match_id).await
     }
@@ -135,65 +189,134 @@ impl MatchAuthorityService {
     // START MATCH
     // =============================================================================
 
-    /// Start a match (CREATED -> STARTED transition)
+    /// Start a match (CREATED -> STARTED transition) with transaction isolation
     pub async fn start_match(
         &self,
         match_id: Uuid,
         signer_secret: &str,
     ) -> Result<MatchAuthorityResponse, ApiError> {
-        // Get match
-        let match_entity = self.get_match_entity(match_id).await?;
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
 
-        // Validate FSM transition
-        self.validate_transition(&match_entity.state, &MatchAuthorityState::Started)?;
+        let match_id_clone = match_id;
+        let signer_secret_clone = signer_secret.to_string();
+        let db_pool = self.db_pool.clone();
+        let soroban_service = self.soroban_service.clone();
+        let match_lifecycle_contract = self.match_lifecycle_contract.clone();
 
-        info!(
-            match_id = %match_id,
-            from_state = ?match_entity.state,
-            "Starting match"
-        );
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                // Get match with row lock
+                let match_entity = sqlx::query_as!(
+                    MatchAuthorityEntity,
+                    r#"
+                    SELECT
+                        id, on_chain_match_id, player_a, player_b, winner,
+                        state as "state: MatchAuthorityState",
+                        created_at, started_at, ended_at, last_chain_tx,
+                        idempotency_key, metadata
+                    FROM match_authority
+                    WHERE id = $1
+                    FOR UPDATE
+                    "#,
+                    match_id_clone
+                )
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?
+                .ok_or_else(|| ApiError::not_found("Match not found"))?;
 
-        // Step 1: Submit start_match transaction to blockchain
-        let chain_result = self
-            .start_match_on_chain(&match_entity.on_chain_match_id, signer_secret)
-            .await
-            .map_err(|e| {
-                error!(error = %e, "Failed to start match on blockchain");
-                ApiError::internal_error(format!("Blockchain start failed: {}", e))
-            })?;
+                // Validate FSM transition
+                if !match_entity.state.can_transition_to(&MatchAuthorityState::Started) {
+                    return Err(ApiError::bad_request(format!(
+                        "Invalid state transition from {:?} to {:?}",
+                        match_entity.state, MatchAuthorityState::Started
+                    )));
+                }
 
-        // Step 2: Update match state
-        sqlx::query!(
-            r#"
-            UPDATE match_authority
-            SET state = 'STARTED'::match_authority_state,
-                last_chain_tx = $1,
-                started_at = NOW()
-            WHERE id = $2
-            "#,
-            chain_result.hash,
-            match_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
+                info!(
+                    match_id = %match_id_clone,
+                    from_state = ?match_entity.state,
+                    "Starting match"
+                );
 
-        // Step 3: Record blockchain sync
-        self.record_chain_sync(match_id, "start_match", &chain_result.hash, "pending", None)
-            .await?;
+                // Step 1: Submit start_match transaction to blockchain
+                let chain_result = start_match_on_chain_helper(
+                    &soroban_service,
+                    &match_lifecycle_contract,
+                    &match_entity.on_chain_match_id,
+                    &signer_secret_clone,
+                ).await.map_err(|e| {
+                    error!(error = %e, "Failed to start match on blockchain");
+                    ApiError::internal_error(format!("Blockchain start failed: {}", e))
+                })?;
 
-        // Step 4: Record transition (trigger will auto-create, but we record explicitly)
-        self.record_transition(
-            match_id,
-            match_entity.state,
-            MatchAuthorityState::Started,
-            "system",
-            Some(&chain_result.hash),
-            None,
-        )
-        .await?;
+                // Step 2: Update match state
+                sqlx::query!(
+                    r#"
+                    UPDATE match_authority
+                    SET state = 'STARTED'::match_authority_state,
+                        last_chain_tx = $1,
+                        started_at = NOW()
+                    WHERE id = $2
+                    "#,
+                    chain_result.hash,
+                    match_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
 
-        info!(match_id = %match_id, "Match started successfully");
+                // Step 3: Record blockchain sync
+                sqlx::query!(
+                    r#"
+                    INSERT INTO match_chain_sync (
+                        id, match_id, operation_type, tx_hash, tx_status, error_message, metadata
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7
+                    )
+                    "#,
+                    Uuid::new_v4(),
+                    match_id_clone,
+                    "start_match",
+                    chain_result.hash,
+                    "pending",
+                    None::<String>,
+                    serde_json::json!({})
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                // Step 4: Record transition
+                sqlx::query!(
+                    r#"
+                    INSERT INTO match_transitions (
+                        id, match_id, from_state, to_state, actor, chain_tx, metadata
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7
+                    )
+                    "#,
+                    Uuid::new_v4(),
+                    match_id_clone,
+                    match_entity.state as MatchAuthorityState,
+                    MatchAuthorityState::Started as MatchAuthorityState,
+                    "system",
+                    chain_result.hash,
+                    serde_json::json!({})
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                info!(match_id = %match_id_clone, "Match started successfully");
+
+                Ok::<(), ApiError>(())
+            })
+        }).await?;
 
         self.get_match_with_transitions(match_id).await
     }
@@ -803,6 +926,55 @@ impl MatchAuthorityService {
 
         Ok("CREATED".to_string())
     }
+}
+
+// =============================================================================
+// HELPER FUNCTIONS FOR TRANSACTIONS
+// =============================================================================
+
+/// Helper function to create match on chain (used inside transactions)
+async fn create_match_on_chain_helper(
+    soroban_service: &Arc<SorobanService>,
+    match_lifecycle_contract: &str,
+    dto: &CreateMatchDTO,
+    signer_secret: &str,
+) -> Result<SorobanTxResult, String> {
+    let args = serde_json::json!({
+        "player_a": dto.player_a,
+        "player_b": dto.player_b,
+    });
+
+    soroban_service
+        .invoke(
+            match_lifecycle_contract,
+            "create_match",
+            &args,
+            signer_secret,
+        )
+        .await
+        .map_err(|e| format!("Soroban create_match failed: {}", e))
+}
+
+/// Helper function to start match on chain (used inside transactions)
+async fn start_match_on_chain_helper(
+    soroban_service: &Arc<SorobanService>,
+    match_lifecycle_contract: &str,
+    on_chain_match_id: &str,
+    signer_secret: &str,
+) -> Result<SorobanTxResult, String> {
+    let args = serde_json::json!({
+        "match_id": on_chain_match_id,
+    });
+
+    soroban_service
+        .invoke(
+            match_lifecycle_contract,
+            "start_match",
+            &args,
+            signer_secret,
+        )
+        .await
+        .map_err(|e| format!("Soroban start_match failed: {}", e))
 }
 
 #[cfg(test)]

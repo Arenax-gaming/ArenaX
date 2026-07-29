@@ -1,6 +1,7 @@
 use crate::models::{
     Transaction, TransactionResponse, TransactionStatus, TransactionType, Wallet, WalletResponse,
 };
+use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use anyhow::Result;
 use chrono::Utc;
 // EventBus is used via crate::realtime::event_bus::EventBus
@@ -104,7 +105,7 @@ impl WalletService {
         Ok(wallet)
     }
 
-    /// Add fiat balance (in kobo for NGN)
+    /// Add fiat balance (in kobo for NGN) with transaction isolation
     pub async fn add_fiat_balance(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -112,17 +113,44 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_ngn = balance_ngn + $1, updated_at = $2
-            WHERE user_id = $3
-            "#,
-            amount,
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
+
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                // Lock the wallet row for update to prevent concurrent modifications
+                sqlx::query!(
+                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_ngn = balance_ngn + $1, updated_at = $2
+                    WHERE user_id = $3
+                    "#,
+                    amount_clone,
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         // Publish balance update event
@@ -131,7 +159,7 @@ impl WalletService {
         Ok(())
     }
 
-    /// Deduct fiat balance (in kobo for NGN)
+    /// Deduct fiat balance (in kobo for NGN) with transaction isolation
     pub async fn deduct_fiat_balance(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -139,26 +167,52 @@ impl WalletService {
             ));
         }
 
-        let wallet = self.get_wallet(user_id).await?;
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
 
-        if wallet.balance_ngn.unwrap_or(0) < amount {
-            return Err(WalletError::InsufficientBalance {
-                required: amount,
-                available: wallet.balance_ngn.unwrap_or(0),
-            });
-        }
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                // Lock the wallet row and check balance atomically
+                let wallet = sqlx::query!(
+                    "SELECT balance_ngn FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_ngn = balance_ngn - $1, updated_at = $2
-            WHERE user_id = $3
-            "#,
-            amount,
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+                let current_balance = wallet.balance_ngn.unwrap_or(0);
+                if current_balance < amount_clone {
+                    return Err(WalletError::InsufficientBalance {
+                        required: amount_clone,
+                        available: current_balance,
+                    });
+                }
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_ngn = balance_ngn - $1, updated_at = $2
+                    WHERE user_id = $3
+                    "#,
+                    amount_clone,
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         // Publish balance update event
@@ -167,7 +221,7 @@ impl WalletService {
         Ok(())
     }
 
-    /// Add ArenaX tokens
+    /// Add ArenaX tokens with transaction isolation
     pub async fn add_arenax_tokens(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -175,17 +229,43 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_arenax_tokens = balance_arenax_tokens + $1, updated_at = $2
-            WHERE user_id = $3
-            "#,
-            amount,
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
+
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                sqlx::query!(
+                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_arenax_tokens = balance_arenax_tokens + $1, updated_at = $2
+                    WHERE user_id = $3
+                    "#,
+                    amount_clone,
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         // Publish balance update event
@@ -194,7 +274,7 @@ impl WalletService {
         Ok(())
     }
 
-    /// Deduct ArenaX tokens
+    /// Deduct ArenaX tokens with transaction isolation
     pub async fn deduct_arenax_tokens(
         &self,
         user_id: Uuid,
@@ -206,26 +286,51 @@ impl WalletService {
             ));
         }
 
-        let wallet = self.get_wallet(user_id).await?;
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
 
-        if wallet.balance_arenax_tokens.unwrap_or(0) < amount {
-            return Err(WalletError::InsufficientBalance {
-                required: amount,
-                available: wallet.balance_arenax_tokens.unwrap_or(0),
-            });
-        }
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                let wallet = sqlx::query!(
+                    "SELECT balance_arenax_tokens FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_arenax_tokens = balance_arenax_tokens - $1, updated_at = $2
-            WHERE user_id = $3
-            "#,
-            amount,
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+                let current_balance = wallet.balance_arenax_tokens.unwrap_or(0);
+                if current_balance < amount_clone {
+                    return Err(WalletError::InsufficientBalance {
+                        required: amount_clone,
+                        available: current_balance,
+                    });
+                }
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_arenax_tokens = balance_arenax_tokens - $1, updated_at = $2
+                    WHERE user_id = $3
+                    "#,
+                    amount_clone,
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         // Publish balance update event
@@ -234,7 +339,7 @@ impl WalletService {
         Ok(())
     }
 
-    /// Move balance to escrow
+    /// Move balance to escrow with transaction isolation
     pub async fn move_to_escrow(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -242,35 +347,60 @@ impl WalletService {
             ));
         }
 
-        let wallet = self.get_wallet(user_id).await?;
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
 
-        if wallet.balance_ngn.unwrap_or(0) < amount {
-            return Err(WalletError::InsufficientBalance {
-                required: amount,
-                available: wallet.balance_ngn.unwrap_or(0),
-            });
-        }
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                let wallet = sqlx::query!(
+                    "SELECT balance_ngn FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_ngn = balance_ngn - $1,
-                escrow_balance = escrow_balance + $2,
-                updated_at = $3
-            WHERE user_id = $4
-            "#,
-            amount,
-            Decimal::from(amount),
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+                let current_balance = wallet.balance_ngn.unwrap_or(0);
+                if current_balance < amount_clone {
+                    return Err(WalletError::InsufficientBalance {
+                        required: amount_clone,
+                        available: current_balance,
+                    });
+                }
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_ngn = balance_ngn - $1,
+                        escrow_balance = escrow_balance + $2,
+                        updated_at = $3
+                    WHERE user_id = $4
+                    "#,
+                    amount_clone,
+                    Decimal::from(amount_clone),
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         Ok(())
     }
 
-    /// Release escrow back to balance
+    /// Release escrow back to balance with transaction isolation
     pub async fn release_from_escrow(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -278,20 +408,46 @@ impl WalletService {
             ));
         }
 
-        sqlx::query!(
-            r#"
-            UPDATE wallets
-            SET balance_ngn = balance_ngn + $1,
-                escrow_balance = escrow_balance - $2,
-                updated_at = $3
-            WHERE user_id = $4
-            "#,
-            amount,
-            Decimal::from(amount),
-            Utc::now(),
-            user_id
-        )
-        .execute(&*self.db_pool)
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
+
+        let user_id_clone = user_id;
+        let amount_clone = amount;
+        let db_pool = self.db_pool.clone();
+        
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                sqlx::query!(
+                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_ngn = balance_ngn + $1,
+                        escrow_balance = escrow_balance - $2,
+                        updated_at = $3
+                    WHERE user_id = $4
+                    "#,
+                    amount_clone,
+                    Decimal::from(amount_clone),
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
         .await?;
 
         Ok(())

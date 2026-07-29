@@ -3,6 +3,7 @@ use crate::auth::Claims;
 use crate::db::DbPool;
 use crate::models::matchmaker::*;
 use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig};
+use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use actix_web::{web, HttpResponse, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -393,23 +394,37 @@ async fn get_user_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<Use
 }
 
 async fn create_default_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<(), ApiError> {
-    sqlx::query!(
-        "INSERT INTO user_elo (user_id, game, current_rating, wins, losses, draws, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, game) DO NOTHING",
-        user_id,
-        game,
-        1200i32,
-        0i32,
-        0i32,
-        0i32,
-        Utc::now(),
-        Utc::now()
-    )
-    .execute(db_pool)
-    .await
-    .map_err(|e| ApiError::database_error(e))?;
+    let config = TransactionConfig {
+        isolation_level: IsolationLevel::ReadCommitted,
+        max_retries: 2,
+        ..Default::default()
+    };
 
-    Ok(())
+    let user_id_clone = user_id;
+    let game_clone = game.to_string();
+    let db_pool_clone = db_pool.clone();
+
+    execute_transaction(&db_pool_clone, &config, move |tx| {
+        Box::pin(async move {
+            sqlx::query!(
+                "INSERT INTO user_elo (user_id, game, current_rating, wins, losses, draws, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, game) DO NOTHING",
+                user_id_clone,
+                game_clone,
+                1200i32,
+                0i32,
+                0i32,
+                0i32,
+                Utc::now(),
+                Utc::now()
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            Ok::<(), ApiError>(())
+        })
+    }).await
 }
 
 async fn add_to_database_queue(
@@ -419,31 +434,63 @@ async fn add_to_database_queue(
     game_mode: &str,
     current_elo: i32,
 ) -> Result<(), ApiError> {
-    sqlx::query!(
-        r#"
-        INSERT INTO matchmaking_queue (
-            id, user_id, game, game_mode, current_elo, min_elo, max_elo,
-            joined_at, expires_at, status
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-        )
-        "#,
-        Uuid::new_v4(),
-        user_id,
-        game,
-        game_mode,
-        current_elo,
-        current_elo - 100,
-        current_elo + 100,
-        Utc::now(),
-        Utc::now() + chrono::Duration::minutes(10),
-        QueueStatus::Waiting as _
-    )
-    .execute(db_pool)
-    .await
-    .map_err(|e| ApiError::database_error(e))?;
+    let config = TransactionConfig {
+        isolation_level: IsolationLevel::ReadCommitted,
+        max_retries: 2,
+        ..Default::default()
+    };
 
-    Ok(())
+    let user_id_clone = user_id;
+    let game_clone = game.to_string();
+    let game_mode_clone = game_mode.to_string();
+    let current_elo_clone = current_elo;
+    let db_pool_clone = db_pool.clone();
+
+    execute_transaction(&db_pool_clone, &config, move |tx| {
+        Box::pin(async move {
+            // Check if user is already in queue (prevent duplicates)
+            let existing = sqlx::query!(
+                "SELECT id FROM matchmaking_queue WHERE user_id = $1 AND game = $2 AND game_mode = $3 AND status = $4 FOR UPDATE",
+                user_id_clone,
+                game_clone,
+                game_mode_clone,
+                QueueStatus::Waiting as _
+            )
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            if existing.is_some() {
+                return Ok::<(), ApiError>(());
+            }
+
+            sqlx::query!(
+                r#"
+                INSERT INTO matchmaking_queue (
+                    id, user_id, game, game_mode, current_elo, min_elo, max_elo,
+                    joined_at, expires_at, status
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+                )
+                "#,
+                Uuid::new_v4(),
+                user_id_clone,
+                game_clone,
+                game_mode_clone,
+                current_elo_clone,
+                current_elo_clone - 100,
+                current_elo_clone + 100,
+                Utc::now(),
+                Utc::now() + chrono::Duration::minutes(10),
+                QueueStatus::Waiting as _
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            Ok(())
+        })
+    }).await
 }
 
 async fn update_database_queue_status(
@@ -452,19 +499,34 @@ async fn update_database_queue_status(
     game: &str,
     game_mode: &str,
 ) -> Result<(), ApiError> {
-    sqlx::query!(
-        "UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND game = $3 AND game_mode = $4 AND status = $5",
-        QueueStatus::Left as _,
-        user_id,
-        game,
-        game_mode,
-        QueueStatus::Waiting as _
-    )
-    .execute(db_pool)
-    .await
-    .map_err(|e| ApiError::database_error(e))?;
+    let config = TransactionConfig {
+        isolation_level: IsolationLevel::ReadCommitted,
+        max_retries: 2,
+        ..Default::default()
+    };
 
-    Ok(())
+    let user_id_clone = user_id;
+    let game_clone = game.to_string();
+    let game_mode_clone = game_mode.to_string();
+    let db_pool_clone = db_pool.clone();
+
+    execute_transaction(&db_pool_clone, &config, move |tx| {
+        Box::pin(async move {
+            sqlx::query!(
+                "UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND game = $3 AND game_mode = $4 AND status = $5",
+                QueueStatus::Left as _,
+                user_id_clone,
+                game_clone,
+                game_mode_clone,
+                QueueStatus::Waiting as _
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            Ok::<(), ApiError>(())
+        })
+    }).await
 }
 
 async fn get_matches_created_last_hour(db_pool: &DbPool) -> Result<i64, ApiError> {
