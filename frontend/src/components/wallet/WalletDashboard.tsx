@@ -10,6 +10,8 @@ import { WalletConnectCard } from "@/components/wallet/WalletConnectCard";
 import { WithdrawModal } from "@/components/wallet/WithdrawModal";
 import { useTxStatus } from "@/hooks/useTxStatus";
 import { useWallet } from "@/hooks/useWallet";
+import { useTokenExpiry, SessionExpiredError } from "@/hooks/useTokenExpiry";
+import { SessionExpiredModal } from "@/components/wallet/SessionExpiredModal";
 import { createEmptyBalances, fetchWalletBalances } from "@/lib/wallet/balances";
 import { walletConfig } from "@/lib/wallet/config";
 import { submitWithdrawTransaction } from "@/lib/wallet/transactions";
@@ -19,9 +21,12 @@ export function WalletDashboard() {
   const { session, isConnected, publicKey } = useWallet();
   const { history, appendHistory, clearHistory, trackTx } = useTxStatus();
 
+  const { ensureValidToken } = useTokenExpiry();
+
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [isSessionExpiredOpen, setIsSessionExpiredOpen] = useState(false);
 
   const balancesQuery = useQuery({
     queryKey: ["wallet-balances", publicKey, walletConfig.network],
@@ -40,7 +45,16 @@ export function WalletDashboard() {
     return balancesQuery.data ?? createEmptyBalances();
   }, [balancesQuery.data]);
 
-  const handleRecordDeposit = (asset: WalletAssetCode, amount: number) => {
+  const handleRecordDeposit = async (asset: WalletAssetCode, amount: number) => {
+    try {
+      await ensureValidToken();
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        setIsSessionExpiredOpen(true);
+        return;
+      }
+      throw err;
+    }
     appendHistory({
       direction: "deposit",
       asset,
@@ -53,6 +67,16 @@ export function WalletDashboard() {
   const handleSubmitWithdraw = async (request: WithdrawRequest) => {
     if (!session) {
       throw new Error("Connect a wallet before withdrawing.");
+    }
+
+    try {
+      await ensureValidToken();
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        setIsSessionExpiredOpen(true);
+        return;
+      }
+      throw err;
     }
 
     setWithdrawSubmitting(true);
@@ -136,6 +160,11 @@ export function WalletDashboard() {
       )}
 
       <TransactionToasts />
+
+      <SessionExpiredModal
+        open={isSessionExpiredOpen}
+        onClose={() => setIsSessionExpiredOpen(false)}
+      />
     </div>
   );
 }
