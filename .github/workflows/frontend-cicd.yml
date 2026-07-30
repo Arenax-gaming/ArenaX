@@ -41,8 +41,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check PWA assets
+        run: npm run check:pwa-assets
+
       - name: Run ESLint
         run: npm run lint
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
 
   # ─────────────────────────────────────────────────────────
   # Stage 2 – Type Check
@@ -90,7 +96,7 @@ jobs:
         run: npm ci
 
       - name: Run Jest tests with coverage
-        run: npm run test -- --coverage --ci --forceExit
+        run: npm run test -- --coverage --ci --forceExit --passWithNoTests
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

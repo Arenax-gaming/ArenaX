@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint && npm run check:routes",
     "check:routes": "node scripts/check-no-duplicate-routes.mjs",
+    "check:pwa-assets": "node scripts/check-pwa-assets.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "storybook": "storybook dev -p 6006",
