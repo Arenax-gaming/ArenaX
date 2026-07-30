@@ -13,6 +13,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AuthUser, LoginRequest, RegisterRequest } from "@/types";
 import { api } from "@/lib/api";
 import { AuthApiError, REGISTER_ERROR_MAP } from "@/lib/authErrors";
+import {
+  setTokenExpiresIn,
+  clearTokenExpiry,
+} from "@/lib/wallet/tokenExpiry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -202,6 +206,11 @@ export const AuthProvider = ({
         response.user as Parameters<typeof mapBackendUser>[0],
       );
 
+      // Track the public expiry time so wallet guards can check it.
+      if (typeof response.expires_in === "number") {
+        setTokenExpiresIn(response.expires_in);
+      }
+
       cacheUser(authUser);
       queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
     } catch (err) {
@@ -298,6 +307,7 @@ export const AuthProvider = ({
     api.logout().catch(() => {});
 
     cacheUser(null);
+    clearTokenExpiry();
     if (typeof window !== "undefined") {
       localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
     }
@@ -312,7 +322,10 @@ export const AuthProvider = ({
     isRefreshingRef.current = true;
     setIsRefreshing(true);
     try {
-      return await api.refreshAccessToken();
+      const expiresIn = await api.refreshAccessToken();
+      // Keep the public expiry timestamp in sync after a successful refresh.
+      setTokenExpiresIn(expiresIn);
+      return expiresIn;
     } finally {
       isRefreshingRef.current = false;
       setIsRefreshing(false);

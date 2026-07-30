@@ -38,15 +38,18 @@ jest.mock('@/hooks/useMatchWebSocket', () => ({
   }),
 }));
 
-// Mock useMatch so tests are synchronous and don't need API calls
+// Mock useMatch so tests are synchronous and don't need API calls.
+// Fixtures are imported from the test-only re-export — never from production
+// data files — to enforce the acceptance criterion that fixture files are not
+// imported in production pages or hooks.
 jest.mock('@/hooks/useMatches', () => ({
   useMatch: (matchId: string) => {
-    // Import matchHubDetails synchronously via require
-    const { matchHubDetails } = require('@/data/matchHub');
+    const { matchHubDetails } = require('@/__tests__/fixtures/matchFixtures');
     const data = matchHubDetails[matchId] ?? null;
     return {
       data,
       isLoading: false,
+      isError: !data,
       error: data ? null : new Error('Not found'),
       refetch: jest.fn(),
     };
@@ -70,10 +73,10 @@ describe('MatchHubPage — params.id narrowing', () => {
     mockBack.mockReset();
   });
 
-  it('shows "Match Not Found" for an unknown string id', () => {
+  it('shows error state for an unknown string id', () => {
     mockUseParams = jest.fn(() => ({ id: 'definitely-not-real' }));
     renderWithQuery(<MatchHubPage />);
-    expect(screen.getByText('Match Not Found')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load match')).toBeInTheDocument();
   });
 
   it('renders the match hub for a known string id', () => {
@@ -88,9 +91,9 @@ describe('MatchHubPage — params.id narrowing', () => {
     expect(screen.getByText('Match Hub')).toBeInTheDocument();
   });
 
-  it('shows "Match Not Found" when params.id array contains an unknown id', () => {
+  it('shows error state when params.id array contains an unknown id', () => {
     mockUseParams = jest.fn(() => ({ id: ['definitely-not-real'] }));
     renderWithQuery(<MatchHubPage />);
-    expect(screen.getByText('Match Not Found')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load match')).toBeInTheDocument();
   });
 });
