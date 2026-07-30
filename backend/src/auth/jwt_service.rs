@@ -101,11 +101,44 @@ impl Default for JwtConfig {
             .and_then(|v| parse_duration_str(&v))
             .unwrap_or_else(|| Duration::minutes(15));
 
+        // Parse JWT_REFRESH_EXPIRES_IN env var; falls back to 7 days.
+        let refresh_token_expiry = std::env::var("JWT_REFRESH_EXPIRES_IN")
+            .ok()
+            .and_then(|v| parse_duration_str(&v))
+            .unwrap_or_else(|| Duration::days(7));
+
         Self {
             secret_key: std::env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "default_secret_change_in_production".to_string()),
             access_token_expiry,
-            refresh_token_expiry: Duration::days(7),
+            refresh_token_expiry,
+            algorithm: Algorithm::HS256,
+            issuer: Some("ArenaX".to_string()),
+            audience: Some("ArenaX API".to_string()),
+        }
+    }
+}
+
+impl JwtConfig {
+    /// Build a `JwtConfig` from explicit duration strings.
+    ///
+    /// Called from `main.rs` after `Config::from_env()` so the values come
+    /// from the validated environment rather than being re-read inside this
+    /// module.
+    pub fn from_config(
+        secret_key: String,
+        jwt_expires_in: &str,
+        jwt_refresh_expires_in: &str,
+    ) -> Self {
+        let access_token_expiry = parse_duration_str(jwt_expires_in)
+            .unwrap_or_else(|| Duration::minutes(15));
+        let refresh_token_expiry = parse_duration_str(jwt_refresh_expires_in)
+            .unwrap_or_else(|| Duration::days(7));
+
+        Self {
+            secret_key,
+            access_token_expiry,
+            refresh_token_expiry,
             algorithm: Algorithm::HS256,
             issuer: Some("ArenaX".to_string()),
             audience: Some("ArenaX API".to_string()),
@@ -777,8 +810,73 @@ impl JwtService {
         })
     }
 
-    /// Cleanup expired sessions (garbage collection)
-    pub async fn cleanup_expired_sessions(&self) -> Result<u32, JwtError> {
+    // ── Config accessors (used by HTTP handlers for cookie max-age) ──────────
+
+    /// Access token TTL in seconds (for `Set-Cookie: max-age`).
+    pub fn access_token_expiry_secs(&self) -> i64 {
+        self.config.access_token_expiry.num_seconds()
+    }
+
+    /// Refresh token TTL in seconds (for `Set-Cookie: max-age`).
+    pub fn refresh_token_expiry_secs(&self) -> i64 {
+        self.config.refresh_token_expiry.num_seconds()
+    }
+
+    // ── Short-lived WebSocket token ───────────────────────────────────────────
+
+    /// Generate a 60-second access token used exclusively for the initial
+    /// WebSocket authentication handshake.
+    ///
+    /// The token is never stored in a cookie — it is returned in a JSON body
+    /// and used immediately. After 60 seconds it is worthless.
+    pub async fn generate_ws_token(
+        &self,
+        user_id: Uuid,
+        roles: Vec<String>,
+    ) -> Result<String, JwtError> {
+        let session_id = Uuid::new_v4().to_string();
+
+        let claims = Claims {
+            sub: user_id.to_string(),
+            exp: (Utc::now() + Duration::seconds(60)).timestamp(),
+            iat: Utc::now().timestamp(),
+            jti: Uuid::new_v4().to_string(),
+            token_type: TokenType::Access,
+            device_id: None,
+            session_id: session_id.clone(),
+            roles,
+        };
+
+        let key_rotation = self.key_rotation.read().await;
+        let encoding_key = EncodingKey::from_secret(key_rotation.current_key.as_bytes());
+
+        let token = encode(&Header::new(self.config.algorithm), &claims, &encoding_key)
+            .map_err(|e| JwtError::TokenGeneration(e.to_string()))?;
+
+        drop(key_rotation);
+
+        // Store a very short-lived session so validate_token can verify it.
+        // We bypass store_session's access_token_expiry and use 65 s instead.
+        let session_data = SessionData {
+            user_id,
+            session_id: session_id.clone(),
+            device_id: None,
+            created_at: Utc::now().timestamp(),
+            last_activity: Utc::now().timestamp(),
+            ip_address: None,
+            user_agent: None,
+        };
+        let session_key = format!("session:{}", session_id);
+        let session_json = serde_json::to_string(&session_data)
+            .map_err(|e| JwtError::RedisError(e.to_string()))?;
+        let mut conn = self.redis.clone();
+        conn.set_ex::<_, _, ()>(&session_key, session_json, 65).await?;
+
+        info!(user_id = %user_id, "WS token generated (60s)");
+        Ok(token)
+    }
+
+    /// Cleanup expired sessions (garbage collection)    pub async fn cleanup_expired_sessions(&self) -> Result<u32, JwtError> {
         let mut conn = self.redis.clone();
         let keys: Vec<String> = conn.keys("session:*").await.unwrap_or_default();
 

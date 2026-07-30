@@ -8,6 +8,33 @@ import { logger } from '../services/logger.service';
 // per-connection closure state alone.
 const socketSessions = new Map<string, Set<string>>();
 const sessionSockets = new Map<string, Set<string>>();
+const actionQueues = new Map<string, Array<{ playerId: string; action: unknown; timestamp: number }>>();
+const actionTimers = new Map<string, NodeJS.Timeout>();
+
+function queuePlayerAction(io: any, sessionId: string, playerId: string, action: unknown) {
+  let queue = actionQueues.get(sessionId);
+  if (!queue) {
+    queue = [];
+    actionQueues.set(sessionId, queue);
+  }
+  queue.push({ playerId, action, timestamp: Date.now() });
+
+  if (!actionTimers.has(sessionId)) {
+    const timer = setTimeout(() => {
+      actionTimers.delete(sessionId);
+      const pending = actionQueues.get(sessionId);
+      if (pending && pending.length > 0) {
+        actionQueues.delete(sessionId);
+        if (pending.length === 1) {
+          io.to(sessionId).emit('game:action', pending[0]);
+        } else {
+          io.to(sessionId).emit('game:actions-batch', { actions: pending, timestamp: Date.now() });
+        }
+      }
+    }, 16);
+    actionTimers.set(sessionId, timer);
+  }
+}
 
 export function initGameSocket(io: Server) {
   const gameSessionService = new GameSessionService();
@@ -52,7 +79,7 @@ export function initGameSocket(io: Server) {
     socket.on('action', async ({ sessionId, playerId, action }: { sessionId: string; playerId: string; action: unknown }) => {
       try {
         await gameSessionService.processPlayerAction(sessionId, playerId, action);
-        io.to(sessionId).emit('game:action', { playerId, action, timestamp: Date.now() });
+        queuePlayerAction(io.of('/game'), sessionId, playerId, action);
       } catch (e) {
         socket.emit('error', { message: (e as Error).message });
       }
@@ -72,6 +99,9 @@ export function initGameSocket(io: Server) {
           cleanupSocketFromSession(socket, io, gameSessionService, sessionId, 'disconnect');
         }
       }
+      
+      // Remove all event listeners for this socket to prevent memory leaks
+      socket.removeAllListeners();
     });
   });
 }
@@ -112,6 +142,15 @@ function cleanupSocketFromSession(
   if (connectedSockets.size === 0) {
     sessionSockets.delete(sessionId);
     gameSessionService.removeSession(sessionId);
+    
+    // Clean up action queue and timer for this session
+    actionQueues.delete(sessionId);
+    const timer = actionTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      actionTimers.delete(sessionId);
+    }
+    
     logger.info('Game session deleted (no connected sockets remaining)', { sessionId, reason });
     return;
   }

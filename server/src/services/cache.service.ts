@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import Redis, { Cluster } from 'ioredis';
 import { logger } from './logger.service';
 import { metricsService } from './metrics.service';
 
@@ -9,6 +9,19 @@ import { metricsService } from './metrics.service';
 interface InMemoryEntry {
   value: unknown;
   expiry: number;
+}
+
+/** Parse a `REDIS_CLUSTER_NODES` env value ("host1:port1,host2:port2") into ioredis node descriptors. */
+function parseClusterNodes(value?: string): Array<{ host: string; port: number }> {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [host, port] = entry.split(':');
+      return { host, port: Number(port) || 6379 };
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -24,7 +37,7 @@ interface ICacheBackend {
 }
 
 // ---------------------------------------------------------------------------
-// RedisBackend
+// RedisBackend — single-instance Redis
 // ---------------------------------------------------------------------------
 
 class RedisBackend implements ICacheBackend {
@@ -81,6 +94,82 @@ class RedisBackend implements ICacheBackend {
 }
 
 // ---------------------------------------------------------------------------
+// RedisClusterBackend — sharded, highly-available Redis Cluster (#655)
+//
+// Built on ioredis's native `Cluster` client, which:
+//   - shards keys across masters using CRC16 hash slots (no app-level
+//     sharding logic needed — `MOVED`/`ASK` redirects are handled for us)
+//   - fails over to a replica automatically when a master goes down
+//     (`CLUSTERDOWN` is retried against the new topology once the cluster
+//     itself completes failover)
+// ---------------------------------------------------------------------------
+
+class RedisClusterBackend implements ICacheBackend {
+  private client: Cluster;
+  private ready = false;
+  readonly nodeCount: number;
+
+  constructor(nodes: Array<{ host: string; port: number }>) {
+    this.nodeCount = nodes.length;
+    this.client = new Cluster(nodes, {
+      enableOfflineQueue: false,
+      // Retries a redirected/failed-over command against the refreshed
+      // cluster topology before giving up on the request.
+      clusterRetryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 200, 2000)),
+      redisOptions: {
+        maxRetriesPerRequest: 1,
+      },
+    });
+
+    this.client.on('ready', () => {
+      this.ready = true;
+      logger.info('Redis Cluster connected', { nodes: this.nodeCount });
+    });
+
+    this.client.on('error', (err: Error) => {
+      this.ready = false;
+      logger.warn('Redis Cluster error — falling back to in-memory', { error: err.message });
+    });
+
+    this.client.on('close', () => {
+      this.ready = false;
+    });
+
+    this.client.on('node error', (err: Error, address: string) => {
+      logger.warn('Redis Cluster node unreachable', { address, error: err.message });
+    });
+  }
+
+  isAvailable(): boolean {
+    return this.ready;
+  }
+
+  /** Number of nodes currently reporting `ready` in the cluster topology. */
+  get readyNodeCount(): number {
+    return this.client.nodes('all').filter((n: Redis) => n.status === 'ready').length;
+  }
+
+  async get(key: string): Promise<string | null> {
+    return this.client.get(key);
+  }
+
+  async set(key: string, value: string, ttlSeconds: number): Promise<void> {
+    await this.client.set(key, value, 'EX', ttlSeconds);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.del(key);
+  }
+
+  async clear(): Promise<void> {
+    // FLUSHDB must be issued per-master; the cluster client has no single
+    // keyspace to flush in one call.
+    const masters = this.client.nodes('master');
+    await Promise.all(masters.map((node: Redis) => node.flushdb()));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // InMemoryBackend
 // ---------------------------------------------------------------------------
 
@@ -131,16 +220,19 @@ class InMemoryBackend implements ICacheBackend {
 // ---------------------------------------------------------------------------
 
 export class CacheService {
-  private redis: RedisBackend | null = null;
+  private redis: RedisBackend | RedisClusterBackend | null = null;
   private memory: InMemoryBackend;
   /** Default TTL in seconds (overridable per call). */
   readonly defaultTTL: number;
 
-  constructor(redisUrl?: string, defaultTTL = 300) {
+  constructor(redisUrl?: string, defaultTTL = 300, clusterNodes?: string) {
     this.defaultTTL = defaultTTL;
     this.memory = new InMemoryBackend();
 
-    if (redisUrl) {
+    const parsedNodes = parseClusterNodes(clusterNodes);
+    if (parsedNodes.length > 0) {
+      this.redis = new RedisClusterBackend(parsedNodes);
+    } else if (redisUrl) {
       this.redis = new RedisBackend(redisUrl);
     } else {
       logger.info('REDIS_URL not set — using in-memory cache');
@@ -148,6 +240,15 @@ export class CacheService {
 
     // Evict stale in-memory entries every minute regardless of Redis status.
     setInterval(() => this.memory.evictExpired(), 60_000).unref();
+
+    // Surface cluster health on Prometheus every 15s so failovers/node
+    // outages are visible without scraping ioredis internals directly.
+    if (this.redis instanceof RedisClusterBackend) {
+      const cluster = this.redis;
+      setInterval(() => {
+        metricsService.setRedisClusterHealth(cluster.nodeCount, cluster.readyNodeCount);
+      }, 15_000).unref();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -242,9 +343,14 @@ export class CacheService {
     return value;
   }
 
-  /** Whether Redis is currently connected. */
+  /** Whether Redis (single-instance or cluster) is currently connected. */
   get isRedisConnected(): boolean {
     return this.redis?.isAvailable() ?? false;
+  }
+
+  /** Whether the cache is backed by a Redis Cluster (vs. a single instance). */
+  get isClusterMode(): boolean {
+    return this.redis instanceof RedisClusterBackend;
   }
 
   /** Number of entries in the in-memory fallback store. */
@@ -259,19 +365,24 @@ export class CacheService {
 
 import { getEnv } from '../config/env';
 
-const _resolveConfig = (): { redisUrl?: string; ttl: number } => {
+const _resolveConfig = (): { redisUrl?: string; ttl: number; clusterNodes?: string } => {
     try {
         const env = getEnv();
-        return { redisUrl: env.REDIS_URL, ttl: env.PROFILE_CACHE_TTL_SECONDS };
+        return {
+            redisUrl: env.REDIS_URL,
+            ttl: env.PROFILE_CACHE_TTL_SECONDS,
+            clusterNodes: env.REDIS_CLUSTER_NODES,
+        };
     } catch {
         // Fallback before initEnv() runs (e.g. unit tests importing this module directly).
         return {
             redisUrl: process.env.REDIS_URL,
             ttl: Number(process.env.PROFILE_CACHE_TTL_SECONDS ?? 300),
+            clusterNodes: process.env.REDIS_CLUSTER_NODES,
         };
     }
 };
 
-const { redisUrl, ttl } = _resolveConfig();
+const { redisUrl, ttl, clusterNodes } = _resolveConfig();
 
-export const cacheService = new CacheService(redisUrl, ttl);
+export const cacheService = new CacheService(redisUrl, ttl, clusterNodes);

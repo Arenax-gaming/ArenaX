@@ -64,50 +64,51 @@ where
         let service = self.service.clone();
 
         Box::pin(async move {
-            // Extract Authorization header
-            let auth_header = req
+            // ── Token extraction ─────────────────────────────────────────────
+            // Priority order:
+            //   1. Authorization: Bearer <token>  (API clients, mobile)
+            //   2. auth_token httpOnly cookie      (browser SPA)
+            let token_opt: Option<String> = req
                 .headers()
                 .get("Authorization")
-                .and_then(|h| h.to_str().ok());
+                .and_then(|h| h.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer ").map(str::to_owned))
+                .or_else(|| {
+                    req.cookie(crate::http::auth_handler::ACCESS_TOKEN_COOKIE)
+                        .map(|c| c.value().to_owned())
+                });
 
-            if let Some(auth_value) = auth_header {
-                // Check for Bearer token
-                if let Some(token) = auth_value.strip_prefix("Bearer ") {
-                    // Validate token
-                    match jwt_service.validate_token(token).await {
-                        Ok(claims) => {
-                            debug!(user_id = %claims.sub, "Request authenticated");
-
-                            // Store claims in request extensions for later use
-                            req.extensions_mut().insert(claims);
-
-                            // Call the next service
-                            service.call(req).await
-                        }
-                        Err(JwtError::TokenExpired) => {
-                            warn!("Token expired");
-                            Err(ErrorUnauthorized("Token expired"))
-                        }
-                        Err(JwtError::TokenBlacklisted) => {
-                            warn!("Token blacklisted");
-                            Err(ErrorForbidden("Token has been revoked"))
-                        }
-                        Err(JwtError::SessionNotFound) => {
-                            warn!("Session not found");
-                            Err(ErrorUnauthorized("Session expired or invalid"))
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Token validation failed");
-                            Err(ErrorUnauthorized(format!("Invalid token: {}", e)))
-                        }
-                    }
-                } else {
-                    warn!("Invalid authorization header format");
-                    Err(ErrorUnauthorized("Invalid authorization header format"))
+            let token = match token_opt {
+                Some(t) => t,
+                None => {
+                    warn!("Missing authorization header and auth cookie");
+                    return Err(ErrorUnauthorized("Authentication required"));
                 }
-            } else {
-                warn!("Missing authorization header");
-                Err(ErrorUnauthorized("Missing authorization header"))
+            };
+
+            // ── Token validation ─────────────────────────────────────────────
+            match jwt_service.validate_token(&token).await {
+                Ok(claims) => {
+                    debug!(user_id = %claims.sub, "Request authenticated");
+                    req.extensions_mut().insert(claims);
+                    service.call(req).await
+                }
+                Err(JwtError::TokenExpired) => {
+                    warn!("Token expired");
+                    Err(ErrorUnauthorized("Token expired"))
+                }
+                Err(JwtError::TokenBlacklisted) => {
+                    warn!("Token blacklisted");
+                    Err(ErrorForbidden("Token has been revoked"))
+                }
+                Err(JwtError::SessionNotFound) => {
+                    warn!("Session not found");
+                    Err(ErrorUnauthorized("Session expired or invalid"))
+                }
+                Err(e) => {
+                    warn!(error = %e, "Token validation failed");
+                    Err(ErrorUnauthorized(format!("Invalid token: {}", e)))
+                }
             }
         })
     }
@@ -137,7 +138,6 @@ mod tests {
     #[test]
     fn test_claims_ext_interface() {
         // This test just ensures the trait compiles
-        // Real testing would require mocking HTTP request
         assert!(true);
     }
 }

@@ -85,6 +85,9 @@ function VirtualListInner<T>(
   const listRef = useRef<FixedSizeListType>(null);
   const analytics = useVirtualScrollAnalytics(listId);
   const hasFiredMountRef = useRef(false);
+  const lastScrollTimeRef = useRef<number>(0);
+  const scrollRafRef = useRef<number | null>(null);
+  const loadMoreDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Forward the ref
   const setRefs = useCallback(
@@ -110,19 +113,58 @@ function VirtualListInner<T>(
     }
   }, [items.length, height, itemHeight, overscanCount, analytics]);
 
+  // Cleanup RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+      if (loadMoreDebounceRef.current) {
+        clearTimeout(loadMoreDebounceRef.current);
+      }
+    };
+  }, []);
+
   const handleScroll = useCallback(
     ({ scrollOffset }: { scrollOffset: number }) => {
-      const totalHeight = items.length * itemHeight;
-      const visible = Math.ceil(height / itemHeight);
-      analytics.trackScroll(scrollOffset, totalHeight, visible);
-
-      // Infinite scroll trigger
-      if (onLoadMore) {
-        const distanceFromBottom = totalHeight - scrollOffset - height;
-        if (distanceFromBottom < loadMoreThreshold) {
-          onLoadMore();
-        }
+      // Throttle scroll events using RAF for 60fps
+      if (scrollRafRef.current !== null) {
+        return;
       }
+
+      scrollRafRef.current = requestAnimationFrame(() => {
+        const now = performance.now();
+        const timeSinceLastScroll = now - lastScrollTimeRef.current;
+        
+        // Only process scroll events at most every 16ms (60fps)
+        if (timeSinceLastScroll < 16) {
+          scrollRafRef.current = null;
+          return;
+        }
+
+        lastScrollTimeRef.current = now;
+        
+        const totalHeight = items.length * itemHeight;
+        const visible = Math.ceil(height / itemHeight);
+        analytics.trackScroll(scrollOffset, totalHeight, visible);
+
+        // Infinite scroll trigger with debouncing
+        if (onLoadMore) {
+          const distanceFromBottom = totalHeight - scrollOffset - height;
+          if (distanceFromBottom < loadMoreThreshold) {
+            // Debounce onLoadMore to prevent multiple rapid calls
+            if (loadMoreDebounceRef.current) {
+              clearTimeout(loadMoreDebounceRef.current);
+            }
+            loadMoreDebounceRef.current = setTimeout(() => {
+              onLoadMore();
+              loadMoreDebounceRef.current = null;
+            }, 150);
+          }
+        }
+
+        scrollRafRef.current = null;
+      });
     },
     [items.length, itemHeight, height, analytics, onLoadMore, loadMoreThreshold]
   );
@@ -132,6 +174,7 @@ function VirtualListInner<T>(
   }
 
   // react-window row renderer — must be a stable reference
+  // Use React.memo to prevent unnecessary re-renders
   const Row = useCallback(
     ({ index, style }: ListChildComponentProps) => {
       const item = items[index];
@@ -152,6 +195,10 @@ function VirtualListInner<T>(
         overscanCount={overscanCount}
         onScroll={handleScroll}
         outerElementType={outerClassName ? OuterElement(outerClassName) : undefined}
+        // Performance optimization: use layout="vertical" explicitly
+        layout="vertical"
+        // Enable useIsScrolling for better performance with heavy render items
+        useIsScrolling={false}
       >
         {Row}
       </FixedSizeList>

@@ -9,6 +9,14 @@ const MAX_QUEUE_SIZE = 100;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // How many missed heartbeats before the connection is considered stale.
 const HEARTBEAT_TIMEOUT_INTERVALS = 2;
+// Maximum number of concurrent connections per user.
+const MAX_CONNECTIONS_PER_USER = 10;
+// Maximum total connections across all users.
+const MAX_TOTAL_CONNECTIONS = 1000;
+// Memory usage alert threshold (MB).
+const MEMORY_ALERT_THRESHOLD_MB = 500;
+// Automatic cleanup interval for stale data.
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface QueuedMessage {
   event: string;
@@ -35,17 +43,46 @@ export class WebSocketPoolService {
   private readonly _userSockets = new Map<string, Set<string>>();
   // Heartbeat timer.
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // Store event handlers for proper cleanup
+  private _connectionHandler: ((socket: Socket) => void) | null = null;
+  // Cleanup timer for automatic stale data removal
+  private _cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   // ── Initialisation ─────────────────────────────────────────────────────────
 
   init(io: Server): void {
     this._io = io;
     this._startHeartbeat();
+    this._startCleanup();
 
-    io.on('connection', (socket: Socket) => {
+    this._connectionHandler = (socket: Socket) => {
+      // Check total connection limit
+      if (this._connections.size >= MAX_TOTAL_CONNECTIONS) {
+        logger.warn('Connection rejected: max total connections reached', { 
+          total: this._connections.size,
+          limit: MAX_TOTAL_CONNECTIONS 
+        });
+        socket.emit('error', { message: 'Server at maximum capacity' });
+        socket.disconnect(true);
+        return;
+      }
+
       this._registerConnection(socket);
 
       socket.on('authenticate', (userId: string) => {
+        // Check per-user connection limit
+        const userSockets = this._userSockets.get(userId);
+        if (userSockets && userSockets.size >= MAX_CONNECTIONS_PER_USER) {
+          logger.warn('Connection rejected: max user connections reached', { 
+            userId,
+            current: userSockets.size,
+            limit: MAX_CONNECTIONS_PER_USER 
+          });
+          socket.emit('error', { message: 'Maximum connections per user exceeded' });
+          socket.disconnect(true);
+          return;
+        }
+        
         this._associateUser(socket, userId);
         this._flushOfflineQueue(socket, userId);
       });
@@ -70,8 +107,12 @@ export class WebSocketPoolService {
 
       socket.on('disconnect', () => {
         this._deregisterConnection(socket);
+        // Remove all event listeners for this socket to prevent memory leaks
+        socket.removeAllListeners();
       });
-    });
+    };
+
+    io.on('connection', this._connectionHandler);
   }
 
   // ── Connection management ──────────────────────────────────────────────────
@@ -195,7 +236,63 @@ export class WebSocketPoolService {
           this._io?.to(socketId).emit('ping');
         }
       }
+      
+      // Check memory usage and alert if needed
+      this._checkMemoryUsage();
     }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  // ── Automatic cleanup for stale data ─────────────────────────────────────────
+
+  private _startCleanup(): void {
+    this._cleanupTimer = setInterval(() => {
+      this._cleanupStaleQueuedMessages();
+      logger.info('Automatic cleanup completed', { 
+        offlineQueueSize: this._offlineQueue.size,
+        connectionsSize: this._connections.size 
+      });
+    }, CLEANUP_INTERVAL_MS);
+  }
+
+  private _cleanupStaleQueuedMessages(): void {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [userId, queue] of this._offlineQueue) {
+      const fresh = queue.filter((m) => now - m.queuedAt < MESSAGE_TTL_MS);
+      const dropped = queue.length - fresh.length;
+      
+      if (dropped > 0) {
+        cleanedCount += dropped;
+        if (fresh.length === 0) {
+          this._offlineQueue.delete(userId);
+        } else {
+          this._offlineQueue.set(userId, fresh);
+        }
+      }
+    }
+
+    if (cleanedCount > 0) {
+      logger.info('Cleaned stale queued messages', { count: cleanedCount });
+    }
+  }
+
+  // ── Memory monitoring ───────────────────────────────────────────────────────
+
+  private _checkMemoryUsage(): void {
+    if (typeof process !== 'undefined' && process.memoryUsage) {
+      const memoryUsage = process.memoryUsage();
+      const heapUsedMB = memoryUsage.heapUsed / 1024 / 1024;
+      
+      if (heapUsedMB > MEMORY_ALERT_THRESHOLD_MB) {
+        logger.error('Memory usage alert', { 
+          heapUsedMB: heapUsedMB.toFixed(2),
+          threshold: MEMORY_ALERT_THRESHOLD_MB,
+          connections: this._connections.size,
+          offlineQueueSize: Array.from(this._offlineQueue.values()).reduce((sum, q) => sum + q.length, 0)
+        });
+      }
+    }
   }
 
   // ── Analytics ───────────────────────────────────────────────────────────────
@@ -214,6 +311,24 @@ export class WebSocketPoolService {
   destroy(): void {
     if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
     this._heartbeatTimer = null;
+    
+    if (this._cleanupTimer) clearInterval(this._cleanupTimer);
+    this._cleanupTimer = null;
+    
+    // Remove the connection event handler to prevent memory leaks
+    if (this._io && this._connectionHandler) {
+      this._io.off('connection', this._connectionHandler);
+      this._connectionHandler = null;
+    }
+    
+    // Disconnect all active sockets
+    if (this._io) {
+      this._io.sockets.sockets.forEach((socket: Socket) => {
+        socket.disconnect(true);
+        socket.removeAllListeners();
+      });
+    }
+    
     this._connections.clear();
     this._userSockets.clear();
     this._offlineQueue.clear();

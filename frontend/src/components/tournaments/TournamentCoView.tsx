@@ -6,6 +6,7 @@ import {
   MessageSquare,
   Send,
   Check,
+  UserPlus,
 } from "lucide-react";
 import {
   Card,
@@ -45,7 +46,10 @@ export function TournamentCoView({
     if (isInCoView) {
       setActiveChannel(null, null);
     } else {
-      setActiveChannel(`tournament-${tournamentId}`, CollaborationChannelType.TOURNAMENT_COVIEW);
+      setActiveChannel(
+        `tournament-${tournamentId}`,
+        CollaborationChannelType.TOURNAMENT_COVIEW
+      );
     }
   };
 
@@ -59,6 +63,12 @@ export function TournamentCoView({
     } as any);
     setMessageInput("");
   };
+
+  const peers = channel?.users ?? [];
+  const hasPeers = peers.length > 0;
+  const messageEvents = events.filter(
+    (e) => e.type === CollaborationEventType.MESSAGE
+  );
 
   return (
     <Card className={cn("w-full", className)}>
@@ -79,19 +89,63 @@ export function TournamentCoView({
       </CardHeader>
 
       <CardContent>
-        {!isInCoView ? (
+        {/* Not joined yet */}
+        {!isInCoView && (
           <div className="text-center py-6 text-muted-foreground">
             Join the viewing party to chat and see who else is watching!
           </div>
-        ) : (
+        )}
+
+        {/* Joined but no real peers connected yet */}
+        {isInCoView && !isConnected && (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
+              <UserPlus className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Invite friends to watch together</p>
+              <p className="text-xs text-muted-foreground">
+                Nobody else has joined yet. Share this tournament link to watch
+                with friends.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+              <div className="h-2 w-2 rounded-full bg-muted-foreground" />
+              Connecting…
+            </div>
+          </div>
+        )}
+
+        {/* Joined and connected, but channel is empty (no peers) */}
+        {isInCoView && isConnected && !hasPeers && (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
+              <UserPlus className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Invite friends to watch together</p>
+              <p className="text-xs text-muted-foreground">
+                You're the only one here right now. Share this tournament link so
+                friends can join your viewing party.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+              <div className="h-2 w-2 rounded-full bg-success" />
+              Connected — waiting for others
+            </div>
+          </div>
+        )}
+
+        {/* Joined, connected and at least one peer is present */}
+        {isInCoView && isConnected && hasPeers && (
           <div className="space-y-4">
             {/* Connected users */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium text-muted-foreground">
-                {channel?.users.length || 0} watching
+                {peers.length} watching
               </h4>
               <div className="flex flex-wrap gap-2">
-                {channel?.users.map((user) => (
+                {peers.map((user) => (
                   <div
                     key={user.id}
                     className="flex items-center gap-2 bg-muted/30 px-3 py-1.5 rounded-full"
@@ -113,28 +167,30 @@ export function TournamentCoView({
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-muted-foreground">Chat</span>
+                <span className="text-sm font-medium text-muted-foreground">
+                  Chat
+                </span>
               </div>
               <div className="bg-muted/20 rounded-lg p-3 max-h-48 overflow-y-auto space-y-2">
-                {events
-                  .filter((e) => e.type === CollaborationEventType.MESSAGE)
-                  .map((event) => {
-                    const msgEvent = event as any;
-                    const user = channel?.users.find((u) => u.id === msgEvent.userId);
-                    return (
-                      <div
-                        key={msgEvent.messageId}
-                        className="flex items-start gap-2 text-sm"
-                      >
-                        <span className="font-medium text-primary">
-                          {user?.username || "Unknown"}:
-                        </span>
-                        <span className="text-foreground">{msgEvent.content}</span>
-                      </div>
-                    );
-                  })}
-                {events.filter((e) => e.type === CollaborationEventType.MESSAGE).length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center">No messages yet</p>
+                {messageEvents.map((event) => {
+                  const msgEvent = event as any;
+                  const user = peers.find((u) => u.id === msgEvent.userId);
+                  return (
+                    <div
+                      key={msgEvent.messageId}
+                      className="flex items-start gap-2 text-sm"
+                    >
+                      <span className="font-medium text-primary">
+                        {user?.username ?? "Unknown"}:
+                      </span>
+                      <span className="text-foreground">{msgEvent.content}</span>
+                    </div>
+                  );
+                })}
+                {messageEvents.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center">
+                    No messages yet
+                  </p>
                 )}
               </div>
               <div className="flex gap-2">
@@ -145,7 +201,7 @@ export function TournamentCoView({
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSendMessage();
                   }}
-                  placeholder="Type a message..."
+                  placeholder="Type a message…"
                   className="flex-1 px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 <Button
@@ -161,13 +217,8 @@ export function TournamentCoView({
 
             {/* Connection status */}
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  isConnected ? "bg-success" : "bg-muted-foreground"
-                )}
-              />
-              {isConnected ? "Connected" : "Disconnected"}
+              <div className="h-2 w-2 rounded-full bg-success" />
+              Connected
             </div>
           </div>
         )}

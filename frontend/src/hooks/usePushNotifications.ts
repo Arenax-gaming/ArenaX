@@ -93,6 +93,14 @@ export function usePushNotifications(): UsePushNotificationsReturn {
     };
 
     checkPermission();
+
+    // Cleanup: unsubscribe on unmount to prevent memory leaks
+    return () => {
+      unsubscribe().catch((error) => {
+        console.error("[PushNotifications] Cleanup unsubscribe error:", error);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Subscribe to push notifications

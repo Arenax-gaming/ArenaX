@@ -10,6 +10,7 @@ mod rewards;
 mod storage;
 
 use arenax_events::virtual_economy as events;
+use marketplace::MarketplaceManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
 
 pub use error::VirtualEconomyError;
@@ -652,6 +653,404 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::MarketplaceOrder(order_id))
             .ok_or(VirtualEconomyError::OrderNotFound)
+    }
+
+    // -------------------------------------------------------------------------
+    // Dynamic Pricing: Dutch Auctions
+    //
+    // A single NFT listed at a price that decays over time from
+    // `start_price` to `floor_price` instead of a fixed price, so price
+    // discovery happens automatically instead of the seller guessing.
+    // -------------------------------------------------------------------------
+
+    /// List an NFT in a Dutch auction. Price starts at `start_price` and
+    /// decays to `floor_price` between `start_time` and `end_time` following
+    /// `curve`.
+    pub fn create_dutch_auction(
+        env: Env,
+        seller: Address,
+        token_id: BytesN<32>,
+        start_price: i128,
+        floor_price: i128,
+        start_time: u64,
+        end_time: u64,
+        curve: PriceCurve,
+    ) -> Result<BytesN<32>, VirtualEconomyError> {
+        seller.require_auth();
+
+        let owner = Self::get_nft_owner(env.clone(), token_id.clone())?;
+        if owner != seller {
+            return Err(VirtualEconomyError::NotOwner);
+        }
+
+        MarketplaceManager::validate_auction_params(start_price, floor_price, start_time, end_time)?;
+
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuctionCounter)
+            .unwrap_or(0);
+        let new_counter = counter + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::AuctionCounter, &new_counter);
+
+        let mut id_bytes = [0u8; 32];
+        id_bytes[0..8].copy_from_slice(&new_counter.to_be_bytes());
+        let listing_id = BytesN::from_array(&env, &id_bytes);
+
+        let listing = DutchAuctionListing {
+            listing_id: listing_id.clone(),
+            seller: seller.clone(),
+            token_id: token_id.clone(),
+            start_price,
+            floor_price,
+            start_time,
+            end_time,
+            curve,
+            status: OrderStatus::Active,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::DutchAuction(listing_id.clone()), &listing);
+
+        let mut analytics = Self::get_pricing_analytics(env.clone());
+        analytics.total_auctions_created += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PricingAnalytics, &analytics);
+
+        events::emit_dutch_auction_created(
+            &env,
+            &listing_id,
+            &seller,
+            &token_id,
+            start_price,
+            floor_price,
+        );
+        Ok(listing_id)
+    }
+
+    /// Get the auction listing details (static fields; use
+    /// [`Self::get_auction_price`] for the current live price).
+    pub fn get_dutch_auction(
+        env: Env,
+        listing_id: BytesN<32>,
+    ) -> Result<DutchAuctionListing, VirtualEconomyError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::DutchAuction(listing_id))
+            .ok_or(VirtualEconomyError::AuctionNotFound)
+    }
+
+    /// Compute the current price of an active auction given the ledger time.
+    pub fn get_auction_price(env: Env, listing_id: BytesN<32>) -> Result<i128, VirtualEconomyError> {
+        let listing = Self::get_dutch_auction(env.clone(), listing_id)?;
+        Ok(MarketplaceManager::dutch_auction_price(&env, &listing))
+    }
+
+    /// Buy the auctioned NFT at its current computed price. Applies the
+    /// same marketplace fee and creator royalty rules as fixed-price trades.
+    pub fn purchase_dutch_auction(
+        env: Env,
+        buyer: Address,
+        listing_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
+        buyer.require_auth();
+
+        let mut listing = Self::get_dutch_auction(env.clone(), listing_id.clone())?;
+        if listing.status != OrderStatus::Active {
+            return Err(VirtualEconomyError::AuctionNotActive);
+        }
+        if env.ledger().timestamp() >= listing.end_time {
+            return Err(VirtualEconomyError::AuctionEnded);
+        }
+
+        let price = MarketplaceManager::dutch_auction_price(&env, &listing);
+
+        let buyer_balance = Self::get_currency_balance(env.clone(), buyer.clone());
+        if buyer_balance < price {
+            return Err(VirtualEconomyError::InsufficientBalance);
+        }
+
+        let config = Self::get_marketplace_config(&env);
+        let fee = (price * config.fee_percentage as i128) / 10000;
+
+        let mut royalty_amount = 0i128;
+        let mut creator = None;
+        if let Some(metadata) = env
+            .storage()
+            .persistent()
+            .get::<_, NFTMetadata>(&DataKey::NFTMetadata(listing.token_id.clone()))
+        {
+            creator = Some(metadata.creator.clone());
+            let is_primary_sale = metadata.creator == listing.seller;
+            let is_exempt = env
+                .storage()
+                .persistent()
+                .get::<_, bool>(&DataKey::RoyaltyExempt(buyer.clone()))
+                .unwrap_or(false);
+            if !is_primary_sale && !is_exempt && metadata.royalty_bps > 0 {
+                royalty_amount = (price * metadata.royalty_bps as i128) / 10000;
+            }
+        }
+
+        let seller_amount = price - fee - royalty_amount;
+
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(buyer.clone()),
+            &(buyer_balance - price),
+        );
+        let seller_balance = Self::get_currency_balance(env.clone(), listing.seller.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(listing.seller.clone()),
+            &(seller_balance + seller_amount),
+        );
+        let fee_collector_balance =
+            Self::get_currency_balance(env.clone(), config.fee_collector.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(config.fee_collector.clone()),
+            &(fee_collector_balance + fee),
+        );
+        if royalty_amount > 0 {
+            if let Some(creator_addr) = creator {
+                let creator_balance = Self::get_currency_balance(env.clone(), creator_addr.clone());
+                env.storage().persistent().set(
+                    &DataKey::CurrencyBalance(creator_addr),
+                    &(creator_balance + royalty_amount),
+                );
+
+                let mut royalty_stats = Self::get_royalty_analytics(env.clone());
+                royalty_stats.total_royalties_paid += royalty_amount;
+                royalty_stats.total_royalty_transactions += 1;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::RoyaltyAnalytics, &royalty_stats);
+            }
+        }
+
+        Self::transfer_nft(
+            env.clone(),
+            listing.seller.clone(),
+            buyer.clone(),
+            listing.token_id.clone(),
+        )?;
+
+        listing.status = OrderStatus::Completed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::DutchAuction(listing_id.clone()), &listing);
+
+        let mut analytics = Self::get_pricing_analytics(env.clone());
+        analytics.total_auctions_settled += 1;
+        analytics.total_auction_volume += price;
+        env.storage()
+            .instance()
+            .set(&DataKey::PricingAnalytics, &analytics);
+
+        events::emit_dutch_auction_purchased(&env, &listing_id, &buyer, price);
+        Ok(())
+    }
+
+    /// Cancel an active auction (seller only).
+    pub fn cancel_dutch_auction(
+        env: Env,
+        listing_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
+        let mut listing = Self::get_dutch_auction(env.clone(), listing_id.clone())?;
+        listing.seller.require_auth();
+
+        if listing.status != OrderStatus::Active {
+            return Err(VirtualEconomyError::AuctionNotActive);
+        }
+        listing.status = OrderStatus::Cancelled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::DutchAuction(listing_id.clone()), &listing);
+
+        events::emit_dutch_auction_cancelled(&env, &listing_id);
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Dynamic Pricing: Bonding Curve Drops
+    //
+    // A repeatable NFT mint whose price rises with each unit already
+    // minted, so the price itself reflects realised demand instead of a
+    // creator's static guess.
+    // -------------------------------------------------------------------------
+
+    /// Create a bonding-curve drop. `slope_bps` controls how fast the price
+    /// rises per mint (basis points of `base_price`); `max_supply` optionally
+    /// caps total mints.
+    pub fn create_bonding_curve_drop(
+        env: Env,
+        creator: Address,
+        base_price: i128,
+        slope_bps: u32,
+        max_supply: Option<u32>,
+        metadata_template: NFTMetadata,
+    ) -> Result<BytesN<32>, VirtualEconomyError> {
+        creator.require_auth();
+        MarketplaceManager::validate_curve_params(base_price, slope_bps, max_supply)?;
+
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DropCounter)
+            .unwrap_or(0);
+        let new_counter = counter + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::DropCounter, &new_counter);
+
+        let mut id_bytes = [0u8; 32];
+        id_bytes[8..16].copy_from_slice(&new_counter.to_be_bytes());
+        let drop_id = BytesN::from_array(&env, &id_bytes);
+
+        let drop = BondingCurveDrop {
+            drop_id: drop_id.clone(),
+            creator: creator.clone(),
+            base_price,
+            slope_bps,
+            max_supply,
+            minted: 0,
+            metadata_template,
+            active: true,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::BondingCurveDrop(drop_id.clone()), &drop);
+
+        let mut analytics = Self::get_pricing_analytics(env.clone());
+        analytics.total_drops_created += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::PricingAnalytics, &analytics);
+
+        events::emit_bonding_curve_drop_created(&env, &drop_id, &creator, base_price, slope_bps);
+        Ok(drop_id)
+    }
+
+    pub fn get_bonding_curve_drop(
+        env: Env,
+        drop_id: BytesN<32>,
+    ) -> Result<BondingCurveDrop, VirtualEconomyError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BondingCurveDrop(drop_id))
+            .ok_or(VirtualEconomyError::DropNotFound)
+    }
+
+    /// Compute the current mint price of a drop given units minted so far.
+    pub fn get_drop_price(env: Env, drop_id: BytesN<32>) -> Result<i128, VirtualEconomyError> {
+        let drop = Self::get_bonding_curve_drop(env, drop_id)?;
+        Ok(MarketplaceManager::bonding_curve_price(&drop))
+    }
+
+    /// Mint the next unit from a drop at its current bonding-curve price.
+    /// Payment (in the contract's internal currency) goes to the drop's
+    /// creator, minus the standard marketplace fee.
+    pub fn mint_from_drop(
+        env: Env,
+        buyer: Address,
+        drop_id: BytesN<32>,
+    ) -> Result<BytesN<32>, VirtualEconomyError> {
+        buyer.require_auth();
+
+        let mut drop = Self::get_bonding_curve_drop(env.clone(), drop_id.clone())?;
+        if !drop.active {
+            return Err(VirtualEconomyError::DropInactive);
+        }
+        if let Some(max) = drop.max_supply {
+            if drop.minted >= max {
+                return Err(VirtualEconomyError::DropSupplyExceeded);
+            }
+        }
+
+        let price = MarketplaceManager::bonding_curve_price(&drop);
+        let buyer_balance = Self::get_currency_balance(env.clone(), buyer.clone());
+        if buyer_balance < price {
+            return Err(VirtualEconomyError::InsufficientBalance);
+        }
+
+        let config = Self::get_marketplace_config(&env);
+        let fee = (price * config.fee_percentage as i128) / 10000;
+        let creator_amount = price - fee;
+
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(buyer.clone()),
+            &(buyer_balance - price),
+        );
+        let creator_balance = Self::get_currency_balance(env.clone(), drop.creator.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(drop.creator.clone()),
+            &(creator_balance + creator_amount),
+        );
+        let fee_collector_balance =
+            Self::get_currency_balance(env.clone(), config.fee_collector.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(config.fee_collector.clone()),
+            &(fee_collector_balance + fee),
+        );
+
+        let token_id = Self::mint_nft(
+            env.clone(),
+            buyer.clone(),
+            drop.metadata_template.clone(),
+            None,
+        )?;
+
+        drop.minted += 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::BondingCurveDrop(drop_id.clone()), &drop);
+
+        let mut analytics = Self::get_pricing_analytics(env.clone());
+        analytics.total_drop_mints += 1;
+        analytics.total_drop_volume += price;
+        env.storage()
+            .instance()
+            .set(&DataKey::PricingAnalytics, &analytics);
+
+        events::emit_bonding_curve_drop_minted(&env, &drop_id, &buyer, &token_id, price);
+        Ok(token_id)
+    }
+
+    /// Activate/deactivate a drop (creator only). Deactivating stops new
+    /// mints without affecting units already minted.
+    pub fn set_drop_active(
+        env: Env,
+        drop_id: BytesN<32>,
+        caller: Address,
+        active: bool,
+    ) -> Result<(), VirtualEconomyError> {
+        caller.require_auth();
+        let mut drop = Self::get_bonding_curve_drop(env.clone(), drop_id.clone())?;
+        if drop.creator != caller {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+        drop.active = active;
+        env.storage()
+            .persistent()
+            .set(&DataKey::BondingCurveDrop(drop_id.clone()), &drop);
+        events::emit_bonding_curve_drop_updated(&env, &drop_id, active);
+        Ok(())
+    }
+
+    /// Aggregate stats across all dynamic-pricing mechanisms.
+    pub fn get_pricing_analytics(env: Env) -> PricingAnalytics {
+        env.storage()
+            .instance()
+            .get(&DataKey::PricingAnalytics)
+            .unwrap_or(PricingAnalytics {
+                total_auctions_created: 0,
+                total_auctions_settled: 0,
+                total_auction_volume: 0,
+                total_drops_created: 0,
+                total_drop_mints: 0,
+                total_drop_volume: 0,
+            })
     }
 
     // -------------------------------------------------------------------------

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
-      "Bash(rustc:*)"
+      "Bash(rustc:*)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

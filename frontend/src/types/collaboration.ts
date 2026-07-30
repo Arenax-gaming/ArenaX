@@ -166,3 +166,28 @@ export interface CollaborationChannel {
   tournamentId?: string;
   partyId?: string;
 }
+
+// Wire protocol for /ws/collaboration/{tournamentId}
+
+/** Full channel snapshot sent by the server on join and after reconnects. */
+export interface CollaborationChannelStateMessage {
+  type: "channel_state";
+  channel: CollaborationChannel;
+}
+
+export interface CollaborationPingMessage {
+  type: "ping";
+}
+
+export interface CollaborationPongMessage {
+  type: "pong";
+}
+
+export type CollaborationServerMessage =
+  | CollaborationChannelStateMessage
+  | CollaborationPingMessage
+  | CollaborationEvent;
+
+export type CollaborationClientMessage =
+  | CollaborationPongMessage
+  | CollaborationEvent;

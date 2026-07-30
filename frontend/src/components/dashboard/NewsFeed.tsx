@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { RefreshCw } from "lucide-react";
 
 interface NewsItem {
   id: string;
@@ -29,10 +30,63 @@ const tagColors: Record<string, string> = {
 
 const PAGE_SIZE = 3;
 
-export function NewsFeed() {
+interface NewsFeedProps {
+  news?: NewsItem[];
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
+}
+
+function NewsFeedSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-16 bg-muted rounded-full animate-pulse" />
+              <div className="h-3 w-20 bg-muted rounded animate-pulse" />
+            </div>
+            <div className="h-4 w-3/4 bg-muted rounded animate-pulse" />
+            <div className="h-3 w-full bg-muted rounded animate-pulse" />
+            <div className="h-3 w-5/6 bg-muted rounded animate-pulse" />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function NewsFeedError({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold">Platform News</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+        <p className="text-sm text-muted-foreground">Could not load news — please try again.</p>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function NewsFeed({ news = mockNews, isLoading = false, isError = false, onRetry }: NewsFeedProps) {
   const [page, setPage] = useState(1);
-  const visible = mockNews.slice(0, page * PAGE_SIZE);
-  const hasMore = visible.length < mockNews.length;
+
+  if (isLoading) return <NewsFeedSkeleton />;
+  if (isError) return <NewsFeedError onRetry={onRetry} />;
+
+  const visible = news.slice(0, page * PAGE_SIZE);
+  const hasMore = visible.length < news.length;
 
   return (
     <Card>

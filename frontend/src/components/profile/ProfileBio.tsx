@@ -37,9 +37,11 @@ interface ProfileBioProps {
   /** Called when the component requests edit mode to change. Only needed for controlled usage. */
   onEditToggle?: (editing: boolean) => void;
   onSave: (updatedUser: Partial<User>) => void;
+  /** Called whenever the bio form has uncommitted (dirty) changes. */
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
-export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSave }: ProfileBioProps) {
+export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSave, onDirtyChange }: ProfileBioProps) {
   const [internalEditing, setInternalEditing] = React.useState(false);
   const isEditing = isEditingProp !== undefined ? isEditingProp : internalEditing;
   const setEditing = (v: boolean) => {
@@ -63,6 +65,10 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
   const bioValue = form.watch("bio") ?? "";
   const bioLength = bioValue.length;
   const bioNearLimit = bioLength >= Math.floor(MAX_BIO_LENGTH * 0.9);
+
+  React.useEffect(() => {
+    onDirtyChange?.(isEditing && form.formState.isDirty);
+  }, [isEditing, form.formState.isDirty, onDirtyChange]);
 
   const handleSave = form.handleSubmit((data) => {
     onSave({

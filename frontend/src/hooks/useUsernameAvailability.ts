@@ -43,7 +43,7 @@ export function useUsernameAvailability(username: string) {
       abortRef.current = controller;
 
       try {
-        const result = await api.checkUsernameAvailability(trimmed);
+        const result = await api.checkUsernameAvailability(trimmed, controller.signal);
         if (!controller.signal.aborted) {
           setStatus(result.available ? "available" : "unavailable");
         }

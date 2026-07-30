@@ -69,6 +69,15 @@ class MockRedis {
   async exec() { return []; }
   on() { return this; }
   async connect() { return this; }
+
+  // Mirrors the increment-and-read-previous Lua script used by
+  // SlidingWindowRateLimitStore: INCR key[0], PEXPIRE on first write, GET key[1].
+  async eval(_script, _numkeys, currentKey, previousKey) {
+    const current = (this.store.get(currentKey) || 0) + 1;
+    this.store.set(currentKey, current);
+    const previous = Number(this.store.get(previousKey) || 0);
+    return [current, previous];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +127,96 @@ describe('RedisRateLimitStore', () => {
     const redis = new MockRedis();
     redis.incr = () => { throw new Error('ECONNREFUSED'); };
     const store = new RedisRateLimitStore({ redis, windowMs: 60000 });
+
+    const result = await store.increment('k');
+    assert.equal(result.totalHits, 1);
+    assert.ok(result.resetTime instanceof Date);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: SlidingWindowRateLimitStore
+// ---------------------------------------------------------------------------
+
+describe('SlidingWindowRateLimitStore', () => {
+  it('increments counter and returns totalHits + resetTime', async () => {
+    const { SlidingWindowRateLimitStore } = await import('../dist/middleware/sliding-window-rate-limit.store.js');
+    const redis = new MockRedis();
+    const store = new SlidingWindowRateLimitStore({ redis, windowMs: 60000 });
+
+    const result1 = await store.increment('user:123');
+    assert.equal(result1.totalHits, 1);
+    assert.ok(result1.resetTime instanceof Date);
+    assert.ok(result1.resetTime.getTime() > Date.now());
+
+    const result2 = await store.increment('user:123');
+    assert.equal(result2.totalHits, 2);
+  });
+
+  it('smooths bursts across a fixed-window boundary', async () => {
+    const { SlidingWindowRateLimitStore } = await import('../dist/middleware/sliding-window-rate-limit.store.js');
+    const redis = new MockRedis();
+    const windowMs = 60000;
+    const store = new SlidingWindowRateLimitStore({ redis, windowMs });
+
+    const realNow = Date.now;
+    try {
+      // Fill the first window with 100 hits.
+      Date.now = () => 0;
+      for (let i = 0; i < 100; i++) {
+        await store.increment('burst');
+      }
+
+      // A fixed-window counter would reset to 1 here, allowing another
+      // full burst. The sliding window should still see ~100 hits.
+      Date.now = () => windowMs + 1;
+      const rightAfterBoundary = await store.increment('burst');
+      assert.ok(
+        rightAfterBoundary.totalHits > 90,
+        `expected sliding window to carry over most of the previous window's hits, got ${rightAfterBoundary.totalHits}`,
+      );
+
+      // Well past the boundary, the previous window's weight should have
+      // decayed to (close to) nothing.
+      Date.now = () => windowMs * 2 + 5000;
+      const farFromBoundary = await store.increment('burst');
+      assert.ok(
+        farFromBoundary.totalHits < 10,
+        `expected the previous window's influence to have decayed, got ${farFromBoundary.totalHits}`,
+      );
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('decrements counter', async () => {
+    const { SlidingWindowRateLimitStore } = await import('../dist/middleware/sliding-window-rate-limit.store.js');
+    const redis = new MockRedis();
+    const store = new SlidingWindowRateLimitStore({ redis, windowMs: 60000 });
+
+    await store.increment('k');
+    await store.increment('k');
+    await store.decrement('k');
+    const result = await store.increment('k');
+    assert.equal(result.totalHits, 2);
+  });
+
+  it('resets a single key', async () => {
+    const { SlidingWindowRateLimitStore } = await import('../dist/middleware/sliding-window-rate-limit.store.js');
+    const redis = new MockRedis();
+    const store = new SlidingWindowRateLimitStore({ redis, windowMs: 60000 });
+
+    await store.increment('k');
+    await store.resetKey('k');
+    const result = await store.increment('k');
+    assert.equal(result.totalHits, 1);
+  });
+
+  it('handles Redis errors gracefully', async () => {
+    const { SlidingWindowRateLimitStore } = await import('../dist/middleware/sliding-window-rate-limit.store.js');
+    const redis = new MockRedis();
+    redis.eval = () => { throw new Error('ECONNREFUSED'); };
+    const store = new SlidingWindowRateLimitStore({ redis, windowMs: 60000 });
 
     const result = await store.increment('k');
     assert.equal(result.totalHits, 1);

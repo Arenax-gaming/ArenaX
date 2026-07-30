@@ -3,6 +3,7 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import { useDevice, useOnlineStatus, useConnectionSpeed } from "./useMobile";
+import { hasAnalyticsConsent } from "@/lib/consentCookie";
 
 interface AnalyticsEvent {
   category: string;
@@ -83,6 +84,8 @@ class MobileAnalytics {
 
   // Track event
   trackEvent(event: AnalyticsEvent) {
+    if (!hasAnalyticsConsent()) return;
+
     this.queue.push(event);
     
     // Flush if queue is full
@@ -122,6 +125,8 @@ class MobileAnalytics {
 
   // Send event to analytics service
   private sendEvent(event: AnalyticsEvent) {
+    if (!hasAnalyticsConsent()) return;
+
     // In production, replace with actual analytics service call
     // Example: gtag, Mixpanel, Amplitude, etc.
     console.log("[MobileAnalytics] Event:", event);
@@ -184,22 +189,24 @@ export function useMobileAnalytics() {
 
   // Initialize on mount
   useEffect(() => {
+    if (!hasAnalyticsConsent()) return;
+
     if (!isInitialized.current) {
       analytics.init();
       isInitialized.current = true;
     }
-    
+
     // Track device info
     analytics.trackMobileEvent("device_info", `${device.deviceType}`, undefined);
-    
+
     // Track connection speed
     analytics.trackMobileEvent("connection", connectionSpeed, undefined);
-    
+
     // Track online status
     if (!isOnline) {
       analytics.trackMobileEvent("offline", "connection_lost");
     }
-    
+
     return () => {
       analytics.endSession();
     };

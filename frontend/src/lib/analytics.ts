@@ -7,8 +7,8 @@ import type {
   ConsentState,
   SessionProperties,
 } from "@/types/analytics";
+import { getAnalyticsConsentCookie, setAnalyticsConsentCookie } from "@/lib/consentCookie";
 
-const CONSENT_KEY = "arenax:analytics:consent";
 const SESSION_KEY = "arenax:analytics:session";
 
 function generateId(): string {
@@ -16,19 +16,12 @@ function generateId(): string {
 }
 
 function loadConsent(): ConsentState {
-  if (typeof window === "undefined") return { analytics: "pending", updatedAt: null };
-  try {
-    const raw = localStorage.getItem(CONSENT_KEY);
-    if (raw) return JSON.parse(raw) as ConsentState;
-  } catch {
-    // ignore
-  }
-  return { analytics: "pending", updatedAt: null };
+  return { analytics: getAnalyticsConsentCookie(), updatedAt: null };
 }
 
 function saveConsent(state: ConsentState): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(CONSENT_KEY, JSON.stringify(state));
+  if (state.analytics === "pending") return;
+  setAnalyticsConsentCookie(state.analytics);
 }
 
 function loadOrCreateSession(userId?: string): SessionProperties {
