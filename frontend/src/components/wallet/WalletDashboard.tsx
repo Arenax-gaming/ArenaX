@@ -13,6 +13,8 @@ import { WithdrawModal } from "@/components/wallet/WithdrawModal";
 import { useAuth } from "@/hooks/useAuth";
 import { useTxStatus } from "@/hooks/useTxStatus";
 import { useWallet } from "@/hooks/useWallet";
+import { useTokenExpiry, SessionExpiredError } from "@/hooks/useTokenExpiry";
+import { SessionExpiredModal } from "@/components/wallet/SessionExpiredModal";
 import { createEmptyBalances, fetchWalletBalances } from "@/lib/wallet/balances";
 import { walletConfig } from "@/lib/wallet/config";
 import { submitWithdrawTransaction } from "@/lib/wallet/transactions";
@@ -25,9 +27,12 @@ export function WalletDashboard() {
   const { session, isConnected, publicKey } = useWallet();
   const { history, appendHistory, clearHistory, trackTx } = useTxStatus();
 
+  const { ensureValidToken } = useTokenExpiry();
+
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [isSessionExpiredOpen, setIsSessionExpiredOpen] = useState(false);
 
   // Pending withdraw request — held while the session-expired modal is shown.
   const [pendingWithdraw, setPendingWithdraw] = useState<WithdrawRequest | null>(null);
@@ -50,7 +55,16 @@ export function WalletDashboard() {
     return balancesQuery.data ?? createEmptyBalances();
   }, [balancesQuery.data]);
 
-  const handleRecordDeposit = (asset: WalletAssetCode, amount: number) => {
+  const handleRecordDeposit = async (asset: WalletAssetCode, amount: number) => {
+    try {
+      await ensureValidToken();
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        setIsSessionExpiredOpen(true);
+        return;
+      }
+      throw err;
+    }
     appendHistory({
       direction: "deposit",
       asset,
@@ -65,28 +79,15 @@ export function WalletDashboard() {
       throw new Error("Connect a wallet before withdrawing.");
     }
 
-    // ── Token validity guard ──────────────────────────────────────────────
-    // If the token is within 60 s of expiry, attempt a silent refresh first.
-    // If the refresh fails, hold the request and show the session-expired
-    // modal so the user can re-authenticate before the transaction proceeds.
-    if (isTokenNearExpiry()) {
-      try {
-        await refreshAccessToken();
-      } catch {
-        // Refresh failed — store the request and surface the modal.
-        setPendingWithdraw(request);
-        setSessionExpiredVisible(true);
+    try {
+      await ensureValidToken();
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        setIsSessionExpiredOpen(true);
         return;
       }
+      throw err;
     }
-
-    await executeWithdraw(request);
-  };
-
-  // Separated so it can be called both from handleSubmitWithdraw and from
-  // the modal's re-authenticate callback after a successful token refresh.
-  const executeWithdraw = async (request: WithdrawRequest) => {
-    if (!session) return;
 
     setWithdrawSubmitting(true);
 
@@ -192,13 +193,10 @@ export function WalletDashboard() {
 
       <TransactionToasts />
 
-      {sessionExpiredVisible && (
-        <SessionExpiredModal
-          onReauthenticate={handleReauthenticate}
-          onDismiss={handleDismissSessionExpired}
-          isRefreshing={isRefreshing}
-        />
-      )}
+      <SessionExpiredModal
+        open={isSessionExpiredOpen}
+        onClose={() => setIsSessionExpiredOpen(false)}
+      />
     </div>
   );
 }
