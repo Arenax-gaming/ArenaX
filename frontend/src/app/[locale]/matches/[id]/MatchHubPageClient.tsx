@@ -12,10 +12,12 @@ import {
 } from "@/hooks/useMatchWebSocket";
 import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
+import { SpectatorMode } from "@/components/match/SpectatorMode";
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Eye,
   RadioTower,
   RefreshCw,
   ShieldAlert,
@@ -220,6 +222,21 @@ function MatchHubPageContent() {
 
   const isLive = match.status === "in_progress";
   const isDisputed = match.status === "disputed";
+
+  // Non-participants watching a live or completed match enter spectator mode.
+  // Spectator limit is pulled from the match config if present.
+  if (!isParticipant && (isLive || isDisputed || match.status === "completed")) {
+    return (
+      <SpectatorMode
+        match={match as MatchHubDetails}
+        currentUserId={currentUserId}
+        currentUserName={user?.username ?? "Spectator"}
+        spectatorLimit={(match as MatchHubDetails).spectatorLimit}
+        onExit={() => router.back()}
+      />
+    );
+  }
+
   const submissionLocked =
     !isParticipant || (!isLive && !isDisputed) || !player1Score.length || !player2Score.length;
 
