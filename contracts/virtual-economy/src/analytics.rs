@@ -1,6 +1,11 @@
 // Economy analytics and monitoring
+//
+// A reusable calculation library not yet wired into the contract's public
+// entry points in lib.rs.
+#![allow(dead_code)]
+
 use crate::storage::*;
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Env};
 
 pub struct EconomyAnalyticsManager;
 
@@ -32,7 +37,7 @@ impl EconomyAnalyticsManager {
         // Fee collection efficiency
         if analytics.total_trade_volume > 0 {
             let fee_ratio = (analytics.total_fees_collected * 100) / analytics.total_trade_volume;
-            if fee_ratio >= 2 && fee_ratio <= 5 {
+            if (2..=5).contains(&fee_ratio) {
                 score = score.saturating_add(10); // Healthy fee collection
             }
         }

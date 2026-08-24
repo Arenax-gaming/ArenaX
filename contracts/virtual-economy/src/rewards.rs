@@ -1,5 +1,9 @@
 // Reward distribution system
-use crate::error::VirtualEconomyError;
+//
+// A reusable calculation library not yet wired into the contract's public
+// entry points in lib.rs.
+#![allow(dead_code)]
+
 use crate::storage::*;
 use soroban_sdk::{Address, Env, String, Vec};
 
@@ -9,7 +13,7 @@ impl RewardManager {
     /// Calculate tournament rewards based on placement and prize pool
     pub fn calculate_tournament_rewards(
         total_prize_pool: i128,
-        player_count: u32,
+        _player_count: u32,
         placement: u32,
     ) -> i128 {
         // Standard tournament payout structure
@@ -93,7 +97,7 @@ impl RewardManager {
     /// Distribute seasonal rewards to active players
     pub fn calculate_seasonal_rewards(
         player_activity_score: i128,
-        season_length_days: u32,
+        _season_length_days: u32,
         total_seasonal_pool: i128,
         active_players: u32,
     ) -> i128 {

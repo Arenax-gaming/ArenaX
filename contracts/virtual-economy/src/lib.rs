@@ -1,4 +1,8 @@
 #![no_std]
+// create_dutch_auction's 8 real, independent parameters trip
+// clippy::too_many_arguments (allowed at crate level, since #[contractimpl]
+// generates the Client/Args types outside the impl block itself).
+#![allow(clippy::too_many_arguments)]
 
 mod analytics;
 mod currency;
@@ -11,7 +15,7 @@ mod storage;
 
 use arenax_events::virtual_economy as events;
 use marketplace::MarketplaceManager;
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 pub use error::VirtualEconomyError;
 pub use storage::*;
@@ -329,7 +333,7 @@ impl VirtualEconomyContract {
             .set(&DataKey::NFTOwner(token_id.clone()), &to);
 
         // Update from's NFT list
-        let mut from_nfts: Vec<BytesN<32>> = env
+        let from_nfts: Vec<BytesN<32>> = env
             .storage()
             .persistent()
             .get(&DataKey::OwnedNFTs(from.clone()))
@@ -1098,7 +1102,7 @@ impl VirtualEconomyContract {
             }
         }
 
-        events::emit_rewards_distributed(&env, rewards.len() as u32, &reason);
+        events::emit_rewards_distributed(&env, rewards.len(), &reason);
         Ok(())
     }
 

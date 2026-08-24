@@ -507,7 +507,7 @@ impl StakingManager {
         let ax_token = Self::get_ax_token(env.clone());
         token::Client::new(&env, &ax_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -774,7 +774,7 @@ impl StakingManager {
         let ax_token = Self::get_ax_token(env.clone());
         token::Client::new(&env, &ax_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -950,7 +950,7 @@ impl StakingManager {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| Vec::new(env));
-        if !pools.contains(&pool_id) {
+        if !pools.contains(pool_id) {
             pools.push_back(pool_id);
             env.storage().persistent().set(&key, &pools);
         }
