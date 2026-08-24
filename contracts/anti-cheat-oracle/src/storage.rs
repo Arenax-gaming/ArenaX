@@ -3,11 +3,11 @@ use soroban_sdk::{contracttype, Address, String, Vec};
 // ─── Feed / Oracle configuration ─────────────────────────────────────────────
 
 /// Feed types the oracle supports.
-pub const FEED_TYPE_SCORE: u32 = 0;       // Raw match score data
-pub const FEED_TYPE_TELEMETRY: u32 = 1;   // In-game telemetry stream
-pub const FEED_TYPE_BEHAVIOR: u32 = 2;    // Player behavior metrics
-pub const FEED_TYPE_NETWORK: u32 = 3;     // Network / latency metrics
-pub const FEED_TYPE_EXTERNAL: u32 = 4;    // Third-party oracle feed
+pub const FEED_TYPE_SCORE: u32 = 0; // Raw match score data
+pub const FEED_TYPE_TELEMETRY: u32 = 1; // In-game telemetry stream
+pub const FEED_TYPE_BEHAVIOR: u32 = 2; // Player behavior metrics
+pub const FEED_TYPE_NETWORK: u32 = 3; // Network / latency metrics
+pub const FEED_TYPE_EXTERNAL: u32 = 4; // Third-party oracle feed
 
 /// Status of an individual data feed.
 pub const FEED_STATUS_ACTIVE: u32 = 0;
@@ -22,12 +22,12 @@ pub const ORACLE_OFFLINE: u32 = 2;
 // ─── Detection rule / alert constants ────────────────────────────────────────
 
 /// Detection rule types (what pattern each rule targets).
-pub const RULE_SCORE_SPIKE: u32 = 0;      // Score value outside normal range
-pub const RULE_VELOCITY: u32 = 1;         // Change rate too high / too low
-pub const RULE_CONSENSUS: u32 = 2;        // Oracles disagree beyond threshold
-pub const RULE_STALENESS: u32 = 3;        // Feed has not updated recently
-pub const RULE_ANOMALY_ML: u32 = 4;       // ML anomaly score exceeds threshold
-pub const RULE_FREQ_ABUSE: u32 = 5;       // Oracle posting far too frequently
+pub const RULE_SCORE_SPIKE: u32 = 0; // Score value outside normal range
+pub const RULE_VELOCITY: u32 = 1; // Change rate too high / too low
+pub const RULE_CONSENSUS: u32 = 2; // Oracles disagree beyond threshold
+pub const RULE_STALENESS: u32 = 3; // Feed has not updated recently
+pub const RULE_ANOMALY_ML: u32 = 4; // ML anomaly score exceeds threshold
+pub const RULE_FREQ_ABUSE: u32 = 5; // Oracle posting far too frequently
 
 /// Alert severity levels.
 pub const ALERT_INFO: u32 = 0;
@@ -63,22 +63,22 @@ pub enum DataKey {
     Admin,
     ReputationContract,
     OracleConfig,
-    GovernanceQuorum,          // u32 — votes needed to pass a proposal
-    EmergencyPaused,           // bool
+    GovernanceQuorum, // u32 — votes needed to pass a proposal
+    EmergencyPaused,  // bool
 
     // Per-oracle (instance)
     AuthorizedOracle(Address), // bool
     OracleHealth(Address),     // OracleHealth
 
     // Per-feed (persistent)
-    Feed(u32),                 // u32 feed_id → DataFeed
-    FeedCounter,               // u32 — next feed ID
-    FeedReading(u32, u32),     // (feed_id, seq) → FeedReading
-    FeedReadingSeq(u32),       // u32 — next sequence for a feed
+    Feed(u32),             // u32 feed_id → DataFeed
+    FeedCounter,           // u32 — next feed ID
+    FeedReading(u32, u32), // (feed_id, seq) → FeedReading
+    FeedReadingSeq(u32),   // u32 — next sequence for a feed
 
     // Detection rules (persistent)
-    Rule(u32),                 // u32 rule_id → DetectionRule
-    RuleCounter,               // u32
+    Rule(u32),   // u32 rule_id → DetectionRule
+    RuleCounter, // u32
 
     // Alerts (persistent)
     Alert(u64),                // u64 alert_id → AlertRecord
@@ -89,18 +89,18 @@ pub enum DataKey {
     Confirmation(Address, u64), // (player, match_id) → AntiCheatConfirmation
 
     // Analytics (persistent)
-    AnalyticsTotals,           // AnalyticsTotals
-    OracleSubmitCount(Address),// u64 — submissions per oracle
-    FeedReadingCount(u32),     // u64 — total readings for a feed
+    AnalyticsTotals,            // AnalyticsTotals
+    OracleSubmitCount(Address), // u64 — submissions per oracle
+    FeedReadingCount(u32),      // u64 — total readings for a feed
 
     // Governance proposals (persistent)
-    Proposal(u64),             // u64 proposal_id → GovernanceProposal
-    ProposalCounter,           // u64
-    ProposalVote(u64, Address),// (proposal_id, voter) → bool
+    Proposal(u64),              // u64 proposal_id → GovernanceProposal
+    ProposalCounter,            // u64
+    ProposalVote(u64, Address), // (proposal_id, voter) → bool
 
     // Monitoring (persistent)
-    MonitoringState,           // MonitoringState
-    LastHeartbeat,             // u64 timestamp
+    MonitoringState, // MonitoringState
+    LastHeartbeat,   // u64 timestamp
 }
 
 // ─── Structs ─────────────────────────────────────────────────────────────────
@@ -127,10 +127,10 @@ pub struct OracleConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataFeed {
     pub feed_id: u32,
-    pub feed_type: u32,        // FEED_TYPE_*
+    pub feed_type: u32, // FEED_TYPE_*
     pub description: String,
-    pub owner: Address,        // Oracle address that owns / manages this feed
-    pub status: u32,           // FEED_STATUS_*
+    pub owner: Address, // Oracle address that owns / manages this feed
+    pub status: u32,    // FEED_STATUS_*
     pub created_at: u64,
     pub last_updated: u64,
     pub total_readings: u64,
@@ -144,14 +144,14 @@ pub struct DataFeed {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeedReading {
     pub feed_id: u32,
-    pub seq: u32,              // Monotonically increasing per feed
-    pub oracle: Address,       // Submitting oracle
-    pub value: i64,            // The data point
-    pub confidence: u32,       // Oracle-reported confidence 0-100
-    pub player: Address,       // Player the reading relates to
+    pub seq: u32,        // Monotonically increasing per feed
+    pub oracle: Address, // Submitting oracle
+    pub value: i64,      // The data point
+    pub confidence: u32, // Oracle-reported confidence 0-100
+    pub player: Address, // Player the reading relates to
     pub match_id: u64,
     pub timestamp: u64,
-    pub anomaly_score: u32,    // 0-100 computed on submission
+    pub anomaly_score: u32, // 0-100 computed on submission
 }
 
 /// A real-time cheat detection rule.
@@ -159,14 +159,14 @@ pub struct FeedReading {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DetectionRule {
     pub rule_id: u32,
-    pub rule_type: u32,        // RULE_*
-    pub feed_type: u32,        // Which FEED_TYPE this rule monitors
+    pub rule_type: u32, // RULE_*
+    pub feed_type: u32, // Which FEED_TYPE this rule monitors
     pub description: String,
-    pub threshold: i64,        // Rule-specific threshold value
-    pub severity: u32,         // ALERT_INFO / WARNING / CRITICAL
+    pub threshold: i64, // Rule-specific threshold value
+    pub severity: u32,  // ALERT_INFO / WARNING / CRITICAL
     pub enabled: bool,
     pub created_at: u64,
-    pub trigger_count: u64,    // Total times this rule has fired
+    pub trigger_count: u64, // Total times this rule has fired
 }
 
 /// An alert raised by the detection engine.
@@ -178,13 +178,13 @@ pub struct AlertRecord {
     pub feed_id: u32,
     pub player: Address,
     pub match_id: u64,
-    pub severity: u32,         // ALERT_*
-    pub status: u32,           // ALERT_OPEN / ACKNOWLEDGED / RESOLVED / FALSE_POSITIVE
+    pub severity: u32, // ALERT_*
+    pub status: u32,   // ALERT_OPEN / ACKNOWLEDGED / RESOLVED / FALSE_POSITIVE
     pub triggered_at: u64,
-    pub resolved_at: u64,      // 0 if still open
-    pub oracle: Address,       // Oracle whose reading triggered this
-    pub value: i64,            // The offending value
-    pub threshold: i64,        // The rule threshold that was breached
+    pub resolved_at: u64, // 0 if still open
+    pub oracle: Address,  // Oracle whose reading triggered this
+    pub value: i64,       // The offending value
+    pub threshold: i64,   // The rule threshold that was breached
     pub details: String,
 }
 
@@ -208,17 +208,17 @@ pub struct AnalyticsTotals {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GovernanceProposal {
     pub proposal_id: u64,
-    pub proposal_type: u32,    // PROPOSAL_TYPE_*
+    pub proposal_type: u32, // PROPOSAL_TYPE_*
     pub proposer: Address,
     pub description: String,
     /// ABI-encoded payload specific to the proposal type.
     pub payload: soroban_sdk::Bytes,
-    pub status: u32,           // PROPOSAL_STATUS_*
+    pub status: u32, // PROPOSAL_STATUS_*
     pub votes_for: u32,
     pub votes_against: u32,
     pub created_at: u64,
     pub expires_at: u64,
-    pub executed_at: u64,      // 0 until executed
+    pub executed_at: u64, // 0 until executed
 }
 
 /// Per-oracle health record (instance storage).
@@ -226,12 +226,12 @@ pub struct GovernanceProposal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OracleHealth {
     pub oracle: Address,
-    pub state: u32,            // ORACLE_HEALTHY / DEGRADED / OFFLINE
+    pub state: u32, // ORACLE_HEALTHY / DEGRADED / OFFLINE
     pub total_submissions: u64,
     pub valid_submissions: u64,
     pub last_submission: u64,
     pub consecutive_errors: u32,
-    pub uptime_score: u32,     // 0-100
+    pub uptime_score: u32, // 0-100
 }
 
 /// Monitoring state snapshot.

@@ -29,7 +29,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, IntoVal, Symbol, Val, Vec, Error};
+use soroban_sdk::{contracterror, contracttype, Address, Env, Error, IntoVal, Symbol, Val, Vec};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -122,12 +122,17 @@ pub fn is_call_allowed(env: &Env, target: &Address, function: &Symbol) -> bool {
 
 /// Set whether a target contract address is allowed to be called.
 pub fn set_contract_allowed(env: &Env, target: &Address, allowed: bool) {
-    env.storage().instance().set(&GovernanceKey::AllowedContract(target.clone()), &allowed);
+    env.storage()
+        .instance()
+        .set(&GovernanceKey::AllowedContract(target.clone()), &allowed);
 }
 
 /// Set whether a specific function on a target contract is allowed to be called.
 pub fn set_function_allowed(env: &Env, target: &Address, function: &Symbol, allowed: bool) {
-    env.storage().instance().set(&GovernanceKey::AllowedFunction(target.clone(), function.clone()), &allowed);
+    env.storage().instance().set(
+        &GovernanceKey::AllowedFunction(target.clone(), function.clone()),
+        &allowed,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -157,17 +162,23 @@ pub fn record_and_emit_telemetry(env: &Env, target: &Address, function: &Symbol,
     // Analytics: update call counts
     let total_key = CallAnalyticsKey::TotalCalls;
     let current_total: u64 = env.storage().instance().get(&total_key).unwrap_or(0);
-    env.storage().instance().set(&total_key, &(current_total + 1));
+    env.storage()
+        .instance()
+        .set(&total_key, &(current_total + 1));
 
     if !success {
         let failed_key = CallAnalyticsKey::FailedCalls;
         let current_failed: u64 = env.storage().instance().get(&failed_key).unwrap_or(0);
-        env.storage().instance().set(&failed_key, &(current_failed + 1));
+        env.storage()
+            .instance()
+            .set(&failed_key, &(current_failed + 1));
     }
 
     let count_key = CallAnalyticsKey::CallCount(target.clone(), function.clone());
     let current_count: u64 = env.storage().instance().get(&count_key).unwrap_or(0);
-    env.storage().instance().set(&count_key, &(current_count + 1));
+    env.storage()
+        .instance()
+        .set(&count_key, &(current_count + 1));
 
     // Monitoring: publish event
     let event = CrossContractCallEvent {
@@ -177,24 +188,39 @@ pub fn record_and_emit_telemetry(env: &Env, target: &Address, function: &Symbol,
         timestamp: env.ledger().timestamp(),
     };
     env.events().publish(
-        (Symbol::new(env, "cross_contract"), Symbol::new(env, "call_metric")),
+        (
+            Symbol::new(env, "cross_contract"),
+            Symbol::new(env, "call_metric"),
+        ),
         event,
     );
 }
 
 /// Query analytics: get total calls
 pub fn get_total_calls(env: &Env) -> u64 {
-    env.storage().instance().get(&CallAnalyticsKey::TotalCalls).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&CallAnalyticsKey::TotalCalls)
+        .unwrap_or(0)
 }
 
 /// Query analytics: get failed calls
 pub fn get_failed_calls(env: &Env) -> u64 {
-    env.storage().instance().get(&CallAnalyticsKey::FailedCalls).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&CallAnalyticsKey::FailedCalls)
+        .unwrap_or(0)
 }
 
 /// Query analytics: get call count for specific target and function
 pub fn get_call_count(env: &Env, target: &Address, function: &Symbol) -> u64 {
-    env.storage().instance().get(&CallAnalyticsKey::CallCount(target.clone(), function.clone())).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&CallAnalyticsKey::CallCount(
+            target.clone(),
+            function.clone(),
+        ))
+        .unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +270,10 @@ impl CrossContractCaller {
             }
             Err(err) => {
                 record_and_emit_telemetry(env, contract, &function, false);
-                panic!("remote contract call failed with execution error: {:?}", err);
+                panic!(
+                    "remote contract call failed with execution error: {:?}",
+                    err
+                );
             }
             Ok(Err(_)) => {
                 record_and_emit_telemetry(env, contract, &function, false);
@@ -462,7 +491,9 @@ mod tests {
     #[contractimpl]
     impl MockCallback {
         pub fn on_success(env: Env, val: i32) {
-            env.storage().instance().set(&Symbol::new(&env, "cb_val"), &val);
+            env.storage()
+                .instance()
+                .set(&Symbol::new(&env, "cb_val"), &val);
         }
     }
 
@@ -647,7 +678,11 @@ mod tests {
         assert_eq!(res, 30);
 
         env.as_contract(&cb_id, || {
-            let cb_val: i32 = env.storage().instance().get(&Symbol::new(&env, "cb_val")).unwrap();
+            let cb_val: i32 = env
+                .storage()
+                .instance()
+                .get(&Symbol::new(&env, "cb_val"))
+                .unwrap();
             assert_eq!(cb_val, 30);
         });
     }

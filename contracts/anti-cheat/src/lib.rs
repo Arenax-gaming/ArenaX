@@ -475,7 +475,8 @@ impl AntiCheatContract {
         };
 
         // Combine base probability, behavior analysis factor, profile anomalies factor, and ML inference probability
-        let probability = (base_probability + behavior_factor + profile_factor + ml_probability as u32) / 4;
+        let probability =
+            (base_probability + behavior_factor + profile_factor + ml_probability as u32) / 4;
 
         // Clamp to 0-100
         if probability > 100 {
