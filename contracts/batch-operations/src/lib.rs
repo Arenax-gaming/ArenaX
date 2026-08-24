@@ -1,8 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env, Map, Vec, U256,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, Env, Vec};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -147,7 +145,7 @@ pub struct QueuedOperation {
     /// Timestamp when queued
     pub queued_at: u64,
     /// Encoded operation data (simplified for storage)
-    pub data: Vec<u8>,
+    pub data: Bytes,
     /// Whether executed
     pub executed: bool,
 }
@@ -323,7 +321,7 @@ impl BatchOperations {
         env: Env,
         submitter: Address,
         op_type: QueueOpType,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<u32, BatchError> {
         Self::require_initialized(&env)?;
         submitter.require_auth();
