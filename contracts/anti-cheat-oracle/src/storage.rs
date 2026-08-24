@@ -1,4 +1,9 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+// This module defines full enum-like constant tables (feed types, statuses,
+// proposal types); not every variant is wired into contract logic yet, which
+// is expected for a reserved/forward-compatible value space.
+#![allow(dead_code)]
+
+use soroban_sdk::{contracttype, Address, String};
 
 // ─── Feed / Oracle configuration ─────────────────────────────────────────────
 

@@ -1,4 +1,9 @@
 #![no_std]
+// schedule_operation's parameter count reflects real, independent fields
+// contract callers must supply (Soroban entry points can't take a struct
+// param); #[contractimpl] generates the Client/Args types outside the impl
+// block itself, so this needs to be crate-level to cover them too.
+#![allow(clippy::too_many_arguments)]
 
 use arenax_events::time_lock as events;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
