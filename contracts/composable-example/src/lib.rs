@@ -1,7 +1,5 @@
 #![no_std]
 
-use arenax_events::access_control as events;
-use contract_standards::{impl_ownable, Ownable, Pausable};
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
 #[contracttype]
@@ -70,9 +68,7 @@ impl ComposableExample {
     pub fn decrement(env: Env) -> u32 {
         Self::check_not_paused(&env);
         let mut counter: u32 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0);
-        if counter > 0 {
-            counter -= 1;
-        }
+        counter = counter.saturating_sub(1);
         env.storage().instance().set(&DataKey::Counter, &counter);
         counter
     }

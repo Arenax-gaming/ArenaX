@@ -50,6 +50,10 @@ pub enum DataKey {
 #[contract]
 pub struct AxToken;
 
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#[allow(deprecated)]
 #[contractimpl]
 impl AxToken {
     pub fn initialize(env: &Env, admin: Address) {

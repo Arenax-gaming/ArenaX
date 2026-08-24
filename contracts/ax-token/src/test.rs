@@ -1,7 +1,6 @@
 #![cfg(test)]
 
 extern crate std;
-use std::vec;
 
 use super::*;
 use soroban_sdk::{
@@ -18,8 +17,7 @@ fn create_test_env() -> (Env, Address, Address, Address) {
 }
 
 fn initialize_contract(env: &Env, admin: &Address) -> Address {
-    let contract_id = Address::generate(env);
-    env.register_contract(&contract_id, AxToken);
+    let contract_id = env.register(AxToken, ());
     let client = AxTokenClient::new(env, &contract_id);
     client.initialize(admin);
     contract_id
@@ -143,8 +141,7 @@ fn test_burn_zero_amount() {
 #[should_panic]
 fn test_burn_unauthorized() {
     let (env, admin, user1, _) = create_test_env();
-    let contract_id = Address::generate(&env);
-    env.register_contract(&contract_id, AxToken);
+    let contract_id = env.register(AxToken, ());
     let client = AxTokenClient::new(&env, &contract_id);
     client.initialize(&admin);
 
@@ -301,8 +298,8 @@ fn test_multiple_users() {
 
     env.mock_all_auths();
 
-    let users = vec![user1.clone(), user2.clone(), user3.clone(), user4.clone()];
-    let amounts = vec![1000i128, 2000i128, 3000i128, 4000i128];
+    let users = [user1.clone(), user2.clone(), user3.clone(), user4.clone()];
+    let amounts = [1000i128, 2000i128, 3000i128, 4000i128];
 
     for (i, user) in users.iter().enumerate() {
         client.mint(user, &amounts[i]);

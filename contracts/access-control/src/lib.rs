@@ -282,7 +282,7 @@ impl AccessControl {
     pub fn remove_permission_from_role(env: Env, role: u32, permission_name: String) {
         Self::require_admin(&env);
         let key = DataKey::RolePermissions(role);
-        let mut perms: Vec<String> = env
+        let perms: Vec<String> = env
             .storage()
             .persistent()
             .get(&key)
@@ -328,7 +328,7 @@ impl AccessControl {
 
     /// Check if an account has a specific permission (via any of their roles)
     pub fn account_has_permission(env: Env, account: Address, permission_name: String) -> bool {
-        let roles_to_check = vec![
+        let roles_to_check = soroban_sdk::vec![
             &env,
             ROLE_ADMIN,
             ROLE_GOVERNANCE,
@@ -344,10 +344,10 @@ impl AccessControl {
         let mut i = 0;
         while i < roles_to_check.len() {
             let role = roles_to_check.get(i).unwrap();
-            if Self::has_role(env.clone(), account.clone(), role) {
-                if Self::has_permission(env.clone(), role, permission_name.clone()) {
-                    return true;
-                }
+            if Self::has_role(env.clone(), account.clone(), role)
+                && Self::has_permission(env.clone(), role, permission_name.clone())
+            {
+                return true;
             }
             i += 1;
         }
@@ -530,6 +530,12 @@ impl AccessControl {
             .instance()
             .get(&DataKey::Admin)
             .expect("not initialized")
+    }
+
+    /// Require that the current admin has authorized this call.
+    fn require_admin(env: &Env) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
     }
 
     /// Get all defined permissions

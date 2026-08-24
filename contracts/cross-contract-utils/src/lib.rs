@@ -158,6 +158,11 @@ pub struct CrossContractCallEvent {
 }
 
 /// Record call telemetry to persistent/instance storage and emit monitoring events.
+///
+/// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+/// `CrossContractCallEvent` predates that macro's availability and changing
+/// its wire format is out of scope here.
+#[allow(deprecated)]
 pub fn record_and_emit_telemetry(env: &Env, target: &Address, function: &Symbol, success: bool) {
     // Analytics: update call counts
     let total_key = CallAnalyticsKey::TotalCalls;
@@ -645,7 +650,7 @@ mod tests {
         let env = Env::default();
         let target_id = env.register(MockTarget, ());
         let caller_id = env.register(MockCaller, ());
-        let caller_client = MockCallerClient::new(&env, &caller_id);
+        let _caller_client = MockCallerClient::new(&env, &caller_id);
 
         // Governance block
         env.as_contract(&caller_id, || {
