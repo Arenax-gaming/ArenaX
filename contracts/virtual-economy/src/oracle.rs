@@ -80,11 +80,7 @@ impl OracleManager {
     /// Return `true` when `price` is within the allowed variance window
     /// relative to the last accepted price.  Always `true` when there is no
     /// prior price.
-    pub fn is_within_variance(
-        new_price: i128,
-        last_price: i128,
-        max_variance_bps: u32,
-    ) -> bool {
+    pub fn is_within_variance(new_price: i128, last_price: i128, max_variance_bps: u32) -> bool {
         if last_price <= 0 {
             return true; // no reference — accept any non-negative price
         }
@@ -124,7 +120,11 @@ impl OracleManager {
 
         let primary_ok = primary_price > 0
             && Self::is_fresh(now, primary_timestamp, max_age)
-            && Self::is_within_variance(primary_price, last_accepted_price, config.max_variance_bps);
+            && Self::is_within_variance(
+                primary_price,
+                last_accepted_price,
+                config.max_variance_bps,
+            );
 
         if primary_ok {
             return Ok((primary_price, false));

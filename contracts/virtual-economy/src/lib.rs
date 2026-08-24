@@ -503,7 +503,11 @@ impl VirtualEconomyContract {
         let mut creator = None;
 
         if let MarketplaceAsset::NFT(token_id) = &order.asset {
-            if let Some(metadata) = env.storage().persistent().get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone())) {
+            if let Some(metadata) = env
+                .storage()
+                .persistent()
+                .get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone()))
+            {
                 creator = Some(metadata.creator.clone());
 
                 // Only pay royalty if seller != creator (not a primary sale)
@@ -685,7 +689,12 @@ impl VirtualEconomyContract {
             return Err(VirtualEconomyError::NotOwner);
         }
 
-        MarketplaceManager::validate_auction_params(start_price, floor_price, start_time, end_time)?;
+        MarketplaceManager::validate_auction_params(
+            start_price,
+            floor_price,
+            start_time,
+            end_time,
+        )?;
 
         let counter: u64 = env
             .storage()
@@ -746,7 +755,10 @@ impl VirtualEconomyContract {
     }
 
     /// Compute the current price of an active auction given the ledger time.
-    pub fn get_auction_price(env: Env, listing_id: BytesN<32>) -> Result<i128, VirtualEconomyError> {
+    pub fn get_auction_price(
+        env: Env,
+        listing_id: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
         let listing = Self::get_dutch_auction(env.clone(), listing_id)?;
         Ok(MarketplaceManager::dutch_auction_price(&env, &listing))
     }
@@ -1315,8 +1327,7 @@ impl VirtualEconomyContract {
 
         // Variance check against last accepted price.
         if !OracleManager::is_within_variance(price, history.last_price, config.max_variance_bps) {
-            let variance =
-                OracleManager::price_variance_bps(price, history.last_price);
+            let variance = OracleManager::price_variance_bps(price, history.last_price);
 
             // Record the raw primary price even though we reject it.
             env.storage().persistent().set(
@@ -1511,7 +1522,10 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::OraclePriceHistory(asset_pair))
             .ok_or(VirtualEconomyError::InvalidAssetPair)?;
-        Ok(OracleManager::calculate_twap(&history, config.update_interval))
+        Ok(OracleManager::calculate_twap(
+            &history,
+            config.update_interval,
+        ))
     }
 
     /// Return the `(min, max)` price range seen in the stored history for a
@@ -1654,7 +1668,10 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
-    pub fn get_nft_license(env: Env, token_id: BytesN<32>) -> Result<LicenseConfig, VirtualEconomyError> {
+    pub fn get_nft_license(
+        env: Env,
+        token_id: BytesN<32>,
+    ) -> Result<LicenseConfig, VirtualEconomyError> {
         env.storage()
             .persistent()
             .get(&DataKey::NFTLicense(token_id))
@@ -1761,7 +1778,10 @@ impl VirtualEconomyContract {
 
     /// Return the per-pair config if one exists, otherwise fall back to the
     /// global config.
-    fn get_pair_config(env: &Env, asset_pair: &BytesN<32>) -> Result<OracleConfig, VirtualEconomyError> {
+    fn get_pair_config(
+        env: &Env,
+        asset_pair: &BytesN<32>,
+    ) -> Result<OracleConfig, VirtualEconomyError> {
         if let Some(pair_cfg) = env
             .storage()
             .persistent()

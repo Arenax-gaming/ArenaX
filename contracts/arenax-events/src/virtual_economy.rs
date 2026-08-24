@@ -266,7 +266,12 @@ pub fn emit_dutch_auction_created(
     .publish(env);
 }
 
-pub fn emit_dutch_auction_purchased(env: &Env, listing_id: &BytesN<32>, buyer: &Address, price: i128) {
+pub fn emit_dutch_auction_purchased(
+    env: &Env,
+    listing_id: &BytesN<32>,
+    buyer: &Address,
+    price: i128,
+) {
     DutchAuctionPurchased {
         listing_id: listing_id.clone(),
         buyer: buyer.clone(),
