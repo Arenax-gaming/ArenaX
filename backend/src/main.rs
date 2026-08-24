@@ -21,6 +21,7 @@ use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
+use crate::middleware::tracing_middleware::RequestTracing;
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -36,8 +37,9 @@ async fn main() -> io::Result<()> {
     // Load configuration
     let config = Config::from_env().expect("Failed to load configuration");
 
-    // Initialize telemetry
-    init_telemetry();
+    // Initialize telemetry — kept alive for the process lifetime so spans
+    // are flushed to the OTLP exporter (Jaeger/Datadog) on shutdown.
+    let _telemetry_guard = init_telemetry();
 
     // Create database pool
     let db_pool = create_pool(&config)
@@ -183,6 +185,10 @@ async fn main() -> io::Result<()> {
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
+            // Outermost: sees the request first (extracts trace context /
+            // correlation id) and the response last (records latency,
+            // stamps correlation headers).
+            .wrap(RequestTracing::new())
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))

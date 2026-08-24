@@ -50,6 +50,7 @@ impl WalletService {
     // ========================================================================
 
     /// Get wallet for a user
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     pub async fn get_wallet(&self, user_id: Uuid) -> Result<Wallet, WalletError> {
         let wallet = sqlx::query_as!(
             Wallet,
@@ -106,6 +107,7 @@ impl WalletService {
     }
 
     /// Add fiat balance (in kobo for NGN) with transaction isolation
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, amount))]
     pub async fn add_fiat_balance(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -160,6 +162,7 @@ impl WalletService {
     }
 
     /// Deduct fiat balance (in kobo for NGN) with transaction isolation
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, amount))]
     pub async fn deduct_fiat_balance(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -340,6 +343,7 @@ impl WalletService {
     }
 
     /// Move balance to escrow with transaction isolation
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, amount))]
     pub async fn move_to_escrow(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(
@@ -401,6 +405,7 @@ impl WalletService {
     }
 
     /// Release escrow back to balance with transaction isolation
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, amount))]
     pub async fn release_from_escrow(&self, user_id: Uuid, amount: i64) -> Result<(), WalletError> {
         if amount <= 0 {
             return Err(WalletError::InvalidAmount(

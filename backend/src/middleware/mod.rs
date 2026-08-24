@@ -2,10 +2,12 @@
 pub mod idempotency_middleware;
 pub mod rate_limit;
 pub mod security;
+pub mod tracing_middleware;
 
 pub use idempotency_middleware::IdempotencyMiddleware;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
+pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
 
 use actix_cors::Cors;
 use std::env;
