@@ -1,14 +1,10 @@
 #![cfg(test)]
 
 use crate::{
-    AnalyticsData, AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal,
-    BehaviorPattern, BehaviorProfile, DataKey, MlModelParams, Sanction, SanctionStatus,
-    SanctionType, SuspiciousActivity, TrustScore, WhistleblowerProtection,
+    AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, BehaviorPattern, DataKey,
+    MlModelParams, Sanction, SanctionStatus, SanctionType, SuspiciousActivity,
 };
-use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    Address, Bytes, Env, Map, String, Symbol, Vec,
-};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Map, String, Vec};
 
 fn setup_env() -> (Env, Address, Address, Address) {
     let env = Env::default();
