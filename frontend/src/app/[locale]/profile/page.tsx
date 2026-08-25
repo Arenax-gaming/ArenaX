@@ -147,17 +147,6 @@ export default function ProfilePage() {
     [queryClient, notify],
   );
 
-  if (authLoading && !authUser) {
-    return (
-      <ProtectedPage>
-        <ProfileSkeleton />
-      </ProtectedPage>
-    );
-  }
-
-  // After auth loads, authUser should be present (ProtectedPage redirects otherwise)
-  const user = authUser!;
-
   useEffect(() => {
     if (!isDirty) return;
 
@@ -203,6 +192,17 @@ export default function ProfilePage() {
   const handleBioDirtyChange = useCallback((dirty: boolean) => {
     setIsBioDirty(dirty);
   }, []);
+
+  if (authLoading && !authUser) {
+    return (
+      <ProtectedPage>
+        <ProfileSkeleton />
+      </ProtectedPage>
+    );
+  }
+
+  // After auth loads, authUser should be present (ProtectedPage redirects otherwise)
+  const user = authUser!;
 
   return (
     <ProtectedPage>
