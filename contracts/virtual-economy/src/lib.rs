@@ -10,11 +10,13 @@ mod error;
 mod governance;
 mod marketplace;
 mod nft;
+mod oracle;
 mod rewards;
 mod storage;
 
 use arenax_events::virtual_economy as events;
 use marketplace::MarketplaceManager;
+use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 pub use error::VirtualEconomyError;
@@ -1161,6 +1163,431 @@ impl VirtualEconomyContract {
     }
 
     // -------------------------------------------------------------------------
+    // Price Oracle Integration
+    // -------------------------------------------------------------------------
+
+    /// Configure the primary oracle address and global oracle settings.
+    ///
+    /// Only the contract admin may call this. Calling again overwrites the
+    /// previous configuration.
+    pub fn configure_oracle(
+        env: Env,
+        primary_oracle: Address,
+        config: OracleConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        OracleManager::validate_config(&config)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PrimaryOracle, &primary_oracle);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &config);
+
+        // Initialise analytics if not yet present.
+        if !env.storage().instance().has(&DataKey::OracleAnalytics) {
+            let analytics = OracleAnalytics {
+                primary_updates: 0,
+                fallback_updates: 0,
+                variance_rejections: 0,
+                stale_rejections: 0,
+                registered_pairs: 0,
+            };
+            env.storage()
+                .instance()
+                .set(&DataKey::OracleAnalytics, &analytics);
+        }
+
+        events::emit_oracle_configured(
+            &env,
+            &primary_oracle,
+            config.update_interval,
+            config.max_variance_bps,
+        );
+        Ok(())
+    }
+
+    /// Set (or replace) the fallback oracle address.
+    ///
+    /// The fallback oracle is consulted when the primary feed is stale or
+    /// outside the variance window. Only the admin may call this.
+    pub fn set_fallback_oracle(
+        env: Env,
+        fallback_oracle: Address,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::FallbackOracle, &fallback_oracle);
+
+        events::emit_oracle_fallback_set(&env, &fallback_oracle);
+        Ok(())
+    }
+
+    /// Register a new asset pair and optionally override its update interval.
+    ///
+    /// `asset_pair` — a 32-byte identifier for the trading pair (e.g. the
+    /// first 32 bytes of `sha256("XLM/USD")`).
+    ///
+    /// `update_interval_override` — when `Some`, overrides the global
+    /// `OracleConfig.update_interval` for this pair only.
+    pub fn register_oracle_pair(
+        env: Env,
+        asset_pair: BytesN<32>,
+        update_interval_override: Option<u64>,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+
+        let global_config = Self::get_oracle_config(&env)?;
+
+        let pair_interval = update_interval_override.unwrap_or(global_config.update_interval);
+        if pair_interval == 0 {
+            return Err(VirtualEconomyError::InvalidOracleConfig);
+        }
+
+        // Build and store the per-pair config (inherits global settings,
+        // overrides only the interval).
+        let pair_config = OracleConfig {
+            update_interval: pair_interval,
+            max_variance_bps: global_config.max_variance_bps,
+            history_size: global_config.history_size,
+            stale_multiplier: global_config.stale_multiplier,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::OraclePairConfig(asset_pair.clone()), &pair_config);
+
+        // Initialise an empty history for this pair if none exists.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::OraclePriceHistory(asset_pair.clone()))
+        {
+            let history = PriceHistory {
+                entries: Vec::new(&env),
+                last_price: 0,
+                last_updated: 0,
+                update_count: 0,
+            };
+            env.storage()
+                .persistent()
+                .set(&DataKey::OraclePriceHistory(asset_pair.clone()), &history);
+
+            // Increment registered-pair counter.
+            let mut analytics = Self::get_oracle_analytics(env.clone());
+            analytics.registered_pairs += 1;
+            env.storage()
+                .instance()
+                .set(&DataKey::OracleAnalytics, &analytics);
+        }
+
+        events::emit_oracle_pair_registered(&env, &asset_pair, pair_interval);
+        Ok(())
+    }
+
+    /// Push a new price for an asset pair from the primary oracle.
+    ///
+    /// The caller must be the registered primary oracle address.
+    ///
+    /// The contract:
+    /// 1. Checks the update frequency — rejects if too soon.
+    /// 2. Validates the price is positive.
+    /// 3. Checks variance against the last accepted price.
+    /// 4. Appends the accepted price to the history ring-buffer.
+    /// 5. Emits an event.
+    pub fn submit_primary_price(
+        env: Env,
+        asset_pair: BytesN<32>,
+        price: i128,
+    ) -> Result<(), VirtualEconomyError> {
+        let primary: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PrimaryOracle)
+            .ok_or(VirtualEconomyError::OracleNotConfigured)?;
+        primary.require_auth();
+
+        if price <= 0 {
+            return Err(VirtualEconomyError::OracleInvalidPrice);
+        }
+
+        let config = Self::get_pair_config(&env, &asset_pair)?;
+        let now = env.ledger().timestamp();
+
+        let mut history: PriceHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OraclePriceHistory(asset_pair.clone()))
+            .ok_or(VirtualEconomyError::InvalidAssetPair)?;
+
+        // Frequency check.
+        if history.last_updated > 0
+            && !OracleManager::is_update_due(now, history.last_updated, config.update_interval)
+        {
+            return Err(VirtualEconomyError::OracleUpdateTooFrequent);
+        }
+
+        // Variance check against last accepted price.
+        if !OracleManager::is_within_variance(price, history.last_price, config.max_variance_bps) {
+            let variance = OracleManager::price_variance_bps(price, history.last_price);
+
+            // Record the raw primary price even though we reject it.
+            env.storage().persistent().set(
+                &DataKey::OracleLastPrimaryPrice(asset_pair.clone()),
+                &(price, now),
+            );
+
+            let mut analytics = Self::get_oracle_analytics(env.clone());
+            analytics.variance_rejections += 1;
+            env.storage()
+                .instance()
+                .set(&DataKey::OracleAnalytics, &analytics);
+
+            events::emit_oracle_price_rejected(
+                &env,
+                &asset_pair,
+                price,
+                history.last_price,
+                variance,
+            );
+            return Err(VirtualEconomyError::OraclePriceVarianceTooHigh);
+        }
+
+        // Accept the price.
+        env.storage().persistent().set(
+            &DataKey::OracleLastPrimaryPrice(asset_pair.clone()),
+            &(price, now),
+        );
+        OracleManager::append_history(
+            &mut history,
+            price,
+            now,
+            primary.clone(),
+            false,
+            config.history_size,
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::OraclePriceHistory(asset_pair.clone()), &history);
+
+        let mut analytics = Self::get_oracle_analytics(env.clone());
+        analytics.primary_updates += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAnalytics, &analytics);
+
+        events::emit_oracle_price_updated(&env, &asset_pair, price, now, false);
+        Ok(())
+    }
+
+    /// Push a new price for an asset pair from the fallback oracle.
+    ///
+    /// The caller must be the registered fallback oracle address. The fallback
+    /// price is stored separately and used automatically by
+    /// [`Self::resolve_oracle_price`] when the primary is stale or diverges.
+    pub fn submit_fallback_price(
+        env: Env,
+        asset_pair: BytesN<32>,
+        price: i128,
+    ) -> Result<(), VirtualEconomyError> {
+        let fallback: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FallbackOracle)
+            .ok_or(VirtualEconomyError::OracleNotConfigured)?;
+        fallback.require_auth();
+
+        if price <= 0 {
+            return Err(VirtualEconomyError::OracleInvalidPrice);
+        }
+
+        // Pair must be registered.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::OraclePriceHistory(asset_pair.clone()))
+        {
+            return Err(VirtualEconomyError::InvalidAssetPair);
+        }
+
+        let now = env.ledger().timestamp();
+        env.storage().persistent().set(
+            &DataKey::OracleLastFallbackPrice(asset_pair.clone()),
+            &(price, now),
+        );
+
+        events::emit_oracle_price_updated(&env, &asset_pair, price, now, true);
+        Ok(())
+    }
+
+    /// Resolve the best available price for an asset pair.
+    ///
+    /// 1. Loads the last primary and fallback raw prices.
+    /// 2. Delegates to [`OracleManager::resolve_price`] which applies
+    ///    freshness and variance checks.
+    /// 3. If the fallback price is selected it is written into the history
+    ///    ring-buffer and the analytics counter incremented.
+    /// 4. Returns the resolved price.
+    pub fn resolve_oracle_price(
+        env: Env,
+        asset_pair: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
+        let config = Self::get_pair_config(&env, &asset_pair)?;
+        let now = env.ledger().timestamp();
+
+        let mut history: PriceHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OraclePriceHistory(asset_pair.clone()))
+            .ok_or(VirtualEconomyError::InvalidAssetPair)?;
+
+        let (primary_price, primary_ts): (i128, u64) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OracleLastPrimaryPrice(asset_pair.clone()))
+            .unwrap_or((0, 0));
+
+        let fallback_data: Option<(i128, u64)> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OracleLastFallbackPrice(asset_pair.clone()));
+
+        let (fallback_price, fallback_ts) = match fallback_data {
+            Some((p, t)) => (Some(p), Some(t)),
+            None => (None, None),
+        };
+
+        match OracleManager::resolve_price(
+            primary_price,
+            primary_ts,
+            fallback_price,
+            fallback_ts,
+            history.last_price,
+            &config,
+            now,
+        ) {
+            Ok((price, used_fallback)) => {
+                if used_fallback {
+                    // Commit the fallback price to history.
+                    let fallback: Address = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::FallbackOracle)
+                        .ok_or(VirtualEconomyError::OracleNotConfigured)?;
+                    OracleManager::append_history(
+                        &mut history,
+                        price,
+                        now,
+                        fallback,
+                        true,
+                        config.history_size,
+                    );
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::OraclePriceHistory(asset_pair.clone()), &history);
+
+                    let mut analytics = Self::get_oracle_analytics(env.clone());
+                    analytics.fallback_updates += 1;
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::OracleAnalytics, &analytics);
+                }
+                Ok(price)
+            }
+            Err(e) => {
+                let mut analytics = Self::get_oracle_analytics(env.clone());
+                analytics.stale_rejections += 1;
+                env.storage()
+                    .instance()
+                    .set(&DataKey::OracleAnalytics, &analytics);
+                Err(e)
+            }
+        }
+    }
+
+    /// Return the full price history for an asset pair.
+    pub fn get_price_history(
+        env: Env,
+        asset_pair: BytesN<32>,
+    ) -> Result<PriceHistory, VirtualEconomyError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OraclePriceHistory(asset_pair))
+            .ok_or(VirtualEconomyError::InvalidAssetPair)
+    }
+
+    /// Return the time-weighted average price (TWAP) for an asset pair.
+    pub fn get_twap(env: Env, asset_pair: BytesN<32>) -> Result<i128, VirtualEconomyError> {
+        let config = Self::get_pair_config(&env, &asset_pair)?;
+        let history: PriceHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OraclePriceHistory(asset_pair))
+            .ok_or(VirtualEconomyError::InvalidAssetPair)?;
+        Ok(OracleManager::calculate_twap(
+            &history,
+            config.update_interval,
+        ))
+    }
+
+    /// Return the `(min, max)` price range seen in the stored history for a
+    /// given asset pair.
+    pub fn get_price_range(
+        env: Env,
+        asset_pair: BytesN<32>,
+    ) -> Result<(i128, i128), VirtualEconomyError> {
+        let history: PriceHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OraclePriceHistory(asset_pair))
+            .ok_or(VirtualEconomyError::InvalidAssetPair)?;
+        Ok(OracleManager::price_range(&history))
+    }
+
+    /// Return aggregated oracle analytics (primary/fallback update counts,
+    /// rejection counts, registered pair count).
+    pub fn get_oracle_analytics(env: Env) -> OracleAnalytics {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleAnalytics)
+            .unwrap_or(OracleAnalytics {
+                primary_updates: 0,
+                fallback_updates: 0,
+                variance_rejections: 0,
+                stale_rejections: 0,
+                registered_pairs: 0,
+            })
+    }
+
+    /// Update the per-pair oracle configuration (admin only).
+    ///
+    /// Allows changing the update frequency and variance threshold for a
+    /// single asset pair without touching global settings.
+    pub fn update_pair_oracle_config(
+        env: Env,
+        asset_pair: BytesN<32>,
+        new_config: OracleConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        OracleManager::validate_config(&new_config)?;
+
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::OraclePriceHistory(asset_pair.clone()))
+        {
+            return Err(VirtualEconomyError::InvalidAssetPair);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::OraclePairConfig(asset_pair), &new_config);
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
     // Internal Helper Functions
     // -------------------------------------------------------------------------
 
@@ -1340,5 +1767,32 @@ impl VirtualEconomyContract {
             .ok_or(VirtualEconomyError::TokenNotFound)?;
 
         Ok(metadata.creator)
+    }
+
+    // -------------------------------------------------------------------------
+    // Private Oracle Helpers
+    // -------------------------------------------------------------------------
+
+    fn get_oracle_config(env: &Env) -> Result<OracleConfig, VirtualEconomyError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleConfig)
+            .ok_or(VirtualEconomyError::OracleNotConfigured)
+    }
+
+    /// Return the per-pair config if one exists, otherwise fall back to the
+    /// global config.
+    fn get_pair_config(
+        env: &Env,
+        asset_pair: &BytesN<32>,
+    ) -> Result<OracleConfig, VirtualEconomyError> {
+        if let Some(pair_cfg) = env
+            .storage()
+            .persistent()
+            .get::<_, OracleConfig>(&DataKey::OraclePairConfig(asset_pair.clone()))
+        {
+            return Ok(pair_cfg);
+        }
+        Self::get_oracle_config(env)
     }
 }

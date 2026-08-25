@@ -33,6 +33,22 @@ pub struct Proposal {
     pub executed: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BurnMetrics {
+    pub total_burned: i128,
+    pub last_burn_time: u64,
+    pub last_burn_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BuybackSchedule {
+    pub burn_amount_per_interval: i128,
+    pub interval_seconds: u64,
+    pub next_burn_time: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -45,6 +61,10 @@ pub enum DataKey {
     Proposal(u64),
     HasVoted(u64, Address),
     TotalLockedSupply,
+    RevenuePoolBalance,
+    BurnMetrics,
+    BuybackSchedule,
+    TotalBurned,
 }
 
 #[contract]
@@ -501,6 +521,95 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Buyback and Burn
+    // ---------------------------------------------------------------------------
+
+    pub fn deposit_revenue(env: Env, from: Address, amount: i128) {
+        from.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        
+        let balance = Self::balance(&env, from.clone());
+        if balance < amount {
+            panic!("insufficient balance");
+        }
+        
+        env.storage().instance().set(&DataKey::Balance(from.clone()), &(balance - amount));
+        
+        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
+        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool + amount));
+        
+        env.events().publish(
+            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "REVENUE_DEPOSIT")),
+            (from, amount),
+        );
+    }
+
+    pub fn configure_buyback(env: Env, amount: i128, interval: u64) {
+        Self::require_admin(&env);
+        if amount <= 0 || interval == 0 {
+            panic!("invalid configuration");
+        }
+        
+        let schedule = BuybackSchedule {
+            burn_amount_per_interval: amount,
+            interval_seconds: interval,
+            next_burn_time: env.ledger().timestamp() + interval,
+        };
+        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
+    }
+
+    pub fn execute_buyback_and_burn(env: Env) -> i128 {
+        let mut schedule: BuybackSchedule = env.storage().instance().get(&DataKey::BuybackSchedule).expect("no schedule configured");
+        let current_time = env.ledger().timestamp();
+        
+        if current_time < schedule.next_burn_time {
+            panic!("too early for next burn");
+        }
+        
+        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
+        let amount_to_burn = if pool < schedule.burn_amount_per_interval {
+            pool
+        } else {
+            schedule.burn_amount_per_interval
+        };
+        
+        if amount_to_burn <= 0 {
+            panic!("no revenue to burn");
+        }
+        
+        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
+        
+        let current_supply = Self::total_supply(&env);
+        env.storage().instance().set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
+        
+        let total_burned: i128 = env.storage().instance().get(&DataKey::TotalBurned).unwrap_or(0);
+        env.storage().instance().set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
+        
+        let metrics = BurnMetrics {
+            total_burned: total_burned + amount_to_burn,
+            last_burn_time: current_time,
+            last_burn_amount: amount_to_burn,
+        };
+        env.storage().instance().set(&DataKey::BurnMetrics, &metrics);
+        
+        schedule.next_burn_time = current_time + schedule.interval_seconds;
+        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
+        
+        env.events().publish(
+            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "BUYBACK_BURN")),
+            (amount_to_burn, current_time),
+        );
+        
+        amount_to_burn
+    }
+
+    pub fn get_burn_metrics(env: Env) -> Option<BurnMetrics> {
+        env.storage().instance().get(&DataKey::BurnMetrics)
     }
 
     // ---------------------------------------------------------------------------

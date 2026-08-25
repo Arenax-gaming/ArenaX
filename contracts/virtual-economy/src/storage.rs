@@ -44,6 +44,26 @@ pub enum DataKey {
     // Analytics
     EconomyAnalytics,
     PricingAnalytics,
+
+    // Price Oracle
+    /// Global oracle configuration shared across all asset pairs.
+    OracleConfig,
+    /// Per asset-pair oracle configuration override.  Key is the asset-pair
+    /// symbol string bytes hashed to a 32-byte identifier.
+    OraclePairConfig(BytesN<32>),
+    /// Address of the primary on-chain price-feed contract (Chainlink-style).
+    PrimaryOracle,
+    /// Address of the fallback oracle contract (used when primary is stale or
+    /// diverges beyond `max_variance_bps`).
+    FallbackOracle,
+    /// Stored price history ring-buffer for an asset pair.
+    OraclePriceHistory(BytesN<32>),
+    /// Last raw price reported by the primary oracle for an asset pair.
+    OracleLastPrimaryPrice(BytesN<32>),
+    /// Last raw price reported by the fallback oracle for an asset pair.
+    OracleLastFallbackPrice(BytesN<32>),
+    /// Aggregate statistics across all oracle updates.
+    OracleAnalytics,
 }
 
 #[contracttype]
@@ -227,4 +247,71 @@ pub struct PricingAnalytics {
     pub total_drops_created: u64,
     pub total_drop_mints: u64,
     pub total_drop_volume: i128,
+}
+
+// -----------------------------------------------------------------------------
+// Price Oracle
+// -----------------------------------------------------------------------------
+
+/// Global (and per-pair-overridable) oracle configuration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleConfig {
+    /// Minimum seconds that must elapse between accepted price updates.
+    /// Prevents spam / too-frequent updates; configurable per pair.
+    pub update_interval: u64,
+    /// Maximum allowed variance in basis points between the incoming price and
+    /// the last accepted price before the fallback is preferred.
+    /// 500 = 5 %, 10 000 = 100 % (effectively disables the check).
+    pub max_variance_bps: u32,
+    /// Number of historic price entries to retain per asset pair (ring-buffer).
+    /// Must be in 1..=100.
+    pub history_size: u32,
+    /// Multiplier applied to `update_interval` to determine when a price feed
+    /// is considered stale.  E.g. `3` ⇒ stale after `3 × update_interval` s.
+    pub stale_multiplier: u64,
+}
+
+/// A single price observation stored in the history ring-buffer.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OraclePriceEntry {
+    /// Price in the smallest unit of the quote asset (e.g. stroops for XLM).
+    pub price: i128,
+    /// Ledger timestamp (seconds since Unix epoch) when the entry was accepted.
+    pub timestamp: u64,
+    /// Address of the oracle contract that provided this price.
+    pub source: Address,
+    /// `true` if this entry was sourced from the fallback oracle.
+    pub is_fallback: bool,
+}
+
+/// Ring-buffer of recent price observations for one asset pair.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceHistory {
+    /// Ordered oldest-to-newest list of price observations.
+    pub entries: Vec<OraclePriceEntry>,
+    /// Most recently accepted price (redundant but avoids a full scan).
+    pub last_price: i128,
+    /// Timestamp of the most recently accepted price.
+    pub last_updated: u64,
+    /// Total number of updates accepted since the pair was registered.
+    pub update_count: u64,
+}
+
+/// Aggregate statistics across all oracle price-feed activity.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleAnalytics {
+    /// Number of price updates accepted from the primary oracle.
+    pub primary_updates: u64,
+    /// Number of price updates accepted from the fallback oracle.
+    pub fallback_updates: u64,
+    /// Number of times an incoming price was rejected for excessive variance.
+    pub variance_rejections: u64,
+    /// Number of times both oracles were stale and no price could be accepted.
+    pub stale_rejections: u64,
+    /// Total number of distinct asset pairs registered.
+    pub registered_pairs: u32,
 }
