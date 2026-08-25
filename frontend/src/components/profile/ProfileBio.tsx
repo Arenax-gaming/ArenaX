@@ -48,11 +48,7 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
     if (onEditToggle) onEditToggle(v);
     else setInternalEditing(v);
   };
-  const form = useForm<ProfileBioFormData & {
-    twitter: string;
-    discord: string;
-    twitch: string;
-  }>({
+  const form = useForm<ProfileBioFormData>({
     resolver: zodResolver(profileBioSchema),
     defaultValues: {
       bio: user.bio ?? "",

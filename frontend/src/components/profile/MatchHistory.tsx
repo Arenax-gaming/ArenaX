@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
-import { MatchWithPlayers } from "@/types/profile";
+import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { VirtualDynamicList, VirtualDynamicListRenderProps } from "@/components/ui/VirtualDynamicList";
@@ -29,6 +29,10 @@ type AnyMatchWithPlayers = MatchWithPlayers & {
   scorePlayer2?: number;
   createdAt?: string;
   completedAt?: string;
+  /** Legacy profile-shape field — split as "playerScore-opponentScore". */
+  score?: string;
+  /** Legacy profile-shape field — ISO date of the match. */
+  date?: string;
 };
 
 export interface MatchHistoryFilters {

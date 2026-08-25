@@ -132,7 +132,7 @@ export function VirtualDynamicList<T>({
       Object.values(observers).forEach((o) => o.disconnect());
       // Clear the observers reference to prevent memory leaks
       Object.keys(observersRef.current).forEach((key) => {
-        delete observersRef.current[key];
+        delete observersRef.current[Number(key)];
       });
     };
   }, [items]);

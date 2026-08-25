@@ -141,7 +141,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
         .then(([axeMod, ReactDOMMod, ReactMod]) => {
           const ReactDOM = ReactDOMMod.default;
           const ReactLib = ReactMod.default;
-          axeMod.default(ReactLib, ReactDOM, 1_000, undefined, (violations) => {
+          axeMod.default(ReactLib, ReactDOM, 1_000, undefined, undefined, (results) => {
+            const violations = results?.violations ?? [];
             if (violations.length > 0) {
               violations.forEach((v) => {
                 a11yAnalytics.track("violation_detected", `${v.id}: ${v.description}`);
