@@ -139,4 +139,45 @@ export interface MatchHubDetails {
   reports: ScoreReport[];
   feed: MatchHubEvent[];
   canDisputeUntil: string;
+  /** Spectator mode configuration */
+  spectatorLimit?: number;
+  replayUrl?: string;
 }
+
+// ─── Spectator Mode Types ──────────────────────────────────────────────────────
+
+/** Which player's perspective the spectator is viewing */
+export type SpectatorPerspective = "player1" | "player2" | "overview";
+
+/** A single spectator chat message */
+export interface SpectatorChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  createdAt: number;
+  /** True while the message is optimistically rendered before server confirmation */
+  optimistic?: boolean;
+}
+
+/** Live spectator update received over WebSocket */
+export interface SpectatorUpdate {
+  matchId: string;
+  spectatorCount: number;
+  scorePlayer1?: number;
+  scorePlayer2?: number;
+  status?: BracketMatch["status"];
+  winnerId?: string;
+  /** Narrative event text (e.g. "ProGamer99 takes the lead!") */
+  eventMessage?: string;
+  timestamp: number;
+}
+
+/** State of the spectator WebSocket connection */
+export type SpectatorConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "error";
