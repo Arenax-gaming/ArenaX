@@ -19,6 +19,7 @@ export type AnalyticsEventName =
   | "tournament_viewed"
   | "tournament_joined"
   | "tournament_left"
+  | "tournament_win_shared"
   | "match_score_reported"
   | "match_disputed"
   | "purchase_initiated"
@@ -89,6 +90,14 @@ export interface TournamentPayload extends BaseEventPayload {
   entryFee?: number;
 }
 
+export interface TournamentWinSharedPayload extends BaseEventPayload {
+  event: "tournament_win_shared";
+  tournamentId: string;
+  /** "twitter" | "discord" | "link" | "native" */
+  platform: string;
+  winnerId?: string;
+}
+
 export interface PurchasePayload extends BaseEventPayload {
   event: "purchase_initiated" | "purchase_completed" | "purchase_failed";
   amount: number;
@@ -121,6 +130,7 @@ export type AnalyticsPayload =
   | GameEndPayload
   | MatchmakingPayload
   | TournamentPayload
+  | TournamentWinSharedPayload
   | PurchasePayload
   | ABTestPayload
   | FunnelStepPayload
@@ -160,6 +170,7 @@ export const ALLOWED_EVENT_NAMES: readonly AnalyticsEventName[] = [
   "tournament_viewed",
   "tournament_joined",
   "tournament_left",
+  "tournament_win_shared",
   "match_score_reported",
   "match_disputed",
   "purchase_initiated",
