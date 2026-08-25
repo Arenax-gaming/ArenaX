@@ -225,7 +225,13 @@ pub fn emit_flexible_claimed(env: &Env, user: &Address, pool_id: u32, amount: i1
     .publish(env);
 }
 
-pub fn emit_flexible_unstaked(env: &Env, user: &Address, pool_id: u32, amount: i128, penalty: i128) {
+pub fn emit_flexible_unstaked(
+    env: &Env,
+    user: &Address,
+    pool_id: u32,
+    amount: i128,
+    penalty: i128,
+) {
     FlexibleUnstaked {
         user: user.clone(),
         pool_id,

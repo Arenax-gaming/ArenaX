@@ -1,4 +1,9 @@
 #![no_std]
+// schedule_operation's parameter count reflects real, independent fields
+// contract callers must supply (Soroban entry points can't take a struct
+// param); #[contractimpl] generates the Client/Args types outside the impl
+// block itself, so this needs to be crate-level to cover them too.
+#![allow(clippy::too_many_arguments)]
 
 use arenax_events::time_lock as events;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
@@ -41,7 +46,7 @@ pub enum DataKey {
 
     // Persistent storage (per-operation)
     Operation(BytesN<32>),
-    AccelVotes(BytesN<32>),      // Vec<Address> of voters for an operation
+    AccelVotes(BytesN<32>), // Vec<Address> of voters for an operation
     ActiveCount,
 
     // Analytics (persistent)
@@ -136,7 +141,9 @@ impl TimeLock {
         env.storage()
             .instance()
             .set(&DataKey::AccelQuorum, &accel_quorum);
-        env.storage().instance().set(&DataKey::Governors, &governors);
+        env.storage()
+            .instance()
+            .set(&DataKey::Governors, &governors);
 
         // Initialise analytics
         let totals = AnalyticsTotals {
@@ -150,9 +157,7 @@ impl TimeLock {
         env.storage()
             .persistent()
             .set(&DataKey::AnalyticsTotal, &totals);
-        env.storage()
-            .persistent()
-            .set(&DataKey::ActiveCount, &0u32);
+        env.storage().persistent().set(&DataKey::ActiveCount, &0u32);
     }
 
     // ── Scheduling ────────────────────────────────────────────────────────────
@@ -510,7 +515,9 @@ impl TimeLock {
             panic!("governor limit reached");
         }
         governors.push_back(new_governor.clone());
-        env.storage().instance().set(&DataKey::Governors, &governors);
+        env.storage()
+            .instance()
+            .set(&DataKey::Governors, &governors);
 
         events::emit_governor_added(&env, &new_governor, &caller);
     }
@@ -793,48 +800,48 @@ impl TimeLock {
 
     fn increment_category_scheduled(env: &Env, category: u32) {
         let key = DataKey::AnalyticsByCategory(category);
-        let mut stats: CategoryStats = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(CategoryStats {
-                category,
-                scheduled: 0,
-                executed: 0,
-                cancelled: 0,
-            });
+        let mut stats: CategoryStats =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(CategoryStats {
+                    category,
+                    scheduled: 0,
+                    executed: 0,
+                    cancelled: 0,
+                });
         stats.scheduled += 1;
         env.storage().persistent().set(&key, &stats);
     }
 
     fn increment_category_executed(env: &Env, category: u32) {
         let key = DataKey::AnalyticsByCategory(category);
-        let mut stats: CategoryStats = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(CategoryStats {
-                category,
-                scheduled: 0,
-                executed: 0,
-                cancelled: 0,
-            });
+        let mut stats: CategoryStats =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(CategoryStats {
+                    category,
+                    scheduled: 0,
+                    executed: 0,
+                    cancelled: 0,
+                });
         stats.executed += 1;
         env.storage().persistent().set(&key, &stats);
     }
 
     fn increment_category_cancelled(env: &Env, category: u32) {
         let key = DataKey::AnalyticsByCategory(category);
-        let mut stats: CategoryStats = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(CategoryStats {
-                category,
-                scheduled: 0,
-                executed: 0,
-                cancelled: 0,
-            });
+        let mut stats: CategoryStats =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(CategoryStats {
+                    category,
+                    scheduled: 0,
+                    executed: 0,
+                    cancelled: 0,
+                });
         stats.cancelled += 1;
         env.storage().persistent().set(&key, &stats);
     }

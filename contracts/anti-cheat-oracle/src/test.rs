@@ -15,7 +15,7 @@ fn test_initialize_and_add_oracle() {
     let contract_id = env.register(AntiCheatOracle, ());
     let client = AntiCheatOracleClient::new(&env, &contract_id);
 
-    client.initialize(&admin);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
     assert!(!client.is_authorized_oracle(&oracle));
 
     client.add_authorized_oracle(&oracle);
@@ -36,7 +36,7 @@ fn test_submit_flag_unauthorized() {
 
     let contract_id = env.register(AntiCheatOracle, ());
     let client = AntiCheatOracleClient::new(&env, &contract_id);
-    client.initialize(&admin);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
 
     let result = client.try_submit_flag(&unauthorized, &player, &1u64, &2u32);
     assert_eq!(result, Err(Ok(AntiCheatError::Unauthorized)));
@@ -53,7 +53,7 @@ fn test_submit_flag_invalid_severity() {
 
     let contract_id = env.register(AntiCheatOracle, ());
     let client = AntiCheatOracleClient::new(&env, &contract_id);
-    client.initialize(&admin);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
     client.add_authorized_oracle(&oracle);
 
     assert_eq!(
@@ -78,7 +78,7 @@ fn test_submit_flag_and_get_confirmation() {
 
     let contract_id = env.register(AntiCheatOracle, ());
     let client = AntiCheatOracleClient::new(&env, &contract_id);
-    client.initialize(&admin);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
     client.add_authorized_oracle(&oracle);
 
     assert!(client.get_confirmation(&player, &match_id).is_none());

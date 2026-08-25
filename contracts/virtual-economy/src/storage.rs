@@ -133,6 +133,11 @@ pub struct MarketplaceOrder {
     pub status: OrderStatus,
 }
 
+// Boxing the NFT variant to shrink this enum isn't safe to do blind: Soroban's
+// #[contracttype] XDR (de)serialization is generated against this exact shape,
+// and Box<T> support there isn't something to assume without verifying against
+// the SDK version in use.
+#[allow(clippy::large_enum_variant)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RewardType {

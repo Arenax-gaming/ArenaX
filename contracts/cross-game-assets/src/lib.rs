@@ -1,4 +1,12 @@
 #![no_std]
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#![allow(deprecated)]
+// register_asset's 9 real, independent parameters trip
+// clippy::too_many_arguments (allowed at crate level, since #[contractimpl]
+// generates the Client/Args types outside the impl block itself).
+#![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
 
@@ -534,7 +542,7 @@ impl CrossGameAssets {
         let config = ChainConfig {
             chain_id: chain_id.clone(),
             chain_name,
-            bridge_contract,
+            bridge_contract: bridge_contract.clone(),
             is_active: true,
             max_bridge_amount,
             bridge_fee_bps,
@@ -560,8 +568,10 @@ impl CrossGameAssets {
             i += 1;
         }
         if !found {
-            chains.push_back(chain_id);
-            env.storage().instance().set(&DataKey::SupportedChains, &chains);
+            chains.push_back(chain_id.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::SupportedChains, &chains);
         }
 
         env.events().publish(
@@ -627,11 +637,7 @@ impl CrossGameAssets {
 
         // Check cooldown
         let cooldown_key = DataKey::BridgeCooldown(owner.clone(), target_chain.clone());
-        let last_bridge: u64 = env
-            .storage()
-            .persistent()
-            .get(&cooldown_key)
-            .unwrap_or(0);
+        let last_bridge: u64 = env.storage().persistent().get(&cooldown_key).unwrap_or(0);
         let now = env.ledger().timestamp();
         if now < last_bridge + chain_config.cooldown_secs {
             panic!("bridge cooldown not elapsed");
@@ -667,7 +673,7 @@ impl CrossGameAssets {
         request_bytes[0..8].copy_from_slice(&nonce.to_be_bytes());
         request_bytes[8..12].copy_from_slice(&source_game_id.to_be_bytes());
         request_bytes[12..16].copy_from_slice(&target_game_id.to_be_bytes());
-        let request_id = BytesN::from_array(env, &request_bytes);
+        let request_id = BytesN::from_array(&env, &request_bytes);
 
         // Create bridge request
         let request = BridgeRequest {
@@ -694,13 +700,16 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeCooldown(owner.clone(), target_chain), &now);
 
         // Lock the assets record
-        env.storage().persistent().set(
-            &DataKey::BridgeLock(owner, asset_id.clone()),
-            &amount,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeLock(owner, asset_id.clone()), &amount);
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_INIT"), request_id.clone(), asset_id),
+            (
+                soroban_sdk::symbol_short!("BRDG_INIT"),
+                request_id.clone(),
+                asset_id,
+            ),
             (amount, source_game_id, target_game_id),
         );
 
@@ -708,10 +717,7 @@ impl CrossGameAssets {
     }
 
     /// Complete a bridge request (called by bridge oracle/admin)
-    pub fn complete_bridge(
-        env: Env,
-        request_id: BytesN<32>,
-    ) {
+    pub fn complete_bridge(env: Env, request_id: BytesN<32>) {
         Self::require_admin(&env);
         let mut request: BridgeRequest = env
             .storage()
@@ -732,21 +738,19 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(request.owner.clone(), request.asset_id.clone()),
-        );
+        env.storage().persistent().remove(&DataKey::BridgeLock(
+            request.owner.clone(),
+            request.asset_id.clone(),
+        ));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_DONE"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_DONE"), request_id),
             (request.amount, request.source_chain, request.target_chain),
         );
     }
 
     /// Fail a bridge request (called by bridge oracle/admin)
-    pub fn fail_bridge(
-        env: Env,
-        request_id: BytesN<32>,
-    ) {
+    pub fn fail_bridge(env: Env, request_id: BytesN<32>) {
         Self::require_admin(&env);
         let mut request: BridgeRequest = env
             .storage()
@@ -784,22 +788,18 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(request.owner, request.asset_id),
-        );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BridgeLock(request.owner, request.asset_id));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_FAIL"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_FAIL"), request_id),
             request.amount,
         );
     }
 
     /// Cancel a bridge request (called by owner)
-    pub fn cancel_bridge(
-        env: Env,
-        owner: Address,
-        request_id: BytesN<32>,
-    ) {
+    pub fn cancel_bridge(env: Env, owner: Address, request_id: BytesN<32>) {
         owner.require_auth();
         let mut request: BridgeRequest = env
             .storage()
@@ -840,12 +840,12 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(owner, request.asset_id),
-        );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BridgeLock(owner, request.asset_id));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_CANCEL"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_CNCL"), request_id),
             request.amount,
         );
     }

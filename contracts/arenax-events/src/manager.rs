@@ -2,9 +2,7 @@
 //!
 //! Provides on-chain event indexing, filtering, analytics, monitoring, and archiving.
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Map, Symbol, Vec, Bytes,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Map, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -39,7 +37,7 @@ pub enum DataKey {
     Admin,
     EventCounter,
     Event(u64),
-    PlayerEvents(Address), // Vector of event IDs
+    PlayerEvents(Address),  // Vector of event IDs
     TopicAnalytics(Symbol), // count per topic
     AnomalyCounter,
     RateLimit(Symbol),
@@ -57,11 +55,20 @@ impl EventManagerContract {
             panic!("already initialized");
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::EventCounter, &0u64);
-        env.storage().persistent().set(&DataKey::AnomalyCounter, &0u64);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EventCounter, &0u64);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AnomalyCounter, &0u64);
     }
 
     /// Index a new event record.
+    ///
+    /// `Events::publish` is deprecated in favor of the `#[contractevent]`
+    /// macro; this anomaly-monitoring alert doesn't have a concrete event
+    /// type of its own, so migrating it is out of scope here.
+    #[allow(deprecated)]
     pub fn index_event(
         env: Env,
         caller: Address,
@@ -88,8 +95,12 @@ impl EventManagerContract {
         };
 
         // Store event by ID
-        env.storage().persistent().set(&DataKey::Event(counter), &record);
-        env.storage().persistent().set(&DataKey::EventCounter, &counter);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(counter), &record);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EventCounter, &counter);
 
         // Index by player
         let player_key = DataKey::PlayerEvents(player);
@@ -103,16 +114,18 @@ impl EventManagerContract {
 
         // Update Topic Analytics
         let analytic_key = DataKey::TopicAnalytics(topic.clone());
-        let topic_count: u64 = env
-            .storage()
+        let topic_count: u64 = env.storage().persistent().get(&analytic_key).unwrap_or(0);
+        env.storage()
             .persistent()
-            .get(&analytic_key)
-            .unwrap_or(0);
-        env.storage().persistent().set(&analytic_key, &(topic_count + 1));
+            .set(&analytic_key, &(topic_count + 1));
 
         // Event Monitoring: Check for rapid successive events (anomaly detection)
         let last_time_key = DataKey::LastEventTimestamp(topic.clone());
-        if let Some(last_ts) = env.storage().persistent().get::<DataKey, u64>(&last_time_key) {
+        if let Some(last_ts) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&last_time_key)
+        {
             let current_ts = env.ledger().timestamp();
             let limit: u32 = env
                 .storage()
@@ -128,16 +141,23 @@ impl EventManagerContract {
                     .get(&DataKey::AnomalyCounter)
                     .unwrap_or(0);
                 anomalies += 1;
-                env.storage().persistent().set(&DataKey::AnomalyCounter, &anomalies);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::AnomalyCounter, &anomalies);
 
                 // Publish monitoring alert event
                 env.events().publish(
-                    (Symbol::new(&env, "event_monitor"), Symbol::new(&env, "anomaly_alert")),
+                    (
+                        Symbol::new(&env, "event_monitor"),
+                        Symbol::new(&env, "anomaly_alert"),
+                    ),
                     (topic.clone(), current_ts),
                 );
             }
         }
-        env.storage().persistent().set(&last_time_key, &env.ledger().timestamp());
+        env.storage()
+            .persistent()
+            .set(&last_time_key, &env.ledger().timestamp());
 
         counter
     }
@@ -154,7 +174,11 @@ impl EventManagerContract {
         offset: u32,
         limit: u32,
     ) -> Vec<EventRecord> {
-        let total: u64 = env.storage().persistent().get(&DataKey::EventCounter).unwrap_or(0);
+        let total: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EventCounter)
+            .unwrap_or(0);
         let mut results = Vec::new(&env);
         let mut skipped = 0;
 
@@ -168,7 +192,11 @@ impl EventManagerContract {
                 .unwrap_or_else(|| Vec::new(&env));
 
             for id in player_evs.iter() {
-                if let Some(record) = env.storage().persistent().get::<DataKey, EventRecord>(&DataKey::Event(id)) {
+                if let Some(record) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, EventRecord>(&DataKey::Event(id))
+                {
                     if Self::matches_filter(&record, &filter) {
                         if skipped < offset {
                             skipped += 1;
@@ -185,7 +213,11 @@ impl EventManagerContract {
             // General scan
             let mut i = 1u64;
             while i <= total {
-                if let Some(record) = env.storage().persistent().get::<DataKey, EventRecord>(&DataKey::Event(i)) {
+                if let Some(record) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, EventRecord>(&DataKey::Event(i))
+                {
                     if Self::matches_filter(&record, &filter) {
                         if skipped < offset {
                             skipped += 1;
@@ -207,9 +239,17 @@ impl EventManagerContract {
 
     /// Fetch aggregate analytics.
     pub fn get_analytics(env: Env, topics: Vec<Symbol>) -> EventAnalytics {
-        let total: u64 = env.storage().persistent().get(&DataKey::EventCounter).unwrap_or(0);
-        let anomalies: u64 = env.storage().persistent().get(&DataKey::AnomalyCounter).unwrap_or(0);
-        
+        let total: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EventCounter)
+            .unwrap_or(0);
+        let anomalies: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AnomalyCounter)
+            .unwrap_or(0);
+
         let mut topic_map = Map::new(&env);
         for topic in topics.iter() {
             let count: u64 = env
@@ -229,10 +269,18 @@ impl EventManagerContract {
 
     /// Archive events before a certain timestamp to save storage (archives them).
     pub fn archive_events(env: Env, before_timestamp: u64) -> u32 {
-        let admin: Address = env.storage().persistent().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
 
-        let total: u64 = env.storage().persistent().get(&DataKey::EventCounter).unwrap_or(0);
+        let total: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EventCounter)
+            .unwrap_or(0);
         let mut archived_count = 0;
 
         let mut i = 1u64;
@@ -252,15 +300,25 @@ impl EventManagerContract {
 
     /// Set rate limit parameter for monitoring.
     pub fn set_rate_limit(env: Env, topic: Symbol, limit_seconds: u32) {
-        let admin: Address = env.storage().persistent().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::RateLimit(topic), &limit_seconds);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RateLimit(topic), &limit_seconds);
     }
 
     /// Set new admin for governance.
     pub fn set_admin(env: Env, new_admin: Address) {
-        let admin: Address = env.storage().persistent().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         admin.require_auth();
 
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
@@ -289,7 +347,10 @@ impl EventManagerContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Env,
+    };
 
     #[test]
     fn test_event_manager_flow() {
@@ -315,7 +376,7 @@ mod tests {
         // Advance ledger timestamp to avoid rate limit alerts initially
         env.ledger().set_timestamp(100);
         let id1 = client.index_event(&caller, &player1, &topic1, &data1);
-        
+
         env.ledger().set_timestamp(200);
         let id2 = client.index_event(&caller, &player2, &topic2, &data1);
 
@@ -350,7 +411,7 @@ mod tests {
 
         // Monitoring rate limit check
         client.set_rate_limit(&topic1, &50); // limit cooldown 50s
-        // Call index twice within 10 seconds (less than 50s cooldown)
+                                             // Call index twice within 10 seconds (less than 50s cooldown)
         env.ledger().set_timestamp(350);
         client.index_event(&caller, &player1, &topic1, &data1);
         env.ledger().set_timestamp(360);

@@ -1,7 +1,7 @@
 #![no_std]
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec, String};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -70,6 +70,10 @@ pub enum DataKey {
 #[contract]
 pub struct AxToken;
 
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#[allow(deprecated)]
 #[contractimpl]
 impl AxToken {
     pub fn initialize(env: &Env, admin: Address) {
@@ -79,8 +83,12 @@ impl AxToken {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
-        env.storage().instance().set(&DataKey::TotalLockedSupply, &0i128);
-        env.storage().instance().set(&DataKey::ProposalCounter, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalLockedSupply, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalCounter, &0u64);
     }
 
     pub fn mint(env: &Env, to: Address, amount: i128) {
@@ -217,7 +225,10 @@ impl AxToken {
             .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VESTING_CREATE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VESTING_CREATE"),
+            ),
             (beneficiary, total_amount),
         );
     }
@@ -254,9 +265,10 @@ impl AxToken {
 
         // Add vested tokens to beneficiary balance
         let current_balance = Self::balance(&env, beneficiary.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(beneficiary.clone()), &(current_balance + claimable));
+        env.storage().instance().set(
+            &DataKey::Balance(beneficiary.clone()),
+            &(current_balance + claimable),
+        );
 
         let current_supply = Self::total_supply(&env);
         env.storage()
@@ -264,7 +276,10 @@ impl AxToken {
             .set(&DataKey::TotalSupply, &(current_supply + claimable));
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VESTING_CLAIM")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VESTING_CLAIM"),
+            ),
             (beneficiary, claimable),
         );
 
@@ -304,7 +319,10 @@ impl AxToken {
             .get(&lockup_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        lockups.push_back(LockupRecord { amount, unlock_time });
+        lockups.push_back(LockupRecord {
+            amount,
+            unlock_time,
+        });
         env.storage().instance().set(&lockup_key, &lockups);
 
         let total_locked: i128 = env
@@ -317,7 +335,10 @@ impl AxToken {
             .set(&DataKey::TotalLockedSupply, &(total_locked + amount));
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "LOCK")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "LOCK"),
+            ),
             (from, amount, unlock_time),
         );
     }
@@ -351,21 +372,26 @@ impl AxToken {
         env.storage().instance().set(&lockup_key, &active_lockups);
 
         let balance = Self::balance(&env, from.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(from.clone()), &(balance + unlocked_amount));
+        env.storage().instance().set(
+            &DataKey::Balance(from.clone()),
+            &(balance + unlocked_amount),
+        );
 
         let total_locked: i128 = env
             .storage()
             .instance()
             .get(&DataKey::TotalLockedSupply)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalLockedSupply, &(total_locked - unlocked_amount));
+        env.storage().instance().set(
+            &DataKey::TotalLockedSupply,
+            &(total_locked - unlocked_amount),
+        );
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "UNLOCK")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "UNLOCK"),
+            ),
             (from, unlocked_amount),
         );
 
@@ -436,7 +462,10 @@ impl AxToken {
             .set(&DataKey::ProposalCounter, &counter);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "PROPOSAL_CREATE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_CREATE"),
+            ),
             (counter, proposer),
         );
 
@@ -480,13 +509,18 @@ impl AxToken {
         env.storage().instance().set(&vote_key, &true);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VOTE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VOTE"),
+            ),
             (proposal_id, voter, support, voting_power),
         );
     }
 
     pub fn get_proposal(env: Env, proposal_id: u64) -> Option<Proposal> {
-        env.storage().instance().get(&DataKey::Proposal(proposal_id))
+        env.storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
     }
 
     // ---------------------------------------------------------------------------

@@ -68,6 +68,9 @@ pub struct AuditEntry {
     pub latency_ms: u64,
     pub blocked: bool,
     pub rate_limited: bool,
+    /// Correlation id set by [`crate::middleware::tracing_middleware::RequestTracing`],
+    /// so audit entries can be cross-referenced with the distributed trace.
+    pub correlation_id: Option<String>,
 }
 
 // ─── Transform (factory) ──────────────────────────────────────────────────────
@@ -135,6 +138,7 @@ where
             let ip = extract_ip(&req);
             let path = req.path().to_string();
             let method = req.method().to_string();
+            let correlation_id = crate::middleware::tracing_middleware::correlation_id(&req);
 
             // ── 1. Check if IP is blocked (DDoS) ─────────────────────────────
             let block_key = format!("sec:block:{}", ip);
@@ -157,6 +161,7 @@ where
                     latency_ms: 0,
                     blocked: true,
                     rate_limited: false,
+                    correlation_id: correlation_id.clone(),
                 });
                 let resp = HttpResponse::TooManyRequests()
                     .json(serde_json::json!({"error": "blocked", "code": "DDOS_BLOCK"}));
@@ -212,6 +217,7 @@ where
                     latency_ms: now_ms() - start,
                     blocked: false,
                     rate_limited: true,
+                    correlation_id: correlation_id.clone(),
                 });
                 let resp = HttpResponse::TooManyRequests()
                     .json(serde_json::json!({"error": "rate limited", "code": "IP_RATE_LIMIT"}));
@@ -252,6 +258,7 @@ where
                     latency_ms: latency,
                     blocked: false,
                     rate_limited: false,
+                    correlation_id: correlation_id.clone(),
                 });
             }
 
