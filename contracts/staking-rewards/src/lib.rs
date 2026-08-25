@@ -1,4 +1,8 @@
 #![no_std]
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#![allow(deprecated)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Vec};
 
@@ -96,7 +100,8 @@ impl StakingRewardsContract {
         }
 
         let token = Self::token(&env);
-        token::Client::new(&env, &token).transfer(&user, &env.current_contract_address(), &amount);
+        token::Client::new(&env, &token).transfer(&user, env.current_contract_address(), &amount);
+
 
         let now = env.ledger().timestamp();
         let key = DataKey::Stake(user.clone());
@@ -363,7 +368,7 @@ impl StakingRewardsContract {
         let token = Self::token(&env);
         token::Client::new(&env, &token).transfer(
             &funder,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
         let pool = env

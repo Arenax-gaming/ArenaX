@@ -64,6 +64,11 @@ impl EventManagerContract {
     }
 
     /// Index a new event record.
+    ///
+    /// `Events::publish` is deprecated in favor of the `#[contractevent]`
+    /// macro; this anomaly-monitoring alert doesn't have a concrete event
+    /// type of its own, so migrating it is out of scope here.
+    #[allow(deprecated)]
     pub fn index_event(
         env: Env,
         caller: Address,

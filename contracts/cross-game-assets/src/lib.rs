@@ -1,4 +1,12 @@
 #![no_std]
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#![allow(deprecated)]
+// register_asset's 9 real, independent parameters trip
+// clippy::too_many_arguments (allowed at crate level, since #[contractimpl]
+// generates the Client/Args types outside the impl block itself).
+#![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
 
@@ -534,7 +542,7 @@ impl CrossGameAssets {
         let config = ChainConfig {
             chain_id: chain_id.clone(),
             chain_name,
-            bridge_contract,
+            bridge_contract: bridge_contract.clone(),
             is_active: true,
             max_bridge_amount,
             bridge_fee_bps,
@@ -560,7 +568,7 @@ impl CrossGameAssets {
             i += 1;
         }
         if !found {
-            chains.push_back(chain_id);
+            chains.push_back(chain_id.clone());
             env.storage()
                 .instance()
                 .set(&DataKey::SupportedChains, &chains);
@@ -665,7 +673,7 @@ impl CrossGameAssets {
         request_bytes[0..8].copy_from_slice(&nonce.to_be_bytes());
         request_bytes[8..12].copy_from_slice(&source_game_id.to_be_bytes());
         request_bytes[12..16].copy_from_slice(&target_game_id.to_be_bytes());
-        let request_id = BytesN::from_array(env, &request_bytes);
+        let request_id = BytesN::from_array(&env, &request_bytes);
 
         // Create bridge request
         let request = BridgeRequest {
@@ -698,7 +706,7 @@ impl CrossGameAssets {
 
         env.events().publish(
             (
-                soroban_sdk::symbol_short!("BRIDGE_INIT"),
+                soroban_sdk::symbol_short!("BRDG_INIT"),
                 request_id.clone(),
                 asset_id,
             ),
@@ -736,7 +744,7 @@ impl CrossGameAssets {
         ));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_DONE"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_DONE"), request_id),
             (request.amount, request.source_chain, request.target_chain),
         );
     }
@@ -785,7 +793,7 @@ impl CrossGameAssets {
             .remove(&DataKey::BridgeLock(request.owner, request.asset_id));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_FAIL"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_FAIL"), request_id),
             request.amount,
         );
     }
@@ -837,7 +845,7 @@ impl CrossGameAssets {
             .remove(&DataKey::BridgeLock(owner, request.asset_id));
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_CANCEL"), request_id),
+            (soroban_sdk::symbol_short!("BRDG_CNCL"), request_id),
             request.amount,
         );
     }

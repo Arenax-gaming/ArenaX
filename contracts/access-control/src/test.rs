@@ -71,6 +71,6 @@ fn test_batch_role_check() {
     roles.push_back(ROLE_GOVERNANCE);
 
     let results = client.batch_has_roles(&accounts, &roles);
-    assert_eq!(results.get(0).unwrap(), true);
-    assert_eq!(results.get(1).unwrap(), false);
+    assert!(results.get(0).unwrap());
+    assert!(!results.get(1).unwrap());
 }

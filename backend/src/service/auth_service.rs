@@ -43,6 +43,7 @@ impl AuthService {
     // ── Registration & Login ─────────────────────────────────────────────────
 
     /// Register a new user and return a fresh token pair.
+    #[tracing::instrument(skip(self, request), fields(username = %request.username))]
     pub async fn register(&self, request: CreateUserRequest) -> Result<AuthResponse, ApiError> {
         if request.username.is_empty() || request.password.is_empty() {
             return Err(ApiError::bad_request("username and password are required"));
@@ -137,6 +138,7 @@ impl AuthService {
     }
 
     /// Authenticate a user and return a fresh token pair.
+    #[tracing::instrument(skip(self, request), fields(email = %request.email))]
     pub async fn login(&self, request: LoginRequest) -> Result<AuthResponse, ApiError> {
         let user = sqlx::query_as!(
             User,
@@ -226,6 +228,7 @@ impl AuthService {
     ///
     /// Replaying the old refresh token after a successful rotation returns
     /// 401 because the Redis record has been deleted.
+    #[tracing::instrument(skip(self, refresh_token))]
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, ApiError> {
         self.jwt_service
             .refresh_token(refresh_token)

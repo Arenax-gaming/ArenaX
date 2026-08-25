@@ -476,7 +476,7 @@ impl AntiCheatContract {
 
         // Combine base probability, behavior analysis factor, profile anomalies factor, and ML inference probability
         let probability =
-            (base_probability + behavior_factor + profile_factor + ml_probability as u32) / 4;
+            (base_probability + behavior_factor + profile_factor + ml_probability) / 4;
 
         // Clamp to 0-100
         if probability > 100 {
@@ -1288,11 +1288,7 @@ impl AntiCheatContract {
             }
         }
 
-        if count == 0 {
-            0
-        } else {
-            total_severity / count
-        }
+        total_severity.checked_div(count).unwrap_or(0)
     }
 
     // Helper: Extract features from behavioral raw bytes
@@ -1330,7 +1326,6 @@ impl AntiCheatContract {
             score += weight * value;
         }
 
-        let prob = (score / 100).clamp(0, 100) as u32;
-        prob
+        (score / 100).clamp(0, 100) as u32
     }
 }

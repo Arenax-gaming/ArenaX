@@ -21,6 +21,7 @@ use crate::middleware::cors_middleware;
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
+use crate::middleware::tracing_middleware::RequestTracing;
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -36,8 +37,9 @@ async fn main() -> io::Result<()> {
     // Load configuration
     let config = Config::from_env().expect("Failed to load configuration");
 
-    // Initialize telemetry
-    init_telemetry();
+    // Initialize telemetry — kept alive for the process lifetime so spans
+    // are flushed to the OTLP exporter (Jaeger/Datadog) on shutdown.
+    let _telemetry_guard = init_telemetry();
 
     // Create database pool
     let db_pool = create_pool(&config)
@@ -172,6 +174,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(address_book.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
             .app_data(web::Data::new(auth_guard.clone()))
+            .app_data(web::Data::new(std::sync::Arc::new(redis_conn.clone())))
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
@@ -181,11 +184,22 @@ async fn main() -> io::Result<()> {
             .wrap(IdempotencyMiddleware::default(db_pool.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
+            .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
+            // Outermost: sees the request first (extracts trace context /
+            // correlation id) and the response last (records latency,
+            // stamps correlation headers).
+            .wrap(RequestTracing::new())
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    // OpenAPI 3.0 docs — Issue #901
+                    .configure(crate::http::docs_handler::configure_routes)
+                    // Anti-bot detection endpoints — Issue #903
+                    .configure(crate::http::anti_bot_handler::configure_routes)
+                    // Player statistics aggregation endpoints — Issue #904
+                    .configure(crate::http::player_stats_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)
                     .configure(crate::http::auth_handler::configure_routes)
                     .route(

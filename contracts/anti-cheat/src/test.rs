@@ -18,7 +18,7 @@ fn setup_env() -> (Env, Address, Address, Address) {
     (env, admin, player, reputation_contract)
 }
 
-fn register_contract(env: &Env) -> (Address, AntiCheatContractClient) {
+fn register_contract(env: &Env) -> (Address, AntiCheatContractClient<'_>) {
     let contract_id = env.register(AntiCheatContract, ());
     let client = AntiCheatContractClient::new(env, &contract_id);
     (contract_id, client)
@@ -457,7 +457,7 @@ fn test_emergency_mode() {
 #[test]
 fn test_whistleblower_protection() {
     let (env, admin, player, reputation_contract) = setup_env();
-    let (contract_id, client) = register_contract(&env);
+    let (_contract_id, client) = register_contract(&env);
 
     client.initialize(&admin, &reputation_contract);
 

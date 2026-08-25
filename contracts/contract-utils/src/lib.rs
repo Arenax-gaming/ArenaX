@@ -1,13 +1,11 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, Env, IntoVal, Map, Val, Vec, U256};
-
 // ---------------------------------------------------------------------------
 // Storage Helpers
 // ---------------------------------------------------------------------------
 
 pub mod storage {
-    use soroban_sdk::{Address, Env, Map};
+    use soroban_sdk::{Env, Map, Val, Vec};
 
     /// Helper for TTL management on persistent keys
     pub fn extend_persistent_ttl(
@@ -88,9 +86,8 @@ pub mod time {
     }
 
     /// Check if timestamp is within a time window
-    pub fn is_within_window(env: &Env, timestamp: u64, window_start: u64, window_end: u64) -> bool {
-        let current = now(env);
-        current >= window_start && current <= window_end
+    pub fn is_within_window(_env: &Env, timestamp: u64, window_start: u64, window_end: u64) -> bool {
+        timestamp >= window_start && timestamp <= window_end
     }
 }
 
@@ -122,7 +119,7 @@ pub mod address {
 // ---------------------------------------------------------------------------
 
 pub mod math {
-    use soroban_sdk::U256;
+    use soroban_sdk::{Env, U256};
 
     /// Safe addition with overflow check
     pub fn safe_add(a: u64, b: u64) -> Option<u64> {
@@ -141,11 +138,7 @@ pub mod math {
 
     /// Safe division with division by zero check
     pub fn safe_div(a: u64, b: u64) -> Option<u64> {
-        if b == 0 {
-            None
-        } else {
-            Some(a / b)
-        }
+        a.checked_div(b)
     }
 
     /// Calculate percentage
@@ -177,12 +170,12 @@ pub mod math {
     }
 
     /// U256 operations for large numbers
-    pub fn u256_from_u64(val: u64) -> U256 {
-        U256::from_u64(val)
+    pub fn u256_from_u64(env: &Env, val: u64) -> U256 {
+        U256::from_u128(env, val as u128)
     }
 
     pub fn u256_to_u64(val: &U256) -> Option<u64> {
-        val.to_u64()
+        val.to_u128().and_then(|v| u64::try_from(v).ok())
     }
 }
 
@@ -191,6 +184,7 @@ pub mod math {
 // ---------------------------------------------------------------------------
 
 pub mod validation {
+    use crate::address;
     use soroban_sdk::{Address, Env};
 
     /// Validate that a value is within a range
@@ -306,17 +300,23 @@ pub mod lifecycle {
 // ---------------------------------------------------------------------------
 
 pub mod events {
-    use soroban_sdk::{Env, Vec};
+    use soroban_sdk::{Env, String, Symbol, Vec};
 
-    /// Emit a custom event
+    /// Emit a custom event.
+    ///
+    /// `Events::publish` is deprecated in favor of the `#[contractevent]`
+    /// macro, which requires a concrete event type — not applicable here
+    /// since this helper accepts arbitrary topics/data.
+    #[allow(deprecated)]
     pub fn emit(env: &Env, topics: Vec<soroban_sdk::Val>, data: Vec<soroban_sdk::Val>) {
         env.events().publish(topics, data);
     }
 
-    /// Emit a simple string event
+    /// Emit a simple string event.
+    #[allow(deprecated)]
     pub fn emit_string(env: &Env, topic: &str, message: &str) {
-        let topics = soroban_sdk::vec![env, soroban_sdk::Val::from_static_str(topic)];
-        let data = soroban_sdk::vec![env, soroban_sdk::Val::from_static_str(message)];
+        let topics = soroban_sdk::vec![env, Symbol::new(env, topic).to_val()];
+        let data = soroban_sdk::vec![env, String::from_str(env, message).to_val()];
         env.events().publish(topics, data);
     }
 }
@@ -329,17 +329,17 @@ pub mod auth {
     use soroban_sdk::{Address, Env};
 
     /// Require admin authorization
-    pub fn require_admin(env: &Env, admin: &Address) {
+    pub fn require_admin(_env: &Env, admin: &Address) {
         admin.require_auth();
     }
 
     /// Require caller authorization
-    pub fn require_caller(env: &Env, caller: &Address) {
+    pub fn require_caller(_env: &Env, caller: &Address) {
         caller.require_auth();
     }
 
     /// Check if caller is admin
-    pub fn is_admin(env: &Env, caller: &Address, admin: &Address) -> bool {
+    pub fn is_admin(_env: &Env, caller: &Address, admin: &Address) -> bool {
         caller == admin
     }
 }

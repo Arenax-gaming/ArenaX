@@ -22,6 +22,7 @@
 
 pub mod access_control;
 pub mod anti_cheat;
+pub mod anti_cheat_oracle;
 pub mod auth_gateway;
 pub mod ax_token;
 pub mod contract_registry;

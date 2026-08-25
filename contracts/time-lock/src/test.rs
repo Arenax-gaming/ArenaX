@@ -19,7 +19,7 @@ fn setup(
     grace: u64,
     quorum: u32,
     num_governors: u32,
-) -> (TimeLockClient, Address, Vec<Address>) {
+) -> (TimeLockClient<'_>, Address, Vec<Address>) {
     let contract_id = env.register(TimeLock, ());
     let client = TimeLockClient::new(env, &contract_id);
     let admin = Address::generate(env);

@@ -3,19 +3,20 @@
 mod error;
 mod storage;
 
-use arenax_events::anti_cheat as events;
+use arenax_events::anti_cheat as anticheat_events;
+use arenax_events::anti_cheat_oracle as events;
 
 use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, String, Vec};
 use storage::{
     AlertRecord, AnalyticsTotals, AntiCheatConfirmation, DataFeed, DataKey, DetectionRule,
     FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth, ALERT_CRITICAL,
-    ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE, FEED_STATUS_PAUSED,
-    FEED_STATUS_REVOKED, FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_NETWORK,
-    FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY, ORACLE_DEGRADED, ORACLE_HEALTHY, ORACLE_OFFLINE,
+    ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE,
+    FEED_STATUS_REVOKED, FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL,
+    FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY, ORACLE_HEALTHY, ORACLE_OFFLINE,
     PROPOSAL_STATUS_ACTIVE, PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED,
-    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_ADD_ORACLE,
-    PROPOSAL_TYPE_EMERGENCY_PAUSE, PROPOSAL_TYPE_REMOVE_ORACLE, PROPOSAL_TYPE_UPDATE_QUORUM,
-    PROPOSAL_TYPE_UPDATE_RULE, RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE,
+    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED,
+    PROPOSAL_TYPE_EMERGENCY_PAUSE, PROPOSAL_TYPE_UPDATE_QUORUM,
+    RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE,
     RULE_STALENESS, RULE_VELOCITY,
 };
 
@@ -586,7 +587,7 @@ impl AntiCheatOracle {
             .persistent()
             .set(&DataKey::AnalyticsTotals, &analytics);
 
-        events::emit_anticheat_flag(
+        anticheat_events::emit_anticheat_flag(
             &env, &player, match_id, severity, penalty, &oracle, timestamp,
         );
         Ok(())
@@ -969,19 +970,17 @@ impl AntiCheatOracle {
                     .instance()
                     .set(&DataKey::EmergencyPaused, &true);
             }
-            PROPOSAL_TYPE_UPDATE_QUORUM => {
-                // payload encodes the new quorum as little-endian u32 (4 bytes)
-                if proposal.payload.len() >= 4 {
-                    let b0 = proposal.payload.get(0).unwrap_or(0) as u32;
-                    let b1 = proposal.payload.get(1).unwrap_or(0) as u32;
-                    let b2 = proposal.payload.get(2).unwrap_or(0) as u32;
-                    let b3 = proposal.payload.get(3).unwrap_or(0) as u32;
-                    let new_quorum = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-                    if new_quorum > 0 {
-                        env.storage()
-                            .instance()
-                            .set(&DataKey::GovernanceQuorum, &new_quorum);
-                    }
+            // payload encodes the new quorum as little-endian u32 (4 bytes)
+            PROPOSAL_TYPE_UPDATE_QUORUM if proposal.payload.len() >= 4 => {
+                let b0 = proposal.payload.get(0).unwrap_or(0) as u32;
+                let b1 = proposal.payload.get(1).unwrap_or(0) as u32;
+                let b2 = proposal.payload.get(2).unwrap_or(0) as u32;
+                let b3 = proposal.payload.get(3).unwrap_or(0) as u32;
+                let new_quorum = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+                if new_quorum > 0 {
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::GovernanceQuorum, &new_quorum);
                 }
             }
             // ADD/REMOVE_ORACLE and UPDATE_RULE require admin to follow up with
@@ -1344,7 +1343,7 @@ impl AntiCheatOracle {
             .set(&DataKey::Rule(rule.rule_id), &updated_rule);
 
         events::emit_alert_raised(
-            &env,
+            env,
             alert_id,
             rule.rule_id,
             &reading.player,
@@ -1458,7 +1457,7 @@ impl AntiCheatOracle {
             .persistent()
             .set(&DataKey::RuleCounter, &rule_id);
 
-        let mut mon = MonitoringState {
+        let mon = MonitoringState {
             active_feeds: 0,
             active_oracles: 0,
             open_alerts: 0,

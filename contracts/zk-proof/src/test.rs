@@ -5,7 +5,7 @@ use crate::{Proof, ZkProof, ZkProofClient};
 #[test]
 fn test() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, ZkProof);
+    let contract_id = env.register(ZkProof, ());
     let client = ZkProofClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
@@ -26,15 +26,15 @@ fn test() {
     assert_eq!(proof.id, 1);
     assert_eq!(proof.proof_type, 1);
     assert_eq!(proof.generator, user);
-    assert_eq!(proof.verified, false);
+    assert!(!proof.verified);
 
     // Verify the proof
     let verified = client.verify_proof(&verifier, &proof_id);
-    assert_eq!(verified, true);
+    assert!(verified);
 
     // Check proof is now verified
     let proof: Proof = client.get_proof(&proof_id);
-    assert_eq!(proof.verified, true);
+    assert!(proof.verified);
 
     // Execute private transaction
     let tx_id = client.execute_private_transaction(&user, &proof_id);
