@@ -4,6 +4,7 @@ pub mod rate_limit;
 pub mod security;
 pub mod tracing_middleware;
 
+pub use anti_bot::AntiBotMiddleware;
 pub use idempotency_middleware::IdempotencyMiddleware;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;

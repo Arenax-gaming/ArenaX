@@ -19,6 +19,7 @@ members = [
     "access-control",
     "time-lock",
     "zk-proof",
+    "airdrop",
 ]
 resolver = "2"
 
