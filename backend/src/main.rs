@@ -166,6 +166,7 @@ async fn main() -> io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
+            .app_data(web::Data::new(redis_conn.clone()))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
