@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype};
+use soroban_sdk::contracterror;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -47,4 +47,21 @@ pub enum VirtualEconomyError {
     DropInactive = 71,
     DropSupplyExceeded = 72,
     InvalidCurveParams = 73,
+
+    // Price oracle errors
+    /// An oracle address has not been registered on the contract.
+    OracleNotConfigured = 80,
+    /// The oracle configuration values failed validation.
+    InvalidOracleConfig = 81,
+    /// Both the primary and fallback oracles returned stale data.
+    OraclePriceStale = 82,
+    /// The incoming price deviates from the last accepted price by more than
+    /// `max_variance_bps` and no valid fallback is available.
+    OraclePriceVarianceTooHigh = 83,
+    /// An update was attempted before `update_interval` seconds have elapsed.
+    OracleUpdateTooFrequent = 84,
+    /// The asset-pair identifier provided to the oracle is invalid.
+    InvalidAssetPair = 85,
+    /// The price submitted to the oracle is not positive.
+    OracleInvalidPrice = 86,
 }

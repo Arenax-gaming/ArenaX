@@ -42,7 +42,7 @@ impl MarketplaceManager {
                 // Approximate exponential decay without floating point:
                 // halve the remaining premium every quarter of the auction
                 // duration (4 halvings across the full duration).
-                let steps = (elapsed * 4 / duration).min(4).max(0);
+                let steps = (elapsed * 4 / duration).clamp(0, 4);
                 let remaining_premium = premium >> steps;
                 listing.floor_price + remaining_premium
             }

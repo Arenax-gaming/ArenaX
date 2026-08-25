@@ -1,4 +1,13 @@
 #![no_std]
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#![allow(deprecated)]
+// record_match/record_aggregation_bucket's params reflect real, independent
+// fields contract callers must supply (Soroban entry points can't take a
+// struct param); #[contractimpl] generates the Client/Args types outside
+// the impl block, so this needs to be crate-level to cover them too.
+#![allow(clippy::too_many_arguments)]
 
 //! On-chain analytics contract for ArenaX.
 //!
@@ -8,7 +17,9 @@
 //! - Aggregated platform metrics are public.
 //! - Differential privacy noise is added to aggregate queries.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, String, Vec,
+};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -73,7 +84,7 @@ pub struct AggregatedGameStats {
     pub total_wagered: i128,
     pub total_rewards: i128,
     pub avg_match_duration: u64,
-    pub win_rate: u64, // basis points (1/100 of 1%)
+    pub win_rate: u64,       // basis points (1/100 of 1%)
     pub retention_rate: u64, // basis points
 }
 
@@ -86,8 +97,8 @@ pub struct CohortAnalysis {
     pub avg_matches: u64,
     pub avg_session_secs: u64,
     pub avg_wager: i128,
-    pub retention_d1: u64, // 1-day retention (basis points)
-    pub retention_d7: u64, // 7-day retention (basis points)
+    pub retention_d1: u64,  // 1-day retention (basis points)
+    pub retention_d7: u64,  // 7-day retention (basis points)
     pub retention_d30: u64, // 30-day retention (basis points)
 }
 
@@ -126,7 +137,7 @@ pub struct AggregationBucket {
 pub struct PrivateMetric {
     pub name: String,
     pub value: i128,
-    pub noise: i128, // Differential privacy noise added
+    pub noise: i128,  // Differential privacy noise added
     pub epsilon: u32, // Privacy budget (basis points)
 }
 
@@ -147,7 +158,7 @@ pub enum DataKey {
     AggregatedStats(u32, u64, u64), // (game_id, period_start, period_end)
     CohortAnalysis(BytesN<32>),
     AggregationBucket(u32, u32, u64), // (game_id, bucket_type, bucket_start)
-    PlatformAggregation(u64, u64), // (period_start, period_end)
+    PlatformAggregation(u64, u64),    // (period_start, period_end)
     PrivacyEpsilon,
     AggregationCounter,
 }
@@ -371,7 +382,9 @@ impl AnalyticsContract {
     /// Set privacy epsilon for differential privacy
     pub fn set_privacy_epsilon(env: Env, epsilon: u32) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::PrivacyEpsilon, &epsilon);
+        env.storage()
+            .instance()
+            .set(&DataKey::PrivacyEpsilon, &epsilon);
     }
 
     /// Get privacy epsilon
@@ -411,7 +424,12 @@ impl AnalyticsContract {
         env.storage().persistent().set(&key, &bucket);
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("AGG_BUCKET"), game_id, bucket_type, bucket_start),
+            (
+                soroban_sdk::symbol_short!("AGG_BUCK"),
+                game_id,
+                bucket_type,
+                bucket_start,
+            ),
             (match_count, player_count, volume, rewards),
         );
     }
@@ -423,9 +441,11 @@ impl AnalyticsContract {
         bucket_type: u32,
         bucket_start: u64,
     ) -> Option<AggregationBucket> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AggregationBucket(game_id, bucket_type, bucket_start))
+        env.storage().persistent().get(&DataKey::AggregationBucket(
+            game_id,
+            bucket_type,
+            bucket_start,
+        ))
     }
 
     /// Aggregate game statistics over a time period
@@ -439,13 +459,17 @@ impl AnalyticsContract {
         let mut total_players: u64 = 0;
         let mut total_wagered: i128 = 0;
         let mut total_rewards: i128 = 0;
-        let mut total_duration: u64 = 0;
+        let total_duration: u64 = 0;
 
         // Scan hourly buckets in the period
         let mut t = period_start;
         while t < period_end {
             let key = DataKey::AggregationBucket(game_id, 0, t);
-            if let Some(bucket) = env.storage().persistent().get::<DataKey, AggregationBucket>(&key) {
+            if let Some(bucket) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, AggregationBucket>(&key)
+            {
                 total_matches += bucket.match_count;
                 total_players += bucket.player_count;
                 total_wagered += bucket.volume;
@@ -454,11 +478,7 @@ impl AnalyticsContract {
             t += 3600; // hourly buckets
         }
 
-        let avg_duration = if total_matches > 0 {
-            total_duration / total_matches
-        } else {
-            0
-        };
+        let avg_duration = total_duration.checked_div(total_matches).unwrap_or(0);
 
         // Calculate win rate from game metrics
         let game_metrics: GameMetrics = env
@@ -515,9 +535,9 @@ impl AnalyticsContract {
             total_matches: platform.total_matches_all_time,
             unique_players: platform.active_players_30d,
             total_volume: platform.total_volume,
-            total_rewards: 0, // Would be summed from game metrics
+            total_rewards: 0,    // Would be summed from game metrics
             avg_session_secs: 0, // Would be calculated from player snapshots
-            dau: 0, // Would be calculated from daily buckets
+            dau: 0,              // Would be calculated from daily buckets
             mau: platform.active_players_30d,
             revenue_per_user: if platform.active_players_30d > 0 {
                 platform.total_volume / platform.active_players_30d as i128
@@ -610,12 +630,11 @@ impl AnalyticsContract {
     /// Hash player address with contract salt for privacy.
     fn hash_player(env: &Env, player: &Address) -> BytesN<32> {
         let salt: BytesN<32> = env.storage().instance().get(&DataKey::Salt).unwrap();
-        // XOR salt bytes with a deterministic hash of the address bytes
-        // Soroban doesn't expose SHA-256 directly; we use the crypto module
+        // Salt the address's XDR-serialised bytes before hashing, so the
+        // resulting hash is both per-player and unguessable without the salt.
         let mut input = soroban_sdk::Bytes::new(env);
         input.append(&salt.into());
-        // Encode address as bytes via its string representation length as a proxy
-        // In production use env.crypto().sha256() with serialised address bytes
+        input.append(&player.clone().to_xdr(env));
         env.crypto().sha256(&input).into()
     }
 
