@@ -2,7 +2,9 @@
 pub mod idempotency_middleware;
 pub mod rate_limit;
 pub mod security;
+pub mod anti_bot;
 
+pub use anti_bot::AntiBotMiddleware;
 pub use idempotency_middleware::IdempotencyMiddleware;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
