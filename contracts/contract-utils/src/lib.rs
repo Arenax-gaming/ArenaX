@@ -10,8 +10,15 @@ pub mod storage {
     use soroban_sdk::{Address, Env, Map};
 
     /// Helper for TTL management on persistent keys
-    pub fn extend_persistent_ttl(env: &Env, key: &impl soroban_sdk::IntoVal<Env, Val>, min_ttl: u32, extend_to: u32) {
-        env.storage().persistent().extend_ttl(key, min_ttl, extend_to);
+    pub fn extend_persistent_ttl(
+        env: &Env,
+        key: &impl soroban_sdk::IntoVal<Env, Val>,
+        min_ttl: u32,
+        extend_to: u32,
+    ) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, min_ttl, extend_to);
     }
 
     /// Helper for instance TTL management
@@ -148,12 +155,20 @@ pub mod math {
 
     /// Minimum of two values
     pub fn min(a: u64, b: u64) -> u64 {
-        if a < b { a } else { b }
+        if a < b {
+            a
+        } else {
+            b
+        }
     }
 
     /// Maximum of two values
     pub fn max(a: u64, b: u64) -> u64 {
-        if a > b { a } else { b }
+        if a > b {
+            a
+        } else {
+            b
+        }
     }
 
     /// Clamp value between min and max
@@ -252,7 +267,9 @@ pub mod lifecycle {
 
     /// Mark contract as initialized
     pub fn set_initialized(env: &Env) {
-        env.storage().instance().set(&LifecycleKey::Initialized, &true);
+        env.storage()
+            .instance()
+            .set(&LifecycleKey::Initialized, &true);
     }
 
     /// Check if contract is paused
@@ -292,7 +309,7 @@ pub mod events {
     use soroban_sdk::{Env, Vec};
 
     /// Emit a custom event
-    pub fn emit(env: &Env, topics: Vec< soroban_sdk::Val>, data: Vec< soroban_sdk::Val>) {
+    pub fn emit(env: &Env, topics: Vec<soroban_sdk::Val>, data: Vec<soroban_sdk::Val>) {
         env.events().publish(topics, data);
     }
 

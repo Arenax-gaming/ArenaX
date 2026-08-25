@@ -127,8 +127,16 @@ fn test_schedule_below_min_delay_panics() {
 
     // 50 < min_delay(100) → should panic
     client.schedule_operation(
-        &admin, &id, &target, &func, &args, &50, &desc,
-        &CATEGORY_GENERAL, &PRIORITY_MEDIUM, &0u64,
+        &admin,
+        &id,
+        &target,
+        &func,
+        &args,
+        &50,
+        &desc,
+        &CATEGORY_GENERAL,
+        &PRIORITY_MEDIUM,
+        &0u64,
     );
 }
 
@@ -174,8 +182,16 @@ fn test_schedule_with_custom_grace_period() {
 
     // custom grace = 7200 (2 h)
     client.schedule_operation(
-        &admin, &id, &target, &func, &args, &200, &desc,
-        &CATEGORY_TREASURY, &PRIORITY_HIGH, &7200u64,
+        &admin,
+        &id,
+        &target,
+        &func,
+        &args,
+        &200,
+        &desc,
+        &CATEGORY_TREASURY,
+        &PRIORITY_HIGH,
+        &7200u64,
     );
 
     let op = client.get_operation(&id).unwrap();
@@ -544,16 +560,40 @@ fn test_analytics_tracks_all_operations() {
     let desc = symbol_short!("op");
 
     client.schedule_operation(
-        &admin, &id1, &target, &func, &args, &200, &desc,
-        &CATEGORY_TREASURY, &PRIORITY_HIGH, &0u64,
+        &admin,
+        &id1,
+        &target,
+        &func,
+        &args,
+        &200,
+        &desc,
+        &CATEGORY_TREASURY,
+        &PRIORITY_HIGH,
+        &0u64,
     );
     client.schedule_operation(
-        &admin, &id2, &target, &func, &args, &200, &desc,
-        &CATEGORY_UPGRADE, &PRIORITY_CRITICAL, &0u64,
+        &admin,
+        &id2,
+        &target,
+        &func,
+        &args,
+        &200,
+        &desc,
+        &CATEGORY_UPGRADE,
+        &PRIORITY_CRITICAL,
+        &0u64,
     );
     client.schedule_operation(
-        &admin, &id3, &target, &func, &args, &200, &desc,
-        &CATEGORY_GENERAL, &PRIORITY_LOW, &0u64,
+        &admin,
+        &id3,
+        &target,
+        &func,
+        &args,
+        &200,
+        &desc,
+        &CATEGORY_GENERAL,
+        &PRIORITY_LOW,
+        &0u64,
     );
 
     assert_eq!(client.get_active_count(), 3);
@@ -597,7 +637,7 @@ fn test_average_delay_calculation() {
     assert_eq!(client.get_average_delay(), 0); // no executions yet
 
     schedule_default(&client, &admin, &id, &target, &env); // scheduled at t=0
-    env.ledger().with_mut(|l| l.timestamp = 300);          // executed at t=300
+    env.ledger().with_mut(|l| l.timestamp = 300); // executed at t=300
     client.execute_operation(&admin, &id);
 
     assert_eq!(client.get_average_delay(), 300); // 300 - 0 = 300
@@ -640,7 +680,12 @@ fn test_all_categories_and_priorities_schedule() {
         CATEGORY_GOVERNANCE,
         CATEGORY_EMERGENCY,
     ];
-    let priorities = [PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_CRITICAL];
+    let priorities = [
+        PRIORITY_LOW,
+        PRIORITY_MEDIUM,
+        PRIORITY_HIGH,
+        PRIORITY_CRITICAL,
+    ];
 
     let mut seed = 10u8;
     for cat in categories.iter() {
@@ -648,8 +693,7 @@ fn test_all_categories_and_priorities_schedule() {
             let id = make_id(&env, seed);
             seed += 1;
             client.schedule_operation(
-                &admin, &id, &target, &func, &args, &20, &desc,
-                cat, pri, &0u64,
+                &admin, &id, &target, &func, &args, &20, &desc, cat, pri, &0u64,
             );
             let op = client.get_operation(&id).unwrap();
             assert_eq!(op.category, *cat);
@@ -677,8 +721,15 @@ fn test_full_governance_workflow() {
 
     client.schedule_operation(
         &govs.get(1).unwrap(),
-        &id, &target, &func, &args, &120, &desc,
-        &CATEGORY_UPGRADE, &PRIORITY_CRITICAL, &0u64,
+        &id,
+        &target,
+        &func,
+        &args,
+        &120,
+        &desc,
+        &CATEGORY_UPGRADE,
+        &PRIORITY_CRITICAL,
+        &0u64,
     );
 
     let op = client.get_operation(&id).unwrap();

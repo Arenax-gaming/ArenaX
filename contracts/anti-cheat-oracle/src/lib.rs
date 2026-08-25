@@ -8,24 +8,21 @@ use arenax_events::anti_cheat as events;
 use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, String, Vec};
 use storage::{
     AlertRecord, AnalyticsTotals, AntiCheatConfirmation, DataFeed, DataKey, DetectionRule,
-    FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth,
-    ALERT_CRITICAL, ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING,
-    FEED_STATUS_ACTIVE, FEED_STATUS_PAUSED, FEED_STATUS_REVOKED,
-    FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_NETWORK,
-    FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY,
-    ORACLE_DEGRADED, ORACLE_HEALTHY, ORACLE_OFFLINE,
+    FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth, ALERT_CRITICAL,
+    ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE, FEED_STATUS_PAUSED,
+    FEED_STATUS_REVOKED, FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_NETWORK,
+    FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY, ORACLE_DEGRADED, ORACLE_HEALTHY, ORACLE_OFFLINE,
     PROPOSAL_STATUS_ACTIVE, PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED,
-    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED,
-    PROPOSAL_TYPE_ADD_ORACLE, PROPOSAL_TYPE_EMERGENCY_PAUSE,
-    PROPOSAL_TYPE_REMOVE_ORACLE, PROPOSAL_TYPE_UPDATE_QUORUM, PROPOSAL_TYPE_UPDATE_RULE,
-    RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE,
+    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_ADD_ORACLE,
+    PROPOSAL_TYPE_EMERGENCY_PAUSE, PROPOSAL_TYPE_REMOVE_ORACLE, PROPOSAL_TYPE_UPDATE_QUORUM,
+    PROPOSAL_TYPE_UPDATE_RULE, RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE,
     RULE_STALENESS, RULE_VELOCITY,
 };
 
 pub use error::AntiCheatError;
 pub use storage::{
-    AlertRecord as OracleAlert, AnalyticsTotals as OracleAnalytics,
-    AntiCheatConfirmation, DataFeed as OracleDataFeed, DetectionRule as OracleDetectionRule,
+    AlertRecord as OracleAlert, AnalyticsTotals as OracleAnalytics, AntiCheatConfirmation,
+    DataFeed as OracleDataFeed, DetectionRule as OracleDetectionRule,
     FeedReading as OracleFeedReading, GovernanceProposal as OracleProposal,
     MonitoringState as OracleMonitoringState, OracleConfig as OracleConfiguration,
     OracleHealth as OracleHealthState,
@@ -38,19 +35,19 @@ const PENALTY_HIGH: i128 = 30;
 
 // ─── Default oracle config values ─────────────────────────────────────────────
 const DEFAULT_MIN_CONFIRMATIONS: u32 = 2;
-const DEFAULT_MAX_STALENESS: u64 = 300;       // 5 minutes
-const DEFAULT_CONSENSUS_BPS: u32 = 500;       // 5% deviation allowed
-const DEFAULT_MIN_SUBMIT_INTERVAL: u64 = 10;  // 10 seconds
+const DEFAULT_MAX_STALENESS: u64 = 300; // 5 minutes
+const DEFAULT_CONSENSUS_BPS: u32 = 500; // 5% deviation allowed
+const DEFAULT_MIN_SUBMIT_INTERVAL: u64 = 10; // 10 seconds
 const DEFAULT_MAX_READINGS: u32 = 100;
 const DEFAULT_GOVERNANCE_QUORUM: u32 = 2;
-const PROPOSAL_TTL: u64 = 604_800;            // 7 days
+const PROPOSAL_TTL: u64 = 604_800; // 7 days
 
 // ─── Detection thresholds ─────────────────────────────────────────────────────
-const ANOMALY_ML_DEFAULT_THRESHOLD: i64 = 75;  // score > 75 → alert
+const ANOMALY_ML_DEFAULT_THRESHOLD: i64 = 75; // score > 75 → alert
 const SCORE_SPIKE_DEFAULT_THRESHOLD: i64 = 500; // absolute value jump
-const VELOCITY_DEFAULT_THRESHOLD: i64 = 200;   // delta per second
-const STALENESS_DEFAULT_THRESHOLD: i64 = 300;  // seconds without update
-const FREQ_ABUSE_DEFAULT_THRESHOLD: i64 = 5;   // submissions per minute
+const VELOCITY_DEFAULT_THRESHOLD: i64 = 200; // delta per second
+const STALENESS_DEFAULT_THRESHOLD: i64 = 300; // seconds without update
+const FREQ_ABUSE_DEFAULT_THRESHOLD: i64 = 5; // submissions per minute
 
 #[contract]
 pub struct AntiCheatOracle;
@@ -237,9 +234,7 @@ impl AntiCheatOracle {
     }
 
     pub fn get_oracle_health(env: Env, oracle: Address) -> Option<OracleHealth> {
-        env.storage()
-            .instance()
-            .get(&DataKey::OracleHealth(oracle))
+        env.storage().instance().get(&DataKey::OracleHealth(oracle))
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -466,8 +461,8 @@ impl AntiCheatOracle {
         health.valid_submissions += 1;
         health.last_submission = now;
         health.consecutive_errors = 0;
-        health.uptime_score = ((health.valid_submissions * 100)
-            / health.total_submissions.max(1)) as u32;
+        health.uptime_score =
+            ((health.valid_submissions * 100) / health.total_submissions.max(1)) as u32;
         env.storage()
             .instance()
             .set(&DataKey::OracleHealth(oracle.clone()), &health);
@@ -478,9 +473,10 @@ impl AntiCheatOracle {
             .persistent()
             .get(&DataKey::OracleSubmitCount(oracle.clone()))
             .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&DataKey::OracleSubmitCount(oracle.clone()), &(prev_count + 1));
+        env.storage().persistent().set(
+            &DataKey::OracleSubmitCount(oracle.clone()),
+            &(prev_count + 1),
+        );
 
         // Update heartbeat
         env.storage()
@@ -496,7 +492,15 @@ impl AntiCheatOracle {
             .set(&DataKey::AnalyticsTotals, &analytics);
 
         // Emit
-        events::emit_feed_reading_submitted(&env, feed_id, &oracle, &player, match_id, value, anomaly_score);
+        events::emit_feed_reading_submitted(
+            &env,
+            feed_id,
+            &oracle,
+            &player,
+            match_id,
+            value,
+            anomaly_score,
+        );
 
         // Run real-time detection engine
         Self::run_detection_engine(&env, &reading, &feed);
@@ -582,7 +586,9 @@ impl AntiCheatOracle {
             .persistent()
             .set(&DataKey::AnalyticsTotals, &analytics);
 
-        events::emit_anticheat_flag(&env, &player, match_id, severity, penalty, &oracle, timestamp);
+        events::emit_anticheat_flag(
+            &env, &player, match_id, severity, penalty, &oracle, timestamp,
+        );
         Ok(())
     }
 
@@ -676,11 +682,7 @@ impl AntiCheatOracle {
     }
 
     /// Enable or disable a detection rule (admin only).
-    pub fn set_rule_enabled(
-        env: Env,
-        rule_id: u32,
-        enabled: bool,
-    ) -> Result<(), AntiCheatError> {
+    pub fn set_rule_enabled(env: Env, rule_id: u32, enabled: bool) -> Result<(), AntiCheatError> {
         Self::require_admin(&env)?;
         let mut rule: DetectionRule = env
             .storage()
@@ -788,8 +790,7 @@ impl AntiCheatOracle {
             // Recalculate accuracy
             let total = analytics.total_alerts_raised.max(1);
             let fp = analytics.total_false_positives;
-            analytics.detection_accuracy_bps =
-                (((total - fp) * 10_000) / total) as u32;
+            analytics.detection_accuracy_bps = (((total - fp) * 10_000) / total) as u32;
         }
         analytics.last_updated = now;
         env.storage()
@@ -1015,7 +1016,9 @@ impl AntiCheatOracle {
         if new_cfg.min_submit_interval == 0 {
             return Err(AntiCheatError::InvalidThreshold);
         }
-        env.storage().instance().set(&DataKey::OracleConfig, &new_cfg);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleConfig, &new_cfg);
         events::emit_config_updated(&env);
         Ok(())
     }
@@ -1209,7 +1212,8 @@ impl AntiCheatOracle {
             .unwrap_or(0);
 
         for rule_id in 1..=rule_count {
-            let rule: DetectionRule = match env.storage().persistent().get(&DataKey::Rule(rule_id)) {
+            let rule: DetectionRule = match env.storage().persistent().get(&DataKey::Rule(rule_id))
+            {
                 Some(r) => r,
                 None => continue,
             };
@@ -1226,10 +1230,7 @@ impl AntiCheatOracle {
                 RULE_VELOCITY => reading.anomaly_score as i64 > rule.threshold,
                 RULE_ANOMALY_ML => reading.anomaly_score as i64 > rule.threshold,
                 RULE_STALENESS => {
-                    let age = env
-                        .ledger()
-                        .timestamp()
-                        .saturating_sub(feed.last_updated);
+                    let age = env.ledger().timestamp().saturating_sub(feed.last_updated);
                     age as i64 > rule.threshold
                 }
                 RULE_FREQ_ABUSE => {
@@ -1241,7 +1242,9 @@ impl AntiCheatOracle {
                         .unwrap_or(0);
                     count as i64 > rule.threshold * 60
                 }
-                RULE_CONSENSUS => reading.confidence < 50 && reading.anomaly_score as i64 > rule.threshold,
+                RULE_CONSENSUS => {
+                    reading.confidence < 50 && reading.anomaly_score as i64 > rule.threshold
+                }
                 _ => false,
             };
 
@@ -1396,11 +1399,41 @@ impl AntiCheatOracle {
     /// Seed five default detection rules on first initialization.
     fn seed_default_rules(env: &Env) {
         let rules: [(u32, u32, &str, i64, u32); 5] = [
-            (RULE_SCORE_SPIKE,  FEED_TYPE_SCORE,     "Score spike detected",          SCORE_SPIKE_DEFAULT_THRESHOLD,  ALERT_WARNING),
-            (RULE_VELOCITY,     FEED_TYPE_TELEMETRY, "Velocity anomaly detected",     VELOCITY_DEFAULT_THRESHOLD,     ALERT_WARNING),
-            (RULE_ANOMALY_ML,   FEED_TYPE_BEHAVIOR,  "ML anomaly score exceeded",     ANOMALY_ML_DEFAULT_THRESHOLD,   ALERT_CRITICAL),
-            (RULE_STALENESS,    FEED_TYPE_SCORE,     "Feed staleness threshold",       STALENESS_DEFAULT_THRESHOLD,    ALERT_INFO),
-            (RULE_FREQ_ABUSE,   FEED_TYPE_EXTERNAL,  "Oracle frequency abuse",        FREQ_ABUSE_DEFAULT_THRESHOLD,   ALERT_WARNING),
+            (
+                RULE_SCORE_SPIKE,
+                FEED_TYPE_SCORE,
+                "Score spike detected",
+                SCORE_SPIKE_DEFAULT_THRESHOLD,
+                ALERT_WARNING,
+            ),
+            (
+                RULE_VELOCITY,
+                FEED_TYPE_TELEMETRY,
+                "Velocity anomaly detected",
+                VELOCITY_DEFAULT_THRESHOLD,
+                ALERT_WARNING,
+            ),
+            (
+                RULE_ANOMALY_ML,
+                FEED_TYPE_BEHAVIOR,
+                "ML anomaly score exceeded",
+                ANOMALY_ML_DEFAULT_THRESHOLD,
+                ALERT_CRITICAL,
+            ),
+            (
+                RULE_STALENESS,
+                FEED_TYPE_SCORE,
+                "Feed staleness threshold",
+                STALENESS_DEFAULT_THRESHOLD,
+                ALERT_INFO,
+            ),
+            (
+                RULE_FREQ_ABUSE,
+                FEED_TYPE_EXTERNAL,
+                "Oracle frequency abuse",
+                FREQ_ABUSE_DEFAULT_THRESHOLD,
+                ALERT_WARNING,
+            ),
         ];
 
         let mut rule_id: u32 = 0;

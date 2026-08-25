@@ -309,8 +309,8 @@ pub fn emit_operation_scheduled_legacy(
         execute_after,
         execute_after + 86_400, // 1-day grace window as default
         description,
-        0, // CATEGORY_GENERAL
-        1, // PRIORITY_MEDIUM
+        0,      // CATEGORY_GENERAL
+        1,      // PRIORITY_MEDIUM
         target, // proposer falls back to target for legacy calls
     );
 }

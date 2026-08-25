@@ -73,7 +73,7 @@ pub struct AggregatedGameStats {
     pub total_wagered: i128,
     pub total_rewards: i128,
     pub avg_match_duration: u64,
-    pub win_rate: u64, // basis points (1/100 of 1%)
+    pub win_rate: u64,       // basis points (1/100 of 1%)
     pub retention_rate: u64, // basis points
 }
 
@@ -86,8 +86,8 @@ pub struct CohortAnalysis {
     pub avg_matches: u64,
     pub avg_session_secs: u64,
     pub avg_wager: i128,
-    pub retention_d1: u64, // 1-day retention (basis points)
-    pub retention_d7: u64, // 7-day retention (basis points)
+    pub retention_d1: u64,  // 1-day retention (basis points)
+    pub retention_d7: u64,  // 7-day retention (basis points)
     pub retention_d30: u64, // 30-day retention (basis points)
 }
 
@@ -126,7 +126,7 @@ pub struct AggregationBucket {
 pub struct PrivateMetric {
     pub name: String,
     pub value: i128,
-    pub noise: i128, // Differential privacy noise added
+    pub noise: i128,  // Differential privacy noise added
     pub epsilon: u32, // Privacy budget (basis points)
 }
 
@@ -147,7 +147,7 @@ pub enum DataKey {
     AggregatedStats(u32, u64, u64), // (game_id, period_start, period_end)
     CohortAnalysis(BytesN<32>),
     AggregationBucket(u32, u32, u64), // (game_id, bucket_type, bucket_start)
-    PlatformAggregation(u64, u64), // (period_start, period_end)
+    PlatformAggregation(u64, u64),    // (period_start, period_end)
     PrivacyEpsilon,
     AggregationCounter,
 }
@@ -371,7 +371,9 @@ impl AnalyticsContract {
     /// Set privacy epsilon for differential privacy
     pub fn set_privacy_epsilon(env: Env, epsilon: u32) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::PrivacyEpsilon, &epsilon);
+        env.storage()
+            .instance()
+            .set(&DataKey::PrivacyEpsilon, &epsilon);
     }
 
     /// Get privacy epsilon
@@ -411,7 +413,12 @@ impl AnalyticsContract {
         env.storage().persistent().set(&key, &bucket);
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("AGG_BUCKET"), game_id, bucket_type, bucket_start),
+            (
+                soroban_sdk::symbol_short!("AGG_BUCKET"),
+                game_id,
+                bucket_type,
+                bucket_start,
+            ),
             (match_count, player_count, volume, rewards),
         );
     }
@@ -423,9 +430,11 @@ impl AnalyticsContract {
         bucket_type: u32,
         bucket_start: u64,
     ) -> Option<AggregationBucket> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AggregationBucket(game_id, bucket_type, bucket_start))
+        env.storage().persistent().get(&DataKey::AggregationBucket(
+            game_id,
+            bucket_type,
+            bucket_start,
+        ))
     }
 
     /// Aggregate game statistics over a time period
@@ -445,7 +454,11 @@ impl AnalyticsContract {
         let mut t = period_start;
         while t < period_end {
             let key = DataKey::AggregationBucket(game_id, 0, t);
-            if let Some(bucket) = env.storage().persistent().get::<DataKey, AggregationBucket>(&key) {
+            if let Some(bucket) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, AggregationBucket>(&key)
+            {
                 total_matches += bucket.match_count;
                 total_players += bucket.player_count;
                 total_wagered += bucket.volume;
@@ -515,9 +528,9 @@ impl AnalyticsContract {
             total_matches: platform.total_matches_all_time,
             unique_players: platform.active_players_30d,
             total_volume: platform.total_volume,
-            total_rewards: 0, // Would be summed from game metrics
+            total_rewards: 0,    // Would be summed from game metrics
             avg_session_secs: 0, // Would be calculated from player snapshots
-            dau: 0, // Would be calculated from daily buckets
+            dau: 0,              // Would be calculated from daily buckets
             mau: platform.active_players_30d,
             revenue_per_user: if platform.active_players_30d > 0 {
                 platform.total_volume / platform.active_players_30d as i128

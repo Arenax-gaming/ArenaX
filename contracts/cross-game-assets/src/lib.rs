@@ -561,7 +561,9 @@ impl CrossGameAssets {
         }
         if !found {
             chains.push_back(chain_id);
-            env.storage().instance().set(&DataKey::SupportedChains, &chains);
+            env.storage()
+                .instance()
+                .set(&DataKey::SupportedChains, &chains);
         }
 
         env.events().publish(
@@ -627,11 +629,7 @@ impl CrossGameAssets {
 
         // Check cooldown
         let cooldown_key = DataKey::BridgeCooldown(owner.clone(), target_chain.clone());
-        let last_bridge: u64 = env
-            .storage()
-            .persistent()
-            .get(&cooldown_key)
-            .unwrap_or(0);
+        let last_bridge: u64 = env.storage().persistent().get(&cooldown_key).unwrap_or(0);
         let now = env.ledger().timestamp();
         if now < last_bridge + chain_config.cooldown_secs {
             panic!("bridge cooldown not elapsed");
@@ -694,13 +692,16 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeCooldown(owner.clone(), target_chain), &now);
 
         // Lock the assets record
-        env.storage().persistent().set(
-            &DataKey::BridgeLock(owner, asset_id.clone()),
-            &amount,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::BridgeLock(owner, asset_id.clone()), &amount);
 
         env.events().publish(
-            (soroban_sdk::symbol_short!("BRIDGE_INIT"), request_id.clone(), asset_id),
+            (
+                soroban_sdk::symbol_short!("BRIDGE_INIT"),
+                request_id.clone(),
+                asset_id,
+            ),
             (amount, source_game_id, target_game_id),
         );
 
@@ -708,10 +709,7 @@ impl CrossGameAssets {
     }
 
     /// Complete a bridge request (called by bridge oracle/admin)
-    pub fn complete_bridge(
-        env: Env,
-        request_id: BytesN<32>,
-    ) {
+    pub fn complete_bridge(env: Env, request_id: BytesN<32>) {
         Self::require_admin(&env);
         let mut request: BridgeRequest = env
             .storage()
@@ -732,9 +730,10 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(request.owner.clone(), request.asset_id.clone()),
-        );
+        env.storage().persistent().remove(&DataKey::BridgeLock(
+            request.owner.clone(),
+            request.asset_id.clone(),
+        ));
 
         env.events().publish(
             (soroban_sdk::symbol_short!("BRIDGE_DONE"), request_id),
@@ -743,10 +742,7 @@ impl CrossGameAssets {
     }
 
     /// Fail a bridge request (called by bridge oracle/admin)
-    pub fn fail_bridge(
-        env: Env,
-        request_id: BytesN<32>,
-    ) {
+    pub fn fail_bridge(env: Env, request_id: BytesN<32>) {
         Self::require_admin(&env);
         let mut request: BridgeRequest = env
             .storage()
@@ -784,9 +780,9 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(request.owner, request.asset_id),
-        );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BridgeLock(request.owner, request.asset_id));
 
         env.events().publish(
             (soroban_sdk::symbol_short!("BRIDGE_FAIL"), request_id),
@@ -795,11 +791,7 @@ impl CrossGameAssets {
     }
 
     /// Cancel a bridge request (called by owner)
-    pub fn cancel_bridge(
-        env: Env,
-        owner: Address,
-        request_id: BytesN<32>,
-    ) {
+    pub fn cancel_bridge(env: Env, owner: Address, request_id: BytesN<32>) {
         owner.require_auth();
         let mut request: BridgeRequest = env
             .storage()
@@ -840,9 +832,9 @@ impl CrossGameAssets {
             .set(&DataKey::BridgeRequest(request_id.clone()), &request);
 
         // Remove the lock
-        env.storage().persistent().remove(
-            &DataKey::BridgeLock(owner, request.asset_id),
-        );
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BridgeLock(owner, request.asset_id));
 
         env.events().publish(
             (soroban_sdk::symbol_short!("BRIDGE_CANCEL"), request_id),
