@@ -91,7 +91,9 @@ export interface WebVitalsReporter {
 
 const noop = () => {};
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+// Read lazily so tests can flip NODE_ENV (Jest runs with `test`) to
+// exercise the shipping paths; production behavior is unchanged.
+const isProduction = () => process.env.NODE_ENV === 'production';
 
 /**
  * Create a reporter. The factory style is the same we use for
@@ -124,7 +126,7 @@ export const createWebVitalsReporter = (
     const ship = async (reports: WebVitalReport[]) => {
         if (reports.length === 0) return;
         // Never send metrics outside production to avoid polluting analytics.
-        if (!IS_PRODUCTION) return;
+        if (!isProduction()) return;
         if (options.sink) {
             await options.sink(reports);
             return;

@@ -44,7 +44,7 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
       <div className="bg-card/60 backdrop-blur-lg rounded-2xl p-12 border border-border max-w-md w-full mx-4">
         <div className="text-center">
-          <div className="relative mb-8">
+          <div className="relative mb-8" aria-hidden="true">
             <div className="w-32 h-32 mx-auto rounded-full border-4 border-primary border-t-transparent animate-spin" />
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="text-4xl">🎮</span>
@@ -82,7 +82,14 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
           </div>
 
           <div className="space-y-3">
-            <div className="w-full bg-muted rounded-full h-2">
+            <div
+              className="w-full bg-muted rounded-full h-2"
+              role="progressbar"
+              aria-label="Matchmaking progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progressPercent}
+            >
               <div
                 className="bg-primary h-2 rounded-full transition-all duration-1000"
                 style={{ width: `${Math.min((waitTime / estimatedTime) * 100, 100)}%` }}
@@ -97,6 +104,12 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
               Cancel Matchmaking
             </button>
           </div>
+
+          <p role="status" aria-live="polite" className="sr-only">
+            {isSearching
+              ? `Searching for opponents in ${gameMode} mode`
+              : 'Match found'}
+          </p>
         </div>
       </div>
     </div>

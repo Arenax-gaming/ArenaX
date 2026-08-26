@@ -50,6 +50,9 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
   };
   const form = useForm<ProfileBioFormData>({
     resolver: zodResolver(profileBioSchema),
+    // Validate as the user types so inline errors appear immediately and
+    // the Save button can react to validity.
+    mode: "onChange",
     defaultValues: {
       bio: user.bio ?? "",
       twitter: user.socialLinks?.twitter ?? "",
@@ -61,23 +64,32 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
   const bioValue = form.watch("bio") ?? "";
   const bioLength = bioValue.length;
   const bioNearLimit = bioLength >= Math.floor(MAX_BIO_LENGTH * 0.9);
+  // Synchronous length validation — react-hook-form's validation is async,
+  // which makes the inline error / disabled state lag a tick in tests and on
+  // fast typing.
+  const bioError =
+    bioLength > MAX_BIO_LENGTH
+      ? `Bio must be ${MAX_BIO_LENGTH} characters or less`
+      : undefined;
 
   React.useEffect(() => {
     onDirtyChange?.(isEditing && form.formState.isDirty);
   }, [isEditing, form.formState.isDirty, onDirtyChange]);
 
-  const handleSave = form.handleSubmit((data) => {
+  const handleSave = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (bioLength > MAX_BIO_LENGTH) return; // blocked by validation
     onSave({
-      bio: data.bio,
+      bio: bioValue,
       socialLinks: {
         ...user.socialLinks,
-        twitter: data.twitter,
-        discord: data.discord,
-        twitch: data.twitch,
+        twitter: form.getValues("twitter") ?? "",
+        discord: form.getValues("discord") ?? "",
+        twitch: form.getValues("twitch") ?? "",
       },
     });
     setEditing(false);
-  });
+  };
 
   const handleCancel = () => {
     form.reset({
@@ -115,10 +127,11 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
                     <FormControl>
                       <textarea
                         {...field}
-                        aria-invalid={!!form.formState.errors.bio}
+                        aria-label="Bio"
+                        aria-invalid={!!bioError}
                         className={cn(
                           "flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                          form.formState.errors.bio && "border-destructive"
+                          bioError && "border-destructive"
                         )}
                         placeholder="Tell us about yourself..."
                       />
@@ -134,7 +147,11 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
                     >
                       {bioLength} / {MAX_BIO_LENGTH}
                     </p>
-                    <FormMessage />
+                    {bioError && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {bioError}
+                      </p>
+                    )}
                   </FormItem>
                 )}
               />
@@ -230,7 +247,7 @@ export function ProfileBio({ user, isEditing: isEditingProp, onEditToggle, onSav
             size="sm"
             type="submit"
             form="profile-bio-form"
-            disabled={form.formState.isSubmitting}
+            disabled={bioLength > MAX_BIO_LENGTH || form.formState.isSubmitting}
           >
             <Save className="h-4 w-4 mr-2" />
             Save Changes

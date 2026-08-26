@@ -33,3 +33,14 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     }),
   });
 }
+
+// jsdom doesn't implement ResizeObserver — provide a no-op stub so hooks that
+// observe layout (e.g. useResponsive) can mount in tests. Suites that need to
+// assert on callback behavior override `global.ResizeObserver` themselves.
+if (typeof global.ResizeObserver === "undefined") {
+  global.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  } as unknown as typeof ResizeObserver;
+}

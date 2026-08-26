@@ -66,6 +66,9 @@ const QUEUE_STORAGE_KEY = "arenax_message_queue";
 const CONVERSATIONS_STORAGE_KEY = "arenax_conversations";
 const MAX_PERSISTED_MESSAGES = 500;
 
+/** Stable empty-array reference for getMessages() (see useSyncExternalStore). */
+const EMPTY_MESSAGES: readonly ChatMessage[] = [];
+
 interface PersistedStore {
   messages: Record<string, ChatMessage[]>;   // conversationId → messages
   queue: QueuedMessage[];
@@ -357,7 +360,10 @@ export class MessageStore {
   // ─── Accessors ──────────────────────────────────────────────────────────────
 
   getMessages(conversationId: string): readonly ChatMessage[] {
-    return this.messages[conversationId] ?? [];
+    // Return a stable reference for empty conversations — useSyncExternalStore
+    // compares snapshots by reference, and a fresh `[]` each call would
+    // trigger an infinite re-render loop.
+    return this.messages[conversationId] ?? EMPTY_MESSAGES;
   }
 
   getAllConversations(): readonly Conversation[] {

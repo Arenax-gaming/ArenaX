@@ -59,7 +59,11 @@ describe('useInfiniteScroll', () => {
       { items: ['a'], nextCursor: 'page2' },
       { items: ['b'], nextCursor: undefined },
     ]);
-    const { result } = renderHook(() => useInfiniteScroll({ fetchPage }));
+    const { result } = renderHook(() =>
+      // Optimizations off: the 200ms throttle + rAF deferral would swallow
+      // the synchronous intersection callback in this unit test.
+      useInfiniteScroll({ fetchPage, enableOptimizations: false })
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual(['a']);
 
