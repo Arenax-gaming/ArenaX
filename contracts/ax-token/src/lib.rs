@@ -1,5 +1,8 @@
 #![no_std]
 
+mod flash_loan_protection;
+use flash_loan_protection::FlashLoanGuard;
+
 use arenax_events::ax_token as events;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
@@ -65,6 +68,9 @@ pub enum DataKey {
     BurnMetrics,
     BuybackSchedule,
     TotalBurned,
+    // Flash loan protection
+    LastOpSequence(Address),
+    GlobalLastSequence,
 }
 
 #[contract]
@@ -120,6 +126,11 @@ impl AxToken {
             panic!("amount must be positive");
         }
 
+        // Flash loan protection: reject same-sequence re-use
+        if FlashLoanGuard::check_and_set_sequence(env, &from) {
+            panic!("flash loan detected: same-sequence burn");
+        }
+
         let current_balance = Self::balance(env, from.clone());
         if current_balance < amount {
             panic!("insufficient balance");
@@ -148,6 +159,11 @@ impl AxToken {
 
         if from == to {
             panic!("cannot transfer to self");
+        }
+
+        // Flash loan protection: reject same-sequence re-use
+        if FlashLoanGuard::check_and_set_sequence(env, &from) {
+            panic!("flash loan detected: same-sequence transfer");
         }
 
         let from_balance = Self::balance(env, from.clone());
@@ -474,6 +490,11 @@ impl AxToken {
 
     pub fn vote_on_proposal(env: Env, voter: Address, proposal_id: u64, support: bool) {
         voter.require_auth();
+
+        // Flash loan protection: prevent same-sequence governance manipulation
+        if FlashLoanGuard::check_and_set_sequence(&env, &voter) {
+            panic!("flash loan detected: same-sequence governance vote");
+        }
 
         let mut proposal: Proposal = env
             .storage()
