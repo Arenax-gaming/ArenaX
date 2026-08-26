@@ -65,6 +65,9 @@ pub enum DataKey {
     BurnMetrics,
     BuybackSchedule,
     TotalBurned,
+    ChainId,
+    Nonce(Address),
+    UsedNonce(Address, u64),
 }
 
 #[contract]
@@ -521,6 +524,99 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Transaction Replay Protection
+    // ---------------------------------------------------------------------------
+    //
+    // Binds sensitive operations to a specific chain and a strictly
+    // increasing per-address nonce so a signed/authorized call captured on
+    // one network (or replayed twice on the same network) cannot be
+    // re-submitted elsewhere or re-executed. `chain_id` must be configured
+    // by the admin before any replay-protected entry point can be used.
+
+    /// Set the chain identifier this deployment accepts nonces for. Must be
+    /// configured once per network the contract is deployed to.
+    pub fn set_chain_id(env: Env, chain_id: u32) {
+        Self::require_admin(&env);
+        if chain_id == 0 {
+            panic!("chain id must be non-zero");
+        }
+        env.storage().instance().set(&DataKey::ChainId, &chain_id);
+    }
+
+    pub fn get_chain_id(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::ChainId).unwrap_or(0)
+    }
+
+    /// The next nonce `address` is expected to use for a replay-protected call.
+    pub fn get_nonce(env: Env, address: Address) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Nonce(address))
+            .unwrap_or(0)
+    }
+
+    /// Whether a given (address, nonce) pair has already been consumed.
+    pub fn is_nonce_used(env: Env, address: Address, nonce: u64) -> bool {
+        env.storage()
+            .instance()
+            .has(&DataKey::UsedNonce(address, nonce))
+    }
+
+    /// Replay-protected token transfer. Requires the caller to supply the
+    /// chain id this transaction was authorized for and the next expected
+    /// nonce; both are verified and the nonce is consumed atomically before
+    /// the transfer executes, so a captured authorization cannot be
+    /// replayed on another chain or resubmitted a second time.
+    pub fn transfer_replay_protected(
+        env: Env,
+        from: Address,
+        to: Address,
+        amount: i128,
+        chain_id: u32,
+        nonce: u64,
+    ) {
+        from.require_auth();
+        Self::consume_nonce(&env, &from, chain_id, nonce);
+        Self::transfer(&env, from, to, amount);
+    }
+
+    fn consume_nonce(env: &Env, address: &Address, chain_id: u32, nonce: u64) {
+        let configured_chain_id: u32 = env.storage().instance().get(&DataKey::ChainId).unwrap_or(0);
+        if configured_chain_id == 0 {
+            panic!("chain id not configured");
+        }
+        if chain_id != configured_chain_id {
+            panic!("invalid chain id: replay protection violation");
+        }
+
+        let expected_nonce: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Nonce(address.clone()))
+            .unwrap_or(0);
+        if nonce != expected_nonce {
+            panic!("invalid nonce: replay detected or out of order");
+        }
+
+        let used_key = DataKey::UsedNonce(address.clone(), nonce);
+        if env.storage().instance().has(&used_key) {
+            panic!("nonce already used: replay detected");
+        }
+        env.storage().instance().set(&used_key, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::Nonce(address.clone()), &(expected_nonce + 1));
+
+        env.events().publish(
+            (
+                Symbol::new(env, "ArenaXToken_v1"),
+                Symbol::new(env, "NONCE_CONSUMED"),
+            ),
+            (address.clone(), chain_id, nonce),
+        );
     }
 
     // ---------------------------------------------------------------------------
