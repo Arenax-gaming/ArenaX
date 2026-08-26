@@ -72,7 +72,11 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
               <div className="text-muted-foreground text-xs">Players Found</div>
             </div>
             <div className="bg-muted/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-success/80">~{estimatedTime - waitTime}s</div>
+              {waitTime >= estimatedTime ? (
+                <div className="text-2xl font-bold text-success/80">Almost there...</div>
+              ) : (
+                <div className="text-2xl font-bold text-success/80">~{Math.max(0, estimatedTime - waitTime)}s</div>
+              )}
               <div className="text-muted-foreground text-xs">Estimated</div>
             </div>
           </div>

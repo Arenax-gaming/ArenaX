@@ -416,7 +416,12 @@ export class EnhancedApiClient {
 
     const promise = this.request<T>(endpoint, { ...options, method: "GET" });
     this._inFlight.set(url, promise);
-    promise.finally(() => this._inFlight.delete(url));
+    // Swallow the derived promise's rejection — the caller handles the
+    // original error; without this the finally() child promise would become
+    // an unhandled rejection whenever the request fails.
+    promise
+      .finally(() => this._inFlight.delete(url))
+      .catch(() => {});
     return promise;
   }
 
