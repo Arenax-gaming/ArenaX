@@ -1,11 +1,13 @@
 // Middleware module for ArenaX
 pub mod idempotency_middleware;
+pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;
 pub mod tracing_middleware;
 
 pub use anti_bot::AntiBotMiddleware;
 pub use idempotency_middleware::IdempotencyMiddleware;
+pub use metrics_middleware::RequestMetrics;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
