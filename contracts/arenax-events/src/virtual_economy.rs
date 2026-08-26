@@ -447,3 +447,84 @@ pub fn emit_oracle_pair_registered(env: &Env, asset_pair: &BytesN<32>, update_in
     }
     .publish(env);
 }
+
+// ─── NFT Staking ──────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKING_CONFIGURED"])]
+pub struct NftStakingConfigured {
+    pub reward_rate_bps: u32,
+    pub reward_interval: u64,
+    pub min_lock_period: u64,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKED"])]
+pub struct NftStaked {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub staked_at: u64,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_UNSTAKED"])]
+pub struct NftUnstaked {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub rewards_claimed: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKING_REWARDS_CLAIMED"])]
+pub struct NftStakingRewardsClaimed {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub amount: i128,
+}
+
+pub fn emit_nft_staking_configured(
+    env: &Env,
+    reward_rate_bps: u32,
+    reward_interval: u64,
+    min_lock_period: u64,
+) {
+    NftStakingConfigured {
+        reward_rate_bps,
+        reward_interval,
+        min_lock_period,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_staked(env: &Env, token_id: &BytesN<32>, owner: &Address, staked_at: u64) {
+    NftStaked {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        staked_at,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_unstaked(
+    env: &Env,
+    token_id: &BytesN<32>,
+    owner: &Address,
+    rewards_claimed: i128,
+) {
+    NftUnstaked {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        rewards_claimed,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_staking_rewards_claimed(
+    env: &Env,
+    token_id: &BytesN<32>,
+    owner: &Address,
+    amount: i128,
+) {
+    NftStakingRewardsClaimed {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        amount,
+    }
+    .publish(env);
+}

@@ -10,12 +10,14 @@ mod error;
 mod governance;
 mod marketplace;
 mod nft;
+mod nft_staking;
 mod oracle;
 mod rewards;
 mod storage;
 
 use arenax_events::virtual_economy as events;
 use marketplace::MarketplaceManager;
+use nft_staking::NftStakingManager;
 use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -1585,6 +1587,273 @@ impl VirtualEconomyContract {
             .persistent()
             .set(&DataKey::OraclePairConfig(asset_pair), &new_config);
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // NFT Staking
+    // -------------------------------------------------------------------------
+
+    /// Configure (or reconfigure) the NFT staking module. Admin-only.
+    pub fn configure_nft_staking(
+        env: Env,
+        config: NftStakeConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        if config.reward_interval == 0 {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::NftStakeConfig, &config);
+        events::emit_nft_staking_configured(
+            &env,
+            config.reward_rate_bps,
+            config.reward_interval,
+            config.min_lock_period,
+        );
+        Ok(())
+    }
+
+    /// Stake an NFT owned by `owner`. The NFT is locked in the contract's
+    /// virtual accounting until unstaked.
+    pub fn stake_nft(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        if config.paused {
+            return Err(VirtualEconomyError::NftStakingPaused);
+        }
+
+        // Verify NFT exists and belongs to owner
+        let nft_owner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTOwner(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        if nft_owner != owner {
+            return Err(VirtualEconomyError::NotOwner);
+        }
+
+        // Ensure not already staked
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::NftStakedPosition(token_id.clone()))
+        {
+            return Err(VirtualEconomyError::NftAlreadyStaked);
+        }
+
+        let now = env.ledger().timestamp();
+        let position = NftStakedPosition {
+            token_id: token_id.clone(),
+            owner: owner.clone(),
+            staked_at: now,
+            pending_rewards: 0,
+            last_reward_ts: now,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedPosition(token_id.clone()), &position);
+
+        // Track owner's staked list
+        let mut staked_list: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        staked_list.push_back(token_id.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedByOwner(owner.clone()), &staked_list);
+
+        NftStakingManager::increment_staked(&env);
+
+        events::emit_nft_staked(&env, &token_id, &owner, now);
+        Ok(())
+    }
+
+    /// Unstake an NFT and claim any accrued rewards.
+    pub fn unstake_nft(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        if config.paused {
+            return Err(VirtualEconomyError::NftStakingPaused);
+        }
+
+        let mut position: NftStakedPosition = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id.clone()))
+            .ok_or(VirtualEconomyError::NftNotStaked)?;
+
+        if position.owner != owner {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        // Check lock period
+        let now = env.ledger().timestamp();
+        if config.min_lock_period > 0 && now < position.staked_at + config.min_lock_period {
+            return Err(VirtualEconomyError::NftLockPeriodNotMet);
+        }
+
+        // Calculate and pay out rewards
+        let nft_metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        let accrued =
+            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let total_rewards = position.pending_rewards + accrued;
+
+        if total_rewards > 0 {
+            let current_balance = Self::get_currency_balance(env.clone(), owner.clone());
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(owner.clone()),
+                &(current_balance + total_rewards),
+            );
+            let supply = Self::get_total_currency_supply(env.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalCurrencySupply, &(supply + total_rewards));
+        }
+
+        // Remove staked position
+        env.storage()
+            .persistent()
+            .remove(&DataKey::NftStakedPosition(token_id.clone()));
+
+        // Remove from owner's staked list
+        let staked_list: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut new_list: Vec<BytesN<32>> = Vec::new(&env);
+        for id in staked_list.iter() {
+            if id != token_id {
+                new_list.push_back(id);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedByOwner(owner.clone()), &new_list);
+
+        NftStakingManager::decrement_staked(&env, total_rewards);
+
+        events::emit_nft_unstaked(&env, &token_id, &owner, total_rewards);
+        Ok(total_rewards)
+    }
+
+    /// Claim accrued rewards for a staked NFT without unstaking it.
+    pub fn claim_nft_staking_rewards(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        let mut position: NftStakedPosition = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id.clone()))
+            .ok_or(VirtualEconomyError::NftNotStaked)?;
+
+        if position.owner != owner {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        let nft_metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        let accrued =
+            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let total_rewards = position.pending_rewards + accrued;
+
+        if total_rewards <= 0 {
+            return Ok(0);
+        }
+
+        // Mint rewards
+        let current_balance = Self::get_currency_balance(env.clone(), owner.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(owner.clone()),
+            &(current_balance + total_rewards),
+        );
+        let supply = Self::get_total_currency_supply(env.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(supply + total_rewards));
+
+        // Reset pending rewards
+        position.pending_rewards = 0;
+        position.last_reward_ts = now;
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedPosition(token_id.clone()), &position);
+
+        NftStakingManager::record_rewards_distributed(&env, total_rewards);
+
+        events::emit_nft_staking_rewards_claimed(&env, &token_id, &owner, total_rewards);
+        Ok(total_rewards)
+    }
+
+    /// Return the staked position for a given token, or `None` if not staked.
+    pub fn get_nft_staked_position(
+        env: Env,
+        token_id: BytesN<32>,
+    ) -> Option<NftStakedPosition> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id))
+    }
+
+    /// Return all token IDs staked by `owner`.
+    pub fn get_nfts_staked_by_owner(env: Env, owner: Address) -> Vec<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return aggregate NFT staking analytics.
+    pub fn get_nft_staking_analytics(env: Env) -> NftStakingAnalytics {
+        env.storage()
+            .instance()
+            .get(&DataKey::NftStakingAnalytics)
+            .unwrap_or(NftStakingAnalytics {
+                total_staked: 0,
+                total_rewards_distributed: 0,
+                unique_stakers: 0,
+            })
     }
 
     // -------------------------------------------------------------------------
