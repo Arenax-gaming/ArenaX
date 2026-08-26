@@ -10,7 +10,7 @@
 use crate::{
     anti_cheat, auth_gateway, ax_token, contract_registry, dispute, escrow, governance, identity,
     match_contract, match_lifecycle, player_reputation, prize_distribution, registry, reputation,
-    reputation_index, slashing, staking, time_lock, tournament, virtual_economy,
+    reputation_index, slashing, staking, time_lock, tournament, upgrade_manager, virtual_economy,
 };
 
 /// A single entry in the namespace registry.
@@ -42,6 +42,7 @@ pub const NAMESPACES: &[NamespaceEntry] = &[
     NamespaceEntry { namespace: staking::NAMESPACE, version: staking::VERSION },
     NamespaceEntry { namespace: time_lock::NAMESPACE, version: time_lock::VERSION },
     NamespaceEntry { namespace: tournament::NAMESPACE, version: tournament::VERSION },
+    NamespaceEntry { namespace: upgrade_manager::NAMESPACE, version: upgrade_manager::VERSION },
     NamespaceEntry { namespace: virtual_economy::NAMESPACE, version: virtual_economy::VERSION },
 ];
 
