@@ -14,6 +14,7 @@ mod realtime;
 mod service;
 mod orchestrator;
 mod telemetry;
+mod validators;
 
 use crate::config::Config;
 use crate::db::{create_pool, run_startup_migrations};
