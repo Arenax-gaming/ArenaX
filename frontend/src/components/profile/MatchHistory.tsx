@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { MatchWithPlayers } from "@/types/profile";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { VirtualDynamicList, VirtualDynamicListRenderProps } from "@/components/ui/VirtualDynamicList";
+import { useInfiniteScrollSentinel } from "@/hooks/useInfiniteScrollSentinel";
 import {
   Trophy,
   Swords,
@@ -20,6 +22,7 @@ import {
   Clock,
   Gamepad2,
   BarChart3,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +32,10 @@ type AnyMatchWithPlayers = MatchWithPlayers & {
   scorePlayer2?: number;
   createdAt?: string;
   completedAt?: string;
+  /** Legacy profile-shape field — split as "playerScore-opponentScore". */
+  score?: string;
+  /** Legacy profile-shape field — ISO date of the match. */
+  date?: string;
 };
 
 export interface MatchHistoryFilters {
@@ -36,6 +43,11 @@ export interface MatchHistoryFilters {
   result?: "win" | "loss";
   opponentSearch?: string;
   timeRange?: "week" | "month" | "all";
+}
+
+export interface MatchHistorySort {
+  field?: "date" | "elo" | "duration";
+  direction?: "asc" | "desc";
 }
 
 interface MatchHistoryProps {
@@ -54,6 +66,26 @@ interface MatchHistoryProps {
   isLoadingMore?: boolean;
   /** Disable virtual scrolling (e.g. for short lists < 20 items) */
   disableVirtualization?: boolean;
+  /**
+   * Enable IntersectionObserver-driven infinite scroll (issue #888). When
+   * omitted it turns on automatically if `onLoadMore` is supplied without
+   * explicit pagination (`page`/`totalPages`), and off otherwise — so existing
+   * paginated/virtualized call sites keep their behavior.
+   */
+  infiniteScroll?: boolean;
+  /**
+   * Whether more matches remain to load. Defaults to `true` in infinite-scroll
+   * mode (or `page < totalPages` when paginating). Set to `false` to stop the
+   * sentinel and show an end-of-list marker.
+   */
+  hasMore?: boolean;
+  /** Elapsed ms for each infinite-scroll batch (acceptance criteria: < 300ms). */
+  onBatchLoad?: (durationMs: number) => void;
+  /**
+   * sessionStorage key for scroll-position restoration across navigation.
+   * Defaults to a stable key in infinite-scroll mode; pass `null` to disable.
+   */
+  scrollRestorationKey?: string | null;
 }
 
 // ─── Individual match row ─────────────────────────────────────────────────────
@@ -78,6 +110,12 @@ const MatchRow = React.memo(function MatchRow({
   const myScore = match.score?.split("-")[0] ?? String(match.scorePlayer1 ?? 0);
   const opponentScore = match.score?.split("-")[1] ?? String(match.scorePlayer2 ?? 0);
   const date = new Date(match.date ?? match.createdAt ?? Date.now());
+  const durationMinutes = useMemo(() => {
+    const start = new Date(match.date ?? match.createdAt ?? Date.now());
+    const end = new Date(match.completedAt ?? Date.now());
+    return Math.round((end.getTime() - start.getTime()) / (1000 * 60));
+  }, [match.completedAt, match.date, match.createdAt]);
+
   // Deterministic ELO change based on match id to avoid hydration mismatch
   const eloSeed = match.id.charCodeAt(0) % 25 + 10;
   const eloChange = isWinner ? eloSeed : -eloSeed;
@@ -131,6 +169,7 @@ const MatchRow = React.memo(function MatchRow({
                       hour: "numeric",
                       minute: "2-digit",
                     })}
+                    {durationMinutes > 0 && <span className="opacity-70">({durationMinutes}m)</span>}
                   </span>
                   <span className="uppercase tracking-wider font-medium bg-muted px-2 py-0.5 rounded">
                     {match.gameType}
@@ -170,6 +209,68 @@ const MatchRow = React.memo(function MatchRow({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// De-duplicate matches by id, preserving first-seen order. Infinite scroll can
+// re-deliver overlapping items across page boundaries; this keeps React keys
+// unique and prevents the same match rendering twice.
+function dedupeById(matches: AnyMatchWithPlayers[]): AnyMatchWithPlayers[] {
+  const seen = new Set<string>();
+  const out: AnyMatchWithPlayers[] = [];
+  for (const match of matches) {
+    if (match?.id == null || seen.has(match.id)) continue;
+    seen.add(match.id);
+    out.push(match);
+  }
+  return out;
+}
+
+// Parse URL search params into filters object
+function parseFiltersFromURL(searchParams: URLSearchParams): MatchHistoryFilters & MatchHistorySort {
+  const filters: MatchHistoryFilters & MatchHistorySort = {};
+  
+  const gameType = searchParams.get("gameType");
+  if (gameType) filters.gameType = gameType;
+  
+  const result = searchParams.get("result") as "win" | "loss" | undefined;
+  if (result) filters.result = result;
+  
+  const opponentSearch = searchParams.get("opponentSearch");
+  if (opponentSearch) filters.opponentSearch = opponentSearch;
+  
+  const timeRange = searchParams.get("timeRange") as "week" | "month" | "all" | undefined;
+  if (timeRange) filters.timeRange = timeRange;
+  
+  const sortField = searchParams.get("sortField");
+  if (sortField) filters.field = sortField as "date" | "elo" | "duration";
+  
+  const sortDirection = searchParams.get("sortDirection");
+  if (sortDirection) filters.direction = sortDirection as "asc" | "desc";
+  
+  return filters;
+}
+
+// Build search params string from filters
+function buildSearchParamsString(
+  filters: MatchHistoryFilters & MatchHistorySort,
+  router: any,
+  pathname: string
+) {
+  const params = new URLSearchParams();
+  
+  if (filters.gameType) params.set("gameType", filters.gameType);
+  if (filters.result) params.set("result", filters.result);
+  if (filters.opponentSearch) params.set("opponentSearch", filters.opponentSearch);
+  if (filters.timeRange) params.set("timeRange", filters.timeRange);
+  if (filters.field) params.set("sortField", filters.field);
+  if (filters.direction) params.set("sortDirection", filters.direction);
+  
+  const queryString = params.toString();
+  if (queryString) {
+    router.push(`${pathname}?${queryString}`, { scroll: false });
+  } else {
+    router.push(pathname, { scroll: false });
+  }
+}
+
 export function MatchHistory({
   matches,
   currentUserId,
@@ -182,48 +283,188 @@ export function MatchHistory({
   onLoadMore,
   isLoadingMore = false,
   disableVirtualization = false,
+  infiniteScroll,
+  hasMore,
+  onBatchLoad,
+  scrollRestorationKey,
 }: MatchHistoryProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  
   const [showFilters, setShowFilters] = useState(false);
 
+  // Merge URL filters with props filters (props take precedence)
+  const urlFilters = useMemo(() => parseFiltersFromURL(searchParams), [searchParams]);
+  const activeFilters = { ...urlFilters, ...filters };
+  
+  // Handle filter changes - update both local state and URL
+  const handleFilterChange = useCallback(
+    (newFilters: MatchHistoryFilters) => {
+      // If we have a callback, use it
+      if (onFilterChange) {
+        onFilterChange(newFilters);
+      }
+      // Update URL
+      buildSearchParamsString({ ...activeFilters, ...newFilters }, router, pathname);
+    },
+    [onFilterChange, activeFilters, router, pathname]
+  );
+
+  // Overlapping pages can arrive with duplicate ids — dedupe before anything
+  // else so counts, filters, and keys all operate on a clean list.
+  const uniqueMatches = useMemo(() => dedupeById(matches), [matches]);
+
   const gameTypes = useMemo(
-    () => Array.from(new Set(matches.map((m) => m.gameType).filter(Boolean))),
-    [matches]
+    () => Array.from(new Set(uniqueMatches.map((m) => m.gameType).filter(Boolean))),
+    [uniqueMatches]
   );
 
   const filteredMatches = useMemo(() => {
-    return matches.filter((match) => {
+    let result = uniqueMatches.filter((match) => {
       const isWin = match.winnerId === currentUserId;
       const opponentName =
         match.player1Id === currentUserId ? match.player2Username : match.player1Username;
-      if (filters.gameType && match.gameType !== filters.gameType) return false;
-      if (filters.result === "win" && !isWin) return false;
-      if (filters.result === "loss" && isWin) return false;
+      if (activeFilters.gameType && match.gameType !== activeFilters.gameType) return false;
+      if (activeFilters.result === "win" && !isWin) return false;
+      if (activeFilters.result === "loss" && isWin) return false;
       if (
-        filters.opponentSearch &&
-        !opponentName.toLowerCase().includes(filters.opponentSearch.toLowerCase())
+        activeFilters.opponentSearch &&
+        !opponentName.toLowerCase().includes(activeFilters.opponentSearch.toLowerCase())
       )
         return false;
-      if (filters.timeRange && filters.timeRange !== "all") {
+      if (activeFilters.timeRange && activeFilters.timeRange !== "all") {
         const matchDate = new Date(match.date ?? match.createdAt ?? Date.now());
         const daysDiff = Math.floor(
           (Date.now() - matchDate.getTime()) / (1000 * 60 * 60 * 24)
         );
-        if (filters.timeRange === "week" && daysDiff > 7) return false;
-        if (filters.timeRange === "month" && daysDiff > 30) return false;
+        if (activeFilters.timeRange === "week" && daysDiff > 7) return false;
+        if (activeFilters.timeRange === "month" && daysDiff > 30) return false;
       }
       return true;
     });
-  }, [matches, filters, currentUserId]);
+
+    // Apply sorting
+    if (activeFilters.field) {
+      result = [...result].sort((a, b) => {
+        let comparison = 0;
+        
+        if (activeFilters.field === "date") {
+          const dateA = new Date(a.date ?? a.createdAt ?? 0).getTime();
+          const dateB = new Date(b.date ?? b.createdAt ?? 0).getTime();
+          comparison = dateA - dateB;
+        } else if (activeFilters.field === "elo") {
+          // Calculate ELO change for both matches
+          const eloSeedA = a.id.charCodeAt(0) % 25 + 10;
+          const eloSeedB = b.id.charCodeAt(0) % 25 + 10;
+          const eloA = a.winnerId === currentUserId ? eloSeedA : -eloSeedA;
+          const eloB = b.winnerId === currentUserId ? eloSeedB : -eloSeedB;
+          comparison = eloA - eloB;
+        } else if (activeFilters.field === "duration") {
+          const startA = new Date(a.date ?? a.createdAt ?? 0).getTime();
+          const endA = new Date(a.completedAt ?? Date.now()).getTime();
+          const durationA = endA - startA;
+          
+          const startB = new Date(b.date ?? b.createdAt ?? 0).getTime();
+          const endB = new Date(b.completedAt ?? Date.now()).getTime();
+          const durationB = endB - startB;
+          
+          comparison = durationA - durationB;
+        }
+        
+        return activeFilters.direction === "asc" ? comparison : -comparison;
+      });
+    }
+
+    return result;
+  }, [uniqueMatches, activeFilters, currentUserId]);
 
   const wins = filteredMatches.filter((m) => m.winnerId === currentUserId).length;
   const losses = filteredMatches.length - wins;
   const winRate = filteredMatches.length > 0 ? (wins / filteredMatches.length) * 100 : 0;
-  const hasActiveFilters = Object.values(filters).some((v) => v !== undefined);
+  const hasActiveFilters = Object.values(activeFilters).some((v) => v !== undefined);
 
-  // Use virtualisation only when there are enough items to justify it
-  const useVirtual = !disableVirtualization && filteredMatches.length >= 20;
+  const paginationProvided = totalPages !== undefined && onPageChange !== undefined;
+  const currentPage = page ?? 1;
 
-  const clearFilters = () => onFilterChange?.({});
+  // Infinite scroll turns on explicitly, or implicitly when a load callback is
+  // supplied without pagination. It is mutually exclusive with the paginated /
+  // virtualized paths (window-level scrolling vs. an inner fixed-height list).
+  const useInfinite = infiniteScroll ?? (!!onLoadMore && !paginationProvided);
+  const moreAvailable =
+    hasMore ?? (paginationProvided ? currentPage < (totalPages ?? 1) : true);
+
+  // Use virtualisation only when there are enough items to justify it and we are
+  // not in infinite-scroll mode.
+  const useVirtual =
+    !useInfinite && !disableVirtualization && filteredMatches.length >= 20;
+
+  const { sentinelRef } = useInfiniteScrollSentinel({
+    onLoadMore,
+    hasMore: moreAvailable,
+    isLoading: isLoadingMore,
+    itemCount: uniqueMatches.length,
+    enabled: useInfinite,
+    onBatchLoad,
+  });
+
+  // Restore the window scroll position when returning to this list (e.g. after
+  // opening a match and navigating back), and persist it as the user scrolls.
+  const restoreKey =
+    scrollRestorationKey === undefined
+      ? useInfinite
+        ? "match-history"
+        : null
+      : scrollRestorationKey;
+
+  useEffect(() => {
+    if (!restoreKey || typeof window === "undefined") return;
+    const storageKey = `mh-scroll:${restoreKey}`;
+    const raf =
+      typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame.bind(window)
+        : (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0);
+
+    // Restore once the list has had a chance to lay out.
+    try {
+      const saved = window.sessionStorage.getItem(storageKey);
+      const y = saved ? parseInt(saved, 10) : NaN;
+      if (!Number.isNaN(y) && typeof window.scrollTo === "function") {
+        raf(() => window.scrollTo(0, y));
+      }
+    } catch {
+      /* sessionStorage unavailable (private mode) — restoration is best-effort */
+    }
+
+    let frame = 0;
+    const persist = () => {
+      try {
+        window.sessionStorage.setItem(storageKey, String(window.scrollY));
+      } catch {
+        /* ignore */
+      }
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = raf(() => {
+        frame = 0;
+        persist();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      persist();
+    };
+  }, [restoreKey]);
+
+  const clearFilters = useCallback(() => {
+    // Clear both local filters and URL
+    buildSearchParamsString({}, router, pathname);
+    if (onFilterChange) {
+      onFilterChange({});
+    }
+  }, [router, pathname, onFilterChange]);
 
   // Render function for VirtualDynamicList
   const renderMatchItem = useCallback(
@@ -240,8 +481,34 @@ export function MatchHistory({
     [currentUserId]
   );
 
-  const showPagination = totalPages !== undefined && onPageChange !== undefined && totalPages > 1;
-  const currentPage = page ?? 1;
+  const showPagination =
+    !useInfinite && totalPages !== undefined && onPageChange !== undefined && totalPages > 1;
+
+  // Helper to toggle sort
+  const toggleSort = useCallback(
+    (field: "date" | "elo" | "duration") => {
+      const currentField = activeFilters.field;
+      const currentDirection = activeFilters.direction;
+      
+      let newDirection: "asc" | "desc" = "desc";
+      if (currentField === field) {
+        newDirection = currentDirection === "asc" ? "desc" : "asc";
+      }
+      
+      handleFilterChange({ field, direction: newDirection });
+    },
+    [activeFilters.field, activeFilters.direction, handleFilterChange]
+  );
+
+  // Get sort indicator icon
+  const getSortIndicator = (field: "date" | "elo" | "duration") => {
+    if (activeFilters.field !== field) return null;
+    return activeFilters.direction === "asc" ? (
+      <span className="ml-1 text-xs">▲</span>
+    ) : (
+      <span className="ml-1 text-xs">▼</span>
+    );
+  };
 
   return (
     <Card>
@@ -300,15 +567,48 @@ export function MatchHistory({
             role="region"
             aria-label="Match filters"
           >
+            {/* Sort options */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Sort By
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {(["date", "elo", "duration"] as const).map((field) => (
+                  <button
+                    key={field}
+                    onClick={() => toggleSort(field)}
+                    className={cn(
+                      "flex items-center px-3 py-1.5 text-sm rounded-md border transition-all",
+                      activeFilters.field === field
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-foreground hover:bg-muted border-muted-foreground/20"
+                    )}
+                    aria-pressed={activeFilters.field === field}
+                  >
+                    {field === "date" && <Calendar className="h-3 w-3 mr-1.5" />}
+                    {field === "elo" && (
+                      <>
+                        <TrendingUp className="h-3 w-3 mr-1.5" />
+                        <span>ELO</span>
+                      </>
+                    )}
+                    {field === "duration" && <Clock className="h-3 w-3 mr-1.5" />}
+                    <span className="capitalize">{field}</span>
+                    {getSortIndicator(field)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-3">
               {/* Time Range */}
               <div className="flex rounded-md overflow-hidden border" role="group" aria-label="Filter by time range">
                 {(["all", "week", "month"] as const).map((range) => {
-                  const active = (filters.timeRange ?? "all") === range;
+                  const active = (activeFilters.timeRange ?? "all") === range;
                   return (
                     <button
                       key={range}
-                      onClick={() => onFilterChange?.({ ...filters, timeRange: range })}
+                      onClick={() => handleFilterChange({ timeRange: range })}
                       className={cn(
                         "px-3 py-1.5 text-sm capitalize transition-colors",
                         active ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted"
@@ -323,8 +623,8 @@ export function MatchHistory({
 
               {/* Game type */}
               <select
-                value={filters.gameType ?? ""}
-                onChange={(e) => onFilterChange?.({ ...filters, gameType: e.target.value || undefined })}
+                value={activeFilters.gameType ?? ""}
+                onChange={(e) => handleFilterChange({ gameType: e.target.value || undefined })}
                 className="text-sm border rounded-md px-3 py-1.5 bg-background text-foreground min-w-[120px]"
                 aria-label="Filter by game type"
               >
@@ -337,11 +637,11 @@ export function MatchHistory({
               {/* Result */}
               <div className="flex rounded-md overflow-hidden border" role="group" aria-label="Filter by result">
                 {(["all", "win", "loss"] as const).map((r) => {
-                  const active = r === "all" ? !filters.result : filters.result === r;
+                  const active = r === "all" ? !activeFilters.result : activeFilters.result === r;
                   return (
                     <button
                       key={r}
-                      onClick={() => onFilterChange?.({ ...filters, result: r === "all" ? undefined : r })}
+                      onClick={() => handleFilterChange({ result: r === "all" ? undefined : r })}
                       className={cn(
                         "px-3 py-1.5 text-sm capitalize transition-colors",
                         active ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted"
@@ -361,17 +661,27 @@ export function MatchHistory({
               <input
                 type="text"
                 placeholder="Search opponent..."
-                value={filters.opponentSearch ?? ""}
-                onChange={(e) => onFilterChange?.({ ...filters, opponentSearch: e.target.value || undefined })}
+                value={activeFilters.opponentSearch ?? ""}
+                onChange={(e) => handleFilterChange({ opponentSearch: e.target.value || undefined })}
                 className="w-full pl-10 pr-4 py-2 text-sm border rounded-md bg-background text-foreground"
                 aria-label="Search by opponent name"
               />
+              {activeFilters.opponentSearch && (
+                <button
+                  onClick={() => handleFilterChange({ opponentSearch: undefined })}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear opponent search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
             {hasActiveFilters && (
-              <div className="flex justify-end">
+              <div className="flex justify-end pt-2">
                 <Button variant="outline" size="sm" onClick={clearFilters}>
-                  Clear Filters
+                  <X className="h-4 w-4 mr-2" />
+                  Clear All Filters
                 </Button>
               </div>
             )}
@@ -411,6 +721,46 @@ export function MatchHistory({
               ) : null
             }
           />
+        ) : useInfinite ? (
+          // Infinite scroll: window-level list with an IntersectionObserver
+          // sentinel that requests the next batch as it nears the viewport.
+          <div className="space-y-3" role="list" aria-busy={isLoadingMore}>
+            {filteredMatches.map((match, index) => (
+              <MatchRow
+                key={match.id}
+                match={match}
+                currentUserId={currentUserId}
+                index={index}
+              />
+            ))}
+
+            {isLoadingMore && (
+              <div
+                className="flex justify-center py-3"
+                aria-busy="true"
+                aria-label="Loading more matches"
+              >
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            )}
+
+            {/* Sentinel: kept in the tree (not the spinner) so the observer has a
+                stable target. Zero-height and hidden from assistive tech. */}
+            {moreAvailable && (
+              <div
+                ref={sentinelRef}
+                data-testid="infinite-scroll-sentinel"
+                aria-hidden="true"
+                className="h-px w-full"
+              />
+            )}
+
+            {!moreAvailable && (
+              <p className="text-center text-xs text-muted-foreground py-3">
+                You&apos;ve reached the end of your match history
+              </p>
+            )}
+          </div>
         ) : (
           // Static render for short lists
           <div className="space-y-3" role="list">

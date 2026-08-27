@@ -65,7 +65,7 @@ export function InviteFriends({
     const map = new Map<string, FriendRequest>();
     for (const req of incomingRequests) {
       if (req.status === "pending") {
-        map.set(req.fromUserId, req);
+        map.set(req.fromUser?.id ?? req.id, req);
       }
     }
     return map;

@@ -1,3 +1,5 @@
+#![no_std]
+
 //! # Event Manager Contract
 //!
 //! Provides on-chain event indexing, filtering, analytics, monitoring, and archiving.

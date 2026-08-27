@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
@@ -52,6 +53,7 @@ export default function ProfilePage() {
   const [draftUsername, setDraftUsername] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsaved, setHasUnsaved] = useState(false);
+  const [isDirty, setIsBioDirty] = useState(false);
 
   // Sync draft when auth user loads
   useEffect(() => {
@@ -147,17 +149,6 @@ export default function ProfilePage() {
     [queryClient, notify],
   );
 
-  if (authLoading && !authUser) {
-    return (
-      <ProtectedPage>
-        <ProfileSkeleton />
-      </ProtectedPage>
-    );
-  }
-
-  // After auth loads, authUser should be present (ProtectedPage redirects otherwise)
-  const user = authUser!;
-
   useEffect(() => {
     if (!isDirty) return;
 
@@ -203,6 +194,17 @@ export default function ProfilePage() {
   const handleBioDirtyChange = useCallback((dirty: boolean) => {
     setIsBioDirty(dirty);
   }, []);
+
+  if (authLoading && !authUser) {
+    return (
+      <ProtectedPage>
+        <ProfileSkeleton />
+      </ProtectedPage>
+    );
+  }
+
+  // After auth loads, authUser should be present (ProtectedPage redirects otherwise)
+  const user = authUser!;
 
   return (
     <ProtectedPage>

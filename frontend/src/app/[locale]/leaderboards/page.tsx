@@ -40,9 +40,21 @@ function LeaderboardsContent() {
   const { data: statsData } = useLeaderboardStats(category);
 
   const entries = leaderboardData?.entries || [];
-  const filteredEntries = entries.filter((entry) =>
-    entry.username.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const filteredEntries = entries
+    .filter((entry) =>
+      entry.username.toLowerCase().includes(searchQuery.toLowerCase()),
+    )
+    .map((entry) => ({
+      rank: entry.ranking,
+      userId: entry.userId,
+      username: entry.username,
+      avatar: entry.avatarUrl,
+      points: entry.eloRating,
+      wins: entry.wins,
+      winRate: entry.winRate / 100,
+      lastUpdated: new Date(entry.updatedAt),
+      trend: (entry.ranking <= 3 ? "up" : undefined) as "up" | undefined,
+    }));
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">

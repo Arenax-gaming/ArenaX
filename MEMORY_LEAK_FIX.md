@@ -256,15 +256,6 @@ useEffect(() => {
 }, []);
 ```
 
-### 6. **Close WebSockets**
-Always close WebSocket connections:
-
-```typescript
-useEffect(() => {
-  const ws = new WebSocket(url);
-  return () => ws.close();
-}, []);
-```
 
 ## Monitoring
 

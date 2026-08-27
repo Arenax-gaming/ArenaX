@@ -12,6 +12,7 @@ pub struct VestingSchedule {
     pub duration: u64,
     pub total_amount: i128,
     pub amount_claimed: i128,
+    pub revoked: bool,
 }
 
 #[contracttype]
@@ -49,6 +50,14 @@ pub struct BuybackSchedule {
     pub next_burn_time: u64,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DelegationRecord {
+    pub delegatee: Address,
+    pub timestamp: u64,
+    pub revoked: bool,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -65,9 +74,9 @@ pub enum DataKey {
     BurnMetrics,
     BuybackSchedule,
     TotalBurned,
-    ChainId,
-    Nonce(Address),
-    UsedNonce(Address, u64),
+    Delegate(Address),
+    Delegators(Address),
+    DelegationHistory(Address),
 }
 
 #[contract]
@@ -208,32 +217,85 @@ impl AxToken {
         duration: u64,
     ) {
         Self::require_admin(&env);
-        if total_amount <= 0 {
-            panic!("amount must be positive");
-        }
-        if duration == 0 {
-            panic!("duration must be positive");
-        }
-
-        let schedule = VestingSchedule {
-            beneficiary: beneficiary.clone(),
+        Self::store_vesting_schedule(
+            &env,
+            beneficiary,
+            total_amount,
             start_time,
             cliff_duration,
             duration,
-            total_amount,
-            amount_claimed: 0,
-        };
-        env.storage()
+        );
+    }
+
+    /// Creates vesting schedules for multiple beneficiaries in a single call,
+    /// all sharing the same start time, cliff, and duration.
+    pub fn create_vesting_schedules_batch(
+        env: Env,
+        beneficiaries: Vec<Address>,
+        amounts: Vec<i128>,
+        start_time: u64,
+        cliff_duration: u64,
+        duration: u64,
+    ) {
+        Self::require_admin(&env);
+        if beneficiaries.len() != amounts.len() {
+            panic!("beneficiaries and amounts length mismatch");
+        }
+        if beneficiaries.is_empty() {
+            panic!("empty batch");
+        }
+
+        for i in 0..beneficiaries.len() {
+            Self::store_vesting_schedule(
+                &env,
+                beneficiaries.get(i).unwrap(),
+                amounts.get(i).unwrap(),
+                start_time,
+                cliff_duration,
+                duration,
+            );
+        }
+    }
+
+    /// Revokes a vesting schedule before it fully vests (clawback). Any amount
+    /// already vested as of now remains claimable by the beneficiary; the
+    /// unvested remainder is forfeited and can no longer be claimed.
+    pub fn revoke_vesting_schedule(env: Env, beneficiary: Address) -> i128 {
+        Self::require_admin(&env);
+
+        let key = DataKey::Vesting(beneficiary.clone());
+        let mut schedule: VestingSchedule = env
+            .storage()
             .instance()
-            .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
+            .get(&key)
+            .expect("no vesting schedule found");
+
+        if schedule.revoked {
+            panic!("vesting schedule already revoked");
+        }
+
+        let vested_amount = Self::vested_amount(&env, &schedule);
+        let forfeited = schedule.total_amount - vested_amount;
+
+        // Freeze `duration` at the elapsed time so future calls to
+        // `vested_amount` always take the `elapsed >= duration` branch and
+        // return the capped `total_amount` outright, instead of re-applying
+        // the linear elapsed/duration fraction to an already-capped amount.
+        let elapsed_at_revoke = env.ledger().timestamp().saturating_sub(schedule.start_time);
+        schedule.total_amount = vested_amount;
+        schedule.duration = elapsed_at_revoke;
+        schedule.revoked = true;
+        env.storage().instance().set(&key, &schedule);
 
         env.events().publish(
             (
                 Symbol::new(&env, "ArenaXToken_v1"),
-                Symbol::new(&env, "VESTING_CREATE"),
+                Symbol::new(&env, "VESTING_REVOKE"),
             ),
-            (beneficiary, total_amount),
+            (beneficiary, forfeited),
         );
+
+        forfeited
     }
 
     pub fn claim_vested_tokens(env: Env, beneficiary: Address) -> i128 {
@@ -251,13 +313,7 @@ impl AxToken {
             panic!("cliff period not met");
         }
 
-        let elapsed = current_time.saturating_sub(schedule.start_time);
-        let vested_amount = if elapsed >= schedule.duration {
-            schedule.total_amount
-        } else {
-            schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
-        };
-
+        let vested_amount = Self::vested_amount(&env, &schedule);
         let claimable = vested_amount - schedule.amount_claimed;
         if claimable <= 0 {
             panic!("no vested tokens to claim");
@@ -493,8 +549,7 @@ impl AxToken {
             panic!("already voted");
         }
 
-        let mut voting_power = Self::balance(&env, voter.clone());
-        voting_power += Self::get_locked_balance(env.clone(), voter.clone());
+        let voting_power = Self::get_voting_power(env.clone(), voter.clone());
 
         if voting_power <= 0 {
             panic!("no voting power");
@@ -527,96 +582,154 @@ impl AxToken {
     }
 
     // ---------------------------------------------------------------------------
-    // Advanced Features: Transaction Replay Protection
+    // Advanced Features: Vote Delegation
     // ---------------------------------------------------------------------------
-    //
-    // Binds sensitive operations to a specific chain and a strictly
-    // increasing per-address nonce so a signed/authorized call captured on
-    // one network (or replayed twice on the same network) cannot be
-    // re-submitted elsewhere or re-executed. `chain_id` must be configured
-    // by the admin before any replay-protected entry point can be used.
 
-    /// Set the chain identifier this deployment accepts nonces for. Must be
-    /// configured once per network the contract is deployed to.
-    pub fn set_chain_id(env: Env, chain_id: u32) {
-        Self::require_admin(&env);
-        if chain_id == 0 {
-            panic!("chain id must be non-zero");
+    /// Delegate voting power (own balance + locked balance) to another address.
+    /// Re-delegating simply moves the delegation from the old delegatee to the
+    /// new one. Self-delegation is blocked since holding your own power
+    /// directly already achieves the same effect.
+    pub fn delegate(env: Env, delegator: Address, delegatee: Address) {
+        delegator.require_auth();
+
+        if delegator == delegatee {
+            panic!("cannot delegate to self");
         }
-        env.storage().instance().set(&DataKey::ChainId, &chain_id);
-    }
 
-    pub fn get_chain_id(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::ChainId).unwrap_or(0)
-    }
+        let current_time = env.ledger().timestamp();
+        let previous = Self::get_delegate(env.clone(), delegator.clone());
 
-    /// The next nonce `address` is expected to use for a replay-protected call.
-    pub fn get_nonce(env: Env, address: Address) -> u64 {
+        if let Some(previous_delegatee) = previous {
+            if previous_delegatee == delegatee {
+                panic!("already delegated to this address");
+            }
+            Self::remove_delegator(&env, &previous_delegatee, &delegator);
+        }
+
         env.storage()
             .instance()
-            .get(&DataKey::Nonce(address))
-            .unwrap_or(0)
-    }
+            .set(&DataKey::Delegate(delegator.clone()), &delegatee);
+        Self::add_delegator(&env, &delegatee, &delegator);
 
-    /// Whether a given (address, nonce) pair has already been consumed.
-    pub fn is_nonce_used(env: Env, address: Address, nonce: u64) -> bool {
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: current_time,
+            revoked: false,
+        });
         env.storage()
             .instance()
-            .has(&DataKey::UsedNonce(address, nonce))
-    }
-
-    /// Replay-protected token transfer. Requires the caller to supply the
-    /// chain id this transaction was authorized for and the next expected
-    /// nonce; both are verified and the nonce is consumed atomically before
-    /// the transfer executes, so a captured authorization cannot be
-    /// replayed on another chain or resubmitted a second time.
-    pub fn transfer_replay_protected(
-        env: Env,
-        from: Address,
-        to: Address,
-        amount: i128,
-        chain_id: u32,
-        nonce: u64,
-    ) {
-        from.require_auth();
-        Self::consume_nonce(&env, &from, chain_id, nonce);
-        Self::transfer(&env, from, to, amount);
-    }
-
-    fn consume_nonce(env: &Env, address: &Address, chain_id: u32, nonce: u64) {
-        let configured_chain_id: u32 = env.storage().instance().get(&DataKey::ChainId).unwrap_or(0);
-        if configured_chain_id == 0 {
-            panic!("chain id not configured");
-        }
-        if chain_id != configured_chain_id {
-            panic!("invalid chain id: replay protection violation");
-        }
-
-        let expected_nonce: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::Nonce(address.clone()))
-            .unwrap_or(0);
-        if nonce != expected_nonce {
-            panic!("invalid nonce: replay detected or out of order");
-        }
-
-        let used_key = DataKey::UsedNonce(address.clone(), nonce);
-        if env.storage().instance().has(&used_key) {
-            panic!("nonce already used: replay detected");
-        }
-        env.storage().instance().set(&used_key, &true);
-        env.storage()
-            .instance()
-            .set(&DataKey::Nonce(address.clone()), &(expected_nonce + 1));
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
 
         env.events().publish(
             (
-                Symbol::new(env, "ArenaXToken_v1"),
-                Symbol::new(env, "NONCE_CONSUMED"),
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATE"),
             ),
-            (address.clone(), chain_id, nonce),
+            (delegator, delegatee),
         );
+    }
+
+    /// Revoke an active delegation, returning voting power to the delegator.
+    pub fn revoke_delegation(env: Env, delegator: Address) {
+        delegator.require_auth();
+
+        let delegatee = Self::get_delegate(env.clone(), delegator.clone())
+            .expect("no active delegation found");
+
+        Self::remove_delegator(&env, &delegatee, &delegator);
+        env.storage()
+            .instance()
+            .remove(&DataKey::Delegate(delegator.clone()));
+
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: env.ledger().timestamp(),
+            revoked: true,
+        });
+        env.storage()
+            .instance()
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATION_REVOKE"),
+            ),
+            (delegator, delegatee),
+        );
+    }
+
+    /// The address `delegator` currently delegates to, if any.
+    pub fn get_delegate(env: Env, delegator: Address) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Delegate(delegator))
+    }
+
+    /// Addresses that currently delegate their voting power to `delegatee`.
+    pub fn get_delegators(env: Env, delegatee: Address) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Delegators(delegatee))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Full history of delegation/revocation events for `delegator`.
+    pub fn get_delegation_history(env: Env, delegator: Address) -> Vec<DelegationRecord> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DelegationHistory(delegator))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Effective voting power for `address`: their own balance + locked
+    /// balance (zero if they've delegated it away) plus the raw power of
+    /// every address currently delegating to them. Delegation chains are not
+    /// followed further than one hop — a delegatee's received power isn't
+    /// forwarded on if they in turn delegate elsewhere.
+    pub fn get_voting_power(env: Env, address: Address) -> i128 {
+        let has_delegated = Self::get_delegate(env.clone(), address.clone()).is_some();
+        let own_power = if has_delegated {
+            0
+        } else {
+            Self::balance(&env, address.clone()) + Self::get_locked_balance(env.clone(), address.clone())
+        };
+
+        let delegators = Self::get_delegators(env.clone(), address.clone());
+        let mut delegated_power = 0i128;
+        for delegator in delegators.iter() {
+            delegated_power +=
+                Self::balance(&env, delegator.clone()) + Self::get_locked_balance(env.clone(), delegator.clone());
+        }
+
+        own_power + delegated_power
+    }
+
+    fn add_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let mut delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        delegators.push_back(delegator.clone());
+        env.storage().instance().set(&key, &delegators);
+    }
+
+    fn remove_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut remaining = Vec::new(env);
+        for existing in delegators.iter() {
+            if existing != *delegator {
+                remaining.push_back(existing);
+            }
+        }
+        env.storage().instance().set(&key, &remaining);
     }
 
     // ---------------------------------------------------------------------------
@@ -628,19 +741,30 @@ impl AxToken {
         if amount <= 0 {
             panic!("amount must be positive");
         }
-        
+
         let balance = Self::balance(&env, from.clone());
         if balance < amount {
             panic!("insufficient balance");
         }
-        
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &(balance - amount));
-        
-        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
-        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool + amount));
-        
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &(balance - amount));
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool + amount));
+
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "REVENUE_DEPOSIT")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "REVENUE_DEPOSIT"),
+            ),
             (from, amount),
         );
     }
@@ -650,57 +774,84 @@ impl AxToken {
         if amount <= 0 || interval == 0 {
             panic!("invalid configuration");
         }
-        
+
         let schedule = BuybackSchedule {
             burn_amount_per_interval: amount,
             interval_seconds: interval,
             next_burn_time: env.ledger().timestamp() + interval,
         };
-        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
     }
 
     pub fn execute_buyback_and_burn(env: Env) -> i128 {
-        let mut schedule: BuybackSchedule = env.storage().instance().get(&DataKey::BuybackSchedule).expect("no schedule configured");
+        let mut schedule: BuybackSchedule = env
+            .storage()
+            .instance()
+            .get(&DataKey::BuybackSchedule)
+            .expect("no schedule configured");
         let current_time = env.ledger().timestamp();
-        
+
         if current_time < schedule.next_burn_time {
             panic!("too early for next burn");
         }
-        
-        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
         let amount_to_burn = if pool < schedule.burn_amount_per_interval {
             pool
         } else {
             schedule.burn_amount_per_interval
         };
-        
+
         if amount_to_burn <= 0 {
             panic!("no revenue to burn");
         }
-        
-        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
-        
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
+
         let current_supply = Self::total_supply(&env);
-        env.storage().instance().set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
-        
-        let total_burned: i128 = env.storage().instance().get(&DataKey::TotalBurned).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
+
+        let total_burned: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBurned)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
+
         let metrics = BurnMetrics {
             total_burned: total_burned + amount_to_burn,
             last_burn_time: current_time,
             last_burn_amount: amount_to_burn,
         };
-        env.storage().instance().set(&DataKey::BurnMetrics, &metrics);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::BurnMetrics, &metrics);
+
         schedule.next_burn_time = current_time + schedule.interval_seconds;
-        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
+
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "BUYBACK_BURN")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "BUYBACK_BURN"),
+            ),
             (amount_to_burn, current_time),
         );
-        
+
         amount_to_burn
     }
 
@@ -711,6 +862,57 @@ impl AxToken {
     // ---------------------------------------------------------------------------
     // Internal Helpers
     // ---------------------------------------------------------------------------
+
+    fn store_vesting_schedule(
+        env: &Env,
+        beneficiary: Address,
+        total_amount: i128,
+        start_time: u64,
+        cliff_duration: u64,
+        duration: u64,
+    ) {
+        if total_amount <= 0 {
+            panic!("amount must be positive");
+        }
+        if duration == 0 {
+            panic!("duration must be positive");
+        }
+
+        let schedule = VestingSchedule {
+            beneficiary: beneficiary.clone(),
+            start_time,
+            cliff_duration,
+            duration,
+            total_amount,
+            amount_claimed: 0,
+            revoked: false,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
+
+        env.events().publish(
+            (
+                Symbol::new(env, "ArenaXToken_v1"),
+                Symbol::new(env, "VESTING_CREATE"),
+            ),
+            (beneficiary, total_amount),
+        );
+    }
+
+    fn vested_amount(env: &Env, schedule: &VestingSchedule) -> i128 {
+        let current_time = env.ledger().timestamp();
+        if current_time < schedule.start_time + schedule.cliff_duration {
+            return 0;
+        }
+
+        let elapsed = current_time.saturating_sub(schedule.start_time);
+        if elapsed >= schedule.duration {
+            schedule.total_amount
+        } else {
+            schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
+        }
+    }
 
     fn has_admin(env: &Env) -> bool {
         env.storage()
