@@ -11,6 +11,7 @@ mod error;
 mod governance;
 mod marketplace;
 mod nft;
+mod nft_staking;
 mod oracle;
 mod rewards;
 mod storage;
@@ -18,6 +19,7 @@ mod storage;
 use arenax_events::virtual_economy as events;
 use batch::{BatchManager, BatchResult, BatchTransferItem, MAX_BATCH_SIZE};
 use marketplace::MarketplaceManager;
+use nft_staking::NftStakingManager;
 use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
@@ -1744,6 +1746,487 @@ impl VirtualEconomyContract {
             .persistent()
             .set(&DataKey::OraclePairConfig(asset_pair), &new_config);
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Fair Launch
+    // -------------------------------------------------------------------------
+
+    /// Configure (or reconfigure) the fair-launch sale. Admin-only.
+    ///
+    /// Phases are implicit: before `whitelist_start` = NotStarted (0),
+    /// `[whitelist_start, whitelist_end)` = Whitelist (1),
+    /// `[public_start, public_end)` = Public (2), after `public_end` = Ended (3).
+    pub fn configure_fair_launch(
+        env: Env,
+        config: FairLaunchConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        if config.base_price <= 0 {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+        if config.whitelist_end <= config.whitelist_start
+            || config.public_start < config.whitelist_end
+            || config.public_end <= config.public_start
+        {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+        if config.total_supply_cap <= 0 {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchConfig, &config);
+
+        // Reset analytics for a fresh launch
+        let analytics = FairLaunchAnalytics {
+            total_sold: 0,
+            whitelist_sold: 0,
+            public_sold: 0,
+            unique_buyers: 0,
+            current_price: config.base_price,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchAnalytics, &analytics);
+        env.storage().instance().set(&DataKey::FairLaunchPhase, &0u32);
+
+        events::emit_fair_launch_configured(
+            &env,
+            config.whitelist_start,
+            config.public_start,
+            config.total_supply_cap,
+            config.base_price,
+        );
+        Ok(())
+    }
+
+    /// Add an address to the fair-launch whitelist. Admin-only.
+    pub fn add_to_whitelist(env: Env, address: Address) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::Whitelist(address.clone()), &true);
+        events::emit_whitelist_added(&env, &address);
+        Ok(())
+    }
+
+    /// Purchase tokens in the current fair-launch phase.
+    ///
+    /// - During Whitelist phase only whitelisted addresses may buy, up to
+    ///   `max_whitelist_per_wallet`.
+    /// - During Public phase anyone may buy, up to `max_public_per_wallet`.
+    /// - Anti-whale cap: no wallet may hold more than `anti_whale_bps`/10_000
+    ///   of `total_supply_cap`.
+    /// - Currency is minted directly to the buyer (internal accounting only).
+    pub fn purchase_fair_launch(
+        env: Env,
+        buyer: Address,
+        amount: i128,
+    ) -> Result<(), VirtualEconomyError> {
+        buyer.require_auth();
+
+        if amount <= 0 {
+            return Err(VirtualEconomyError::InvalidAmount);
+        }
+
+        let config: FairLaunchConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::FairLaunchConfig)
+            .ok_or(VirtualEconomyError::InvalidConfig)?;
+
+        let now = env.ledger().timestamp();
+        let phase = if now < config.whitelist_start {
+            0u32
+        } else if now < config.whitelist_end {
+            1u32
+        } else if now < config.public_end {
+            2u32
+        } else {
+            3u32
+        };
+
+        if phase == 0 || phase == 3 {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+
+        // Whitelist check
+        if phase == 1 {
+            let is_whitelisted: bool = env
+                .storage()
+                .instance()
+                .get(&DataKey::Whitelist(buyer.clone()))
+                .unwrap_or(false);
+            if !is_whitelisted {
+                return Err(VirtualEconomyError::Unauthorized);
+            }
+        }
+
+        // Per-wallet cap
+        let already_purchased: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FairLaunchPurchased(buyer.clone()))
+            .unwrap_or(0i128);
+        let per_wallet_cap = if phase == 1 {
+            config.max_whitelist_per_wallet
+        } else {
+            config.max_public_per_wallet
+        };
+        if already_purchased + amount > per_wallet_cap {
+            return Err(VirtualEconomyError::InvalidAmount);
+        }
+
+        // Anti-whale cap
+        if config.anti_whale_bps > 0 {
+            let max_per_whale = config.total_supply_cap * config.anti_whale_bps as i128 / 10_000;
+            let total_after = already_purchased + amount;
+            if total_after > max_per_whale {
+                return Err(VirtualEconomyError::InvalidAmount);
+            }
+        }
+
+        // Total supply cap check
+        let mut analytics: FairLaunchAnalytics = env
+            .storage()
+            .instance()
+            .get(&DataKey::FairLaunchAnalytics)
+            .unwrap_or(FairLaunchAnalytics {
+                total_sold: 0,
+                whitelist_sold: 0,
+                public_sold: 0,
+                unique_buyers: 0,
+                current_price: config.base_price,
+            });
+        if analytics.total_sold + amount > config.total_supply_cap {
+            return Err(VirtualEconomyError::SupplyLimitExceeded);
+        }
+
+        // Mint currency to buyer
+        let current_balance = Self::get_currency_balance(env.clone(), buyer.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(buyer.clone()),
+            &(current_balance + amount),
+        );
+        let supply = Self::get_total_currency_supply(env.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(supply + amount));
+
+        // Update per-wallet record
+        let is_new_buyer = already_purchased == 0;
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchPurchased(buyer.clone()), &(already_purchased + amount));
+
+        // Update analytics
+        analytics.total_sold += amount;
+        if phase == 1 {
+            analytics.whitelist_sold += amount;
+        } else {
+            analytics.public_sold += amount;
+        }
+        if is_new_buyer {
+            analytics.unique_buyers += 1;
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchAnalytics, &analytics);
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchPhase, &phase);
+
+        events::emit_fair_launch_purchase(&env, &buyer, amount, phase, config.base_price);
+        Ok(())
+    }
+
+    /// Return the current fair-launch config, or `None` if not yet configured.
+    pub fn get_fair_launch_config(env: Env) -> Option<FairLaunchConfig> {
+        env.storage().instance().get(&DataKey::FairLaunchConfig)
+    }
+
+    /// Return aggregate fair-launch analytics.
+    pub fn get_fair_launch_analytics(env: Env) -> FairLaunchAnalytics {
+        env.storage()
+            .instance()
+            .get(&DataKey::FairLaunchAnalytics)
+            .unwrap_or(FairLaunchAnalytics {
+                total_sold: 0,
+                whitelist_sold: 0,
+                public_sold: 0,
+                unique_buyers: 0,
+                current_price: 0,
+            })
+    }
+
+    // -------------------------------------------------------------------------
+    // NFT Staking
+    // -------------------------------------------------------------------------
+
+    /// Configure (or reconfigure) the NFT staking module. Admin-only.
+    pub fn configure_nft_staking(
+        env: Env,
+        config: NftStakeConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        if config.reward_interval == 0 {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::NftStakeConfig, &config);
+        events::emit_nft_staking_configured(
+            &env,
+            config.reward_rate_bps,
+            config.reward_interval,
+            config.min_lock_period,
+        );
+        Ok(())
+    }
+
+    /// Stake an NFT owned by `owner`. The NFT is locked in the contract's
+    /// virtual accounting (ownership unchanged on-chain) until unstaked.
+    pub fn stake_nft(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        if config.paused {
+            return Err(VirtualEconomyError::NftStakingPaused);
+        }
+
+        // Verify NFT exists and belongs to owner
+        let nft_owner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTOwner(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        if nft_owner != owner {
+            return Err(VirtualEconomyError::NotOwner);
+        }
+
+        // Ensure not already staked
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::NftStakedPosition(token_id.clone()))
+        {
+            return Err(VirtualEconomyError::NftAlreadyStaked);
+        }
+
+        let now = env.ledger().timestamp();
+        let position = NftStakedPosition {
+            token_id: token_id.clone(),
+            owner: owner.clone(),
+            staked_at: now,
+            pending_rewards: 0,
+            last_reward_ts: now,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedPosition(token_id.clone()), &position);
+
+        // Track owner's staked list
+        let mut staked_list: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        staked_list.push_back(token_id.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedByOwner(owner.clone()), &staked_list);
+
+        // Update analytics
+        NftStakingManager::increment_staked(&env);
+
+        events::emit_nft_staked(&env, &token_id, &owner, now);
+        Ok(())
+    }
+
+    /// Unstake an NFT and claim any accrued rewards.
+    pub fn unstake_nft(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        if config.paused {
+            return Err(VirtualEconomyError::NftStakingPaused);
+        }
+
+        let mut position: NftStakedPosition = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id.clone()))
+            .ok_or(VirtualEconomyError::NftNotStaked)?;
+
+        if position.owner != owner {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        // Check lock period
+        let now = env.ledger().timestamp();
+        if config.min_lock_period > 0 && now < position.staked_at + config.min_lock_period {
+            return Err(VirtualEconomyError::NftLockPeriodNotMet);
+        }
+
+        // Calculate and pay out rewards
+        let nft_metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        let accrued =
+            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let total_rewards = position.pending_rewards + accrued;
+
+        if total_rewards > 0 {
+            let current_balance = Self::get_currency_balance(env.clone(), owner.clone());
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(owner.clone()),
+                &(current_balance + total_rewards),
+            );
+            let supply = Self::get_total_currency_supply(env.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalCurrencySupply, &(supply + total_rewards));
+        }
+
+        // Remove staked position
+        env.storage()
+            .persistent()
+            .remove(&DataKey::NftStakedPosition(token_id.clone()));
+
+        // Remove from owner's staked list
+        let staked_list: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut new_list: Vec<BytesN<32>> = Vec::new(&env);
+        for id in staked_list.iter() {
+            if id != token_id {
+                new_list.push_back(id);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedByOwner(owner.clone()), &new_list);
+
+        NftStakingManager::decrement_staked(&env, total_rewards);
+
+        events::emit_nft_unstaked(&env, &token_id, &owner, total_rewards);
+        Ok(total_rewards)
+    }
+
+    /// Claim accrued rewards for a staked NFT without unstaking it.
+    pub fn claim_nft_staking_rewards(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<i128, VirtualEconomyError> {
+        owner.require_auth();
+
+        let config: NftStakeConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::NftStakeConfig)
+            .ok_or(VirtualEconomyError::NftStakingNotConfigured)?;
+
+        let mut position: NftStakedPosition = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id.clone()))
+            .ok_or(VirtualEconomyError::NftNotStaked)?;
+
+        if position.owner != owner {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        let nft_metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        let accrued =
+            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let total_rewards = position.pending_rewards + accrued;
+
+        if total_rewards <= 0 {
+            return Ok(0);
+        }
+
+        // Mint rewards
+        let current_balance = Self::get_currency_balance(env.clone(), owner.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(owner.clone()),
+            &(current_balance + total_rewards),
+        );
+        let supply = Self::get_total_currency_supply(env.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(supply + total_rewards));
+
+        // Reset pending rewards
+        position.pending_rewards = 0;
+        position.last_reward_ts = now;
+        env.storage()
+            .persistent()
+            .set(&DataKey::NftStakedPosition(token_id.clone()), &position);
+
+        NftStakingManager::record_rewards_distributed(&env, total_rewards);
+
+        events::emit_nft_staking_rewards_claimed(&env, &token_id, &owner, total_rewards);
+        Ok(total_rewards)
+    }
+
+    /// Return the staked position for a given token, or `None` if not staked.
+    pub fn get_nft_staked_position(
+        env: Env,
+        token_id: BytesN<32>,
+    ) -> Option<NftStakedPosition> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NftStakedPosition(token_id))
+    }
+
+    /// Return all token IDs staked by `owner`.
+    pub fn get_nfts_staked_by_owner(env: Env, owner: Address) -> Vec<BytesN<32>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NftStakedByOwner(owner))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return aggregate NFT staking analytics.
+    pub fn get_nft_staking_analytics(env: Env) -> NftStakingAnalytics {
+        env.storage()
+            .instance()
+            .get(&DataKey::NftStakingAnalytics)
+            .unwrap_or(NftStakingAnalytics {
+                total_staked: 0,
+                total_rewards_distributed: 0,
+                unique_stakers: 0,
+            })
     }
 
     // -------------------------------------------------------------------------
