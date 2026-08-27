@@ -129,6 +129,9 @@ impl MatchmakerService {
             self.find_matches_for_game_mode(&mut conn, &game, &game_mode).await?;
         }
 
+        // Broadcast real-time metrics update over WebSocket / Redis pubsub
+        let _ = self.broadcast_metrics_update().await;
+
         Ok(())
     }
 
@@ -172,9 +175,169 @@ impl MatchmakerService {
 
         for candidate in matches_found {
             self.create_match_from_candidate(&candidate).await?;
+            self.record_candidate_metrics(conn, &candidate).await?;
             self.remove_from_queue(conn, &candidate.player1.user_id, game, game_mode).await?;
             self.remove_from_queue(conn, &candidate.player2.user_id, game, game_mode).await?;
         }
+
+        Ok(())
+    }
+
+    /// Record match metrics (wait times, match quality, hourly counts)
+    pub async fn record_candidate_metrics(
+        &self,
+        conn: &mut RedisConn,
+        candidate: &MatchCandidate,
+    ) -> Result<(), ApiError> {
+        let now = Utc::now();
+        let wait1 = (now - candidate.player1.joined_at).num_milliseconds() as f64 / 1000.0;
+        let wait2 = (now - candidate.player2.joined_at).num_milliseconds() as f64 / 1000.0;
+        let game = &candidate.player1.game;
+
+        let wait_key_game = format!("matchmaker:metrics:wait_times:{}", game);
+        let wait_key_global = "matchmaker:metrics:wait_times:global".to_string();
+        let quality_key_game = format!("matchmaker:metrics:quality:{}", game);
+        let hour_bucket = now.timestamp() / 3600 * 3600;
+        let hourly_matches_key = format!("matchmaker:metrics:hourly:matches:{}", hour_bucket);
+
+        let mut pipe = redis::pipe();
+        pipe.cmd("RPUSH").arg(&wait_key_game).arg(wait1).arg(wait2).ignore()
+            .cmd("LTRIM").arg(&wait_key_game).arg(-1000i64).arg(-1i64).ignore()
+            .cmd("RPUSH").arg(&wait_key_global).arg(wait1).arg(wait2).ignore()
+            .cmd("LTRIM").arg(&wait_key_global).arg(-1000i64).arg(-1i64).ignore()
+            .cmd("RPUSH").arg(&quality_key_game).arg(candidate.match_quality).ignore()
+            .cmd("LTRIM").arg(&quality_key_game).arg(-1000i64).arg(-1i64).ignore()
+            .cmd("INCR").arg(&hourly_matches_key).ignore();
+
+        pipe.query_async::<()>(conn)
+            .await
+            .map_err(|e| ApiError::internal_error(&format!("Redis metrics pipe error: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Retrieve full matchmaking metrics dashboard
+    pub async fn get_metrics_dashboard(
+        &self,
+    ) -> Result<crate::models::matchmaker::MatchmakingMetricsDashboard, ApiError> {
+        let mut conn = self.redis.clone();
+        let active_modes = self.get_active_modes_from_redis(&mut conn).await?;
+
+        let mut games_set = std::collections::HashSet::new();
+        for (g, _) in &active_modes {
+            games_set.insert(g.clone());
+        }
+
+        let mut per_game_metrics = Vec::new();
+        let mut total_queue_depth = 0usize;
+        let mut alerts = Vec::new();
+
+        for game in games_set {
+            let pattern = format!("{}:{}:*", QUEUE_ENTRY_PREFIX, game);
+            let keys = scan_keys(&mut conn, &pattern).await?;
+            let queue_depth = keys.len();
+            total_queue_depth += queue_depth;
+
+            let wait_key_game = format!("matchmaker:metrics:wait_times:{}", game);
+            let wait_samples_str: Vec<String> = conn.lrange(&wait_key_game, 0, -1).await.unwrap_or_default();
+            let wait_samples: Vec<f64> = wait_samples_str.into_iter().filter_map(|s| s.parse().ok()).collect();
+            let wait_time_percentiles = calculate_percentiles(wait_samples);
+
+            let quality_key_game = format!("matchmaker:metrics:quality:{}", game);
+            let quality_samples_str: Vec<String> = conn.lrange(&quality_key_game, 0, -1).await.unwrap_or_default();
+            let quality_samples: Vec<f64> = quality_samples_str.into_iter().filter_map(|s| s.parse().ok()).collect();
+            let avg_match_quality = if quality_samples.is_empty() {
+                1.0
+            } else {
+                quality_samples.iter().sum::<f64>() / quality_samples.len() as f64
+            };
+
+            // Alert on queue depth > 1000
+            if queue_depth > 1000 {
+                let msg = format!("Queue depth for game '{}' exceeded threshold of 1000 (current: {})", game, queue_depth);
+                tracing::warn!("{}", msg);
+                alerts.push(crate::models::matchmaker::MatchmakingAlert {
+                    alert_type: "HIGH_QUEUE_DEPTH".to_string(),
+                    game: Some(game.clone()),
+                    game_mode: None,
+                    queue_depth,
+                    message: msg,
+                    timestamp: Utc::now(),
+                });
+            }
+
+            per_game_metrics.push(crate::models::matchmaker::PerGameMetrics {
+                game,
+                queue_depth,
+                avg_match_quality,
+                wait_time_percentiles,
+            });
+        }
+
+        let wait_key_global = "matchmaker:metrics:wait_times:global";
+        let global_samples_str: Vec<String> = conn.lrange(wait_key_global, 0, -1).await.unwrap_or_default();
+        let global_samples: Vec<f64> = global_samples_str.into_iter().filter_map(|s| s.parse().ok()).collect();
+        let global_wait_time_percentiles = calculate_percentiles(global_samples);
+
+        // Global alert check if total queue depth > 1000
+        if total_queue_depth > 1000 && alerts.is_empty() {
+            let msg = format!("Total queue depth exceeded threshold of 1000 (current: {})", total_queue_depth);
+            tracing::warn!("{}", msg);
+            alerts.push(crate::models::matchmaker::MatchmakingAlert {
+                alert_type: "HIGH_QUEUE_DEPTH".to_string(),
+                game: None,
+                game_mode: None,
+                queue_depth: total_queue_depth,
+                message: msg,
+                timestamp: Utc::now(),
+            });
+        }
+
+        let current_hour = Utc::now().timestamp() / 3600 * 3600;
+        let mut hourly_aggregates = Vec::new();
+        for i in (0..24).rev() {
+            let hour_ts = current_hour - (i * 3600);
+            let hourly_matches_key = format!("matchmaker:metrics:hourly:matches:{}", hour_ts);
+            let total_matches_created: i64 = conn.get(&hourly_matches_key).await.unwrap_or(0);
+
+            let avg_quality = if per_game_metrics.is_empty() {
+                1.0
+            } else {
+                per_game_metrics.iter().map(|m| m.avg_match_quality).sum::<f64>() / per_game_metrics.len() as f64
+            };
+
+            hourly_aggregates.push(crate::models::matchmaker::HourlyAggregate {
+                hour_timestamp: hour_ts,
+                total_matches_created,
+                avg_queue_depth: total_queue_depth as f64,
+                avg_match_quality: avg_quality,
+                wait_time_p50: global_wait_time_percentiles.p50,
+                wait_time_p95: global_wait_time_percentiles.p95,
+                wait_time_p99: global_wait_time_percentiles.p99,
+            });
+        }
+
+        Ok(crate::models::matchmaker::MatchmakingMetricsDashboard {
+            per_game_metrics,
+            global_wait_time_percentiles,
+            total_queue_depth,
+            hourly_aggregates,
+            alerts,
+        })
+    }
+
+    /// Broadcast real-time metrics update over Redis Pub/Sub
+    pub async fn broadcast_metrics_update(&self) -> Result<(), ApiError> {
+        let dashboard = self.get_metrics_dashboard().await?;
+        let mut conn = self.redis.clone();
+        let payload = serde_json::to_string(&crate::realtime::events::RealtimeEvent::MatchmakingMetricsUpdate {
+            dashboard: serde_json::to_value(&dashboard).unwrap_or_default(),
+            timestamp: Utc::now().to_rfc3339(),
+        }).map_err(|e| ApiError::internal_error(&format!("JSON serialize error: {}", e)))?;
+
+        conn.publish::<_, _, ()>(crate::realtime::events::channels::MATCHMAKING_METRICS_CHANNEL, payload)
+            .await
+            .map_err(|e| ApiError::internal_error(&format!("Redis PUBLISH error: {}", e)))?;
 
         Ok(())
     }
@@ -373,6 +536,19 @@ impl MatchmakerService {
         base + elo_penalty
     }
 
+    /// Estimate wait time for a given player in queue
+    pub async fn get_estimated_wait_time(
+        &self,
+        user_id: Uuid,
+        game: &str,
+        game_mode: &str,
+    ) -> Result<i32, ApiError> {
+        let entry = self.is_user_in_queue(user_id, game, game_mode).await?;
+        let elo = entry.map(|e| e.current_elo).unwrap_or(1200);
+        let queue_size = self.get_queue_size(game, game_mode).await?;
+        Ok(Self::estimate_wait_time_from_size(queue_size, elo))
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Database helpers
     // ─────────────────────────────────────────────────────────────────────────
@@ -496,6 +672,23 @@ fn calculate_match_quality(player1: &QueueEntry, player2: &QueueEntry, elo_gap: 
     let wait_bonus = ((wait1 + wait2) / 2.0 / 600.0).min(0.5);
 
     elo_score + wait_bonus
+}
+
+/// Calculate p50, p95, p99 wait time percentiles from samples
+pub fn calculate_percentiles(mut samples: Vec<f64>) -> crate::models::matchmaker::WaitTimePercentiles {
+    if samples.is_empty() {
+        return crate::models::matchmaker::WaitTimePercentiles { p50: 0.0, p95: 0.0, p99: 0.0 };
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let len = samples.len();
+    let p50_idx = ((len as f64 * 0.50).ceil() as usize).saturating_sub(1).min(len - 1);
+    let p95_idx = ((len as f64 * 0.95).ceil() as usize).saturating_sub(1).min(len - 1);
+    let p99_idx = ((len as f64 * 0.99).ceil() as usize).saturating_sub(1).min(len - 1);
+    crate::models::matchmaker::WaitTimePercentiles {
+        p50: samples[p50_idx],
+        p95: samples[p95_idx],
+        p99: samples[p99_idx],
+    }
 }
 
 /// Non-blocking SCAN over the Redis keyspace.  Returns all keys matching
