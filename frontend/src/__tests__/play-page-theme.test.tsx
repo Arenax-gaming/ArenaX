@@ -18,6 +18,10 @@ jest.mock('@/hooks/useSettings', () => ({
   }),
 }));
 
+jest.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'user-1' } }),
+}));
+
 jest.mock('@/components/game/GameModeSelector', () => {
   const MockGameModeSelector = () => <div data-testid="game-mode-selector" />;
   MockGameModeSelector.displayName = 'MockGameModeSelector';

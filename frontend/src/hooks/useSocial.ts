@@ -9,6 +9,7 @@ import {
   SocialUser,
 } from '@/types/social'
 import { API_BASE } from '@/lib/constants'
+import { api } from '@/lib/api'
 
 export const useFriendsList = () => {
   return useQuery({

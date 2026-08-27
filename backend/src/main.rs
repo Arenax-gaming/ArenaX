@@ -15,14 +15,17 @@ mod realtime;
 mod service;
 mod orchestrator;
 mod telemetry;
+mod validators;
 
 use crate::config::Config;
 use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
+use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::metrics_middleware::RequestMetrics;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
+use crate::middleware::security_headers::security_headers;
 use crate::middleware::tracing_middleware::RequestTracing;
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
@@ -188,6 +191,7 @@ async fn main() -> io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
+            .app_data(web::Data::new(redis_conn.clone()))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(session_registry.clone()))
@@ -205,20 +209,21 @@ async fn main() -> io::Result<()> {
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
+            .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
-            .wrap(RequestMetrics::new())
-            // Outermost: sees the request first (extracts trace context /
+            // RequestTracing sees the request first (extracts trace context /
             // correlation id) and the response last (records latency,
-            // stamps correlation headers).
+            // stamps correlation headers) among the "inner" layers below.
             .wrap(RequestTracing::new())
-            // Unauthenticated Prometheus scrape target — kept outside the
-            // `/api` scope (and its rate-limit/idempotency/security
-            // middleware) so scraping never competes with real traffic.
-            .route("/metrics", web::get().to(crate::metrics::metrics_handler))
+            // Outermost: guarantees security headers land on every response,
+            // including ones short-circuited by an inner layer (CORS
+            // preflight, CSRF rejection, rate limiting, etc).
+            .wrap(actix_web::middleware::from_fn(security_headers))
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    .route("/csrf-token", web::get().to(csrf_token_handler))
                     // OpenAPI 3.0 docs — Issue #901
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903

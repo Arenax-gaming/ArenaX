@@ -76,7 +76,7 @@ function ToastItem({ toast }: { toast: ToastNotification }) {
     const interval = setInterval(() => {
       if (!isPaused) {
         const elapsed = Date.now() - startTimeRef.current;
-        const remaining = Math.max(0, 100 - (elapsed / toast.duration) * 100);
+        const remaining = Math.max(0, 100 - (elapsed / (toast.duration ?? 0)) * 100);
         setProgress(remaining);
 
         if (remaining <= 0) {

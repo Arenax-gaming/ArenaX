@@ -2,10 +2,8 @@
 
 import React, { useState } from "react";
 import { BracketData } from "@/types/bracket";
-import { MatchCard } from "./MatchCard";
-import { Button } from "@/components/ui/Button";
-import { PrizePool } from "./PrizePool";
-import { RadioTower, Trophy } from "lucide-react";
+import { BracketView } from "./BracketView";
+import { RadioTower } from "lucide-react";
 
 interface TournamentBracketProps {
   bracketData: BracketData;
@@ -13,9 +11,6 @@ interface TournamentBracketProps {
 }
 
 export function TournamentBracket({ bracketData, currentUserId }: TournamentBracketProps) {
-  const [activeSection, setActiveSection] = useState(bracketData.sections[0]?.id ?? "");
-
-  const currentSection = bracketData.sections.find((s) => s.id === activeSection);
   const liveMatchCount = bracketData.activeMatchIds?.length ?? 0;
 
   return (
@@ -30,60 +25,8 @@ export function TournamentBracket({ bracketData, currentUserId }: TournamentBrac
         </div>
       )}
 
-      {/* Section tabs (for double elimination) */}
-      {bracketData.sections.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {bracketData.sections.map((section) => (
-            <button
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              className={`whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                activeSection === section.id
-                  ? "bg-primary/90 text-white"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {section.title}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Rounds */}
-      {currentSection?.rounds.map((round) => (
-        <div key={round.roundNumber} className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Trophy className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {round.roundName}
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              · {round.matches.length} match{round.matches.length > 1 ? "es" : ""}
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {round.matches.map((match) => (
-              <MatchCard
-                key={match.id}
-                match={match}
-                currentUserId={currentUserId}
-                showLink
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {/* Prize distribution */}
-      {bracketData.prizeDistribution.length > 0 && (
-        <PrizePool
-          prizePool={bracketData.prizeDistribution.reduce(
-            (sum, t) => sum + (t.amount ?? 0),
-            0,
-          )}
-          distribution={bracketData.prizeDistribution}
-        />
-      )}
+      {/* Bracket View - Tree-based layout */}
+      <BracketView bracketData={bracketData} currentUserId={currentUserId} />
     </div>
   );
 }

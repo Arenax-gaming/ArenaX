@@ -204,7 +204,7 @@ function MatchHubPageContent() {
   }
 
   // Make sure we have the MatchHubDetails shape for the rest of the component
-  if (!("player1" in match) || !("player2" in match)) {
+  if (!match || !("player1" in match) || !("player2" in match)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">

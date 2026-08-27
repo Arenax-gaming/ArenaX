@@ -1,20 +1,20 @@
 # Global fallback
-* @anonfedora
+* @hydrax117
 
 # Smart contracts — require contract team review
-/contracts/ @anonfedora
+/contracts/ @hydrax117
 
 # DB migrations — require backend lead review
-/backend/migrations/ @anonfedora
+/backend/migrations/ @hydrax117
 
 # CI/CD and workflow changes
-/.github/ @anonfedora
+/.github/ @hydrax117
 
 # Frontend
-/frontend/ @anonfedora
+/frontend/ @hydrax117
 
 # TypeScript server
-/server/ @anonfedora
+/server/ @hydrax117
 
 # Rust backend
-/backend/src/ @anonfedora
+/backend/src/ @hydrax117

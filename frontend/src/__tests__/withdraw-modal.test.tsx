@@ -22,8 +22,10 @@ describe("Withdraw validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /submit withdrawal/i }));
 
+    // Form validation runs asynchronously on submit (zodResolver). An empty
+    // amount fails the required check before the positive-number refine.
     expect(
-      screen.getByText(/enter a valid amount greater than 0/i),
+      await screen.findByText(/amount is required/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/destination address is required/i),

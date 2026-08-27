@@ -12,3 +12,4 @@ pub mod telemetry;
 pub mod transaction;
 pub mod transaction_monitor;
 pub mod transaction_test;
+pub mod validators;

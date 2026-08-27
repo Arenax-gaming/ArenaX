@@ -169,7 +169,10 @@ export function DynamicPage<P extends object = object>({
   }, []);
 
   // Re-create the lazy component on retry so React attempts the import again
-  const LazyComponent = lazy(loader) as ComponentType<P>;
+  const LazyComponent = lazy(async () => {
+    const mod = await loader();
+    return { default: mod } as { default: ComponentType<P> };
+  }) as unknown as ComponentType<P>;
 
   const currentPath =
     typeof window !== "undefined" ? window.location.pathname : "";
