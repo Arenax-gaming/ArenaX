@@ -18,9 +18,11 @@ mod telemetry;
 use crate::config::Config;
 use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
+use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
+use crate::middleware::security_headers::security_headers;
 use crate::middleware::tracing_middleware::RequestTracing;
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
@@ -186,15 +188,21 @@ async fn main() -> io::Result<()> {
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
+            .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
-            // Outermost: sees the request first (extracts trace context /
+            // RequestTracing sees the request first (extracts trace context /
             // correlation id) and the response last (records latency,
-            // stamps correlation headers).
+            // stamps correlation headers) among the "inner" layers below.
             .wrap(RequestTracing::new())
+            // Outermost: guarantees security headers land on every response,
+            // including ones short-circuited by an inner layer (CORS
+            // preflight, CSRF rejection, rate limiting, etc).
+            .wrap(actix_web::middleware::from_fn(security_headers))
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    .route("/csrf-token", web::get().to(csrf_token_handler))
                     // OpenAPI 3.0 docs — Issue #901
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903
