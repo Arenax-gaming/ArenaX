@@ -1,13 +1,23 @@
 import React from "react";
 import { cn } from "../../lib/utils";
+import { Slot } from "@radix-ui/react-slot";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "outline" | "ghost" | "destructive";
+  variant?:
+    | "primary"
+    | "default"
+    | "secondary"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "destructive";
   size?: "sm" | "md" | "lg" | "icon";
   /** Shows a loading spinner and sets aria-busy + disabled. */
   loading?: boolean;
   /** Screen-reader label for the loading state. Defaults to "Loading…". */
   loadingLabel?: string;
+  /** Render the button styles on a child element (Radix Slot pattern). */
+  asChild?: boolean;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -20,6 +30,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       loadingLabel = "Loading\u2026",
       children,
       disabled,
+      asChild = false,
       "aria-label": ariaLabel,
       ...props
     },
@@ -33,11 +44,14 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const variantClasses = {
       primary:
         "bg-primary/90 text-white hover:bg-blue-700 focus-visible:ring-primary",
+      default:
+        "bg-primary/90 text-white hover:bg-blue-700 focus-visible:ring-primary",
       secondary:
         "bg-gray-600 text-white hover:bg-surface-raised focus-visible:ring-gray-500",
       outline:
         "border border-border bg-transparent text-foreground/70 hover:bg-muted focus-visible:ring-gray-500",
       ghost: "text-foreground/70 hover:bg-muted focus-visible:ring-gray-500",
+      link: "text-primary underline-offset-4 hover:underline",
       destructive:
         "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive",
     };
@@ -49,22 +63,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       icon: "h-10 w-10",
     };
 
-    return (
-      <button
-        className={cn(
-          baseClasses,
-          variantClasses[variant],
-          sizeClasses[size],
-          loading && "cursor-not-allowed",
-          className,
-        )}
-        ref={ref}
-        disabled={disabled || loading}
-        aria-disabled={disabled || loading}
-        aria-busy={loading || undefined}
-        aria-label={ariaLabel}
-        {...props}
-      >
+    const buttonContent = (
+      <>
         {loading && (
           <>
             {/* Spinner — hidden from AT; sr-only label provides context */}
@@ -95,6 +95,42 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           </>
         )}
         {children}
+      </>
+    );
+
+    const buttonClasses = cn(
+      baseClasses,
+      variantClasses[variant],
+      sizeClasses[size],
+      loading && "cursor-not-allowed",
+      className,
+    );
+
+    if (asChild) {
+      return (
+        <Slot
+          className={buttonClasses}
+          aria-busy={loading || undefined}
+          aria-disabled={disabled || loading}
+          aria-label={ariaLabel}
+          {...props}
+        >
+          {buttonContent}
+        </Slot>
+      );
+    }
+
+    return (
+      <button
+        className={buttonClasses}
+        ref={ref}
+        disabled={disabled || loading}
+        aria-disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        aria-label={ariaLabel}
+        {...props}
+      >
+        {buttonContent}
       </button>
     );
   },

@@ -9,15 +9,16 @@
 "use client";
 
 import React from "react";
-import type { TooltipProps } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import type {
+  Formatter,
   NameType,
   ValueType,
 } from "recharts/types/component/DefaultTooltipContent";
 
-interface ChartTooltipProps extends TooltipProps<ValueType, NameType> {
-  formatter?: (value: ValueType, name: NameType) => string;
-}
+type ChartTooltipProps = Partial<TooltipContentProps<ValueType, NameType>> & {
+  formatter?: Formatter<ValueType, NameType>;
+};
 
 export function ChartTooltip({
   active,
@@ -46,7 +47,13 @@ export function ChartTooltip({
           <span className="text-muted-foreground">{entry.name}:</span>
           <span className="font-medium text-foreground">
             {formatter
-              ? formatter(entry.value as ValueType, entry.name as NameType)
+              ? formatter(
+                  entry.value as ValueType | undefined,
+                  entry.name as NameType | undefined,
+                  entry,
+                  i,
+                  payload,
+                )
               : String(entry.value)}
           </span>
         </div>

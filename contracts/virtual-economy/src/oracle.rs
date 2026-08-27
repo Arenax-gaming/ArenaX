@@ -247,6 +247,7 @@ impl OracleManager {
     ///
     /// An entry that arrived within `update_interval * stale_multiplier`
     /// seconds is considered fresh.
+    #[allow(dead_code)]
     pub fn max_staleness(update_interval: u64, stale_multiplier: u64) -> u64 {
         update_interval.saturating_mul(stale_multiplier)
     }

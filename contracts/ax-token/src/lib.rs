@@ -12,6 +12,7 @@ pub struct VestingSchedule {
     pub duration: u64,
     pub total_amount: i128,
     pub amount_claimed: i128,
+    pub revoked: bool,
 }
 
 #[contracttype]
@@ -205,32 +206,85 @@ impl AxToken {
         duration: u64,
     ) {
         Self::require_admin(&env);
-        if total_amount <= 0 {
-            panic!("amount must be positive");
-        }
-        if duration == 0 {
-            panic!("duration must be positive");
-        }
-
-        let schedule = VestingSchedule {
-            beneficiary: beneficiary.clone(),
+        Self::store_vesting_schedule(
+            &env,
+            beneficiary,
+            total_amount,
             start_time,
             cliff_duration,
             duration,
-            total_amount,
-            amount_claimed: 0,
-        };
-        env.storage()
+        );
+    }
+
+    /// Creates vesting schedules for multiple beneficiaries in a single call,
+    /// all sharing the same start time, cliff, and duration.
+    pub fn create_vesting_schedules_batch(
+        env: Env,
+        beneficiaries: Vec<Address>,
+        amounts: Vec<i128>,
+        start_time: u64,
+        cliff_duration: u64,
+        duration: u64,
+    ) {
+        Self::require_admin(&env);
+        if beneficiaries.len() != amounts.len() {
+            panic!("beneficiaries and amounts length mismatch");
+        }
+        if beneficiaries.is_empty() {
+            panic!("empty batch");
+        }
+
+        for i in 0..beneficiaries.len() {
+            Self::store_vesting_schedule(
+                &env,
+                beneficiaries.get(i).unwrap(),
+                amounts.get(i).unwrap(),
+                start_time,
+                cliff_duration,
+                duration,
+            );
+        }
+    }
+
+    /// Revokes a vesting schedule before it fully vests (clawback). Any amount
+    /// already vested as of now remains claimable by the beneficiary; the
+    /// unvested remainder is forfeited and can no longer be claimed.
+    pub fn revoke_vesting_schedule(env: Env, beneficiary: Address) -> i128 {
+        Self::require_admin(&env);
+
+        let key = DataKey::Vesting(beneficiary.clone());
+        let mut schedule: VestingSchedule = env
+            .storage()
             .instance()
-            .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
+            .get(&key)
+            .expect("no vesting schedule found");
+
+        if schedule.revoked {
+            panic!("vesting schedule already revoked");
+        }
+
+        let vested_amount = Self::vested_amount(&env, &schedule);
+        let forfeited = schedule.total_amount - vested_amount;
+
+        // Freeze `duration` at the elapsed time so future calls to
+        // `vested_amount` always take the `elapsed >= duration` branch and
+        // return the capped `total_amount` outright, instead of re-applying
+        // the linear elapsed/duration fraction to an already-capped amount.
+        let elapsed_at_revoke = env.ledger().timestamp().saturating_sub(schedule.start_time);
+        schedule.total_amount = vested_amount;
+        schedule.duration = elapsed_at_revoke;
+        schedule.revoked = true;
+        env.storage().instance().set(&key, &schedule);
 
         env.events().publish(
             (
                 Symbol::new(&env, "ArenaXToken_v1"),
-                Symbol::new(&env, "VESTING_CREATE"),
+                Symbol::new(&env, "VESTING_REVOKE"),
             ),
-            (beneficiary, total_amount),
+            (beneficiary, forfeited),
         );
+
+        forfeited
     }
 
     pub fn claim_vested_tokens(env: Env, beneficiary: Address) -> i128 {
@@ -248,13 +302,7 @@ impl AxToken {
             panic!("cliff period not met");
         }
 
-        let elapsed = current_time.saturating_sub(schedule.start_time);
-        let vested_amount = if elapsed >= schedule.duration {
-            schedule.total_amount
-        } else {
-            schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
-        };
-
+        let vested_amount = Self::vested_amount(&env, &schedule);
         let claimable = vested_amount - schedule.amount_claimed;
         if claimable <= 0 {
             panic!("no vested tokens to claim");
@@ -532,19 +580,30 @@ impl AxToken {
         if amount <= 0 {
             panic!("amount must be positive");
         }
-        
+
         let balance = Self::balance(&env, from.clone());
         if balance < amount {
             panic!("insufficient balance");
         }
-        
-        env.storage().instance().set(&DataKey::Balance(from.clone()), &(balance - amount));
-        
-        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
-        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool + amount));
-        
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &(balance - amount));
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool + amount));
+
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "REVENUE_DEPOSIT")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "REVENUE_DEPOSIT"),
+            ),
             (from, amount),
         );
     }
@@ -554,57 +613,84 @@ impl AxToken {
         if amount <= 0 || interval == 0 {
             panic!("invalid configuration");
         }
-        
+
         let schedule = BuybackSchedule {
             burn_amount_per_interval: amount,
             interval_seconds: interval,
             next_burn_time: env.ledger().timestamp() + interval,
         };
-        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
     }
 
     pub fn execute_buyback_and_burn(env: Env) -> i128 {
-        let mut schedule: BuybackSchedule = env.storage().instance().get(&DataKey::BuybackSchedule).expect("no schedule configured");
+        let mut schedule: BuybackSchedule = env
+            .storage()
+            .instance()
+            .get(&DataKey::BuybackSchedule)
+            .expect("no schedule configured");
         let current_time = env.ledger().timestamp();
-        
+
         if current_time < schedule.next_burn_time {
             panic!("too early for next burn");
         }
-        
-        let pool: i128 = env.storage().instance().get(&DataKey::RevenuePoolBalance).unwrap_or(0);
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
         let amount_to_burn = if pool < schedule.burn_amount_per_interval {
             pool
         } else {
             schedule.burn_amount_per_interval
         };
-        
+
         if amount_to_burn <= 0 {
             panic!("no revenue to burn");
         }
-        
-        env.storage().instance().set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
-        
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
+
         let current_supply = Self::total_supply(&env);
-        env.storage().instance().set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
-        
-        let total_burned: i128 = env.storage().instance().get(&DataKey::TotalBurned).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
+
+        let total_burned: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBurned)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
+
         let metrics = BurnMetrics {
             total_burned: total_burned + amount_to_burn,
             last_burn_time: current_time,
             last_burn_amount: amount_to_burn,
         };
-        env.storage().instance().set(&DataKey::BurnMetrics, &metrics);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::BurnMetrics, &metrics);
+
         schedule.next_burn_time = current_time + schedule.interval_seconds;
-        env.storage().instance().set(&DataKey::BuybackSchedule, &schedule);
-        
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
+
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "BUYBACK_BURN")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "BUYBACK_BURN"),
+            ),
             (amount_to_burn, current_time),
         );
-        
+
         amount_to_burn
     }
 
@@ -615,6 +701,57 @@ impl AxToken {
     // ---------------------------------------------------------------------------
     // Internal Helpers
     // ---------------------------------------------------------------------------
+
+    fn store_vesting_schedule(
+        env: &Env,
+        beneficiary: Address,
+        total_amount: i128,
+        start_time: u64,
+        cliff_duration: u64,
+        duration: u64,
+    ) {
+        if total_amount <= 0 {
+            panic!("amount must be positive");
+        }
+        if duration == 0 {
+            panic!("duration must be positive");
+        }
+
+        let schedule = VestingSchedule {
+            beneficiary: beneficiary.clone(),
+            start_time,
+            cliff_duration,
+            duration,
+            total_amount,
+            amount_claimed: 0,
+            revoked: false,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
+
+        env.events().publish(
+            (
+                Symbol::new(env, "ArenaXToken_v1"),
+                Symbol::new(env, "VESTING_CREATE"),
+            ),
+            (beneficiary, total_amount),
+        );
+    }
+
+    fn vested_amount(env: &Env, schedule: &VestingSchedule) -> i128 {
+        let current_time = env.ledger().timestamp();
+        if current_time < schedule.start_time + schedule.cliff_duration {
+            return 0;
+        }
+
+        let elapsed = current_time.saturating_sub(schedule.start_time);
+        if elapsed >= schedule.duration {
+            schedule.total_amount
+        } else {
+            schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
+        }
+    }
 
     fn has_admin(env: &Env) -> bool {
         env.storage()

@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { MatchWithPlayers } from "@/types/profile";
+import { MatchWithPlayers } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { VirtualDynamicList, VirtualDynamicListRenderProps } from "@/components/ui/VirtualDynamicList";
+import { useInfiniteScrollSentinel } from "@/hooks/useInfiniteScrollSentinel";
 import {
   Trophy,
   Swords,
@@ -29,6 +30,10 @@ type AnyMatchWithPlayers = MatchWithPlayers & {
   scorePlayer2?: number;
   createdAt?: string;
   completedAt?: string;
+  /** Legacy profile-shape field — split as "playerScore-opponentScore". */
+  score?: string;
+  /** Legacy profile-shape field — ISO date of the match. */
+  date?: string;
 };
 
 export interface MatchHistoryFilters {
@@ -54,6 +59,26 @@ interface MatchHistoryProps {
   isLoadingMore?: boolean;
   /** Disable virtual scrolling (e.g. for short lists < 20 items) */
   disableVirtualization?: boolean;
+  /**
+   * Enable IntersectionObserver-driven infinite scroll (issue #888). When
+   * omitted it turns on automatically if `onLoadMore` is supplied without
+   * explicit pagination (`page`/`totalPages`), and off otherwise — so existing
+   * paginated/virtualized call sites keep their behavior.
+   */
+  infiniteScroll?: boolean;
+  /**
+   * Whether more matches remain to load. Defaults to `true` in infinite-scroll
+   * mode (or `page < totalPages` when paginating). Set to `false` to stop the
+   * sentinel and show an end-of-list marker.
+   */
+  hasMore?: boolean;
+  /** Elapsed ms for each infinite-scroll batch (acceptance criteria: < 300ms). */
+  onBatchLoad?: (durationMs: number) => void;
+  /**
+   * sessionStorage key for scroll-position restoration across navigation.
+   * Defaults to a stable key in infinite-scroll mode; pass `null` to disable.
+   */
+  scrollRestorationKey?: string | null;
 }
 
 // ─── Individual match row ─────────────────────────────────────────────────────
@@ -170,6 +195,20 @@ const MatchRow = React.memo(function MatchRow({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// De-duplicate matches by id, preserving first-seen order. Infinite scroll can
+// re-deliver overlapping items across page boundaries; this keeps React keys
+// unique and prevents the same match rendering twice.
+function dedupeById(matches: AnyMatchWithPlayers[]): AnyMatchWithPlayers[] {
+  const seen = new Set<string>();
+  const out: AnyMatchWithPlayers[] = [];
+  for (const match of matches) {
+    if (match?.id == null || seen.has(match.id)) continue;
+    seen.add(match.id);
+    out.push(match);
+  }
+  return out;
+}
+
 export function MatchHistory({
   matches,
   currentUserId,
@@ -182,16 +221,24 @@ export function MatchHistory({
   onLoadMore,
   isLoadingMore = false,
   disableVirtualization = false,
+  infiniteScroll,
+  hasMore,
+  onBatchLoad,
+  scrollRestorationKey,
 }: MatchHistoryProps) {
   const [showFilters, setShowFilters] = useState(false);
 
+  // Overlapping pages can arrive with duplicate ids — dedupe before anything
+  // else so counts, filters, and keys all operate on a clean list.
+  const uniqueMatches = useMemo(() => dedupeById(matches), [matches]);
+
   const gameTypes = useMemo(
-    () => Array.from(new Set(matches.map((m) => m.gameType).filter(Boolean))),
-    [matches]
+    () => Array.from(new Set(uniqueMatches.map((m) => m.gameType).filter(Boolean))),
+    [uniqueMatches]
   );
 
   const filteredMatches = useMemo(() => {
-    return matches.filter((match) => {
+    return uniqueMatches.filter((match) => {
       const isWin = match.winnerId === currentUserId;
       const opponentName =
         match.player1Id === currentUserId ? match.player2Username : match.player1Username;
@@ -213,15 +260,86 @@ export function MatchHistory({
       }
       return true;
     });
-  }, [matches, filters, currentUserId]);
+  }, [uniqueMatches, filters, currentUserId]);
 
   const wins = filteredMatches.filter((m) => m.winnerId === currentUserId).length;
   const losses = filteredMatches.length - wins;
   const winRate = filteredMatches.length > 0 ? (wins / filteredMatches.length) * 100 : 0;
   const hasActiveFilters = Object.values(filters).some((v) => v !== undefined);
 
-  // Use virtualisation only when there are enough items to justify it
-  const useVirtual = !disableVirtualization && filteredMatches.length >= 20;
+  const paginationProvided = totalPages !== undefined && onPageChange !== undefined;
+  const currentPage = page ?? 1;
+
+  // Infinite scroll turns on explicitly, or implicitly when a load callback is
+  // supplied without pagination. It is mutually exclusive with the paginated /
+  // virtualized paths (window-level scrolling vs. an inner fixed-height list).
+  const useInfinite = infiniteScroll ?? (!!onLoadMore && !paginationProvided);
+  const moreAvailable =
+    hasMore ?? (paginationProvided ? currentPage < (totalPages ?? 1) : true);
+
+  // Use virtualisation only when there are enough items to justify it and we are
+  // not in infinite-scroll mode.
+  const useVirtual =
+    !useInfinite && !disableVirtualization && filteredMatches.length >= 20;
+
+  const { sentinelRef } = useInfiniteScrollSentinel({
+    onLoadMore,
+    hasMore: moreAvailable,
+    isLoading: isLoadingMore,
+    itemCount: uniqueMatches.length,
+    enabled: useInfinite,
+    onBatchLoad,
+  });
+
+  // Restore the window scroll position when returning to this list (e.g. after
+  // opening a match and navigating back), and persist it as the user scrolls.
+  const restoreKey =
+    scrollRestorationKey === undefined
+      ? useInfinite
+        ? "match-history"
+        : null
+      : scrollRestorationKey;
+
+  useEffect(() => {
+    if (!restoreKey || typeof window === "undefined") return;
+    const storageKey = `mh-scroll:${restoreKey}`;
+    const raf =
+      typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame.bind(window)
+        : (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0);
+
+    // Restore once the list has had a chance to lay out.
+    try {
+      const saved = window.sessionStorage.getItem(storageKey);
+      const y = saved ? parseInt(saved, 10) : NaN;
+      if (!Number.isNaN(y) && typeof window.scrollTo === "function") {
+        raf(() => window.scrollTo(0, y));
+      }
+    } catch {
+      /* sessionStorage unavailable (private mode) — restoration is best-effort */
+    }
+
+    let frame = 0;
+    const persist = () => {
+      try {
+        window.sessionStorage.setItem(storageKey, String(window.scrollY));
+      } catch {
+        /* ignore */
+      }
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = raf(() => {
+        frame = 0;
+        persist();
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      persist();
+    };
+  }, [restoreKey]);
 
   const clearFilters = () => onFilterChange?.({});
 
@@ -240,8 +358,8 @@ export function MatchHistory({
     [currentUserId]
   );
 
-  const showPagination = totalPages !== undefined && onPageChange !== undefined && totalPages > 1;
-  const currentPage = page ?? 1;
+  const showPagination =
+    !useInfinite && totalPages !== undefined && onPageChange !== undefined && totalPages > 1;
 
   return (
     <Card>
@@ -411,6 +529,46 @@ export function MatchHistory({
               ) : null
             }
           />
+        ) : useInfinite ? (
+          // Infinite scroll: window-level list with an IntersectionObserver
+          // sentinel that requests the next batch as it nears the viewport.
+          <div className="space-y-3" role="list" aria-busy={isLoadingMore}>
+            {filteredMatches.map((match, index) => (
+              <MatchRow
+                key={match.id}
+                match={match}
+                currentUserId={currentUserId}
+                index={index}
+              />
+            ))}
+
+            {isLoadingMore && (
+              <div
+                className="flex justify-center py-3"
+                aria-busy="true"
+                aria-label="Loading more matches"
+              >
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            )}
+
+            {/* Sentinel: kept in the tree (not the spinner) so the observer has a
+                stable target. Zero-height and hidden from assistive tech. */}
+            {moreAvailable && (
+              <div
+                ref={sentinelRef}
+                data-testid="infinite-scroll-sentinel"
+                aria-hidden="true"
+                className="h-px w-full"
+              />
+            )}
+
+            {!moreAvailable && (
+              <p className="text-center text-xs text-muted-foreground py-3">
+                You&apos;ve reached the end of your match history
+              </p>
+            )}
+          </div>
         ) : (
           // Static render for short lists
           <div className="space-y-3" role="list">

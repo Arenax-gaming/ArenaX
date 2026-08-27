@@ -32,7 +32,7 @@ describe('ProfileEditPage', () => {
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
   });
 
-  it('shows avatar validation error when file exceeds 5MB', () => {
+  it('shows avatar validation error when file exceeds 5MB', async () => {
     render(<ProfileEditPage />);
 
     const input = screen.getByLabelText(/avatar/i);
@@ -43,6 +43,10 @@ describe('ProfileEditPage', () => {
 
     fireEvent.change(input, { target: { files: [oversizedFile] } });
 
-    expect(screen.getByText('File size must not exceed 5MB')).toBeInTheDocument();
+    // File processing (read → optional compression) is async, so wait for it.
+    // The message renders both as the visible alert and inside the sr-only
+    // live region, so match on the collection.
+    const alerts = await screen.findAllByText('File size must not exceed 5MB');
+    expect(alerts.length).toBeGreaterThan(0);
   });
 });
