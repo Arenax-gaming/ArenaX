@@ -266,7 +266,12 @@ pub fn emit_dutch_auction_created(
     .publish(env);
 }
 
-pub fn emit_dutch_auction_purchased(env: &Env, listing_id: &BytesN<32>, buyer: &Address, price: i128) {
+pub fn emit_dutch_auction_purchased(
+    env: &Env,
+    listing_id: &BytesN<32>,
+    buyer: &Address,
+    price: i128,
+) {
     DutchAuctionPurchased {
         listing_id: listing_id.clone(),
         buyer: buyer.clone(),
@@ -342,6 +347,103 @@ pub fn emit_bonding_curve_drop_updated(env: &Env, drop_id: &BytesN<32>, active: 
     BondingCurveDropUpdated {
         drop_id: drop_id.clone(),
         active,
+    }
+    .publish(env);
+}
+
+// ─── Price Oracle ─────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_CONFIGURED"])]
+pub struct OracleConfigured {
+    pub primary_oracle: Address,
+    pub update_interval: u64,
+    pub max_variance_bps: u32,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_FALLBACK_SET"])]
+pub struct OracleFallbackSet {
+    pub fallback_oracle: Address,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PRICE_UPDATED"])]
+pub struct OraclePriceUpdated {
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+    pub used_fallback: bool,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PRICE_REJECTED"])]
+pub struct OraclePriceRejected {
+    pub asset_pair: BytesN<32>,
+    pub submitted_price: i128,
+    pub last_accepted_price: i128,
+    pub variance_bps: u32,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PAIR_REGISTERED"])]
+pub struct OraclePairRegistered {
+    pub asset_pair: BytesN<32>,
+    pub update_interval: u64,
+}
+
+pub fn emit_oracle_configured(
+    env: &Env,
+    primary_oracle: &Address,
+    update_interval: u64,
+    max_variance_bps: u32,
+) {
+    OracleConfigured {
+        primary_oracle: primary_oracle.clone(),
+        update_interval,
+        max_variance_bps,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_fallback_set(env: &Env, fallback_oracle: &Address) {
+    OracleFallbackSet {
+        fallback_oracle: fallback_oracle.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_price_updated(
+    env: &Env,
+    asset_pair: &BytesN<32>,
+    price: i128,
+    timestamp: u64,
+    used_fallback: bool,
+) {
+    OraclePriceUpdated {
+        asset_pair: asset_pair.clone(),
+        price,
+        timestamp,
+        used_fallback,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_price_rejected(
+    env: &Env,
+    asset_pair: &BytesN<32>,
+    submitted_price: i128,
+    last_accepted_price: i128,
+    variance_bps: u32,
+) {
+    OraclePriceRejected {
+        asset_pair: asset_pair.clone(),
+        submitted_price,
+        last_accepted_price,
+        variance_bps,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_pair_registered(env: &Env, asset_pair: &BytesN<32>, update_interval: u64) {
+    OraclePairRegistered {
+        asset_pair: asset_pair.clone(),
+        update_interval,
     }
     .publish(env);
 }

@@ -144,8 +144,8 @@ describe('KeyboardShortcutsHelp — accessibility', () => {
         onClose={onClose}
       />,
     );
-    // Click the backdrop (outermost dialog div)
-    fireEvent.click(screen.getByRole('dialog'));
+    // Click the backdrop — a full-bleed button behind the dialog content
+    fireEvent.click(screen.getByRole('button', { name: 'Close keyboard shortcuts' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

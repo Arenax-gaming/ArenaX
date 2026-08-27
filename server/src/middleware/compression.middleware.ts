@@ -36,6 +36,13 @@ import * as brotli from 'brotli';
 import { metricsService } from '../services/metrics.service';
 import { logger } from '../services/logger.service';
 
+// The `brotli` package's TypeScript types require these as literal unions
+// rather than plain `number`; `clampInt` already enforces these ranges at
+// runtime, so casting to these aliases at the `brotli.compress` call site
+// is safe.
+type CompressionQuality = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+type CompressionMode = 0 | 1 | 2;
+
 const EXCLUDED_DEFAULT_PREFIXES = [
   'image/',
   'video/',
@@ -193,8 +200,6 @@ export const createCompressionMiddleware = (
     let uncompressedBytes = 0;
     const write = res.write.bind(res);
     const end = res.end.bind(res);
-    const originalWrite = res.write;
-    const originalEnd = res.end;
     const chunks: Buffer[] = [];
 
     // Determine preferred encoding
@@ -220,20 +225,23 @@ export const createCompressionMiddleware = (
           uncompressedBytes += buffer.length;
           chunks.push(buffer);
         }
-        
+
         try {
           const fullBuffer = Buffer.concat(chunks);
-          
+
           // Only compress if above threshold
-          if (fullBuffer.length >= config.threshold) {
-            const compressed = brotli.compress(fullBuffer, {
-              quality: config.brotliQuality,
-              mode: config.brotliMode,
-            });
-            
+          const compressed =
+            fullBuffer.length >= config.threshold
+              ? brotli.compress(fullBuffer, {
+                  quality: config.brotliQuality as CompressionQuality,
+                  mode: config.brotliMode as CompressionMode,
+                })
+              : null;
+
+          if (compressed) {
             res.setHeader('Content-Length', compressed.length);
-            originalWrite.call(res, compressed);
-            
+            write(Buffer.from(compressed));
+
             // Record metrics
             metricsService.recordCompression?.('br', {
               uncompressedBytes,
@@ -241,13 +249,11 @@ export const createCompressionMiddleware = (
               ratio: compressed.length / uncompressedBytes,
             });
           } else {
-            // Below threshold, send uncompressed
-            res.setHeader('Content-Length', fullBuffer.length);
-            originalWrite.call(res, fullBuffer);
-            
-            // Remove Content-Encoding since we didn't compress
+            // Below threshold, or Brotli failed/returned null: send uncompressed
             res.removeHeader('Content-Encoding');
-            
+            res.setHeader('Content-Length', fullBuffer.length);
+            write(fullBuffer);
+
             metricsService.recordCompression?.('identity', {
               uncompressedBytes,
               compressedBytes: uncompressedBytes,
@@ -259,16 +265,16 @@ export const createCompressionMiddleware = (
           res.removeHeader('Content-Encoding');
           const fullBuffer = Buffer.concat(chunks);
           res.setHeader('Content-Length', fullBuffer.length);
-          originalWrite.call(res, fullBuffer);
-          
+          write(fullBuffer);
+
           metricsService.recordCompression?.('identity', {
             uncompressedBytes,
             compressedBytes: uncompressedBytes,
             ratio: 1,
           });
         }
-        
-        return originalEnd.call(res, ...args);
+
+        return (end as (...endArgs: any[]) => Response)(...args);
       } as Response['end'];
       
       return next();

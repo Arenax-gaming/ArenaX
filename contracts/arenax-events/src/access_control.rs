@@ -47,7 +47,13 @@ pub fn emit_role_revoked(env: &Env, account: &Address, role: u32, revoked_by: &A
     .publish(env);
 }
 
-pub fn emit_permission_delegated(env: &Env, delegator: &Address, delegatee: &Address, role: u32, expires_at: u64) {
+pub fn emit_permission_delegated(
+    env: &Env,
+    delegator: &Address,
+    delegatee: &Address,
+    role: u32,
+    expires_at: u64,
+) {
     PermissionDelegated {
         delegator: delegator.clone(),
         delegatee: delegatee.clone(),

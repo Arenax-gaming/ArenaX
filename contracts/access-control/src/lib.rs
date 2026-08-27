@@ -51,7 +51,7 @@ pub struct PermissionDefinition {
 pub struct TimeRestriction {
     pub start_time: u64,
     pub end_time: u64,
-    pub allowed_days: Vec<u32>, // 0=Sunday, 6=Saturday
+    pub allowed_days: Vec<u32>,   // 0=Sunday, 6=Saturday
     pub allowed_hours_start: u32, // 0-23
     pub allowed_hours_end: u32,   // 0-23
 }
@@ -79,7 +79,7 @@ impl AccessControl {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        
+
         // Grant admin role to the admin address
         let key = DataKey::Role(admin.clone(), ROLE_ADMIN);
         env.storage().persistent().set(&key, &true);
@@ -89,14 +89,23 @@ impl AccessControl {
     /// Check if an account has a specific role (or admin role, or active delegation)
     pub fn has_role(env: Env, account: Address, role: u32) -> bool {
         // Admin has all privileges
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not initialized");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
         if account == admin {
             return true;
         }
 
         // Check direct role assignment
         let key = DataKey::Role(account.clone(), role);
-        if env.storage().persistent().get::<DataKey, bool>(&key).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&key)
+            .unwrap_or(false)
+        {
             return true;
         }
 
@@ -130,7 +139,13 @@ impl AccessControl {
     }
 
     /// Delegate a role to another account for a limited time duration
-    pub fn delegate_role(env: Env, delegator: Address, delegatee: Address, role: u32, duration: u64) {
+    pub fn delegate_role(
+        env: Env,
+        delegator: Address,
+        delegatee: Address,
+        role: u32,
+        duration: u64,
+    ) {
         delegator.require_auth();
 
         // Verify delegator actually has the role
@@ -142,7 +157,12 @@ impl AccessControl {
         let expires_at = now + duration;
 
         let key = DataKey::Delegation(delegator.clone(), delegatee.clone());
-        let info = DelegationInfo { role, expires_at, max_uses: 0, current_uses: 0 };
+        let info = DelegationInfo {
+            role,
+            expires_at,
+            max_uses: 0,
+            current_uses: 0,
+        };
         env.storage().persistent().set(&key, &info);
 
         events::emit_permission_delegated(&env, &delegator, &delegatee, role, expires_at);
@@ -153,7 +173,11 @@ impl AccessControl {
         delegator.require_auth();
 
         let key = DataKey::Delegation(delegator.clone(), delegatee.clone());
-        if let Some(info) = env.storage().persistent().get::<DataKey, DelegationInfo>(&key) {
+        if let Some(info) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, DelegationInfo>(&key)
+        {
             if info.role == role {
                 env.storage().persistent().remove(&key);
                 events::emit_delegation_revoked(&env, &delegator, &delegatee, role);
@@ -166,9 +190,18 @@ impl AccessControl {
     }
 
     /// Verify if a delegation is currently active
-    pub fn is_delegation_active(env: Env, delegator: Address, delegatee: Address, role: u32) -> bool {
+    pub fn is_delegation_active(
+        env: Env,
+        delegator: Address,
+        delegatee: Address,
+        role: u32,
+    ) -> bool {
         let key = DataKey::Delegation(delegator, delegatee);
-        if let Some(info) = env.storage().persistent().get::<DataKey, DelegationInfo>(&key) {
+        if let Some(info) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, DelegationInfo>(&key)
+        {
             if info.role == role {
                 let now = env.ledger().timestamp();
                 return now < info.expires_at;
@@ -249,7 +282,7 @@ impl AccessControl {
     pub fn remove_permission_from_role(env: Env, role: u32, permission_name: String) {
         Self::require_admin(&env);
         let key = DataKey::RolePermissions(role);
-        let mut perms: Vec<String> = env
+        let perms: Vec<String> = env
             .storage()
             .persistent()
             .get(&key)
@@ -295,18 +328,26 @@ impl AccessControl {
 
     /// Check if an account has a specific permission (via any of their roles)
     pub fn account_has_permission(env: Env, account: Address, permission_name: String) -> bool {
-        let roles_to_check = vec![
-            &env, ROLE_ADMIN, ROLE_GOVERNANCE, ROLE_OPERATOR, ROLE_WHITELIST,
-            ROLE_MODERATOR, ROLE_TOURNAMENT_ORGANIZER, ROLE_GAME_DEVELOPER,
-            ROLE_ANALYTICS_VIEWER, ROLE_STAKING_MANAGER, ROLE_CROSS_GAME_ADMIN,
+        let roles_to_check = soroban_sdk::vec![
+            &env,
+            ROLE_ADMIN,
+            ROLE_GOVERNANCE,
+            ROLE_OPERATOR,
+            ROLE_WHITELIST,
+            ROLE_MODERATOR,
+            ROLE_TOURNAMENT_ORGANIZER,
+            ROLE_GAME_DEVELOPER,
+            ROLE_ANALYTICS_VIEWER,
+            ROLE_STAKING_MANAGER,
+            ROLE_CROSS_GAME_ADMIN,
         ];
         let mut i = 0;
         while i < roles_to_check.len() {
             let role = roles_to_check.get(i).unwrap();
-            if Self::has_role(env.clone(), account.clone(), role) {
-                if Self::has_permission(env.clone(), role, permission_name.clone()) {
-                    return true;
-                }
+            if Self::has_role(env.clone(), account.clone(), role)
+                && Self::has_permission(env.clone(), role, permission_name.clone())
+            {
+                return true;
             }
             i += 1;
         }
@@ -372,7 +413,8 @@ impl AccessControl {
 
         // Check hour of day (simplified)
         let hour_of_day = ((now % day_secs) / 3600) as u32;
-        hour_of_day >= restriction.allowed_hours_start && hour_of_day <= restriction.allowed_hours_end
+        hour_of_day >= restriction.allowed_hours_start
+            && hour_of_day <= restriction.allowed_hours_end
     }
 
     // ── Enhanced Delegation ────────────────────────────────────────────────
@@ -469,9 +511,7 @@ impl AccessControl {
 
     /// Get an audit entry by ID
     pub fn get_audit_entry(env: Env, entry_id: u64) -> Option<AuditEntry> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::AuditLog(entry_id))
+        env.storage().persistent().get(&DataKey::AuditLog(entry_id))
     }
 
     /// Get total number of audit entries
@@ -486,16 +526,32 @@ impl AccessControl {
 
     /// Get admin address
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
+    }
+
+    /// Require that the current admin has authorized this call.
+    fn require_admin(env: &Env) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
     }
 
     /// Get all defined permissions
-    pub fn get_permission_definitions(env: Env, permission_names: Vec<String>) -> Vec<PermissionDefinition> {
+    pub fn get_permission_definitions(
+        env: Env,
+        permission_names: Vec<String>,
+    ) -> Vec<PermissionDefinition> {
         let mut results = Vec::new(&env);
         let mut i = 0;
         while i < permission_names.len() {
             let name = permission_names.get(i).unwrap();
-            if let Some(perm) = env.storage().persistent().get::<DataKey, PermissionDefinition>(&DataKey::Permission(name)) {
+            if let Some(perm) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, PermissionDefinition>(&DataKey::Permission(name))
+            {
                 results.push_back(perm);
             }
             i += 1;

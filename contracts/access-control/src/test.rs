@@ -33,7 +33,7 @@ fn test_access_control_workflow() {
     // Delegate role
     // env.ledger().set_timestamp(100);
     client.delegate_role(&user1, &user2, &ROLE_OPERATOR, &100);
-    
+
     // Delegation is active
     assert!(client.is_delegation_active(&user1, &user2, &ROLE_OPERATOR));
     assert!(client.has_delegated_role(&user1, &user2, &ROLE_OPERATOR));
@@ -71,6 +71,6 @@ fn test_batch_role_check() {
     roles.push_back(ROLE_GOVERNANCE);
 
     let results = client.batch_has_roles(&accounts, &roles);
-    assert_eq!(results.get(0).unwrap(), true);
-    assert_eq!(results.get(1).unwrap(), false);
+    assert!(results.get(0).unwrap());
+    assert!(!results.get(1).unwrap());
 }

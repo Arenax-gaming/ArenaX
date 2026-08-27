@@ -19,6 +19,8 @@ members = [
     "access-control",
     "time-lock",
     "zk-proof",
+    "airdrop",
+    "event-manager",
 ]
 resolver = "2"
 

@@ -24,12 +24,12 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { Resolver, FieldValues } from "react-hook-form";
-import type { ZodSchema, ZodTypeAny, ZodError } from "zod";
+import type { z, ZodError } from "zod";
 import { recordValidationAttempt } from "./analytics";
 
 // ─── Type helpers ─────────────────────────────────────────────────────────────
 
-type ZodSchemaInput = ZodSchema | ZodTypeAny;
+type ZodSchemaInput = z.ZodType;
 
 // ─── Instrumented resolver ────────────────────────────────────────────────────
 
@@ -42,12 +42,15 @@ type ZodSchemaInput = ZodSchema | ZodTypeAny;
  * @param schemaName   - Unique identifier for analytics (use `NamedSchema.meta.name`)
  * @param context      - Optional context label ("form-submit", "field-blur", etc.)
  */
-export function createValidationResolver<TFieldValues extends FieldValues>(
-  schema: ZodSchemaInput,
+export function createValidationResolver<
+  TInput extends FieldValues,
+  TOutput,
+>(
+  schema: z.ZodType<TOutput, TInput>,
   schemaName: string,
   context?: string,
-): Resolver<TFieldValues> {
-  const baseResolver = zodResolver(schema as ZodSchema);
+): Resolver<TInput, any, TOutput> {
+  const baseResolver = zodResolver(schema);
 
   return async (values, resolverContext, options) => {
     const start = performance.now();
@@ -121,7 +124,7 @@ export function validateData<T>(
   | { success: true; data: T }
   | { success: false; errors: Record<string, string>; rawError: ZodError } {
   const start = performance.now();
-  const result = (schema as ZodSchema).safeParse(data);
+  const result = schema.safeParse(data);
   const durationMs = Math.round(performance.now() - start);
 
   if (result.success) {

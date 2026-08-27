@@ -2,13 +2,9 @@
 
 use crate::{
     AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, BehaviorPattern, DataKey,
-    Sanction, SanctionStatus, SanctionType, SuspiciousActivity, TrustScore, WhistleblowerProtection,
-    AnalyticsData, BehaviorProfile, MlModelParams,
+    MlModelParams, Sanction, SanctionStatus, SanctionType, SuspiciousActivity,
 };
-use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    Address, Bytes, Env, String, Vec, Map, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Map, String, Vec};
 
 fn setup_env() -> (Env, Address, Address, Address) {
     let env = Env::default();
@@ -18,7 +14,7 @@ fn setup_env() -> (Env, Address, Address, Address) {
     (env, admin, player, reputation_contract)
 }
 
-fn register_contract(env: &Env) -> (Address, AntiCheatContractClient) {
+fn register_contract(env: &Env) -> (Address, AntiCheatContractClient<'_>) {
     let contract_id = env.register(AntiCheatContract, ());
     let client = AntiCheatContractClient::new(env, &contract_id);
     (contract_id, client)
@@ -73,13 +69,7 @@ fn test_report_suspicious_activity() {
 
     env.mock_all_auths();
     let report_id = client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     assert_eq!(report_id, 1);
@@ -116,13 +106,7 @@ fn test_report_invalid_severity() {
 
     env.mock_all_auths();
     client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 }
 
@@ -409,13 +393,7 @@ fn test_verify_activity() {
 
     env.mock_all_auths();
     let report_id = client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     client.verify_activity(&admin, &report_id, &true);
@@ -446,13 +424,7 @@ fn test_verify_activity_unauthorized() {
 
     env.mock_all_auths();
     let report_id = client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     client.verify_activity(&player, &report_id, &true);
@@ -481,7 +453,7 @@ fn test_emergency_mode() {
 #[test]
 fn test_whistleblower_protection() {
     let (env, admin, player, reputation_contract) = setup_env();
-    let (contract_id, client) = register_contract(&env);
+    let (_contract_id, client) = register_contract(&env);
 
     client.initialize(&admin, &reputation_contract);
 
@@ -493,13 +465,7 @@ fn test_whistleblower_protection() {
 
     env.mock_all_auths();
     client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     let protection = client.get_whistleblower_protection(&reporter).unwrap();
@@ -522,13 +488,7 @@ fn test_analytics() {
 
     env.mock_all_auths();
     client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     let analytics = client.get_analytics();
@@ -550,13 +510,7 @@ fn test_behavior_profile() {
 
     env.mock_all_auths();
     client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     let profile = client.get_behavior_profile(&player).unwrap();
@@ -578,13 +532,7 @@ fn test_confidence_score() {
 
     env.mock_all_auths();
     let report_id = client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     let report = client.get_report(&report_id);
@@ -606,13 +554,7 @@ fn test_false_positive_prevention() {
 
     env.mock_all_auths();
     let report_id = client.report_suspicious_activity(
-        &reporter,
-        &player,
-        &match_id,
-        &pattern,
-        &evidence,
-        &severity,
-        &false,
+        &reporter, &player, &match_id, &pattern, &evidence, &severity, &false,
     );
 
     let report = client.get_report(&report_id);
@@ -632,7 +574,7 @@ fn test_ml_model_governance() {
 
     let mut weights: Map<u32, i32> = Map::new(&env);
     weights.set(0, 15); // Feature 0 weight
-    weights.set(1, 5);  // Feature 1 weight
+    weights.set(1, 5); // Feature 1 weight
     weights.set(2, 25); // Feature 2 weight
     let bias = 100;
     let threshold = 80;
@@ -685,7 +627,7 @@ fn test_ml_action_validation_triggers() {
     // 100 >= 95 threshold, validate_game_action should return false (cheat auto-reject)
     let mut action_bytes = Bytes::new(&env);
     action_bytes.push_back(220); // First byte
-    
+
     let state_bytes = Bytes::new(&env);
 
     let valid = client.validate_game_action(&player, &action_bytes, &state_bytes);

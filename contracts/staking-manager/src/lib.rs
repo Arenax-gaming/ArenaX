@@ -5,8 +5,8 @@ mod flexible_rewards;
 use arenax_events::staking as events;
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
 
-pub use flexible_rewards::{FlexiblePosition, RewardPool};
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
+pub use flexible_rewards::{FlexiblePosition, RewardPool};
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -507,7 +507,7 @@ impl StakingManager {
         let ax_token = Self::get_ax_token(env.clone());
         token::Client::new(&env, &ax_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -774,7 +774,7 @@ impl StakingManager {
         let ax_token = Self::get_ax_token(env.clone());
         token::Client::new(&env, &ax_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -883,12 +883,8 @@ impl StakingManager {
             .unwrap_or(0);
         let reward_payout = accrued.max(0).min(reserve);
 
-        let penalty = early_exit_penalty(
-            pos.amount,
-            pool.early_exit_penalty_bps,
-            now,
-            pos.unlock_at,
-        );
+        let penalty =
+            early_exit_penalty(pos.amount, pool.early_exit_penalty_bps, now, pos.unlock_at);
         let principal_out = pos.amount - penalty;
 
         let ax_token = Self::get_ax_token(env.clone());
@@ -954,7 +950,7 @@ impl StakingManager {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| Vec::new(env));
-        if !pools.contains(&pool_id) {
+        if !pools.contains(pool_id) {
             pools.push_back(pool_id);
             env.storage().persistent().set(&key, &pools);
         }

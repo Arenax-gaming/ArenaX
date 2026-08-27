@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_waiting
     WHERE status = 0;
 
 -- Composite index for the average-wait-time aggregate query which filters on
--- (status = 1 (matched), matched_at IS NOT NULL, created_at >= ...).
+-- (status = 1 (matched), matched_at IS NOT NULL, joined_at >= ...).
 CREATE INDEX IF NOT EXISTS idx_matchmaking_queue_matched_stats
-    ON matchmaking_queue (game, game_mode, created_at)
+    ON matchmaking_queue (game, game_mode, joined_at)
     WHERE status = 1 AND matched_at IS NOT NULL;

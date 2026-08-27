@@ -7,6 +7,7 @@ import {
   LeaderboardStats,
 } from '@/types/leaderboard'
 import { API_BASE } from '@/lib/constants'
+import { api } from '@/lib/api'
 
 export const useLeaderboard = (
   category: string,

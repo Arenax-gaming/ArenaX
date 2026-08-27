@@ -1,7 +1,7 @@
 #![no_std]
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec, String};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -33,6 +33,22 @@ pub struct Proposal {
     pub executed: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BurnMetrics {
+    pub total_burned: i128,
+    pub last_burn_time: u64,
+    pub last_burn_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BuybackSchedule {
+    pub burn_amount_per_interval: i128,
+    pub interval_seconds: u64,
+    pub next_burn_time: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -45,11 +61,19 @@ pub enum DataKey {
     Proposal(u64),
     HasVoted(u64, Address),
     TotalLockedSupply,
+    RevenuePoolBalance,
+    BurnMetrics,
+    BuybackSchedule,
+    TotalBurned,
 }
 
 #[contract]
 pub struct AxToken;
 
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#[allow(deprecated)]
 #[contractimpl]
 impl AxToken {
     pub fn initialize(env: &Env, admin: Address) {
@@ -59,8 +83,12 @@ impl AxToken {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
-        env.storage().instance().set(&DataKey::TotalLockedSupply, &0i128);
-        env.storage().instance().set(&DataKey::ProposalCounter, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalLockedSupply, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalCounter, &0u64);
     }
 
     pub fn mint(env: &Env, to: Address, amount: i128) {
@@ -197,7 +225,10 @@ impl AxToken {
             .set(&DataKey::Vesting(beneficiary.clone()), &schedule);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VESTING_CREATE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VESTING_CREATE"),
+            ),
             (beneficiary, total_amount),
         );
     }
@@ -234,9 +265,10 @@ impl AxToken {
 
         // Add vested tokens to beneficiary balance
         let current_balance = Self::balance(&env, beneficiary.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(beneficiary.clone()), &(current_balance + claimable));
+        env.storage().instance().set(
+            &DataKey::Balance(beneficiary.clone()),
+            &(current_balance + claimable),
+        );
 
         let current_supply = Self::total_supply(&env);
         env.storage()
@@ -244,7 +276,10 @@ impl AxToken {
             .set(&DataKey::TotalSupply, &(current_supply + claimable));
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VESTING_CLAIM")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VESTING_CLAIM"),
+            ),
             (beneficiary, claimable),
         );
 
@@ -284,7 +319,10 @@ impl AxToken {
             .get(&lockup_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        lockups.push_back(LockupRecord { amount, unlock_time });
+        lockups.push_back(LockupRecord {
+            amount,
+            unlock_time,
+        });
         env.storage().instance().set(&lockup_key, &lockups);
 
         let total_locked: i128 = env
@@ -297,7 +335,10 @@ impl AxToken {
             .set(&DataKey::TotalLockedSupply, &(total_locked + amount));
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "LOCK")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "LOCK"),
+            ),
             (from, amount, unlock_time),
         );
     }
@@ -331,21 +372,26 @@ impl AxToken {
         env.storage().instance().set(&lockup_key, &active_lockups);
 
         let balance = Self::balance(&env, from.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::Balance(from.clone()), &(balance + unlocked_amount));
+        env.storage().instance().set(
+            &DataKey::Balance(from.clone()),
+            &(balance + unlocked_amount),
+        );
 
         let total_locked: i128 = env
             .storage()
             .instance()
             .get(&DataKey::TotalLockedSupply)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalLockedSupply, &(total_locked - unlocked_amount));
+        env.storage().instance().set(
+            &DataKey::TotalLockedSupply,
+            &(total_locked - unlocked_amount),
+        );
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "UNLOCK")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "UNLOCK"),
+            ),
             (from, unlocked_amount),
         );
 
@@ -416,7 +462,10 @@ impl AxToken {
             .set(&DataKey::ProposalCounter, &counter);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "PROPOSAL_CREATE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_CREATE"),
+            ),
             (counter, proposer),
         );
 
@@ -460,13 +509,145 @@ impl AxToken {
         env.storage().instance().set(&vote_key, &true);
 
         env.events().publish(
-            (Symbol::new(&env, "ArenaXToken_v1"), Symbol::new(&env, "VOTE")),
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "VOTE"),
+            ),
             (proposal_id, voter, support, voting_power),
         );
     }
 
     pub fn get_proposal(env: Env, proposal_id: u64) -> Option<Proposal> {
-        env.storage().instance().get(&DataKey::Proposal(proposal_id))
+        env.storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Buyback and Burn
+    // ---------------------------------------------------------------------------
+
+    pub fn deposit_revenue(env: Env, from: Address, amount: i128) {
+        from.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let balance = Self::balance(&env, from.clone());
+        if balance < amount {
+            panic!("insufficient balance");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &(balance - amount));
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool + amount));
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "REVENUE_DEPOSIT"),
+            ),
+            (from, amount),
+        );
+    }
+
+    pub fn configure_buyback(env: Env, amount: i128, interval: u64) {
+        Self::require_admin(&env);
+        if amount <= 0 || interval == 0 {
+            panic!("invalid configuration");
+        }
+
+        let schedule = BuybackSchedule {
+            burn_amount_per_interval: amount,
+            interval_seconds: interval,
+            next_burn_time: env.ledger().timestamp() + interval,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
+    }
+
+    pub fn execute_buyback_and_burn(env: Env) -> i128 {
+        let mut schedule: BuybackSchedule = env
+            .storage()
+            .instance()
+            .get(&DataKey::BuybackSchedule)
+            .expect("no schedule configured");
+        let current_time = env.ledger().timestamp();
+
+        if current_time < schedule.next_burn_time {
+            panic!("too early for next burn");
+        }
+
+        let pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RevenuePoolBalance)
+            .unwrap_or(0);
+        let amount_to_burn = if pool < schedule.burn_amount_per_interval {
+            pool
+        } else {
+            schedule.burn_amount_per_interval
+        };
+
+        if amount_to_burn <= 0 {
+            panic!("no revenue to burn");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RevenuePoolBalance, &(pool - amount_to_burn));
+
+        let current_supply = Self::total_supply(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &(current_supply - amount_to_burn));
+
+        let total_burned: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBurned)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBurned, &(total_burned + amount_to_burn));
+
+        let metrics = BurnMetrics {
+            total_burned: total_burned + amount_to_burn,
+            last_burn_time: current_time,
+            last_burn_amount: amount_to_burn,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::BurnMetrics, &metrics);
+
+        schedule.next_burn_time = current_time + schedule.interval_seconds;
+        env.storage()
+            .instance()
+            .set(&DataKey::BuybackSchedule, &schedule);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "BUYBACK_BURN"),
+            ),
+            (amount_to_burn, current_time),
+        );
+
+        amount_to_burn
+    }
+
+    pub fn get_burn_metrics(env: Env) -> Option<BurnMetrics> {
+        env.storage().instance().get(&DataKey::BurnMetrics)
     }
 
     // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { useCollaboration } from '@/hooks/useCollaboration';
 import { CursorOverlay } from '@/components/collaboration/CursorOverlay';
 import { PresenceIndicator } from '@/components/collaboration/PresenceIndicator';
 import { CollaborativeStateIndicator } from '@/components/collaboration/CollaborativeState';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { RemoteCursor, PresenceUser, CollaborationState } from '@/types/collaboration';
 
@@ -62,7 +62,8 @@ describe('PresenceIndicator', () => {
   it('shows all avatars when expanded', () => {
     render(<PresenceIndicator users={mockUsers} maxVisible={3} />);
     const plusButton = screen.getByText('+3');
-    plusButton.click();
+    // fireEvent wraps the click in act() so the React state update flushes
+    fireEvent.click(plusButton);
     expect(screen.queryByText('+3')).not.toBeInTheDocument();
   });
 });
