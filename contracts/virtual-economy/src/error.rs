@@ -64,4 +64,16 @@ pub enum VirtualEconomyError {
     InvalidAssetPair = 85,
     /// The price submitted to the oracle is not positive.
     OracleInvalidPrice = 86,
+
+    // NFT staking errors
+    /// NFT staking has not been configured yet.
+    NftStakingNotConfigured = 110,
+    /// The NFT is already staked.
+    NftAlreadyStaked = 111,
+    /// The NFT is not currently staked.
+    NftNotStaked = 112,
+    /// The minimum lock period has not been met yet.
+    NftLockPeriodNotMet = 113,
+    /// NFT staking is currently paused.
+    NftStakingPaused = 114,
 }

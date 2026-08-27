@@ -2,7 +2,7 @@
 
 import React from 'react'
 
-type Category = 'global' | 'tournaments' | 'casual'
+type Category = 'global' | 'tournaments' | 'casual' | 'ranked'
 
 interface CategorySelectorProps {
   category: Category
@@ -24,6 +24,11 @@ const categories: { id: Category; label: string; description: string }[] = [
     id: 'casual',
     label: 'Casual',
     description: 'Casual game rankings',
+  },
+  {
+    id: 'ranked',
+    label: 'Ranked',
+    description: 'Ranked match rankings',
   },
 ]
 

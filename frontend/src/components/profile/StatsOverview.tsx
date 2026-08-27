@@ -60,7 +60,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
     : 0;
   
   // Calculate rank change (mock data for demo)
-  const rankChange = -15; // Improved by 15 positions
+  const rankChange: number = -15; // Improved by 15 positions
   
   // Get performance rating
   const getPerformanceRating = (winRate: number) => {

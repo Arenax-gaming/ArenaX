@@ -13,11 +13,11 @@
 //! # Design
 //!
 //! The admin initialises the contract with:
-//!   - `token`       — the AX token contract address
-//!   - `merkle_root` — root of a Merkle tree whose leaves are
-//!                     `sha256(address || amount)`
-//!   - `total_amount`— total tokens deposited into this contract
-//!   - `expires_at`  — ledger timestamp after which no new claims are accepted
+//! - `token`       — the AX token contract address
+//! - `merkle_root` — root of a Merkle tree whose leaves are
+//!   `sha256(address || amount)`
+//! - `total_amount` — total tokens deposited into this contract
+//! - `expires_at`  — ledger timestamp after which no new claims are accepted
 //!
 //! Each eligible address calls `claim(proof, amount)`.  The contract:
 //!   1. Verifies the Merkle proof against the stored root.
@@ -28,9 +28,9 @@
 //! After `expires_at` the admin can call `recover_unclaimed` to sweep the
 //! remaining balance back to a designated recovery address.
 
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
-    token, Address, Bytes, BytesN, Env, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Bytes, BytesN, Env, Vec,
 };
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
@@ -79,6 +79,10 @@ pub struct ClaimResult {
 #[contract]
 pub struct AirdropContract;
 
+// `Events::publish` is deprecated in favor of the `#[contractevent]` macro;
+// this contract's events predate that macro's availability and migrating
+// their wire format is out of scope here.
+#[allow(deprecated)]
 #[contractimpl]
 impl AirdropContract {
     // ── Initialisation ────────────────────────────────────────────────────────
@@ -114,17 +118,25 @@ impl AirdropContract {
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
-        env.storage().instance().set(&DataKey::MerkleRoot, &merkle_root);
-        env.storage().instance().set(&DataKey::TotalAmount, &total_amount);
-        env.storage().instance().set(&DataKey::ClaimedAmount, &0i128);
-        env.storage().instance().set(&DataKey::ExpiresAt, &expires_at);
-        env.storage().instance().set(&DataKey::RecoveryAddress, &recovery_address);
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &merkle_root);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAmount, &total_amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::ClaimedAmount, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ExpiresAt, &expires_at);
+        env.storage()
+            .instance()
+            .set(&DataKey::RecoveryAddress, &recovery_address);
         env.storage().instance().set(&DataKey::Paused, &false);
 
-        env.events().publish(
-            (symbol_short!("INIT"), &admin),
-            (total_amount, expires_at),
-        );
+        env.events()
+            .publish((symbol_short!("INIT"), &admin), (total_amount, expires_at));
     }
 
     // ── Claiming ──────────────────────────────────────────────────────────────
@@ -160,7 +172,11 @@ impl AirdropContract {
         }
 
         // Check sufficient balance
-        let claimed: i128 = env.storage().instance().get(&DataKey::ClaimedAmount).unwrap_or(0);
+        let claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedAmount)
+            .unwrap_or(0);
         let total: i128 = env.storage().instance().get(&DataKey::TotalAmount).unwrap();
         if claimed + amount > total {
             panic!("insufficient airdrop balance");
@@ -182,12 +198,14 @@ impl AirdropContract {
         token::Client::new(&env, &token).transfer(&contract_addr, &claimant, &amount);
 
         let now = env.ledger().timestamp();
-        env.events().publish(
-            (symbol_short!("CLAIMED"), &claimant),
-            (amount, now),
-        );
+        env.events()
+            .publish((symbol_short!("CLAIMED"), &claimant), (amount, now));
 
-        ClaimResult { claimant, amount, claimed_at: now }
+        ClaimResult {
+            claimant,
+            amount,
+            claimed_at: now,
+        }
     }
 
     /// Batch-claim for multiple addresses in a single transaction.
@@ -250,10 +268,8 @@ impl AirdropContract {
 
             client.transfer(&contract_addr, &claimant, &amount);
 
-            env.events().publish(
-                (symbol_short!("CLAIMED"), &claimant),
-                (amount, now),
-            );
+            env.events()
+                .publish((symbol_short!("CLAIMED"), &claimant), (amount, now));
 
             results.push_back(ClaimResult {
                 claimant,
@@ -300,10 +316,8 @@ impl AirdropContract {
 
         client.transfer(&contract_addr, &recovery, &balance);
 
-        env.events().publish(
-            (symbol_short!("RECOVERED"), &recovery),
-            (balance,),
-        );
+        env.events()
+            .publish((symbol_short!("RECOVERED"), &recovery), (balance,));
 
         balance
     }
@@ -318,7 +332,9 @@ impl AirdropContract {
             panic!("additional_amount cannot be negative");
         }
 
-        env.storage().instance().set(&DataKey::MerkleRoot, &new_root);
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &new_root);
 
         if additional_amount > 0 {
             let total: i128 = env.storage().instance().get(&DataKey::TotalAmount).unwrap();
@@ -327,10 +343,8 @@ impl AirdropContract {
                 .set(&DataKey::TotalAmount, &(total + additional_amount));
         }
 
-        env.events().publish(
-            (symbol_short!("ROOT_UPD"),),
-            (new_root, additional_amount),
-        );
+        env.events()
+            .publish((symbol_short!("ROOT_UPD"),), (new_root, additional_amount));
     }
 
     /// Extend the expiration timestamp. Can only push it further into the future.
@@ -340,8 +354,11 @@ impl AirdropContract {
         if new_expires_at <= current {
             panic!("new expiry must be later than current expiry");
         }
-        env.storage().instance().set(&DataKey::ExpiresAt, &new_expires_at);
-        env.events().publish((symbol_short!("EXP_EXT"),), (new_expires_at,));
+        env.storage()
+            .instance()
+            .set(&DataKey::ExpiresAt, &new_expires_at);
+        env.events()
+            .publish((symbol_short!("EXP_EXT"),), (new_expires_at,));
     }
 
     pub fn set_paused(env: Env, paused: bool) {
@@ -371,25 +388,46 @@ impl AirdropContract {
     }
 
     pub fn get_total_amount(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::TotalAmount).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalAmount)
+            .unwrap_or(0)
     }
 
     pub fn get_claimed_amount(env: Env) -> i128 {
-        env.storage().instance().get(&DataKey::ClaimedAmount).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::ClaimedAmount)
+            .unwrap_or(0)
     }
 
     pub fn get_unclaimed_amount(env: Env) -> i128 {
-        let total: i128 = env.storage().instance().get(&DataKey::TotalAmount).unwrap_or(0);
-        let claimed: i128 = env.storage().instance().get(&DataKey::ClaimedAmount).unwrap_or(0);
+        let total: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalAmount)
+            .unwrap_or(0);
+        let claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedAmount)
+            .unwrap_or(0);
         total.saturating_sub(claimed)
     }
 
     pub fn get_expires_at(env: Env) -> u64 {
-        env.storage().instance().get(&DataKey::ExpiresAt).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::ExpiresAt)
+            .unwrap_or(0)
     }
 
     pub fn is_expired(env: Env) -> bool {
-        let expires_at: u64 = env.storage().instance().get(&DataKey::ExpiresAt).unwrap_or(0);
+        let expires_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ExpiresAt)
+            .unwrap_or(0);
         env.ledger().timestamp() >= expires_at
     }
 
@@ -401,7 +439,10 @@ impl AirdropContract {
     }
 
     pub fn get_admin(env: Env) -> Address {
-        env.storage().instance().get(&DataKey::Admin).expect("not initialized")
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
@@ -445,9 +486,8 @@ impl AirdropContract {
 /// The leaf encodes the claimant's entitlement so that each (address, amount)
 /// pair maps to a unique leaf.
 fn compute_leaf(env: &Env, claimant: &Address, amount: i128) -> BytesN<32> {
-    // Encode: 8-byte big-endian amount appended after the address xdr bytes.
-    // We use a Bytes buffer because Soroban doesn't expose a direct address→bytes fn.
-    let mut buf = Bytes::new(env);
+    // Encode: 16-byte big-endian amount appended after the address xdr bytes.
+    let mut buf = claimant.clone().to_xdr(env);
 
     // Append amount as 16-byte big-endian (i128)
     let amount_bytes = amount.to_be_bytes();

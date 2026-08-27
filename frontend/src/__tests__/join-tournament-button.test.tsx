@@ -12,6 +12,7 @@ jest.mock("next/navigation", () => ({
 
 const mockNotify = jest.fn();
 const mockAddToast = jest.fn();
+const mockJoinTournament = jest.fn();
 
 jest.mock("@/contexts/NotificationContext", () => ({
   useNotifications: () => ({
@@ -25,8 +26,6 @@ jest.mock("@/lib/api", () => ({
     joinTournament: (...args: unknown[]) => mockJoinTournament(...args),
   },
 }));
-
-const mockJoinTournament = api.joinTournament as jest.Mock;
 
 const baseTournament: Tournament = {
   id: "t1",

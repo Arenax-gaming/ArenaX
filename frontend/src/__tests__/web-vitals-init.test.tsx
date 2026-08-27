@@ -30,6 +30,16 @@ import { WebVitalsInit } from '@/components/providers/WebVitalsInit';
 import { defaultWebVitalsReporter } from '@/lib/webVitalsReporter';
 
 describe('WebVitalsInit', () => {
+  // WebVitalsInit only wires up listeners in production (Jest runs with
+  // NODE_ENV=test), so flip the env for the whole suite.
+  beforeAll(() => {
+    process.env.NODE_ENV = 'production';
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = 'test';
+  });
+
   it('renders nothing to the DOM', () => {
     const { container } = render(<WebVitalsInit />);
     expect(container.firstChild).toBeNull();
