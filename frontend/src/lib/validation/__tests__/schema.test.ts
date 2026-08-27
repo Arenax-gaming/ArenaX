@@ -120,7 +120,10 @@ describe("flattenZodErrors()", () => {
   });
 
   it("uses the first error per field", () => {
-    const schema = z.object({ pw: z.string().min(8).max(3) }); // intentionally conflicting
+    // Intentionally conflicting checks so `pw` produces multiple issues.
+    // (Avoid .min().max() together: zod v4 merges them into one length
+    // regex, and a min > max produces an invalid {m,n} quantifier.)
+    const schema = z.object({ pw: z.string().min(10, "too short").regex(/[A-Z]/, "needs uppercase") });
     const result = schema.safeParse({ pw: "ab" });
     if (!result.success) {
       const flat = flattenZodErrors(result.error);

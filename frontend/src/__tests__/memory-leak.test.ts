@@ -7,14 +7,19 @@
 
 import { renderHook, cleanup, act } from '@testing-library/react';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useInterval } from '@/hooks/useInterval';
-import { useMobile } from '@/hooks/useMobile';
+import { useInterval, useTimeout } from '@/hooks/useInterval';
+import { useDevice, useConnectionSpeed } from '@/hooks/useMobile';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useRealtimeMessages } from '@/messages/useRealtimeMessages';
 
 describe('Memory Leak Prevention', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
   afterEach(() => {
     cleanup();
+    jest.useRealTimers();
   });
 
   describe('useKeyboardShortcuts', () => {
@@ -72,7 +77,7 @@ describe('Memory Leak Prevention', () => {
 
     it('should clear timeout on unmount', () => {
       const callback = jest.fn();
-      const { unmount } = renderHook(() => useInterval.useTimeout(callback, 100));
+      const { unmount } = renderHook(() => useTimeout(callback, 100));
 
       act(() => {
         jest.advanceTimersByTime(50);
@@ -89,9 +94,9 @@ describe('Memory Leak Prevention', () => {
     });
   });
 
-  describe('useMobile', () => {
+  describe('useDevice (mobile detection)', () => {
     it('should clean up resize event listeners on unmount', () => {
-      const { unmount } = renderHook(() => useMobile());
+      const { unmount } = renderHook(() => useDevice());
 
       const removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
 
@@ -104,9 +109,7 @@ describe('Memory Leak Prevention', () => {
     });
 
     it('should clean up connection event listener on unmount', () => {
-      const { unmount } = renderHook(() => useMobile.useConnectionSpeed());
-
-      // Mock connection API
+      // Mock connection API BEFORE mounting so the effect registers on it
       const mockConnection = {
         addEventListener: jest.fn(),
         removeEventListener: jest.fn(),
@@ -114,6 +117,8 @@ describe('Memory Leak Prevention', () => {
       };
       
       (navigator as any).connection = mockConnection;
+
+      const { unmount } = renderHook(() => useConnectionSpeed());
 
       unmount();
 
@@ -125,22 +130,20 @@ describe('Memory Leak Prevention', () => {
 
   describe('useResponsive', () => {
     it('should disconnect ResizeObserver on unmount', () => {
-      const { unmount } = renderHook(() => useResponsive());
-
       const disconnectSpy = jest.fn();
       const observeSpy = jest.fn();
 
-      // Mock ResizeObserver
+      // Mock ResizeObserver BEFORE mounting so the hook's effect picks it up
       class MockResizeObserver {
-        constructor(callback: any) {
-          this.disconnect = disconnectSpy;
-          this.observe = observeSpy;
-        }
+        constructor(_callback: any) {}
         disconnect = disconnectSpy;
         observe = observeSpy;
+        unobserve() {}
       }
 
       (window as any).ResizeObserver = MockResizeObserver;
+
+      const { unmount } = renderHook(() => useResponsive());
 
       unmount();
 
@@ -150,6 +153,14 @@ describe('Memory Leak Prevention', () => {
     });
 
     it('should remove resize event listener on unmount', () => {
+      // Ensure ResizeObserver exists (jsdom lacks it) so the effect mounts
+      const originalRO = (window as any).ResizeObserver;
+      (window as any).ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+
       const { unmount } = renderHook(() => useResponsive());
 
       const removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
@@ -159,6 +170,7 @@ describe('Memory Leak Prevention', () => {
       expect(removeEventListenerSpy).toHaveBeenCalledWith('resize', expect.any(Function));
 
       removeEventListenerSpy.mockRestore();
+      (window as any).ResizeObserver = originalRO;
     });
   });
 

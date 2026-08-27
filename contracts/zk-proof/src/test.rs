@@ -1,10 +1,15 @@
-use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Bytes, Env, Vec,
+};
 
 use crate::{Proof, ZkProof, ZkProofClient};
 
 #[test]
 fn test() {
     let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(10_000);
     let contract_id = env.register(ZkProof, ());
     let client = ZkProofClient::new(&env, &contract_id);
 

@@ -35,8 +35,9 @@ const validatePassword = (password: string): boolean =>
 
 function sanitiseForSync(settings: UserSettings): Record<string, unknown> {
   const { account, ...rest } = settings;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { newPassword: _np, confirmNewPassword: _cnp, ...safeAccount } = account as Record<string, unknown>;
+  const safeAccount: Record<string, unknown> = { ...(account as unknown as Record<string, unknown>) };
+  delete safeAccount.newPassword;
+  delete safeAccount.confirmNewPassword;
   return { ...rest, account: safeAccount };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, Suspense } from "react";
+import { useState, useMemo, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Trophy, Users } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
@@ -218,6 +218,7 @@ function TournamentsContent() {
             );
           })}
         </div>
+      </div>
 
       {/* Content */}
       {isLoading ? (

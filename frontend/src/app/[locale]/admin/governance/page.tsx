@@ -21,7 +21,7 @@ export default function GovernanceDashboard() {
     setError(null);
     try {
       const data = await api.getProposals();
-      setProposals(data as GovernanceProposal[]);
+      setProposals(data as unknown as GovernanceProposal[]);
     } catch (error) {
       console.error("Failed to fetch proposals:", error);
     } finally {

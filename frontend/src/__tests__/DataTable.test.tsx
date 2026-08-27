@@ -55,11 +55,12 @@ describe('DataTable', () => {
     render(<DataTable columns={columns} data={testData} />);
 
     const scoreHeader = screen.getByRole('columnheader', { name: 'Score' });
+    // First click sorts ascending — the lowest score (75) moves to the top.
     fireEvent.click(scoreHeader);
 
     const rows = screen.getAllByRole('row');
-    const lastRow = rows[rows.length - 1];
-    expect(within(lastRow).getByText('75')).toBeInTheDocument();
+    const firstDataRow = rows[1]; // rows[0] is the header row
+    expect(within(firstDataRow).getByText('75')).toBeInTheDocument();
   });
 
   it('filters data via search', () => {

@@ -25,9 +25,11 @@ CREATE INDEX IF NOT EXISTS idx_leaderboards_user_game_period
 ON leaderboards(user_id, game, period);
 
 -- Index for rank history queries
+-- NOTE: no partial predicate here — NOW() is VOLATILE, which Postgres
+-- rejects in index predicates ("functions in index predicate must be
+-- marked IMMUTABLE"). Index all rows instead.
 CREATE INDEX IF NOT EXISTS idx_leaderboards_history 
-ON leaderboards(user_id, game, updated_at DESC) 
-WHERE updated_at > NOW() - INTERVAL '90 days';
+ON leaderboards(user_id, game, updated_at DESC);
 
 -- Add statistics for query planner optimization
 ANALYZE leaderboards;
