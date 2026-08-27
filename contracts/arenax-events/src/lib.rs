@@ -31,7 +31,6 @@ pub mod emergency_pause;
 pub mod escrow;
 pub mod governance;
 pub mod identity;
-pub mod manager;
 pub mod match_contract;
 pub mod match_lifecycle;
 pub mod player_reputation;

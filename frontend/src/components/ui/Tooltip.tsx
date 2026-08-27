@@ -105,7 +105,10 @@ const PLACEMENT_CLASSES: Record<Placement, string> = {
   right: 'left-full top-1/2 -translate-y-1/2 ml-2',
 };
 
-const PLACEMENT_INITIAL: Record<Placement, object> = {
+const PLACEMENT_INITIAL: Record<
+  Placement,
+  { opacity: number; x?: number; y?: number }
+> = {
   top: { opacity: 0, y: 4 },
   bottom: { opacity: 0, y: -4 },
   left: { opacity: 0, x: 4 },

@@ -8,6 +8,12 @@ import {
   getStoredWalletSession,
 } from "@/lib/wallet/connectors";
 
+// WalletConnectCard calls useAnalytics, which needs an AnalyticsProvider in
+// the tree — stub the hook for these unit tests.
+jest.mock("@/hooks/useAnalytics", () => ({
+  useAnalytics: () => ({ track: jest.fn() }),
+}));
+
 jest.mock("@/lib/wallet/connectors", () => ({
   connectFreighter: jest.fn(),
   connectAlbedo: jest.fn(),

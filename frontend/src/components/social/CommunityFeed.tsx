@@ -154,13 +154,13 @@ export function CommunityFeed({
             <div className="flex items-center gap-3">
               <AvatarWithStatus
                 avatar={post.author?.avatar}
-                username={post.author?.username || post.authorUsername}
+                username={post.author?.username || post.authorUsername || "Unknown"}
                 status={post.author?.status as any}
                 size="md"
               />
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{post.author?.username || post.authorUsername}</span>
+                  <span className="font-medium">{post.author?.username || post.authorUsername || "Unknown"}</span>
                   {isPinned && (
                     <span className="flex items-center gap-1 text-xs text-primary">
                       <Pin className="h-3 w-3" />

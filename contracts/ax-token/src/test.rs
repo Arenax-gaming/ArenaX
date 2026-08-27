@@ -364,6 +364,108 @@ fn test_vesting_claim_before_cliff() {
 }
 
 #[test]
+fn test_vesting_batch_flow() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    env.ledger().set_timestamp(100);
+    let beneficiaries = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
+    client.create_vesting_schedules_batch(&beneficiaries, &amounts, &100u64, &50u64, &100u64);
+
+    let schedule1 = client.get_vesting_schedule(&user1).unwrap();
+    let schedule2 = client.get_vesting_schedule(&user2).unwrap();
+    assert_eq!(schedule1.total_amount, 1000);
+    assert_eq!(schedule2.total_amount, 2000);
+
+    env.ledger().set_timestamp(200);
+    assert_eq!(client.claim_vested_tokens(&user1), 1000);
+    assert_eq!(client.claim_vested_tokens(&user2), 2000);
+}
+
+#[test]
+#[should_panic(expected = "beneficiaries and amounts length mismatch")]
+fn test_vesting_batch_length_mismatch() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    let beneficiaries = soroban_sdk::vec![&env, user1.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
+    client.create_vesting_schedules_batch(&beneficiaries, &amounts, &100u64, &50u64, &100u64);
+}
+
+#[test]
+fn test_vesting_clawback_before_cliff() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    env.ledger().set_timestamp(100);
+    client.create_vesting_schedule(&user1, &1000i128, &100u64, &50u64, &100u64);
+
+    // Revoke before cliff: nothing vested yet, entire amount forfeited.
+    env.ledger().set_timestamp(120);
+    let forfeited = client.revoke_vesting_schedule(&user1);
+    assert_eq!(forfeited, 1000);
+
+    let schedule = client.get_vesting_schedule(&user1).unwrap();
+    assert_eq!(schedule.total_amount, 0);
+    assert!(schedule.revoked);
+}
+
+#[test]
+fn test_vesting_clawback_after_partial_vest() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    env.ledger().set_timestamp(100);
+    client.create_vesting_schedule(&user1, &1000i128, &100u64, &50u64, &100u64);
+
+    // Revoke after 60/100 elapsed: 600 vested, 400 forfeited.
+    env.ledger().set_timestamp(160);
+    let forfeited = client.revoke_vesting_schedule(&user1);
+    assert_eq!(forfeited, 400);
+
+    // Beneficiary can still claim the already-vested portion.
+    let claimed = client.claim_vested_tokens(&user1);
+    assert_eq!(claimed, 600);
+    assert_eq!(client.balance(&user1), 600);
+
+    // No further tokens ever become claimable.
+    env.ledger().set_timestamp(500);
+    let schedule = client.get_vesting_schedule(&user1).unwrap();
+    assert_eq!(schedule.total_amount, 600);
+}
+
+#[test]
+#[should_panic(expected = "vesting schedule already revoked")]
+fn test_vesting_clawback_twice() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    env.ledger().set_timestamp(100);
+    client.create_vesting_schedule(&user1, &1000i128, &100u64, &50u64, &100u64);
+
+    env.ledger().set_timestamp(160);
+    client.revoke_vesting_schedule(&user1);
+    client.revoke_vesting_schedule(&user1);
+}
+
+#[test]
 fn test_locking_flow() {
     let (env, admin, user1, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);

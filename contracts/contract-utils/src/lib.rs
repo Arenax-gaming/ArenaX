@@ -86,7 +86,12 @@ pub mod time {
     }
 
     /// Check if timestamp is within a time window
-    pub fn is_within_window(_env: &Env, timestamp: u64, window_start: u64, window_end: u64) -> bool {
+    pub fn is_within_window(
+        _env: &Env,
+        timestamp: u64,
+        window_start: u64,
+        window_end: u64,
+    ) -> bool {
         timestamp >= window_start && timestamp <= window_end
     }
 }

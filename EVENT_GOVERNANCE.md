@@ -143,9 +143,3 @@ Every service MUST:
 
 ---
 
-## 10. Security
-
-- Kafka is internal-only (not exposed outside VPC).
-- No PII in event payloads beyond user/match IDs. Avoid storing phone numbers, emails, or financial details in event bodies — reference them by ID only.
-- mTLS is required in production (`ssl.enabled=true`).
-- Secrets (Kafka credentials) are stored in AWS Secrets Manager and injected as environment variables.

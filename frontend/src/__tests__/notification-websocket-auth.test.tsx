@@ -13,6 +13,7 @@ jest.mock("@/lib/api", () => ({
     markAllNotificationsRead: jest.fn().mockResolvedValue(undefined),
     deleteNotification: jest.fn().mockResolvedValue(undefined),
     createNotification: jest.fn().mockResolvedValue(undefined),
+    getWsToken: jest.fn().mockResolvedValue({ ws_token: "test-jwt-token", expires_in: 60 }),
   },
 }));
 
@@ -124,9 +125,11 @@ describe("NotificationContext WebSocket auth", () => {
   it("still reconnects after a normal connection drop", async () => {
     const socket = await renderProvider();
 
-    act(() => {
+    await act(async () => {
       socket.onclose?.({ code: 1006 });
-      jest.advanceTimersByTime(5_000);
+      // Use the async variant so the getWsToken() promise (microtask) that
+      // precedes creating the replacement socket gets flushed.
+      await jest.advanceTimersByTimeAsync(5_000);
     });
 
     expect(MockWebSocket.instances.length).toBeGreaterThan(1);
