@@ -5,6 +5,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod analytics;
+mod batch;
 mod currency;
 mod error;
 mod governance;
@@ -15,6 +16,7 @@ mod rewards;
 mod storage;
 
 use arenax_events::virtual_economy as events;
+use batch::{BatchManager, BatchResult, BatchTransferItem, MAX_BATCH_SIZE};
 use marketplace::MarketplaceManager;
 use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
@@ -238,6 +240,163 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::TotalCurrencySupply)
             .unwrap_or(0)
+    }
+
+    // -------------------------------------------------------------------------
+    // Currency Management: Gas-Optimized Batch Operations
+    //
+    // Unlike calling mint/transfer/burn N times, these entry points read
+    // TotalCurrencySupply and EconomyAnalytics exactly once, accumulate the
+    // aggregate delta in memory, and write both back exactly once,
+    // collapsing O(N) aggregate-state storage access down to O(1). See
+    // batch.rs and docs/BATCH_GAS_BENCHMARKS.md for details and measured
+    // savings.
+    // -------------------------------------------------------------------------
+
+    /// Maximum number of items accepted by a single batch call.
+    pub fn get_max_batch_size(_env: Env) -> u32 {
+        MAX_BATCH_SIZE
+    }
+
+    /// Mint currency to many recipients in a single call.
+    pub fn batch_mint_currency(
+        env: Env,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+        reason: String,
+    ) -> Result<BatchResult, VirtualEconomyError> {
+        Self::require_authorized_minter(&env)?;
+        BatchManager::validate_batch_size(recipients.len())?;
+        BatchManager::validate_matching_lengths(recipients.len(), amounts.len())?;
+        let total_mint = BatchManager::sum_positive(&amounts)?;
+
+        let config = Self::get_currency_config(&env);
+        let current_supply = Self::get_total_currency_supply(env.clone());
+        if current_supply + total_mint > config.max_supply {
+            return Err(VirtualEconomyError::SupplyLimitExceeded);
+        }
+
+        for i in 0..recipients.len() {
+            let recipient = recipients.get_unchecked(i);
+            let amount = amounts.get_unchecked(i);
+            let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(recipient.clone()),
+                &(current_balance + amount),
+            );
+            events::emit_currency_minted(&env, &recipient, amount, &reason);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(current_supply + total_mint));
+
+        let mut analytics = Self::get_economy_analytics(env.clone());
+        analytics.total_currency_minted += total_mint;
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
+
+        Ok(BatchResult {
+            items_processed: recipients.len(),
+            total_amount: total_mint,
+        })
+    }
+
+    /// Transfer currency from one sender to many recipients in a single call.
+    pub fn batch_transfer_currency(
+        env: Env,
+        from: Address,
+        items: Vec<BatchTransferItem>,
+    ) -> Result<BatchResult, VirtualEconomyError> {
+        from.require_auth();
+        BatchManager::validate_batch_size(items.len())?;
+
+        let mut total_amount: i128 = 0;
+        for item in items.iter() {
+            if item.amount <= 0 {
+                return Err(VirtualEconomyError::InvalidAmount);
+            }
+            total_amount += item.amount;
+        }
+
+        let from_balance = Self::get_currency_balance(env.clone(), from.clone());
+        if from_balance < total_amount {
+            return Err(VirtualEconomyError::InsufficientBalance);
+        }
+
+        for item in items.iter() {
+            let to_balance = Self::get_currency_balance(env.clone(), item.to.clone());
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(item.to.clone()),
+                &(to_balance + item.amount),
+            );
+            events::emit_currency_transferred(&env, &from, &item.to, item.amount);
+        }
+
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(from.clone()),
+            &(from_balance - total_amount),
+        );
+
+        Ok(BatchResult {
+            items_processed: items.len(),
+            total_amount,
+        })
+    }
+
+    /// Burn currency from many owners in a single call.
+    pub fn batch_burn_currency(
+        env: Env,
+        owners: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<BatchResult, VirtualEconomyError> {
+        BatchManager::validate_batch_size(owners.len())?;
+        BatchManager::validate_matching_lengths(owners.len(), amounts.len())?;
+
+        // Every owner must authorize the burn of their own balance, and every
+        // balance must cover its amount, validated before any write happens
+        // so the batch fails atomically.
+        for i in 0..owners.len() {
+            let owner = owners.get_unchecked(i);
+            let amount = amounts.get_unchecked(i);
+            owner.require_auth();
+            if amount <= 0 {
+                return Err(VirtualEconomyError::InvalidAmount);
+            }
+            let balance = Self::get_currency_balance(env.clone(), owner.clone());
+            if balance < amount {
+                return Err(VirtualEconomyError::InsufficientBalance);
+            }
+        }
+
+        let total_burn = BatchManager::sum_positive(&amounts)?;
+
+        for i in 0..owners.len() {
+            let owner = owners.get_unchecked(i);
+            let amount = amounts.get_unchecked(i);
+            let balance = Self::get_currency_balance(env.clone(), owner.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::CurrencyBalance(owner.clone()), &(balance - amount));
+            events::emit_currency_burned(&env, &owner, amount);
+        }
+
+        let current_supply = Self::get_total_currency_supply(env.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(current_supply - total_burn));
+
+        let mut analytics = Self::get_economy_analytics(env.clone());
+        analytics.total_currency_burned += total_burn;
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
+
+        Ok(BatchResult {
+            items_processed: owners.len(),
+            total_amount: total_burn,
+        })
     }
 
     // -------------------------------------------------------------------------
