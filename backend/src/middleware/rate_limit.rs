@@ -25,8 +25,17 @@
 //! | `auth`         | Other `/api/auth/*`         |  30   | 60 s   |
 //! | `game`         | `/api/matchmaking/*`        |  60   | 60 s   |
 //! | `game`         | `/api/matches/*`            |  60   | 60 s   |
-//! | `game`         | `/api/tournaments/*`        |  60   | 60 s   |
+//! | `tournament`   | `/api/tournaments/*`        |  10   | 60 s   |
+//! | `read`         | Any other `GET`             | 100   | 60 s   |
 //! | `default`      | Everything else             | configurable (from env) |
+//!
+//! Requests carrying an `admin` role bypass the limiter entirely.
+//!
+//! Tournament writes are deliberately the tightest game bucket at 10/min:
+//! entering a bracket is a low-frequency action for a real player and a
+//! high-value one to automate, so the limit is set for the human rather than
+//! the client. Reads are separated out at 100/min because a busy lobby polls
+//! constantly and should never be throttled alongside mutations.
 //!
 //! # Identity
 //!
@@ -78,10 +87,17 @@ struct Bucket {
     window_secs: u64,
 }
 
-/// Resolve the bucket for a given request path.
+/// Resolve the bucket for a request.
 ///
-/// Returns the most-specific matching bucket.
-fn resolve_bucket(path: &str, default_limit: u32, default_window: u64) -> Bucket {
+/// Returns the most-specific matching bucket. `method` separates reads from
+/// mutations: a `GET` that matches no specific rule lands in the generous
+/// `read` tier rather than the default one.
+fn resolve_bucket_for(
+    method: &str,
+    path: &str,
+    default_limit: u32,
+    default_window: u64,
+) -> Bucket {
     // Auth — strict (login, register, refresh are the highest-risk)
     if path == "/api/auth/login"
         || path == "/api/auth/register"
@@ -111,9 +127,10 @@ fn resolve_bucket(path: &str, default_limit: u32, default_window: u64) -> Bucket
         return Bucket { name: "matches", limit: 60, window_secs: 60 };
     }
 
-    // Tournaments
+    // Tournaments — entering a bracket is low-frequency for a human and
+    // high-value to automate, so this is the tightest game bucket.
     if path.starts_with("/api/tournaments") {
-        return Bucket { name: "tournaments", limit: 60, window_secs: 60 };
+        return Bucket { name: "tournament", limit: 10, window_secs: 60 };
     }
 
     // Staking mutations
@@ -121,8 +138,34 @@ fn resolve_bucket(path: &str, default_limit: u32, default_window: u64) -> Bucket
         return Bucket { name: "staking_mutate", limit: 10, window_secs: 60 };
     }
 
+    // Reads — a busy lobby polls constantly and must not be throttled on the
+    // same budget as mutations.
+    if method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD") {
+        return Bucket { name: "read", limit: 100, window_secs: 60 };
+    }
+
     // Default — driven by RateLimitConfig from env
     Bucket { name: "default", limit: default_limit, window_secs: default_window }
+}
+
+/// Path-only resolution, preserved for callers and tests that predate the
+/// method-aware tiers. Treated as a non-GET request.
+fn resolve_bucket(path: &str, default_limit: u32, default_window: u64) -> Bucket {
+    resolve_bucket_for("POST", path, default_limit, default_window)
+}
+
+/// Role that skips the limiter entirely.
+const ADMIN_ROLE: &str = "admin";
+
+/// Does this request carry an admin role?
+///
+/// Admin traffic is operational — dashboards, moderation sweeps, incident
+/// response — and throttling it tends to bite exactly when the platform is
+/// already under stress.
+fn is_admin(claims: Option<&Claims>) -> bool {
+    claims.is_some_and(|c| {
+        c.roles.iter().any(|role| role.eq_ignore_ascii_case(ADMIN_ROLE))
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,10 +324,23 @@ where
 
         Box::pin(async move {
             let path = req.path().to_string();
+            let method = req.method().as_str().to_string();
             let now = now_ms();
 
+            // ── Admin bypass ──────────────────────────────────────────────────
+            // Checked before any Redis work: an admin request should not even
+            // cost a round trip, and it must not be blocked when Redis is the
+            // thing that is unwell.
+            let admin = {
+                let extensions = req.extensions();
+                is_admin(extensions.get::<Claims>())
+            };
+            if admin {
+                return Ok(svc.call(req).await?.map_into_left_body());
+            }
+
             // ── Resolve bucket ────────────────────────────────────────────────
-            let bucket = resolve_bucket(&path, default_limit, default_window);
+            let bucket = resolve_bucket_for(&method, &path, default_limit, default_window);
 
             // ── Resolve identity (user ID > IP) ───────────────────────────────
             let identity = req
