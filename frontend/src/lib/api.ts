@@ -49,6 +49,7 @@ import {
 } from "../types/social";
 import { AuthApiError } from "./authErrors";
 import { API_BASE } from "./constants";
+import { pinnedFetch } from "../api/certificatePinning";
 
 // ---------------------------------------------------------------------------
 // ApiClient
@@ -95,7 +96,7 @@ class ApiClient {
     this.isRefreshing = true;
     this.refreshPromise = (async () => {
       const url = `${this.baseURL}/auth/refresh`;
-      const response = await fetch(url, {
+      const response = await pinnedFetch(url, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -129,7 +130,7 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       ...options,
       headers,
       // Always include cookies — the httpOnly auth_token cookie carries the
@@ -175,7 +176,7 @@ class ApiClient {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       ...options,
       headers,
       credentials: "include",

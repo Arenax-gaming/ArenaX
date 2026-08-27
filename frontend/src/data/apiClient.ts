@@ -27,6 +27,7 @@ import {
   type InterceptedRequest,
 } from "@/lib/responseInterceptor";
 import type { StandardResponse, PaginatedStandardResponse } from "@/types/response";
+import { pinnedFetch } from "@/api/certificatePinning";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ export class EnhancedApiClient {
       const refreshToken = getStoredRefreshToken();
       if (!refreshToken) return null;
       try {
-        const res = await fetch(`${this.baseURL}/auth/refresh`, {
+        const res = await pinnedFetch(`${this.baseURL}/auth/refresh`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refreshToken }),
@@ -249,7 +250,7 @@ export class EnhancedApiClient {
     let success = false;
 
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
+      const response = await pinnedFetch(url, { ...init, signal: controller.signal });
       clearTimeout(timeoutId);
       status = response.status;
 
@@ -487,7 +488,7 @@ export class EnhancedApiClient {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(this.timeoutMs),
@@ -527,7 +528,7 @@ export class EnhancedApiClient {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(this.timeoutMs),
