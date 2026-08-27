@@ -50,6 +50,14 @@ pub struct BuybackSchedule {
     pub next_burn_time: u64,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DelegationRecord {
+    pub delegatee: Address,
+    pub timestamp: u64,
+    pub revoked: bool,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -66,6 +74,9 @@ pub enum DataKey {
     BurnMetrics,
     BuybackSchedule,
     TotalBurned,
+    Delegate(Address),
+    Delegators(Address),
+    DelegationHistory(Address),
 }
 
 #[contract]
@@ -538,8 +549,7 @@ impl AxToken {
             panic!("already voted");
         }
 
-        let mut voting_power = Self::balance(&env, voter.clone());
-        voting_power += Self::get_locked_balance(env.clone(), voter.clone());
+        let voting_power = Self::get_voting_power(env.clone(), voter.clone());
 
         if voting_power <= 0 {
             panic!("no voting power");
@@ -569,6 +579,157 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Vote Delegation
+    // ---------------------------------------------------------------------------
+
+    /// Delegate voting power (own balance + locked balance) to another address.
+    /// Re-delegating simply moves the delegation from the old delegatee to the
+    /// new one. Self-delegation is blocked since holding your own power
+    /// directly already achieves the same effect.
+    pub fn delegate(env: Env, delegator: Address, delegatee: Address) {
+        delegator.require_auth();
+
+        if delegator == delegatee {
+            panic!("cannot delegate to self");
+        }
+
+        let current_time = env.ledger().timestamp();
+        let previous = Self::get_delegate(env.clone(), delegator.clone());
+
+        if let Some(previous_delegatee) = previous {
+            if previous_delegatee == delegatee {
+                panic!("already delegated to this address");
+            }
+            Self::remove_delegator(&env, &previous_delegatee, &delegator);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Delegate(delegator.clone()), &delegatee);
+        Self::add_delegator(&env, &delegatee, &delegator);
+
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: current_time,
+            revoked: false,
+        });
+        env.storage()
+            .instance()
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATE"),
+            ),
+            (delegator, delegatee),
+        );
+    }
+
+    /// Revoke an active delegation, returning voting power to the delegator.
+    pub fn revoke_delegation(env: Env, delegator: Address) {
+        delegator.require_auth();
+
+        let delegatee = Self::get_delegate(env.clone(), delegator.clone())
+            .expect("no active delegation found");
+
+        Self::remove_delegator(&env, &delegatee, &delegator);
+        env.storage()
+            .instance()
+            .remove(&DataKey::Delegate(delegator.clone()));
+
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: env.ledger().timestamp(),
+            revoked: true,
+        });
+        env.storage()
+            .instance()
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATION_REVOKE"),
+            ),
+            (delegator, delegatee),
+        );
+    }
+
+    /// The address `delegator` currently delegates to, if any.
+    pub fn get_delegate(env: Env, delegator: Address) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Delegate(delegator))
+    }
+
+    /// Addresses that currently delegate their voting power to `delegatee`.
+    pub fn get_delegators(env: Env, delegatee: Address) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Delegators(delegatee))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Full history of delegation/revocation events for `delegator`.
+    pub fn get_delegation_history(env: Env, delegator: Address) -> Vec<DelegationRecord> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DelegationHistory(delegator))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Effective voting power for `address`: their own balance + locked
+    /// balance (zero if they've delegated it away) plus the raw power of
+    /// every address currently delegating to them. Delegation chains are not
+    /// followed further than one hop — a delegatee's received power isn't
+    /// forwarded on if they in turn delegate elsewhere.
+    pub fn get_voting_power(env: Env, address: Address) -> i128 {
+        let has_delegated = Self::get_delegate(env.clone(), address.clone()).is_some();
+        let own_power = if has_delegated {
+            0
+        } else {
+            Self::balance(&env, address.clone()) + Self::get_locked_balance(env.clone(), address.clone())
+        };
+
+        let delegators = Self::get_delegators(env.clone(), address.clone());
+        let mut delegated_power = 0i128;
+        for delegator in delegators.iter() {
+            delegated_power +=
+                Self::balance(&env, delegator.clone()) + Self::get_locked_balance(env.clone(), delegator.clone());
+        }
+
+        own_power + delegated_power
+    }
+
+    fn add_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let mut delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        delegators.push_back(delegator.clone());
+        env.storage().instance().set(&key, &delegators);
+    }
+
+    fn remove_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut remaining = Vec::new(env);
+        for existing in delegators.iter() {
+            if existing != *delegator {
+                remaining.push_back(existing);
+            }
+        }
+        env.storage().instance().set(&key, &remaining);
     }
 
     // ---------------------------------------------------------------------------
