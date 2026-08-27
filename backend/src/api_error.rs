@@ -37,6 +37,12 @@ pub enum ApiError {
 
     #[error("Too many requests: {0}")]
     TooManyRequests(String),
+
+    /// A dependency is unavailable and the request cannot be served right now.
+    /// Distinct from `InternalServerError`: this says "try again", not
+    /// "something is broken in a way retrying will not help".
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
 }
 
 // Helper methods for convenience
@@ -114,6 +120,10 @@ impl ResponseError for ApiError {
             }
             ApiError::TooManyRequests(_) => (
                 actix_web::http::StatusCode::TOO_MANY_REQUESTS,
+                self.to_string(),
+            ),
+            ApiError::ServiceUnavailable(_) => (
+                actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),
             ),
         };
