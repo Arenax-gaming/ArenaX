@@ -76,4 +76,13 @@ pub enum VirtualEconomyError {
     NftLockPeriodNotMet = 113,
     /// NFT staking is currently paused.
     NftStakingPaused = 114,
+
+    // Referral errors
+    ReferralNotConfigured = 120,
+    ReferralAlreadyRegistered = 121,
+    InvalidReferral = 122,
+    ReferralNotFound = 123,
+    ReferralFraud = 124,
+    ReferralCooldown = 125,
+    NothingToClaim = 126,
 }

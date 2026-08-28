@@ -81,6 +81,10 @@ pub enum DataKey {
     NftStakedByOwner(Address),
     /// Aggregate NFT staking analytics.
     NftStakingAnalytics,
+
+    // Referrals
+    ReferralConfig,
+    ReferralAccount(Address),
 }
 
 #[contracttype]
@@ -197,6 +201,37 @@ pub struct RoyaltyAnalytics {
     pub total_royalties_paid: i128,
     pub total_royalty_transactions: u64,
     pub total_exemptions_applied: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferralTier {
+    /// Minimum cumulative qualifying activity for this tier.
+    pub min_volume: i128,
+    /// Referrer share in basis points.
+    pub referrer_bps: u32,
+    /// Referee share in basis points.
+    pub referee_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferralConfig {
+    pub tiers: Vec<ReferralTier>,
+    pub max_reward_per_activity: i128,
+    pub activity_cooldown: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferralAccount {
+    pub referrer: Option<Address>,
+    pub qualifying_volume: i128,
+    pub pending_rewards: i128,
+    pub total_rewards: i128,
+    pub referred_count: u32,
+    pub last_activity: u64,
+    pub flagged: bool,
 }
 
 // -----------------------------------------------------------------------------
