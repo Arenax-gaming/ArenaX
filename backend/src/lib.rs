@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod http;
+pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod realtime;

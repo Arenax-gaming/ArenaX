@@ -81,6 +81,10 @@ pub enum DataKey {
     NftStakedByOwner(Address),
     /// Aggregate NFT staking analytics.
     NftStakingAnalytics,
+
+    // Liquidity pool (Issue #882)
+    AmmPool,
+    AmmShares(Address),
 }
 
 #[contracttype]
