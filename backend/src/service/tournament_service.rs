@@ -2294,22 +2294,6 @@ impl TournamentService {
         Ok(user.username)
     }
 
-    /// Get tournament analytics dashboard data (Issue #291)
-    /// Get tournament leaderboard (Issue #286)
-    pub async fn get_tournament_leaderboard(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<Vec<TournamentLeaderboardEntry>, ApiError> {
-        // Query participants, sorted by final_rank (if completed) or by registered_at
-        let participants = sqlx::query!(
-            r#"
-            SELECT tp.user_id, u.username, tp.final_rank, tp.prize_amount
-            FROM tournament_participants tp
-            JOIN users u ON tp.user_id = u.id
-            WHERE tp.tournament_id = $1
-            ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
-            "#,
-            tournament_id
     /// Get comprehensive tournament statistics
     pub async fn get_tournament_statistics(
         &self,
@@ -2404,25 +2388,6 @@ impl TournamentService {
         })
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentStatisticsResponse {
-        pub tournament_id: Uuid,
-        pub tournament_name: String,
-        pub game: String,
-        pub status: TournamentStatus,
-        pub participant_count: i32,
-        pub total_matches: i64,
-        pub completed_matches: i64,
-        pub pending_matches: i64,
-        pub in_progress_matches: i64,
-        pub disputed_matches: i64,
-        pub prize_pool_amount: i64,
-        pub prize_pool_currency: String,
-        pub round_count: i64,
-        pub current_round: i32,
-        pub registration_completion_rate: i32,
-        pub completion_rate: i32,
-    }
 
     /// Get tournament leaderboard with ELO ratings and performance metrics
     pub async fn get_tournament_leaderboard(
@@ -2510,28 +2475,6 @@ impl TournamentService {
             .map_err(|e| ApiError::database_error(e))?
             .count
             .unwrap_or(0);
-
-            leaderboard.push(TournamentLeaderboardEntry {
-                user_id: p.user_id,
-                username: p.username,
-                final_rank: p.final_rank,
-                prize_amount: p.prize_amount,
-                points: (wins * 10) as i32, // Example point system
-            });
-        }
-
-        Ok(leaderboard)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentLeaderboardEntry {
-    pub user_id: Uuid,
-    pub username: String,
-    pub final_rank: Option<i32>,
-    pub prize_amount: Option<i64>,
-    pub points: i32,
-}
         // Convert to response format
         let mut leaderboard_entries = Vec::new();
         for row in participants {
@@ -2569,57 +2512,11 @@ pub struct TournamentLeaderboardEntry {
         })
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentLeaderboardResponse {
-        pub tournament_id: Uuid,
-        pub entries: Vec<TournamentLeaderboardEntry>,
-        pub total: i64,
-        pub page: i32,
-        pub per_page: i32,
-    }
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentLeaderboardEntry {
-        pub participant_id: Uuid,
-        pub user_id: Uuid,
-        pub username: String,
-        pub display_name: Option<String>,
-        pub elo_rating: i32,
-        pub final_rank: Option<i32>,
-        pub wins: i64,
-        pub losses: i64,
-        pub draws: i64,
-        pub total_matches: i64,
-        pub win_rate_pct: i32,
-        pub prize_amount: Option<i64>,
-        pub prize_currency: Option<String>,
-        pub participant_status: ParticipantStatus,
-    }
-
     /// Get comprehensive tournament analytics for dashboard visualization
     pub async fn get_tournament_analytics(
         &self,
         tournament_id: Uuid,
     ) -> Result<TournamentAnalyticsResponse, ApiError> {
-        let total_participants = self.get_participant_count(tournament_id).await?;
-        
-        let matches_stats = sqlx::query!(
-            r#"
-            SELECT 
-                COUNT(*) as total_matches,
-                SUM(CASE WHEN status = $2 THEN 1 ELSE 0 END) as matches_completed
-            FROM tournament_matches
-            WHERE tournament_id = $1
-            "#,
-            tournament_id,
-            MatchStatus::Completed as _
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let prize_pool = sqlx::query!(
-            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
         // Get basic tournament info
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
@@ -2662,25 +2559,6 @@ pub struct TournamentLeaderboardEntry {
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
-        .map(|p| p.total_amount)
-        .unwrap_or(0);
-
-        Ok(TournamentAnalyticsResponse {
-            total_participants,
-            total_matches: matches_stats.total_matches.unwrap_or(0) as i32,
-            matches_completed: matches_stats.matches_completed.unwrap_or(0) as i32,
-            current_prize_pool: prize_pool,
-        })
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentAnalyticsResponse {
-    pub total_participants: i32,
-    pub total_matches: i32,
-    pub matches_completed: i32,
-    pub current_prize_pool: i64,
-}
         .unwrap_or_else(|| {
             sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
                 .fetch_one(&self.db_pool)
@@ -2780,106 +2658,15 @@ pub struct TournamentAnalyticsResponse {
         })
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentAnalyticsResponse {
-        pub tournament_id: Uuid,
-        pub tournament_name: String,
-        pub game: String,
-        pub status: TournamentStatus,
-        pub participant_count: i32,
-        pub registration_timeline: TournamentRegistrationTimeline,
-        pub round_statistics: Vec<TournamentRoundStatistics>,
-        pub prize_pool: TournamentPrizePool,
-        pub skill_level_distribution: TournamentSkillDistribution,
-    }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentRegistrationTimeline {
-        pub total_registrations: i64,
-        pub first_registration: Option<DateTime<Utc>>,
-        pub last_registration: Option<DateTime<Utc>>,
-        pub paid_registrations: i64,
-        pub active_participants: i64,
-    }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentRoundStatistics {
-        pub round_number: i32,
-        pub round_type: String,
-        pub total_matches: i64,
-        pub completed_matches: i64,
-        pub pending_matches: i64,
-        pub in_progress_matches: i64,
-        pub disputed_matches: i64,
-        pub avg_duration_secs: f64,
-    }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentPrizePool {
-        pub total_amount: i64,
-        pub currency: String,
-        pub distribution_percentages: Vec<f64>,
-        pub distributed_amount: i64,
-    }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct TournamentSkillDistribution {
-        pub total_participants: i64,
-        pub average_elo: i32,
-        pub min_elo: i32,
-        pub max_elo: i32,
-        pub elo_stddev: i32,
-    }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentBracketResponse {
-    pub tournament_id: Uuid,
-    pub rounds: Vec<BracketRound>,
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BracketRound {
-    pub round_id: Uuid,
-    pub round_number: i32,
-    pub round_type: RoundType,
-    pub status: RoundStatus,
-    pub matches: Vec<BracketMatch>,
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BracketMatch {
-    pub match_id: Uuid,
-    pub match_number: i32,
-    pub player1_id: Uuid,
-    pub player2_id: Option<Uuid>,
-    pub winner_id: Option<Uuid>,
-    pub player1_score: Option<i32>,
-    pub player2_score: Option<i32>,
-    pub status: MatchStatus,
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentPlayerInfo {
-    pub user_id: Uuid,
-    pub username: String,
-    pub display_name: Option<String>,
-    pub final_rank: Option<i32>,
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BracketMatch {
-    pub match_id: Uuid,
-    pub match_number: i32,
-    pub player1: TournamentPlayerInfo,
-    pub player2: TournamentPlayerInfo,
-    pub winner_id: Option<Uuid>,
-    pub player1_score: Option<i32>,
-    pub player2_score: Option<i32>,
-    pub status: MatchStatus,
-    pub scheduled_time: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-}
 
     /// Get enhanced tournament bracket with detailed match information
     pub async fn get_enhanced_tournament_bracket(
@@ -2993,4 +2780,152 @@ pub struct BracketMatch {
             rounds: bracket_rounds,
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentLeaderboardResponse {
+    pub tournament_id: Uuid,
+    pub entries: Vec<TournamentLeaderboardEntry>,
+    pub total: i64,
+    pub page: i32,
+    pub per_page: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentLeaderboardEntry {
+    pub participant_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub elo_rating: i32,
+    pub final_rank: Option<i32>,
+    pub wins: i64,
+    pub losses: i64,
+    pub draws: i64,
+    pub total_matches: i64,
+    pub win_rate_pct: i32,
+    pub prize_amount: Option<i64>,
+    pub prize_currency: Option<String>,
+    pub participant_status: ParticipantStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentStatisticsResponse {
+    pub tournament_id: Uuid,
+    pub tournament_name: String,
+    pub game: String,
+    pub status: TournamentStatus,
+    pub participant_count: i32,
+    pub total_matches: i64,
+    pub completed_matches: i64,
+    pub pending_matches: i64,
+    pub in_progress_matches: i64,
+    pub disputed_matches: i64,
+    pub prize_pool_amount: i64,
+    pub prize_pool_currency: String,
+    pub round_count: i64,
+    pub current_round: i32,
+    pub registration_completion_rate: i32,
+    pub completion_rate: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub tournament_id: Uuid,
+    pub tournament_name: String,
+    pub game: String,
+    pub status: TournamentStatus,
+    pub participant_count: i32,
+    pub registration_timeline: TournamentRegistrationTimeline,
+    pub round_statistics: Vec<TournamentRoundStatistics>,
+    pub prize_pool: TournamentPrizePool,
+    pub skill_level_distribution: TournamentSkillDistribution,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRegistrationTimeline {
+    pub total_registrations: i64,
+    pub first_registration: Option<DateTime<Utc>>,
+    pub last_registration: Option<DateTime<Utc>>,
+    pub paid_registrations: i64,
+    pub active_participants: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRoundStatistics {
+    pub round_number: i32,
+    pub round_type: String,
+    pub total_matches: i64,
+    pub completed_matches: i64,
+    pub pending_matches: i64,
+    pub in_progress_matches: i64,
+    pub disputed_matches: i64,
+    pub avg_duration_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPrizePool {
+    pub total_amount: i64,
+    pub currency: String,
+    pub distribution_percentages: Vec<f64>,
+    pub distributed_amount: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentSkillDistribution {
+    pub total_participants: i64,
+    pub average_elo: i32,
+    pub min_elo: i32,
+    pub max_elo: i32,
+    pub elo_stddev: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentBracketResponse {
+    pub tournament_id: Uuid,
+    pub rounds: Vec<BracketRound>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BracketRound {
+    pub round_id: Uuid,
+    pub round_number: i32,
+    pub round_type: RoundType,
+    pub status: RoundStatus,
+    pub matches: Vec<BracketMatch>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BracketMatch {
+    pub match_id: Uuid,
+    pub match_number: i32,
+    pub player1_id: Uuid,
+    pub player2_id: Option<Uuid>,
+    pub winner_id: Option<Uuid>,
+    pub player1_score: Option<i32>,
+    pub player2_score: Option<i32>,
+    pub status: MatchStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPlayerInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub final_rank: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BracketMatch {
+    pub match_id: Uuid,
+    pub match_number: i32,
+    pub player1: TournamentPlayerInfo,
+    pub player2: TournamentPlayerInfo,
+    pub winner_id: Option<Uuid>,
+    pub player1_score: Option<i32>,
+    pub player2_score: Option<i32>,
+    pub status: MatchStatus,
+    pub scheduled_time: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
 }

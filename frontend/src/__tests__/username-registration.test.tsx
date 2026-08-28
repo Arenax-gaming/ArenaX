@@ -16,6 +16,7 @@ describe('registerSchema — username validation', () => {
     email: 'test@example.com',
     password: 'Password1!',
     confirmPassword: 'Password1!',
+    agreeToTerms: true,
   };
 
   it('accepts a valid alphanumeric username', () => {

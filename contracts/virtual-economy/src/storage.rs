@@ -45,6 +45,13 @@ pub enum DataKey {
     EconomyAnalytics,
     PricingAnalytics,
 
+    // Fair Launch
+    FairLaunchConfig,
+    Whitelist(Address),
+    FairLaunchPurchased(Address),
+    FairLaunchPhase,
+    FairLaunchAnalytics,
+
     // Price Oracle
     /// Global oracle configuration shared across all asset pairs.
     OracleConfig,
@@ -74,6 +81,10 @@ pub enum DataKey {
     NftStakedByOwner(Address),
     /// Aggregate NFT staking analytics.
     NftStakingAnalytics,
+
+    // Liquidity pool (Issue #882)
+    AmmPool,
+    AmmShares(Address),
 }
 
 #[contracttype]
@@ -260,6 +271,42 @@ pub struct PricingAnalytics {
 }
 
 // -----------------------------------------------------------------------------
+// Fair Launch
+// -----------------------------------------------------------------------------
+
+/// Configuration for a fair-launch token sale with whitelist and public phases.
+///
+/// Phases:
+///   0 = NotStarted  – before `whitelist_start`
+///   1 = Whitelist   – [`whitelist_start`, `whitelist_end`)
+///   2 = Public      – [`public_start`, `public_end`)
+///   3 = Ended       – after `public_end`
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FairLaunchConfig {
+    pub whitelist_start: u64,
+    pub whitelist_end: u64,
+    pub public_start: u64,
+    pub public_end: u64,
+    pub base_price: i128,
+    pub max_whitelist_per_wallet: i128,
+    pub max_public_per_wallet: i128,
+    pub total_supply_cap: i128,
+    pub anti_whale_bps: u32, // max % of total supply per wallet (bps)
+}
+
+/// Aggregate statistics for an ongoing or completed fair launch.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FairLaunchAnalytics {
+    pub total_sold: i128,
+    pub whitelist_sold: i128,
+    pub public_sold: i128,
+    pub unique_buyers: u32,
+    pub current_price: i128,
+}
+
+// -----------------------------------------------------------------------------
 // Price Oracle
 // -----------------------------------------------------------------------------
 
@@ -333,7 +380,8 @@ pub struct OracleAnalytics {
 /// Global configuration for the NFT staking module.
 ///
 /// Rewards are expressed as `reward_rate_bps` basis points of the staked
-/// NFT's `rarity` score per `reward_interval` seconds.
+/// NFT's `rarity` score per `reward_interval` seconds.  E.g. `rate = 500`
+/// and `interval = 86400` means 5 % of rarity points are earned daily.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NftStakeConfig {

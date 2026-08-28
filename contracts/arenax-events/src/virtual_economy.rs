@@ -448,6 +448,68 @@ pub fn emit_oracle_pair_registered(env: &Env, asset_pair: &BytesN<32>, update_in
     .publish(env);
 }
 
+// ─── Fair Launch ──────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "FAIR_LAUNCH_CONFIGURED"])]
+pub struct FairLaunchConfigured {
+    pub whitelist_start: u64,
+    pub public_start: u64,
+    pub total_supply_cap: i128,
+    pub base_price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "FAIR_LAUNCH_PURCHASE"])]
+pub struct FairLaunchPurchase {
+    pub buyer: Address,
+    pub amount: i128,
+    pub phase: u32,
+    pub price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "WHITELIST_ADDED"])]
+pub struct WhitelistAdded {
+    pub address: Address,
+}
+
+pub fn emit_fair_launch_configured(
+    env: &Env,
+    whitelist_start: u64,
+    public_start: u64,
+    total_supply_cap: i128,
+    base_price: i128,
+) {
+    FairLaunchConfigured {
+        whitelist_start,
+        public_start,
+        total_supply_cap,
+        base_price,
+    }
+    .publish(env);
+}
+
+pub fn emit_fair_launch_purchase(
+    env: &Env,
+    buyer: &Address,
+    amount: i128,
+    phase: u32,
+    price: i128,
+) {
+    FairLaunchPurchase {
+        buyer: buyer.clone(),
+        amount,
+        phase,
+        price,
+    }
+    .publish(env);
+}
+
+pub fn emit_whitelist_added(env: &Env, address: &Address) {
+    WhitelistAdded {
+        address: address.clone(),
+    }
+    .publish(env);
+}
+
 // ─── NFT Staking ──────────────────────────────────────────────────────────────
 
 #[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKING_CONFIGURED"])]

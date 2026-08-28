@@ -1,7 +1,8 @@
 //! NFT staking helper utilities.
 //!
-//! Provides reward calculation and analytics helpers used by the contract
-//! entry-points in [`lib.rs`].
+//! All reward minting and analytics persistence is handled in [`lib.rs`]; this
+//! module provides pure computation and thin storage helpers so the contract
+//! entry-points stay readable.
 
 #![allow(dead_code)]
 

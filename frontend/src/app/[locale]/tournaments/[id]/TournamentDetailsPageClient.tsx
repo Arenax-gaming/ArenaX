@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
+import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
 
 export function TournamentDetailsPageClient() {
@@ -128,6 +129,7 @@ export function TournamentDetailsPageClient() {
             tournament={tournament}
             bannerSizes={TOURNAMENT_DETAIL_BANNER_SIZES}
           />
+
 
           {showBracket && bracketData ? (
             <section className="space-y-4">
