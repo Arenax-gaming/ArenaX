@@ -379,7 +379,7 @@ function PlayerRow({
   isCurrentUser,
 }: {
   player: BracketPlayer | null;
-  score: number | undefined;
+  score: number | null | undefined;
   isWinner: boolean;
   isCurrentUser: boolean;
 }) {
