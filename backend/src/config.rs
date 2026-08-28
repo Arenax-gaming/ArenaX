@@ -18,6 +18,28 @@ pub struct Config {
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
+    /// Connection pool ceiling.
+    pub max_connections: u32,
+    /// How long a caller waits for a connection before the request is failed.
+    /// Bounded so a saturated or unreachable database sheds load instead of
+    /// letting every handler pile up on the pool (Issue #861).
+    pub acquire_timeout_secs: u64,
+    /// Interval between background pool health probes.
+    pub health_check_interval_secs: u64,
+    /// Consecutive failures that trip the circuit breaker open.
+    pub circuit_failure_threshold: u32,
+    /// How long the breaker stays open before admitting a trial request.
+    pub circuit_open_secs: u64,
+}
+
+/// Read a `u64` from the environment, falling back when unset or unparseable.
+fn env_u64(key: &str, default: u64) -> u64 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// Read a `u32` from the environment, falling back when unset or unparseable.
+fn env_u32(key: &str, default: u32) -> u32 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +160,11 @@ impl Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20),
+                acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
+                health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
+                circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
+                circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
