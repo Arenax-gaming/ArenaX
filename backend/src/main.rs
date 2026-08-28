@@ -316,6 +316,7 @@ async fn main() -> io::Result<()> {
                             .route("/leave", web::post().to(crate::http::matchmaking::leave_queue))
                             .route("/status/{game}/{game_mode}", web::get().to(crate::http::matchmaking::get_queue_status))
                             .route("/stats", web::get().to(crate::http::matchmaking::get_matchmaking_stats))
+                            .route("/metrics", web::get().to(crate::http::matchmaking::get_matchmaking_metrics_dashboard))
                             .route("/elo/{game}", web::get().to(crate::http::matchmaking::get_elo))
                             .route("/elo/{game}/{page}/{limit}", web::get().to(crate::http::matchmaking::get_elo_history))
                     )
