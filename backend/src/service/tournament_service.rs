@@ -442,6 +442,39 @@ impl TournamentService {
         tournament_id: Uuid,
         new_status: TournamentStatus,
     ) -> Result<Tournament, ApiError> {
+        if new_status == TournamentStatus::Cancelled {
+            return self.cancel_tournament(tournament_id).await;
+        }
+
+        let current_tournament = self.get_tournament_by_id(tournament_id).await?;
+        let old_status = current_tournament.status;
+
+        if old_status == new_status {
+            return Ok(current_tournament);
+        }
+
+        // FSM validation: Draft -> RegistrationOpen -> InProgress -> Completed
+        // (Also allowing Upcoming in the flow)
+        let valid_transition = match (old_status, new_status) {
+            (TournamentStatus::Draft, TournamentStatus::RegistrationOpen) => true,
+            (TournamentStatus::Draft, TournamentStatus::Upcoming) => true,
+            (TournamentStatus::Upcoming, TournamentStatus::RegistrationOpen) => true,
+            (TournamentStatus::RegistrationOpen, TournamentStatus::RegistrationClosed) => true,
+            (TournamentStatus::RegistrationOpen, TournamentStatus::InProgress) => true, // Allowed to skip closed
+            (TournamentStatus::RegistrationClosed, TournamentStatus::InProgress) => true,
+            (TournamentStatus::InProgress, TournamentStatus::Completed) => true,
+            _ => false,
+        };
+
+        if !valid_transition {
+            return Err(ApiError::bad_request(&format!(
+                "Invalid status transition from {:?} to {:?}",
+                old_status, new_status
+            )));
+        }
+
+        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
+
         let tournament = sqlx::query_as!(
             Tournament,
             r#"
@@ -454,9 +487,30 @@ impl TournamentService {
             Utc::now(),
             tournament_id
         )
-        .fetch_one(&self.db_pool)
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
+
+        // Audit log
+        let details = serde_json::json!({
+            "old_status": old_status,
+            "new_status": new_status,
+        });
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_logs (action, resource_type, resource_id, details)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            "STATUS_CHANGE",
+            "tournament",
+            tournament_id,
+            details as _
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        tx.commit().await.map_err(ApiError::database_error)?;
 
         // Handle status-specific logic
         match new_status {
@@ -470,7 +524,6 @@ impl TournamentService {
         }
 
         // Publish status change event
-        let old_status = self.get_tournament_by_id(tournament_id).await?.status;
         self.publish_tournament_event(serde_json::json!({
             "type": "status_changed",
             "tournament_id": tournament_id,
@@ -481,6 +534,7 @@ impl TournamentService {
 
         Ok(tournament)
     }
+
 
     // Private helper methods
 
@@ -1398,13 +1452,13 @@ impl TournamentService {
     pub async fn cancel_tournament(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
-        // Only non-terminal statuses can be cancelled
+        // Only non-terminal statuses can be cancelled (before InProgress)
         if matches!(
             tournament.status,
-            TournamentStatus::Completed | TournamentStatus::Cancelled
+            TournamentStatus::InProgress | TournamentStatus::Completed | TournamentStatus::Cancelled
         ) {
             return Err(ApiError::bad_request(
-                "Cannot cancel a tournament that is already completed or cancelled",
+                "Cannot cancel a tournament that is already in progress, completed, or cancelled",
             ));
         }
 
@@ -1463,6 +1517,25 @@ impl TournamentService {
             tournament_id,
         )
         .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Audit log
+        let details = serde_json::json!({
+            "old_status": tournament.status,
+            "new_status": TournamentStatus::Cancelled,
+        });
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_logs (action, resource_type, resource_id, details)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            "STATUS_CHANGE",
+            "tournament",
+            tournament_id,
+            details as _
+        )
+        .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
@@ -2294,42 +2367,6 @@ impl TournamentService {
         Ok(user.username)
     }
 
-    /// Get tournament analytics dashboard data (Issue #291)
-    /// Get tournament leaderboard (Issue #286)
-    pub async fn get_tournament_leaderboard(
-        &self,
-        tournament_id: Uuid,
-    ) -> Result<Vec<TournamentLeaderboardEntry>, ApiError> {
-        // Query participants, sorted by final_rank (if completed) or by registered_at
-        let participants = sqlx::query!(
-            r#"
-            SELECT tp.user_id, u.username, tp.final_rank, tp.prize_amount
-            FROM tournament_participants tp
-            JOIN users u ON tp.user_id = u.id
-            WHERE tp.tournament_id = $1
-            ORDER BY tp.final_rank ASC NULLS LAST, tp.registered_at ASC
-            "#,
-            tournament_id
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let leaderboard = participants
-            .into_iter()
-            .enumerate()
-            .map(|(idx, p)| TournamentLeaderboardEntry {
-                rank: (idx + 1) as i32,
-                user_id: p.user_id,
-                username: p.username,
-                final_rank: p.final_rank,
-                prize_amount: p.prize_amount,
-            })
-            .collect();
-
-        Ok(leaderboard)
-    }
-
     /// Get comprehensive tournament statistics
     pub async fn get_tournament_statistics(
         &self,
@@ -2376,11 +2413,6 @@ impl TournamentService {
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
-        let (_total_amount, _currency) = match prize_pool {
-            Some(p) => (p.total_amount, p.currency),
-            None => (0, "USD".to_string()),
-        };
-
         // Calculate registration completion rate
         let registration_completion_rate = if tournament.max_participants > 0 {
             ((participant_count as f32 / tournament.max_participants as f32) * 100.0) as i32
@@ -2420,6 +2452,7 @@ impl TournamentService {
             completion_rate,
         })
     }
+
 
     /// Get tournament leaderboard with ELO ratings and performance metrics
     pub async fn get_tournament_leaderboard(
@@ -2591,7 +2624,15 @@ impl TournamentService {
         )
         .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(|e| ApiError::database_error(e))?
+        .unwrap_or_else(|| {
+            sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount")
+                .fetch_one(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))
+                .ok()
+                .unwrap_or(sqlx::query!("SELECT 0 as prize_pool_amount, 'USD' as prize_pool_currency, '[]' as distribution_percentages_json, 0 as distributed_amount").fetch_one(&self.db_pool).await.unwrap())
+        });
 
         // Get registration timeline
         let registration_timeline = sqlx::query!("SELECT 
@@ -2626,9 +2667,13 @@ impl TournamentService {
         .map_err(|e| ApiError::database_error(e))?;
 
         // Convert JSON distribution percentages
-        let distribution_percentages: Vec<f64> = if let Some(ref json_str) = prize_distribution.distribution_percentages_json {
-            serde_json::from_str(json_str)
-                .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
+        let distribution_percentages: Vec<f64> = if let Some(ref prize) = prize_distribution {
+            if let Some(ref json_str) = prize.distribution_percentages_json {
+                serde_json::from_str(json_str)
+                    .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         };
@@ -2660,10 +2705,10 @@ impl TournamentService {
                 })
                 .collect(),
             prize_pool: TournamentPrizePool {
-                total_amount: prize_distribution.prize_pool_amount.unwrap_or(0),
-                currency: prize_distribution.prize_pool_currency.unwrap_or("USD".to_string()),
+                total_amount: prize_distribution.as_ref().and_then(|p| p.prize_pool_amount).unwrap_or(0),
+                currency: prize_distribution.as_ref().and_then(|p| p.prize_pool_currency.clone()).unwrap_or_else(|| "USD".to_string()),
                 distribution_percentages,
-                distributed_amount: prize_distribution.distributed_amount.unwrap_or(0),
+                distributed_amount: prize_distribution.as_ref().map(|p| p.distributed_amount).unwrap_or(0),
             },
             skill_level_distribution: TournamentSkillDistribution {
                 total_participants: skill_distribution.total_participants.unwrap_or(0),
@@ -2674,7 +2719,76 @@ impl TournamentService {
             },
         })
     }
+}
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub tournament_id: Uuid,
+    pub tournament_name: String,
+    pub game: String,
+    pub status: TournamentStatus,
+    pub participant_count: i32,
+    pub registration_timeline: TournamentRegistrationTimeline,
+    pub round_statistics: Vec<TournamentRoundStatistics>,
+    pub prize_pool: TournamentPrizePool,
+    pub skill_level_distribution: TournamentSkillDistribution,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRegistrationTimeline {
+    pub total_registrations: i64,
+    pub first_registration: Option<DateTime<Utc>>,
+    pub last_registration: Option<DateTime<Utc>>,
+    pub paid_registrations: i64,
+    pub active_participants: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRoundStatistics {
+    pub round_number: i32,
+    pub round_type: String,
+    pub total_matches: i64,
+    pub completed_matches: i64,
+    pub pending_matches: i64,
+    pub in_progress_matches: i64,
+    pub disputed_matches: i64,
+    pub avg_duration_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPrizePool {
+    pub total_amount: i64,
+    pub currency: String,
+    pub distribution_percentages: Vec<f64>,
+    pub distributed_amount: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentSkillDistribution {
+    pub total_participants: i64,
+    pub average_elo: i32,
+    pub min_elo: i32,
+    pub max_elo: i32,
+    pub elo_stddev: i32,
+}
+
+
+
+
+
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPlayerInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub final_rank: Option<i32>,
+}
+
+
+
+impl TournamentService {
     /// Get enhanced tournament bracket with detailed match information
     pub async fn get_enhanced_tournament_bracket(
         &self,
@@ -2790,26 +2904,6 @@ impl TournamentService {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentStatisticsResponse {
-    pub tournament_id: Uuid,
-    pub tournament_name: String,
-    pub game: String,
-    pub status: TournamentStatus,
-    pub participant_count: i32,
-    pub total_matches: i64,
-    pub completed_matches: i64,
-    pub pending_matches: i64,
-    pub in_progress_matches: i64,
-    pub disputed_matches: i64,
-    pub prize_pool_amount: i64,
-    pub prize_pool_currency: String,
-    pub round_count: i64,
-    pub current_round: i32,
-    pub registration_completion_rate: i32,
-    pub completion_rate: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct TournamentLeaderboardResponse {
     pub tournament_id: Uuid,
     pub entries: Vec<TournamentLeaderboardEntry>,
@@ -2834,6 +2928,26 @@ pub struct TournamentLeaderboardEntry {
     pub prize_amount: Option<i64>,
     pub prize_currency: Option<String>,
     pub participant_status: ParticipantStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentStatisticsResponse {
+    pub tournament_id: Uuid,
+    pub tournament_name: String,
+    pub game: String,
+    pub status: TournamentStatus,
+    pub participant_count: i32,
+    pub total_matches: i64,
+    pub completed_matches: i64,
+    pub pending_matches: i64,
+    pub in_progress_matches: i64,
+    pub disputed_matches: i64,
+    pub prize_pool_amount: i64,
+    pub prize_pool_currency: String,
+    pub round_count: i64,
+    pub current_round: i32,
+    pub registration_completion_rate: i32,
+    pub completion_rate: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2900,6 +3014,18 @@ pub struct BracketRound {
     pub round_type: RoundType,
     pub status: RoundStatus,
     pub matches: Vec<BracketMatch>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BracketMatch {
+    pub match_id: Uuid,
+    pub match_number: i32,
+    pub player1_id: Uuid,
+    pub player2_id: Option<Uuid>,
+    pub winner_id: Option<Uuid>,
+    pub player1_score: Option<i32>,
+    pub player2_score: Option<i32>,
+    pub status: MatchStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -8,6 +8,7 @@ mod auth;
 mod config;
 mod db;
 mod http;
+mod metrics;
 mod middleware;
 mod models;
 mod realtime;
@@ -21,6 +22,7 @@ use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
 use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::metrics_middleware::RequestMetrics;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::middleware::security_headers::security_headers;
@@ -44,6 +46,10 @@ async fn main() -> io::Result<()> {
     // are flushed to the OTLP exporter (Jaeger/Datadog) on shutdown.
     let _telemetry_guard = init_telemetry();
 
+    // Register Prometheus collectors so they show up in /metrics even
+    // before their first observation.
+    crate::metrics::init_metrics();
+
     // Create database pool
     let db_pool = create_pool(&config)
         .await
@@ -52,6 +58,20 @@ async fn main() -> io::Result<()> {
     run_startup_migrations(&config, &db_pool)
         .await
         .expect("Failed to run database migrations");
+
+    // Periodically snapshot DB pool utilization into the
+    // db_pool_connections_active / db_pool_connections_idle gauges.
+    let pool_metrics_handle = db_pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            crate::metrics::record_pool_stats(
+                pool_metrics_handle.size(),
+                pool_metrics_handle.num_idle(),
+            );
+        }
+    });
 
     // Spawn the Reaper — forfeits players who miss the reporting deadline
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));

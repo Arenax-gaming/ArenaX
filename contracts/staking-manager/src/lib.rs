@@ -1,12 +1,14 @@
 #![no_std]
 
 mod flexible_rewards;
+mod validator_penalty;
 
 use arenax_events::staking as events;
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
 pub use flexible_rewards::{FlexiblePosition, RewardPool};
+use validator_penalty::ValidatorPenaltyManager;
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -31,6 +33,19 @@ pub enum DataKey {
     PoolCounter,
     FlexiblePosition(Address, u32),
     UserPools(Address),
+    // Validator penalty / slashing
+    /// Global slash configuration set by admin.
+    ValidatorSlashConfig,
+    /// Monotonically increasing counter used to generate unique slash IDs.
+    ValidatorPenaltyCounter,
+    /// Per-validator immutable slash history (persistent).
+    ValidatorSlashRecord(Address),
+    /// Individual slash record keyed by slash_id (persistent).
+    ValidatorAppealRecord(BytesN<32>),
+    /// Appeal submitted against a slash, keyed by slash_id (persistent).
+    ValidatorAppeal(BytesN<32>),
+    /// Running total of tokens removed from circulation via slash burns.
+    BurnedSupply,
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -116,6 +131,63 @@ pub struct RewardConfig {
     pub min_stake: i128,
     /// Seconds in a year (used for pro-rata calculation)
     pub secs_per_year: u64,
+}
+
+// ─── Validator Slashing Types ─────────────────────────────────────────────────
+
+/// Global configuration for the validator slash system.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashConfig {
+    /// Whether the slashing system is currently active.
+    pub enabled: bool,
+    /// Ordered list of slash amounts per severity level (index = severity 0-4).
+    pub slash_amounts: Vec<i128>,
+    /// Fraction of slashed tokens to burn (rest goes to reward pool).
+    /// Expressed in basis points (5000 = 50 %).
+    pub burn_bps: u32,
+    /// Seconds after a slash during which the validator may appeal.
+    pub appeal_window_seconds: u64,
+}
+
+/// Immutable record of a single slash event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashRecord {
+    pub slash_id: BytesN<32>,
+    pub validator: Address,
+    pub amount: i128,
+    pub severity: u32,
+    pub reason: u32,
+    pub slashed_at: u64,
+    pub burned_amount: i128,
+    pub pool_amount: i128,
+    pub appealed: bool,
+    pub appeal_resolved: bool,
+    pub appeal_granted: bool,
+}
+
+/// An appeal submitted by a slashed validator.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppealRecord {
+    pub slash_id: BytesN<32>,
+    pub appellant: Address,
+    pub appeal_reason: u32,
+    pub submitted_at: u64,
+    pub resolved: bool,
+    pub granted: bool,
+}
+
+/// Aggregate slash history for a single validator.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatorSlashHistory {
+    pub validator: Address,
+    pub total_slashed: i128,
+    pub slash_count: u32,
+    /// `Some(slash_id)` when there is an open appeal pending resolution.
+    pub active_appeal: Option<BytesN<32>>,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -954,6 +1026,50 @@ impl StakingManager {
             pools.push_back(pool_id);
             env.storage().persistent().set(&key, &pools);
         }
+    }
+
+    // ── Validator Penalty / Slashing ─────────────────────────────────────────
+
+    /// Configure the validator slash system. Admin-only.
+    pub fn configure_slashing(env: Env, config: SlashConfig) {
+        Self::require_admin(&env);
+        ValidatorPenaltyManager::configure_slashing(&env, config);
+    }
+
+    /// Slash a validator at the given `severity` (0 = lightest, 4 = heaviest).
+    /// Returns the unique `slash_id` for the event. Admin-only.
+    pub fn slash_validator(
+        env: Env,
+        admin: Address,
+        validator: Address,
+        severity: u32,
+        reason: u32,
+    ) -> BytesN<32> {
+        Self::require_admin(&env);
+        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason)
+    }
+
+    /// Submit an appeal against a slash. Only the slashed validator may call
+    /// this, and only within the configured `appeal_window_seconds`.
+    pub fn appeal_slash(env: Env, validator: Address, slash_id: BytesN<32>, reason: u32) {
+        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason);
+    }
+
+    /// Resolve an open appeal. Admin-only.
+    /// Pass `grant = true` to reverse the slash; `false` to deny.
+    pub fn resolve_appeal(env: Env, admin: Address, slash_id: BytesN<32>, grant: bool) {
+        Self::require_admin(&env);
+        ValidatorPenaltyManager::resolve_appeal(&env, admin, slash_id, grant);
+    }
+
+    /// Return the slash history for a validator, or `None` if never slashed.
+    pub fn get_slash_history(env: Env, validator: Address) -> Option<ValidatorSlashHistory> {
+        ValidatorPenaltyManager::get_slash_history(&env, validator)
+    }
+
+    /// Return the `SlashRecord` for a given `slash_id`, or `None` if not found.
+    pub fn get_slash_record(env: Env, slash_id: BytesN<32>) -> Option<SlashRecord> {
+        ValidatorPenaltyManager::get_slash_record(&env, slash_id)
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
