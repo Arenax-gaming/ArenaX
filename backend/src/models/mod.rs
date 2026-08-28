@@ -1,5 +1,6 @@
 // Core models
 pub mod achievement;
+pub mod batch;
 pub mod idempotency;
 pub mod leaderboard;
 pub mod pagination;
