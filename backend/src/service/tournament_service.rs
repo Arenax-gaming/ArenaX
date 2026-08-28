@@ -2411,15 +2411,7 @@ impl TournamentService {
         let prize_pool = sqlx::query!("SELECT total_amount, currency FROM prize_pools WHERE tournament_id = $1", tournament_id)
             .fetch_optional(&self.db_pool)
             .await
-            .map_err(|e| ApiError::database_error(e))?
-            .unwrap_or_else(|| {
-                sqlx::query!("SELECT 0 as total_amount, 'USD' as currency")
-                    .fetch_one(&self.db_pool)
-                    .await
-                    .map_err(|e| ApiError::database_error(e))
-                    .ok()
-                    .unwrap_or(sqlx::query!("SELECT 0 as total_amount, 'USD' as currency").fetch_one(&self.db_pool).await.unwrap())
-            });
+            .map_err(|e| ApiError::database_error(e))?;
 
         // Calculate registration completion rate
         let registration_completion_rate = if tournament.max_participants > 0 {
@@ -2548,6 +2540,7 @@ impl TournamentService {
             .map_err(|e| ApiError::database_error(e))?
             .count
             .unwrap_or(0);
+
         // Convert to response format
         let mut leaderboard_entries = Vec::new();
         for row in participants {
@@ -2671,20 +2664,16 @@ impl TournamentService {
         )
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?
-        .unwrap_or_else(|| {
-            sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev")
-                .fetch_one(&self.db_pool)
-                .await
-                .map_err(|e| ApiError::database_error(e))
-                .ok()
-                .unwrap_or(sqlx::query!("SELECT 0 as total_participants, 0 as avg_elo, 0 as min_elo, 0 as max_elo, 0 as elo_stddev").fetch_one(&self.db_pool).await.unwrap())
-        });
+        .map_err(|e| ApiError::database_error(e))?;
 
         // Convert JSON distribution percentages
-        let distribution_percentages: Vec<f64> = if let Some(ref json_str) = prize_distribution.distribution_percentages_json {
-            serde_json::from_str(json_str)
-                .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
+        let distribution_percentages: Vec<f64> = if let Some(ref prize) = prize_distribution {
+            if let Some(ref json_str) = prize.distribution_percentages_json {
+                serde_json::from_str(json_str)
+                    .map_err(|e| ApiError::internal_error(format!("Invalid distribution percentages JSON: {}", e)))?
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         };
@@ -2716,10 +2705,10 @@ impl TournamentService {
                 })
                 .collect(),
             prize_pool: TournamentPrizePool {
-                total_amount: prize_distribution.prize_pool_amount.unwrap_or(0),
-                currency: prize_distribution.prize_pool_currency.unwrap_or("USD".to_string()),
+                total_amount: prize_distribution.as_ref().and_then(|p| p.prize_pool_amount).unwrap_or(0),
+                currency: prize_distribution.as_ref().and_then(|p| p.prize_pool_currency.clone()).unwrap_or_else(|| "USD".to_string()),
                 distribution_percentages,
-                distributed_amount: prize_distribution.distributed_amount.unwrap_or(0),
+                distributed_amount: prize_distribution.as_ref().map(|p| p.distributed_amount).unwrap_or(0),
             },
             skill_level_distribution: TournamentSkillDistribution {
                 total_participants: skill_distribution.total_participants.unwrap_or(0),
@@ -2730,6 +2719,58 @@ impl TournamentService {
             },
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentAnalyticsResponse {
+    pub tournament_id: Uuid,
+    pub tournament_name: String,
+    pub game: String,
+    pub status: TournamentStatus,
+    pub participant_count: i32,
+    pub registration_timeline: TournamentRegistrationTimeline,
+    pub round_statistics: Vec<TournamentRoundStatistics>,
+    pub prize_pool: TournamentPrizePool,
+    pub skill_level_distribution: TournamentSkillDistribution,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRegistrationTimeline {
+    pub total_registrations: i64,
+    pub first_registration: Option<DateTime<Utc>>,
+    pub last_registration: Option<DateTime<Utc>>,
+    pub paid_registrations: i64,
+    pub active_participants: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentRoundStatistics {
+    pub round_number: i32,
+    pub round_type: String,
+    pub total_matches: i64,
+    pub completed_matches: i64,
+    pub pending_matches: i64,
+    pub in_progress_matches: i64,
+    pub disputed_matches: i64,
+    pub avg_duration_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPrizePool {
+    pub total_amount: i64,
+    pub currency: String,
+    pub distribution_percentages: Vec<f64>,
+    pub distributed_amount: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentSkillDistribution {
+    pub total_participants: i64,
+    pub average_elo: i32,
+    pub min_elo: i32,
+    pub max_elo: i32,
+    pub elo_stddev: i32,
+}
 
 
 
@@ -2737,10 +2778,17 @@ impl TournamentService {
 
 
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TournamentPlayerInfo {
+    pub user_id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub final_rank: Option<i32>,
+}
 
 
 
-
+impl TournamentService {
     /// Get enhanced tournament bracket with detailed match information
     pub async fn get_enhanced_tournament_bracket(
         &self,

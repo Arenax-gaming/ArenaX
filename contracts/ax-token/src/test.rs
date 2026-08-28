@@ -533,3 +533,139 @@ fn test_governance_flow() {
     assert_eq!(proposal.votes_for, 1500);
     assert_eq!(proposal.votes_against, 500);
 }
+
+#[test]
+fn test_emergency_pause_and_governance_unpause() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&user1, &1000i128);
+
+    assert!(!client.is_paused());
+
+    // Pause contract
+    let reason = soroban_sdk::Symbol::new(&env, "EXPLOIT");
+    client.pause(&reason);
+
+    assert!(client.is_paused());
+
+    let pause_info = client.get_pause_info().unwrap();
+    assert!(pause_info.paused);
+    assert_eq!(pause_info.timeout, 86400);
+
+    // Create governance proposal to unpause
+    let proposal_desc = String::from_str(&env, "Unpause Contract");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    // Advance time past proposal voting duration
+    env.ledger().set_timestamp(3601);
+
+    // Execute unpause via governance
+    client.unpause_via_governance(&proposal_id);
+    assert!(!client.is_paused());
+
+    // Now transfer should succeed
+    client.transfer(&user1, &user2, &200i128);
+    assert_eq!(client.balance(&user2), 200);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_transfer_fails_when_paused() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&user1, &1000i128);
+
+    let reason = soroban_sdk::Symbol::new(&env, "EMERGENCY");
+    client.pause(&reason);
+
+    client.transfer(&user1, &user2, &100i128);
+}
+
+#[test]
+fn test_pause_timeout_expiration() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&user1, &1000i128);
+
+    env.ledger().set_timestamp(100);
+    let reason = soroban_sdk::Symbol::new(&env, "BUG");
+    client.pause(&reason);
+
+    assert!(client.is_paused());
+
+    // Advance timestamp beyond 24 hours (86400 seconds + 100)
+    env.ledger().set_timestamp(100 + 86400 + 1);
+
+    // Pause should have timed out!
+    assert!(!client.is_paused());
+
+    client.transfer(&user1, &user2, &100i128);
+    assert_eq!(client.balance(&user2), 100);
+}
+
+#[test]
+fn test_supply_cap_enforcement_and_burn() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    // Set hard supply cap to 2000
+    client.set_supply_cap(&2000i128);
+    assert_eq!(client.get_supply_cap(), 2000);
+
+    client.mint(&user1, &1500i128);
+    assert_eq!(client.total_supply(), 1500);
+
+    // Burn 500 tokens -> cap should decrease by 500 to 1500!
+    client.burn(&user1, &500i128);
+    assert_eq!(client.total_supply(), 1000);
+    assert_eq!(client.get_supply_cap(), 1500);
+}
+
+#[test]
+#[should_panic(expected = "supply cap exceeded")]
+fn test_mint_exceeds_supply_cap() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+    client.mint(&user1, &1001i128);
+}
+
+#[test]
+fn test_adjust_cap_via_governance() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+    client.mint(&user1, &1000i128);
+
+    // Create proposal to increase cap to 5000
+    let proposal_desc = String::from_str(&env, "Increase Cap to 5000");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    env.ledger().set_timestamp(3601);
+    client.adjust_cap_via_governance(&proposal_id, &5000i128);
+
+    assert_eq!(client.get_supply_cap(), 5000);
+    client.mint(&user1, &2000i128);
+    assert_eq!(client.total_supply(), 3000);
+}
+
