@@ -45,6 +45,13 @@ pub enum DataKey {
     EconomyAnalytics,
     PricingAnalytics,
 
+    // Fair Launch
+    FairLaunchConfig,
+    Whitelist(Address),
+    FairLaunchPurchased(Address),
+    FairLaunchPhase,
+    FairLaunchAnalytics,
+
     // Price Oracle
     /// Global oracle configuration shared across all asset pairs.
     OracleConfig,
@@ -64,6 +71,20 @@ pub enum DataKey {
     OracleLastFallbackPrice(BytesN<32>),
     /// Aggregate statistics across all oracle updates.
     OracleAnalytics,
+
+    // NFT Staking
+    /// Global NFT staking configuration.
+    NftStakeConfig,
+    /// Per-NFT staked position, keyed by token_id.
+    NftStakedPosition(BytesN<32>),
+    /// List of staked token_ids for an owner address.
+    NftStakedByOwner(Address),
+    /// Aggregate NFT staking analytics.
+    NftStakingAnalytics,
+
+    // Liquidity pool (Issue #882)
+    AmmPool,
+    AmmShares(Address),
 }
 
 #[contracttype]
@@ -250,6 +271,42 @@ pub struct PricingAnalytics {
 }
 
 // -----------------------------------------------------------------------------
+// Fair Launch
+// -----------------------------------------------------------------------------
+
+/// Configuration for a fair-launch token sale with whitelist and public phases.
+///
+/// Phases:
+///   0 = NotStarted  – before `whitelist_start`
+///   1 = Whitelist   – [`whitelist_start`, `whitelist_end`)
+///   2 = Public      – [`public_start`, `public_end`)
+///   3 = Ended       – after `public_end`
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FairLaunchConfig {
+    pub whitelist_start: u64,
+    pub whitelist_end: u64,
+    pub public_start: u64,
+    pub public_end: u64,
+    pub base_price: i128,
+    pub max_whitelist_per_wallet: i128,
+    pub max_public_per_wallet: i128,
+    pub total_supply_cap: i128,
+    pub anti_whale_bps: u32, // max % of total supply per wallet (bps)
+}
+
+/// Aggregate statistics for an ongoing or completed fair launch.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FairLaunchAnalytics {
+    pub total_sold: i128,
+    pub whitelist_sold: i128,
+    pub public_sold: i128,
+    pub unique_buyers: u32,
+    pub current_price: i128,
+}
+
+// -----------------------------------------------------------------------------
 // Price Oracle
 // -----------------------------------------------------------------------------
 
@@ -314,4 +371,55 @@ pub struct OracleAnalytics {
     pub stale_rejections: u64,
     /// Total number of distinct asset pairs registered.
     pub registered_pairs: u32,
+}
+
+// -----------------------------------------------------------------------------
+// NFT Staking
+// -----------------------------------------------------------------------------
+
+/// Global configuration for the NFT staking module.
+///
+/// Rewards are expressed as `reward_rate_bps` basis points of the staked
+/// NFT's `rarity` score per `reward_interval` seconds.  E.g. `rate = 500`
+/// and `interval = 86400` means 5 % of rarity points are earned daily.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftStakeConfig {
+    /// Basis-point reward rate per `reward_interval` (100 = 1 %).
+    pub reward_rate_bps: u32,
+    /// Seconds between reward accrual snapshots.
+    pub reward_interval: u64,
+    /// Minimum seconds an NFT must remain staked before it can be unstaked
+    /// (0 = no lock).
+    pub min_lock_period: u64,
+    /// When `true`, new stakes and unstakes are disabled.
+    pub paused: bool,
+}
+
+/// A single staked-NFT position held by an owner.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftStakedPosition {
+    /// Token ID of the staked NFT.
+    pub token_id: BytesN<32>,
+    /// Address that staked the NFT.
+    pub owner: Address,
+    /// Ledger timestamp when the NFT was staked.
+    pub staked_at: u64,
+    /// Accumulated rewards not yet claimed (in virtual currency units).
+    pub pending_rewards: i128,
+    /// Last timestamp at which rewards were snapshotted.
+    pub last_reward_ts: u64,
+}
+
+/// Aggregate statistics for the NFT staking module.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftStakingAnalytics {
+    /// Total number of NFTs currently staked.
+    pub total_staked: u64,
+    /// Cumulative rewards distributed via the staking module.
+    pub total_rewards_distributed: i128,
+    /// Total number of unique stakers (monotonically increasing).
+    pub unique_stakers: u32,
 }

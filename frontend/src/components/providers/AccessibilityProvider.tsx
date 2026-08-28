@@ -137,13 +137,12 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
-      import("@axe-core/react")
-        .then((axe) => {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const ReactDOM = require("react-dom");
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const ReactLib = require("react");
-          axe.default(ReactLib, ReactDOM, 1_000, undefined, (violations) => {
+      Promise.all([import("@axe-core/react"), import("react-dom"), import("react")])
+        .then(([axeMod, ReactDOMMod, ReactMod]) => {
+          const ReactDOM = ReactDOMMod.default;
+          const ReactLib = ReactMod.default;
+          axeMod.default(ReactLib, ReactDOM, 1_000, undefined, undefined, (results) => {
+            const violations = results?.violations ?? [];
             if (violations.length > 0) {
               violations.forEach((v) => {
                 a11yAnalytics.track("violation_detected", `${v.id}: ${v.description}`);

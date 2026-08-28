@@ -20,6 +20,8 @@ members = [
     "time-lock",
     "zk-proof",
     "airdrop",
+    "event-manager",
+    "upgrade-system",
 ]
 resolver = "2"
 

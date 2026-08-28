@@ -102,7 +102,6 @@ impl StakingRewardsContract {
         let token = Self::token(&env);
         token::Client::new(&env, &token).transfer(&user, env.current_contract_address(), &amount);
 
-
         let now = env.ledger().timestamp();
         let key = DataKey::Stake(user.clone());
         let position = if let Some(mut current) = env
@@ -366,11 +365,7 @@ impl StakingRewardsContract {
             panic!("amount must be positive");
         }
         let token = Self::token(&env);
-        token::Client::new(&env, &token).transfer(
-            &funder,
-            env.current_contract_address(),
-            &amount,
-        );
+        token::Client::new(&env, &token).transfer(&funder, env.current_contract_address(), &amount);
         let pool = env
             .storage()
             .instance()

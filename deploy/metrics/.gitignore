@@ -1,0 +1,3 @@
+# Deployment metrics log (append-only JSONL written by
+# blue-green-deploy.sh / rollback.sh) — runtime data, not source.
+*.jsonl

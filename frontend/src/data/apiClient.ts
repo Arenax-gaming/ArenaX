@@ -27,6 +27,7 @@ import {
   type InterceptedRequest,
 } from "@/lib/responseInterceptor";
 import type { StandardResponse, PaginatedStandardResponse } from "@/types/response";
+import { pinnedFetch } from "@/api/certificatePinning";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ export class EnhancedApiClient {
       const refreshToken = getStoredRefreshToken();
       if (!refreshToken) return null;
       try {
-        const res = await fetch(`${this.baseURL}/auth/refresh`, {
+        const res = await pinnedFetch(`${this.baseURL}/auth/refresh`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refreshToken }),
@@ -249,7 +250,7 @@ export class EnhancedApiClient {
     let success = false;
 
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
+      const response = await pinnedFetch(url, { ...init, signal: controller.signal });
       clearTimeout(timeoutId);
       status = response.status;
 
@@ -312,15 +313,18 @@ export class EnhancedApiClient {
           traceId,
         };
 
-        const standardResponse = responseInterceptor.intercept<T>(
-          data,
-          interceptorRequest,
-        );
+        // Run the full pipeline for governance + analytics side effects.
+        responseInterceptor.intercept<T>(data, interceptorRequest);
 
         success = true;
-        // Return the raw transformed data (unwrapped from StandardResponse)
-        // so existing callers (TanStack Query hooks) continue working unchanged.
-        return standardResponse.data;
+        // Return the payload exactly as the server sent it (with configured
+        // transforms applied). Envelope unwrapping is opt-in via
+        // getEnveloped()/postEnveloped(), and callers that accept both
+        // envelope and raw shapes (e.g. TanStack Query hooks) keep working
+        // unchanged. Returning `standardResponse.data` here would eagerly
+        // unwrap any body that merely contains a `data` key and double-unwrap
+        // in getEnveloped().
+        return responseInterceptor.transform<T>(data);
       }
 
       success = true;
@@ -416,7 +420,12 @@ export class EnhancedApiClient {
 
     const promise = this.request<T>(endpoint, { ...options, method: "GET" });
     this._inFlight.set(url, promise);
-    promise.finally(() => this._inFlight.delete(url));
+    // Swallow the derived promise's rejection — the caller handles the
+    // original error; without this the finally() child promise would become
+    // an unhandled rejection whenever the request fails.
+    promise
+      .finally(() => this._inFlight.delete(url))
+      .catch(() => {});
     return promise;
   }
 
@@ -479,7 +488,7 @@ export class EnhancedApiClient {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(this.timeoutMs),
@@ -519,7 +528,7 @@ export class EnhancedApiClient {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const startTime = performance.now();
-    const response = await fetch(url, {
+    const response = await pinnedFetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(this.timeoutMs),
