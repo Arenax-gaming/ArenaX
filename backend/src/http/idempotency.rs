@@ -2,7 +2,7 @@ use crate::api_error::ApiError;
 use crate::auth::Claims;
 use crate::db::DbPool;
 use crate::models::idempotency::*;
-use crate::service::idempotency_service::{IdempotencyService, IdempotencyKeyResponse};
+use crate::service::idempotency_service::{IdempotencyService, IdempotencyKeyResponse, IdempotencyKeyRequest};
 use actix_web::{web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -64,8 +64,10 @@ pub async fn get_user_keys(
     let limit = query.limit.unwrap_or(50).min(100); // Max 100
     let offset = query.offset.unwrap_or(0);
     
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let keys = idempotency_service
-        .get_user_keys(claims.user_id, limit, offset)
+        .get_user_keys(user_id, limit, offset)
         .await?;
     
     Ok(HttpResponse::Ok().json(keys))
@@ -154,16 +156,14 @@ pub async fn validate_key(
         }))),
         Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "valid": false,
-            "error": e.message
+            "error": e.to_string()
         }))),
     }
 }
 
 /// Helper function to check if user is admin
 fn is_admin(claims: &Claims) -> bool {
-    // Implement based on your auth system
-    // This could check user roles, permissions, etc.
-    claims.user_id.to_string().starts_with("admin-") // Example implementation
+    claims.roles.contains(&"admin".to_string())
 }
 
 #[derive(Debug, Deserialize)]

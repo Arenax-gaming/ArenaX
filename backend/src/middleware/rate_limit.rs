@@ -54,7 +54,7 @@ use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     http::header::{HeaderName, HeaderValue},
-    HttpResponse,
+    HttpMessage, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use redis::aio::ConnectionManager;
@@ -349,10 +349,8 @@ where
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn insert_header(response: &mut HttpResponse, name: &'static str, value: impl ToString) {
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_static(name),
-        HeaderValue::from_str(&value.to_string()),
-    ) {
+    if let Ok(v) = HeaderValue::from_str(&value.to_string()) {
+        let n = HeaderName::from_static(name);
         response.headers_mut().insert(n, v);
     }
 }
@@ -362,10 +360,8 @@ fn try_insert(
     name: &'static str,
     value: impl ToString,
 ) {
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_static(name),
-        HeaderValue::from_str(&value.to_string()),
-    ) {
+    if let Ok(v) = HeaderValue::from_str(&value.to_string()) {
+        let n = HeaderName::from_static(name);
         headers.insert(n, v);
     }
 }

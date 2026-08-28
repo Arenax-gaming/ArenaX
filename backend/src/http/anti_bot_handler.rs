@@ -58,7 +58,7 @@ pub async fn get_bot_metrics_handler(
         return Err(ApiError::forbidden("Admin access required"));
     }
 
-    let mut conn = (**redis).clone();
+    let mut conn = redis.get_ref().as_ref().clone();
     let metrics = get_bot_metrics(&mut conn).await;
     Ok(HttpResponse::Ok().json(metrics))
 }

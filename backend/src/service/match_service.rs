@@ -5,16 +5,17 @@ use crate::models::*;
 use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::Arc;
+use redis::Client as RedisClient;
 use uuid::Uuid;
 
 pub struct MatchService {
-    db_pool: DbPool,
-    redis_client: Option<Arc<RedisClient>>,
-    reputation_service: Option<Arc<ReputationService>>,
-    event_bus: Option<crate::realtime::event_bus::EventBus>,
+    pub db_pool: DbPool,
+    pub redis_client: Option<Arc<RedisClient>>,
+    pub reputation_service: Option<Arc<ReputationService>>,
+    pub event_bus: Option<crate::realtime::event_bus::EventBus>,
 }
 
 impl MatchService {

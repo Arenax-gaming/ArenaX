@@ -1,6 +1,7 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::idempotency::*;
+use actix_web::body::{EitherBody, MessageBody};
 use actix_web::{dev, http::header::HeaderMap, web, HttpMessage, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
 use serde_json::Value;
@@ -61,7 +62,8 @@ impl IdempotencyMiddleware {
         hasher.update(req.path());
         
         // Hash query parameters
-        if let Some(query) = req.query_string() {
+        let query = req.query_string();
+        if !query.is_empty() {
             hasher.update(query);
         }
         
@@ -249,26 +251,27 @@ where
         dev::ServiceRequest,
         Response = dev::ServiceResponse<B>,
         Error = actix_web::Error,
-    >,
+    > + 'static,
     S::Future: 'static,
-    B: dev::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = dev::ServiceResponse<B>;
+    type Response = dev::ServiceResponse<EitherBody<B>>;
     type Error = actix_web::Error;
     type Transform = IdempotencyService<S>;
     type InitError = ();
+    type Future = std::future::Ready<Result<Self::Transform, Self::InitError>>;
 
-    fn new_transform(&self, service: S) -> Result<Self::Transform, Self::InitError> {
-        Ok(IdempotencyService {
-            service,
+    fn new_transform(&self, service: S) -> Self::Future {
+        std::future::ready(Ok(IdempotencyService {
+            service: std::rc::Rc::new(service),
             policy: self.policy.clone(),
             db_pool: self.db_pool.clone(),
-        })
+        }))
     }
 }
 
 pub struct IdempotencyService<S> {
-    service: S,
+    service: std::rc::Rc<S>,
     policy: IdempotencyPolicy,
     db_pool: DbPool,
 }
@@ -279,64 +282,61 @@ where
         dev::ServiceRequest,
         Response = dev::ServiceResponse<B>,
         Error = actix_web::Error,
-    >,
+    > + 'static,
     S::Future: 'static,
-    B: dev::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = dev::ServiceResponse<B>;
+    type Response = dev::ServiceResponse<EitherBody<B>>;
     type Error = actix_web::Error;
     type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
 
     dev::forward_ready!(service);
 
-    fn call(&self, mut req: dev::ServiceRequest) -> Self::Future {
+    fn call(&self, req: dev::ServiceRequest) -> Self::Future {
         let policy = self.policy.clone();
         let db_pool = self.db_pool.clone();
+        let svc = self.service.clone();
 
         Box::pin(async move {
             // Only process enabled routes
             if !policy.enabled_routes.iter().any(|pattern| {
                 req.path().starts_with(pattern) || req.path() == pattern
             }) {
-                return self.service.call(req).await;
+                let res = svc.call(req).await?;
+                return Ok(res.map_into_left_body());
             }
 
             // Extract idempotency key
-            let idempotency_key = match Self::extract_idempotency_key(&req.headers(), &policy) {
+            let idempotency_key = match Self::extract_idempotency_key(req.headers(), &policy) {
                 Ok(key) => key,
                 Err(e) => {
                     let error_response = HttpResponse::BadRequest().json(serde_json::json!({
                         "error": "InvalidIdempotencyKey",
-                        "message": e.message
+                        "message": e.to_string()
                     }));
-                    return Ok(req.into_response(error_response));
+                    return Ok(req.into_response(error_response).map_into_right_body());
                 }
             };
 
             // Generate request hash
-            let request_body = match req.extract_body().await {
-                Ok(bytes) => bytes.to_vec(),
-                Err(_) => Vec::new(),
-            };
-            
-            let request_hash = Self::generate_request_hash(&req, &request_body);
+            let request_hash = Self::generate_request_hash_from_req(&req);
 
             // Check for cached response
             let middleware = IdempotencyMiddleware::new(db_pool.clone(), policy.clone());
             
             if let Ok(Some(cached)) = middleware.get_cached_response(&idempotency_key).await {
                 let cached_response = middleware.build_cached_response(cached);
-                return Ok(req.into_response(cached_response));
+                return Ok(req.into_response(cached_response).map_into_right_body());
             }
 
             // Check for conflicts
             if let Ok(Some(conflict)) = middleware.check_conflict(&idempotency_key, &request_hash).await {
                 let conflict_response = middleware.build_conflict_response(conflict);
-                return Ok(req.into_response(conflict_response));
+                return Ok(req.into_response(conflict_response).map_into_right_body());
             }
 
             // Process the request
-            let response = self.service.call(req).await?;
+            let response = svc.call(req).await?;
             
             // Cache the response if it's successful
             if response.status().is_success() {
@@ -350,8 +350,7 @@ where
                     }
                 }
                 
-                // Extract body (simplified - would need body extraction middleware)
-                let body = Value::Null; // Placeholder - would extract actual body
+                let body = Value::Null; // Placeholder
                 
                 let cached_response = CachedResponse::new(
                     status,
@@ -365,18 +364,16 @@ where
                     request_hash,
                     cached_response,
                 ).await {
-                    // Log error but don't fail the response
                     tracing::error!("Failed to cache idempotency response");
                 }
                 
                 // Mark key as used
                 if let Err(_) = middleware.mark_key_used(&idempotency_key).await {
-                    // Log error but don't fail the response
                     tracing::error!("Failed to mark idempotency key as used");
                 }
             }
 
-            Ok(response)
+            Ok(response.map_into_left_body())
         })
     }
 }
@@ -388,9 +385,9 @@ where
         dev::ServiceRequest,
         Response = dev::ServiceResponse<B>,
         Error = actix_web::Error,
-    >,
+    > + 'static,
     S::Future: 'static,
-    B: dev::MessageBody + 'static,
+    B: 'static,
 {
     fn extract_idempotency_key(headers: &HeaderMap, policy: &IdempotencyPolicy) -> Result<String, ApiError> {
         let key_header = headers
@@ -419,6 +416,34 @@ where
         Ok(key_str.to_string())
     }
 
+    fn generate_request_hash_from_req(req: &dev::ServiceRequest) -> String {
+        let mut hasher = Sha256::new();
+        
+        // Hash method
+        hasher.update(req.method().as_str());
+        
+        // Hash path
+        hasher.update(req.path());
+        
+        // Hash query parameters
+        let query = req.query_string();
+        if !query.is_empty() {
+            hasher.update(query);
+        }
+        
+        // Hash relevant headers (exclude idempotency key itself)
+        for (name, value) in req.headers().iter() {
+            if name.as_str() != "Idempotency-Key" {
+                if let Ok(value_str) = value.to_str() {
+                    hasher.update(name.as_str());
+                    hasher.update(value_str);
+                }
+            }
+        }
+        
+        format!("{:x}", hasher.finalize())
+    }
+
     fn generate_request_hash(req: &HttpRequest, body: &[u8]) -> String {
         let mut hasher = Sha256::new();
         
@@ -429,7 +454,8 @@ where
         hasher.update(req.path());
         
         // Hash query parameters
-        if let Some(query) = req.query_string() {
+        let query = req.query_string();
+        if !query.is_empty() {
             hasher.update(query);
         }
         

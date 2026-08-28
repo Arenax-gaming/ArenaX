@@ -1,4 +1,5 @@
 // Middleware module for ArenaX
+pub mod anti_bot;
 pub mod csrf;
 pub mod idempotency_middleware;
 pub mod rate_limit;

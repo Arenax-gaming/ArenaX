@@ -250,9 +250,9 @@ where
             if method_is_mutating(&method) || status >= 400 {
                 emit_audit(AuditEntry {
                     ts: start / 1000,
-                    ip,
+                    ip: ip.clone(),
                     method,
-                    path,
+                    path: path.clone(),
                     status,
                     user_id: None, // populated by auth layer if needed
                     latency_ms: latency,
