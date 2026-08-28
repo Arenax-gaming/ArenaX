@@ -1,6 +1,7 @@
 // Middleware module for ArenaX
 pub mod csrf;
 pub mod idempotency_middleware;
+pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;
 pub mod security_headers;
@@ -9,6 +10,7 @@ pub mod tracing_middleware;
 pub use anti_bot::AntiBotMiddleware;
 pub use csrf::{csrf_protection, csrf_token_handler, CSRF_COOKIE, CSRF_HEADER};
 pub use idempotency_middleware::IdempotencyMiddleware;
+pub use metrics_middleware::RequestMetrics;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 pub use security_headers::security_headers;
