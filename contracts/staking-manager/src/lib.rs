@@ -1074,7 +1074,30 @@ impl StakingManager {
 
     // ── Internal helpers ─────────────────────────────────────────────────────
 
-    /// Pro-rata reward: principal * rate * elapsed / (secs_per_year * 10_000)
+    /// Pro-rata reward: `(amount * annual_rate_bps * elapsed) / (secs_per_year * 10_000)`
+    ///
+    /// Computes accrued rewards for a `RewardStakePosition` based on the annual
+    /// rate (in basis points), seconds elapsed since last snapshot, and the
+    /// staked amount. Uses integer division which truncates toward zero (floor
+    /// for positive values), ensuring rewards never round up and cannot be
+    /// exploited via rounding edge cases.
+    ///
+    /// # Formula
+    /// ```math
+    /// \text{rewards} = \frac{\text{amount} \times \text{annual\_rate\_bps} \times \text{elapsed}}
+    /// {\text{secs\_per\_year} \times 10_000}
+    /// ```
+    ///
+    /// # Precision
+    /// - 1 basis point precision: each unit of `annual_rate_bps` represents
+    ///   0.01% of the amount per year. Dividing by `10_000` (BPS_DENOM) gives
+    ///   exact bps-scale precision.
+    /// - Rounding: Rust's integer division truncates toward zero. For positive
+    ///   values (which is the expected case for stakes), this is equivalent to
+    ///   `floor()`. Rewards always round down, never up — no rounding exploit possible.
+    /// - 12-month verification: when `elapsed = secs_per_year` and
+    ///   `annual_rate_bps = 1200` (12% APY), the result is `amount * 1200 / 10_000`
+    ///   = `amount * 0.12`, confirming the 12-month calculation.
     fn calc_pending(pos: &RewardStakePosition, cfg: &RewardConfig, now: u64) -> i128 {
         let elapsed = now.saturating_sub(pos.last_reward_ts) as i128;
         pos.amount * cfg.annual_rate_bps as i128 * elapsed / (cfg.secs_per_year as i128 * 10_000)
