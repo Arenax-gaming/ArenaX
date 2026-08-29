@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useInterval } from "@/hooks/useInterval";
 import { useAuth } from "@/hooks/useAuth";
@@ -164,20 +164,18 @@ export function useSessionTimeout(): UseSessionTimeoutReturn {
         lastActivityRef.current = Date.now();
         setTimeRemaining(SESSION_DURATION_SECONDS);
         setIsWarning(false);
-        resume();
       }
     } catch (error) {
       console.error("Failed to extend session:", error);
       throw error;
     }
-  }, [refreshAccessToken, resume]);
+  }, [refreshAccessToken]);
   
   // Force logout
   const forceLogout = useCallback(() => {
-    pause();
     logout();
     router.push("/login?reason=user_logout");
-  }, [logout, router, pause]);
+  }, [logout, router]);
   
   // Reset timer
   const resetTimer = useCallback(() => {
