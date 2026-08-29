@@ -12,6 +12,7 @@ pub struct Config {
     pub ai: AiConfig,
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
+    pub idempotency: IdempotencyConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -122,6 +123,12 @@ pub struct RateLimitConfig {
     pub window: u64,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct IdempotencyConfig {
+    pub ttl_seconds: u64,
+    pub max_response_size_kb: u32,
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
@@ -155,6 +162,12 @@ impl Config {
         let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
         let rate_limit_requests: u32 = env::var("RATE_LIMIT_REQUESTS")?.parse()?;
         let rate_limit_window: u64 = env::var("RATE_LIMIT_WINDOW")?.parse()?;
+        let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
+            .unwrap_or_else(|_| "86400".to_string())
+            .parse()?;
+        let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
+            .unwrap_or_else(|_| "1024".to_string())
+            .parse()?;
 
         Ok(Config {
             database: DatabaseConfig {
@@ -201,6 +214,10 @@ impl Config {
             rate_limit: RateLimitConfig {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
+            },
+            idempotency: IdempotencyConfig {
+                ttl_seconds: idempotency_ttl_seconds,
+                max_response_size_kb: idempotency_max_response_size_kb,
             },
         })
     }

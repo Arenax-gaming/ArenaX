@@ -103,6 +103,15 @@ async fn main() -> io::Result<()> {
         matchmaking_config,
     ));
 
+    // Build idempotency middleware policy from config
+    let idempotency_policy = IdempotencyPolicy {
+        enabled: true,
+        key_header_name: "Idempotency-Key".to_string(),
+        ttl_seconds: config.idempotency.ttl_seconds,
+        max_response_size_kb: config.idempotency.max_response_size_kb,
+        conflict_status_code: 422,
+    };
+
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
     tokio::spawn(async move {
@@ -206,7 +215,7 @@ async fn main() -> io::Result<()> {
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
-            .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
