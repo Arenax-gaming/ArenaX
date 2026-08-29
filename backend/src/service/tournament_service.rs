@@ -442,6 +442,39 @@ impl TournamentService {
         tournament_id: Uuid,
         new_status: TournamentStatus,
     ) -> Result<Tournament, ApiError> {
+        if new_status == TournamentStatus::Cancelled {
+            return self.cancel_tournament(tournament_id).await;
+        }
+
+        let current_tournament = self.get_tournament_by_id(tournament_id).await?;
+        let old_status = current_tournament.status;
+
+        if old_status == new_status {
+            return Ok(current_tournament);
+        }
+
+        // FSM validation: Draft -> RegistrationOpen -> InProgress -> Completed
+        // (Also allowing Upcoming in the flow)
+        let valid_transition = match (old_status, new_status) {
+            (TournamentStatus::Draft, TournamentStatus::RegistrationOpen) => true,
+            (TournamentStatus::Draft, TournamentStatus::Upcoming) => true,
+            (TournamentStatus::Upcoming, TournamentStatus::RegistrationOpen) => true,
+            (TournamentStatus::RegistrationOpen, TournamentStatus::RegistrationClosed) => true,
+            (TournamentStatus::RegistrationOpen, TournamentStatus::InProgress) => true, // Allowed to skip closed
+            (TournamentStatus::RegistrationClosed, TournamentStatus::InProgress) => true,
+            (TournamentStatus::InProgress, TournamentStatus::Completed) => true,
+            _ => false,
+        };
+
+        if !valid_transition {
+            return Err(ApiError::bad_request(&format!(
+                "Invalid status transition from {:?} to {:?}",
+                old_status, new_status
+            )));
+        }
+
+        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
+
         let tournament = sqlx::query_as!(
             Tournament,
             r#"
@@ -454,9 +487,30 @@ impl TournamentService {
             Utc::now(),
             tournament_id
         )
-        .fetch_one(&self.db_pool)
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
+
+        // Audit log
+        let details = serde_json::json!({
+            "old_status": old_status,
+            "new_status": new_status,
+        });
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_logs (action, resource_type, resource_id, details)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            "STATUS_CHANGE",
+            "tournament",
+            tournament_id,
+            details as _
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        tx.commit().await.map_err(ApiError::database_error)?;
 
         // Handle status-specific logic
         match new_status {
@@ -470,7 +524,6 @@ impl TournamentService {
         }
 
         // Publish status change event
-        let old_status = self.get_tournament_by_id(tournament_id).await?.status;
         self.publish_tournament_event(serde_json::json!({
             "type": "status_changed",
             "tournament_id": tournament_id,
@@ -481,6 +534,7 @@ impl TournamentService {
 
         Ok(tournament)
     }
+
 
     // Private helper methods
 
@@ -1398,13 +1452,13 @@ impl TournamentService {
     pub async fn cancel_tournament(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
-        // Only non-terminal statuses can be cancelled
+        // Only non-terminal statuses can be cancelled (before InProgress)
         if matches!(
             tournament.status,
-            TournamentStatus::Completed | TournamentStatus::Cancelled
+            TournamentStatus::InProgress | TournamentStatus::Completed | TournamentStatus::Cancelled
         ) {
             return Err(ApiError::bad_request(
-                "Cannot cancel a tournament that is already completed or cancelled",
+                "Cannot cancel a tournament that is already in progress, completed, or cancelled",
             ));
         }
 
@@ -1463,6 +1517,25 @@ impl TournamentService {
             tournament_id,
         )
         .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Audit log
+        let details = serde_json::json!({
+            "old_status": tournament.status,
+            "new_status": TournamentStatus::Cancelled,
+        });
+        sqlx::query!(
+            r#"
+            INSERT INTO audit_logs (action, resource_type, resource_id, details)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            "STATUS_CHANGE",
+            "tournament",
+            tournament_id,
+            details as _
+        )
+        .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
@@ -2653,8 +2726,6 @@ impl TournamentService {
             },
         })
     }
-
-
 
     /// Get enhanced tournament bracket with detailed match information
     pub async fn get_enhanced_tournament_bracket(
