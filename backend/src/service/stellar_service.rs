@@ -5,7 +5,9 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
+use sqlx::Row;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -29,6 +31,10 @@ pub enum StellarError {
 
 pub type DbPool = Arc<PgPool>;
 
+const MAX_TRANSACTION_RETRIES: u32 = 3;
+const INITIAL_RETRY_BACKOFF_MS: u64 = 500;
+const RETRY_BACKOFF_MULTIPLIER: u64 = 2;
+
 #[derive(Clone)]
 pub struct StellarService {
     db_pool: DbPool,
@@ -36,6 +42,9 @@ pub struct StellarService {
     horizon_url: String,
     network_passphrase: String,
     admin_secret: Option<String>,
+    webhook_url: Option<String>,
+    max_retries: u32,
+    initial_retry_backoff_ms: u64,
 }
 
 impl StellarService {
@@ -52,6 +61,9 @@ impl StellarService {
             horizon_url,
             network_passphrase,
             admin_secret,
+            webhook_url: std::env::var("STELLAR_WEBHOOK_URL").ok(),
+            max_retries: MAX_TRANSACTION_RETRIES,
+            initial_retry_backoff_ms: INITIAL_RETRY_BACKOFF_MS,
         }
     }
 
@@ -352,6 +364,403 @@ impl StellarService {
         }
 
         Ok(transaction_hashes)
+    }
+
+    /// Submit a prize payment with exponential backoff retry, dead-letter
+    /// queue fallback, and webhook notification.
+    ///
+    /// The idempotency key is stored in the transaction memo. If a completed
+    /// transaction with the same key already exists, its hash is returned.
+    async fn submit_prize_payment_with_retry(
+        &self,
+        source_account: &str,
+        destination_account: &str,
+        amount: i64,
+        asset_code: &str,
+        idempotency_key: &str,
+        user_id: Option<Uuid>,
+    ) -> Result<String, StellarError> {
+        if let Some(existing) = self.find_completed_transaction_by_memo(idempotency_key).await? {
+            return Ok(existing.transaction_hash);
+        }
+
+        let transaction_id = match self.find_transaction_by_memo(idempotency_key).await? {
+            Some(tx) => tx.id,
+            None => {
+                let placeholder_hash = format!("pending-{}", Uuid::new_v4());
+                self.record_transaction(
+                    &placeholder_hash,
+                    source_account,
+                    destination_account,
+                    amount,
+                    asset_code,
+                    None,
+                    "payment",
+                    Some(idempotency_key.to_string()),
+                    user_id,
+                )
+                .await?
+                .id
+            }
+        };
+
+        let mut attempt = 0u32;
+        let mut backoff_ms = self.initial_retry_backoff_ms;
+        let mut last_error: Option<StellarError> = None;
+
+        while attempt < self.max_retries {
+            match self
+                .submit_stellar_payment(
+                    source_account,
+                    destination_account,
+                    amount,
+                    asset_code,
+                    idempotency_key,
+                )
+                .await
+            {
+                Ok(tx_hash) => {
+                    sqlx::query!(
+                        r#"
+                        UPDATE stellar_transactions
+                        SET transaction_hash = $1, status = 'completed',
+                            completed_at = $3, updated_at = $3
+                        WHERE id = $2
+                        "#,
+                        tx_hash,
+                        transaction_id,
+                        Utc::now()
+                    )
+                    .execute(&*self.db_pool)
+                    .await?;
+
+                    self.notify_webhook(
+                        "prize_distribution.succeeded",
+                        serde_json::json!({
+                            "idempotency_key": idempotency_key,
+                            "transaction_hash": tx_hash,
+                            "source_account": source_account,
+                            "destination_account": destination_account,
+                            "amount": amount,
+                        }),
+                    )
+                    .await;
+
+                    return Ok(tx_hash);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Stellar payment failed (attempt {}): {}",
+                        attempt + 1,
+                        err
+                    );
+                    last_error = Some(err);
+                    attempt += 1;
+
+                    if attempt < self.max_retries {
+                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                        backoff_ms *= RETRY_BACKOFF_MULTIPLIER;
+                    }
+                }
+            }
+        }
+
+        sqlx::query!(
+            r#"
+            UPDATE stellar_transactions
+            SET status = 'failed', updated_at = $2
+            WHERE id = $1
+            "#,
+            transaction_id,
+            Utc::now()
+        )
+        .execute(&*self.db_pool)
+        .await?;
+
+        let error_message = last_error
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Stellar payment retry limit exceeded".to_string());
+
+        self.ensure_dead_letter_table().await?;
+        self.enqueue_dead_letter(
+            transaction_id,
+            idempotency_key,
+            source_account,
+            destination_account,
+            amount,
+            asset_code,
+            user_id,
+            &error_message,
+            attempt,
+        )
+        .await?;
+
+        self.notify_webhook(
+            "prize_distribution.failed",
+            serde_json::json!({
+                "idempotency_key": idempotency_key,
+                "transaction_id": transaction_id.to_string(),
+                "source_account": source_account,
+                "destination_account": destination_account,
+                "amount": amount,
+                "error": error_message,
+                "retry_count": attempt,
+            }),
+        )
+        .await;
+
+        Err(last_error.unwrap_or_else(|| {
+            StellarError::TransactionFailed("Stellar payment retry limit exceeded".to_string())
+        }))
+    }
+
+    /// Build and submit a Stellar payment operation.
+    ///
+    /// This is intentionally separated from the retry loop so the network call
+    /// can be replaced with the Horizon/Stellar SDK implementation without
+    /// changing retry or idempotency behavior.
+    async fn submit_stellar_payment(
+        &self,
+        source_account: &str,
+        destination_account: &str,
+        amount: i64,
+        asset_code: &str,
+        idempotency_key: &str,
+    ) -> Result<String, StellarError> {
+        // TODO: Replace with real Horizon submission:
+        // 1. Load and decrypt source account secret key.
+        // 2. Build a payment operation for `asset_code` from `source_account`
+        //    to `destination_account` for `amount` stroops.
+        // 3. Attach `idempotency_key` as the transaction memo.
+        // 4. Sign and submit; return the transaction hash.
+        let _ = (source_account, destination_account, amount, asset_code, idempotency_key);
+        let tx_hash = format!("prize-{}", Uuid::new_v4());
+        Ok(tx_hash)
+    }
+
+    /// Return the completed transaction for a memo-based idempotency key.
+    async fn find_completed_transaction_by_memo(
+        &self,
+        memo: &str,
+    ) -> Result<Option<StellarTransaction>, StellarError> {
+        let transaction = sqlx::query_as!(
+            StellarTransaction,
+            r#"
+            SELECT * FROM stellar_transactions
+            WHERE memo = $1 AND status = 'completed'
+            LIMIT 1
+            "#,
+            memo
+        )
+        .fetch_optional(&*self.db_pool)
+        .await?;
+        Ok(transaction)
+    }
+
+    /// Return the first transaction recorded for a memo-based idempotency key.
+    async fn find_transaction_by_memo(
+        &self,
+        memo: &str,
+    ) -> Result<Option<StellarTransaction>, StellarError> {
+        let transaction = sqlx::query_as!(
+            StellarTransaction,
+            r#"
+            SELECT * FROM stellar_transactions
+            WHERE memo = $1
+            LIMIT 1
+            "#,
+            memo
+        )
+        .fetch_optional(&*self.db_pool)
+        .await?;
+        Ok(transaction)
+    }
+
+    /// Create the dead-letter queue table if it does not exist.
+    async fn ensure_dead_letter_table(&self) -> Result<(), StellarError> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS dead_letter_queue (
+                id UUID PRIMARY KEY,
+                transaction_id UUID,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                source_account TEXT NOT NULL,
+                destination_account TEXT NOT NULL,
+                amount BIGINT NOT NULL,
+                asset_code TEXT NOT NULL,
+                user_id UUID,
+                error_message TEXT NOT NULL,
+                retry_count INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(&*self.db_pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Insert or update an entry in the dead-letter queue.
+    #[allow(clippy::too_many_arguments)]
+    async fn enqueue_dead_letter(
+        &self,
+        transaction_id: Uuid,
+        idempotency_key: &str,
+        source_account: &str,
+        destination_account: &str,
+        amount: i64,
+        asset_code: &str,
+        user_id: Option<Uuid>,
+        error_message: &str,
+        retry_count: u32,
+    ) -> Result<(), StellarError> {
+        sqlx::query(
+            r#"
+            INSERT INTO dead_letter_queue (
+                id, transaction_id, idempotency_key, source_account, destination_account,
+                amount, asset_code, user_id, error_message, retry_count, status, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $11)
+            ON CONFLICT (idempotency_key) DO UPDATE SET
+                transaction_id = EXCLUDED.transaction_id,
+                source_account = EXCLUDED.source_account,
+                destination_account = EXCLUDED.destination_account,
+                amount = EXCLUDED.amount,
+                asset_code = EXCLUDED.asset_code,
+                user_id = EXCLUDED.user_id,
+                error_message = EXCLUDED.error_message,
+                retry_count = EXCLUDED.retry_count,
+                status = 'pending',
+                updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(transaction_id)
+        .bind(idempotency_key)
+        .bind(source_account)
+        .bind(destination_account)
+        .bind(amount)
+        .bind(asset_code)
+        .bind(user_id)
+        .bind(error_message)
+        .bind(retry_count as i32)
+        .bind(Utc::now())
+        .execute(&*self.db_pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Admin interface: view all dead-letter queue entries.
+    pub async fn admin_list_dead_letter_queue(&self) -> Result<serde_json::Value, StellarError> {
+        self.ensure_dead_letter_table().await?;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT idempotency_key, transaction_id, source_account, destination_account,
+                   amount, asset_code, user_id, error_message, retry_count, status, created_at, updated_at
+            FROM dead_letter_queue
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&*self.db_pool)
+        .await?;
+
+        let entries = rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "idempotency_key": row.try_get::<String, _>("idempotency_key").unwrap_or_default(),
+                    "transaction_id": row.try_get::<Uuid, _>("transaction_id").map(|id| id.to_string()).ok(),
+                    "source_account": row.try_get::<String, _>("source_account").unwrap_or_default(),
+                    "destination_account": row.try_get::<String, _>("destination_account").unwrap_or_default(),
+                    "amount": row.try_get::<i64, _>("amount").unwrap_or_default(),
+                    "asset_code": row.try_get::<String, _>("asset_code").unwrap_or_default(),
+                    "user_id": row.try_get::<Option<Uuid>, _>("user_id").ok().flatten().map(|id| id.to_string()),
+                    "error_message": row.try_get::<String, _>("error_message").unwrap_or_default(),
+                    "retry_count": row.try_get::<i32, _>("retry_count").unwrap_or_default(),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "created_at": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|dt| dt.to_rfc3339()).ok(),
+                    "updated_at": row.try_get::<chrono::DateTime<Utc>, _>("updated_at").map(|dt| dt.to_rfc3339()).ok(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(serde_json::json!({ "dead_letter_queue": entries }))
+    }
+
+    /// Admin interface: retry a dead-letter queue entry.
+    pub async fn admin_retry_dead_letter(&self, idempotency_key: &str) -> Result<(), StellarError> {
+        self.ensure_dead_letter_table().await?;
+
+        let row = sqlx::query(
+            r#"
+            SELECT source_account, destination_account, amount, asset_code, user_id
+            FROM dead_letter_queue
+            WHERE idempotency_key = $1
+            "#,
+        )
+        .bind(idempotency_key)
+        .fetch_optional(&*self.db_pool)
+        .await?
+        .ok_or_else(|| {
+            StellarError::TransactionFailed("Dead letter entry not found".to_string())
+        })?;
+
+        let source_account: String = row.try_get("source_account")?;
+        let destination_account: String = row.try_get("destination_account")?;
+        let amount: i64 = row.try_get("amount")?;
+        let asset_code: String = row.try_get("asset_code")?;
+        let user_id: Option<Uuid> = row.try_get("user_id").ok().flatten();
+
+        self.submit_prize_payment_with_retry(
+            &source_account,
+            &destination_account,
+            amount,
+            &asset_code,
+            idempotency_key,
+            user_id,
+        )
+        .await?;
+
+        sqlx::query("DELETE FROM dead_letter_queue WHERE idempotency_key = $1")
+            .bind(idempotency_key)
+            .execute(&*self.db_pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Send a webhook notification for a prize distribution event. Failures are
+    /// logged but never fail the distribution flow.
+    async fn notify_webhook(&self, event: &str, payload: serde_json::Value) {
+        let url = match self.webhook_url.as_ref() {
+            Some(url) => url,
+            None => return,
+        };
+
+        let client = reqwest::Client::new();
+        let body = serde_json::json!({
+            "event": event,
+            "timestamp": Utc::now().to_rfc3339(),
+            "payload": payload,
+        });
+
+        match client.post(url).json(&body).send().await {
+            Ok(response) if response.status().is_success() => {
+                tracing::debug!("Webhook {} delivered to {}", event, url);
+            }
+            Ok(response) => {
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                tracing::warn!("Webhook {} returned {}: {}", event, status, text);
+            }
+            Err(err) => {
+                tracing::warn!("Webhook {} delivery failed: {}", event, err);
+            }
+        }
     }
 
     // ========================================================================
