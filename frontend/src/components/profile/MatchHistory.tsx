@@ -226,7 +226,9 @@ function dedupeById(matches: AnyMatchWithPlayers[]): AnyMatchWithPlayers[] {
 }
 
 // Parse URL search params into filters object
-function parseFiltersFromURL(searchParams: URLSearchParams | null | undefined): MatchHistoryFilters & MatchHistorySort {
+function parseFiltersFromURL(
+  searchParams: { get(name: string): string | null } | null | undefined
+): MatchHistoryFilters & MatchHistorySort {
   const filters: MatchHistoryFilters & MatchHistorySort = {};
   if (!searchParams) return filters;
   
