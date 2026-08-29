@@ -782,7 +782,7 @@ export function MatchHistory({
         )}
 
         {/* Pagination (used alongside non-virtual render) */}
-        {showPagination && !useVirtual && (
+        {paginationProvided && !useVirtual && (
           <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t">
             <Button
               variant="outline"
@@ -795,13 +795,13 @@ export function MatchHistory({
               Previous
             </Button>
             <span className="text-sm text-muted-foreground px-4">
-              Page {currentPage} of {totalPages}
+              Page {currentPage} of {totalPages ?? 1}
             </span>
             <Button
               variant="outline"
               size="sm"
               onClick={() => onPageChange?.(currentPage + 1)}
-              disabled={currentPage >= totalPages}
+              disabled={totalPages !== undefined && currentPage >= totalPages}
               aria-label="Next page"
             >
               Next
