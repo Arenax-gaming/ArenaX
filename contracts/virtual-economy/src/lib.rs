@@ -4,6 +4,7 @@
 // generates the Client/Args types outside the impl block itself).
 #![allow(clippy::too_many_arguments)]
 
+mod amm;
 mod analytics;
 mod batch;
 mod currency;
@@ -23,6 +24,10 @@ use nft_staking::NftStakingManager;
 use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
+pub use amm::{
+    AmmManager, DepositResult, LiquidityPool, PriceSnapshot, SwapResult, WithdrawResult,
+    MINIMUM_LIQUIDITY, SWAP_FEE_BPS,
+};
 pub use error::VirtualEconomyError;
 pub use storage::*;
 
@@ -289,9 +294,10 @@ impl VirtualEconomyContract {
             events::emit_currency_minted(&env, &recipient, amount, &reason);
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply + total_mint));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply + total_mint),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_minted += total_mint;
@@ -378,16 +384,18 @@ impl VirtualEconomyContract {
             let owner = owners.get_unchecked(i);
             let amount = amounts.get_unchecked(i);
             let balance = Self::get_currency_balance(env.clone(), owner.clone());
-            env.storage()
-                .persistent()
-                .set(&DataKey::CurrencyBalance(owner.clone()), &(balance - amount));
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(owner.clone()),
+                &(balance - amount),
+            );
             events::emit_currency_burned(&env, &owner, amount);
         }
 
         let current_supply = Self::get_total_currency_supply(env.clone());
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply - total_burn));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply - total_burn),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_burned += total_burn;
@@ -2007,7 +2015,9 @@ impl VirtualEconomyContract {
         env.storage()
             .instance()
             .set(&DataKey::FairLaunchAnalytics, &analytics);
-        env.storage().instance().set(&DataKey::FairLaunchPhase, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchPhase, &0u32);
 
         events::emit_fair_launch_configured(
             &env,
@@ -2134,9 +2144,10 @@ impl VirtualEconomyContract {
 
         // Update per-wallet record
         let is_new_buyer = already_purchased == 0;
-        env.storage()
-            .instance()
-            .set(&DataKey::FairLaunchPurchased(buyer.clone()), &(already_purchased + amount));
+        env.storage().instance().set(
+            &DataKey::FairLaunchPurchased(buyer.clone()),
+            &(already_purchased + amount),
+        );
 
         // Update analytics
         analytics.total_sold += amount;
@@ -2311,8 +2322,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards > 0 {
@@ -2384,8 +2394,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards <= 0 {
@@ -2417,10 +2426,7 @@ impl VirtualEconomyContract {
     }
 
     /// Return the staked position for a given token, or `None` if not staked.
-    pub fn get_nft_staked_position(
-        env: Env,
-        token_id: BytesN<32>,
-    ) -> Option<NftStakedPosition> {
+    pub fn get_nft_staked_position(env: Env, token_id: BytesN<32>) -> Option<NftStakedPosition> {
         env.storage()
             .persistent()
             .get(&DataKey::NftStakedPosition(token_id))
@@ -2457,6 +2463,24 @@ impl VirtualEconomyContract {
             .get(&DataKey::Admin)
             .ok_or(VirtualEconomyError::NotInitialized)?;
         admin.require_auth();
+        Ok(())
+    }
+
+    /// Reject pool operations while the contract is emergency-paused.
+    ///
+    /// Withdrawals are gated too. That is deliberate: a pause exists because
+    /// something is wrong with the contract's accounting, and letting LPs race
+    /// each other out of a pool whose reserves may be wrong turns a bug into a
+    /// bank run.
+    fn require_amm_not_paused(env: &Env) -> Result<(), VirtualEconomyError> {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyPaused)
+            .unwrap_or(false)
+        {
+            return Err(VirtualEconomyError::EmergencyPaused);
+        }
         Ok(())
     }
 
@@ -2659,5 +2683,134 @@ impl VirtualEconomyContract {
             return Ok(pair_cfg);
         }
         Self::get_oracle_config(env)
+    }
+
+    // -------------------------------------------------------------------------
+    // Liquidity Pool / AMM (Issue #882)
+    // -------------------------------------------------------------------------
+
+    /// Create the AX liquidity pool. Admin only, and only once.
+    ///
+    /// Reserves start empty; the first `add_liquidity` sets the initial price.
+    ///
+    /// # Errors
+    /// - `Unauthorized` if the caller is not the admin.
+    /// - `PoolAlreadyExists` if a pool has already been created.
+    pub fn create_liquidity_pool(
+        env: Env,
+        fee_bps: i128,
+    ) -> Result<LiquidityPool, VirtualEconomyError> {
+        // require_admin reads the stored admin and calls require_auth itself.
+        Self::require_admin(&env)?;
+        AmmManager::create_pool(&env, fee_bps)
+    }
+
+    /// Deposit both assets and receive LP tokens.
+    ///
+    /// `min_shares` is the caller's slippage floor: the pool ratio can move
+    /// between quoting and execution, and a deposit at an unexpected ratio
+    /// mints fewer shares than intended.
+    ///
+    /// # Errors
+    /// - `InvalidAmount` for non-positive amounts.
+    /// - `InsufficientLiquidity` if the first deposit is too small to cover the
+    ///   permanently locked minimum.
+    /// - `SlippageExceeded` if fewer than `min_shares` would be minted.
+    pub fn add_liquidity(
+        env: Env,
+        provider: Address,
+        amount_a: i128,
+        amount_b: i128,
+        min_shares: i128,
+    ) -> Result<DepositResult, VirtualEconomyError> {
+        provider.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::add_liquidity(&env, &provider, amount_a, amount_b, min_shares)
+    }
+
+    /// Burn LP tokens and withdraw the proportional reserves.
+    ///
+    /// # Errors
+    /// - `InsufficientBalance` if the provider holds fewer shares than requested.
+    /// - `SlippageExceeded` if either amount would fall below its floor.
+    pub fn remove_liquidity(
+        env: Env,
+        provider: Address,
+        shares: i128,
+        min_a: i128,
+        min_b: i128,
+    ) -> Result<WithdrawResult, VirtualEconomyError> {
+        provider.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::remove_liquidity(&env, &provider, shares, min_a, min_b)
+    }
+
+    /// Swap one asset for the other along the constant-product curve.
+    ///
+    /// `min_amount_out` must be positive. A zero floor is rejected rather than
+    /// read as "no preference": an unprotected swap is sandwich bait, and the
+    /// quote a caller saw off-chain is not the price they will get.
+    ///
+    /// # Errors
+    /// - `InvalidAmount` for a non-positive input or a zero slippage floor.
+    /// - `SlippageExceeded` if the output would be below `min_amount_out`.
+    /// - `InsufficientLiquidity` if the pool cannot support the trade.
+    pub fn swap(
+        env: Env,
+        trader: Address,
+        a_to_b: bool,
+        amount_in: i128,
+        min_amount_out: i128,
+    ) -> Result<SwapResult, VirtualEconomyError> {
+        trader.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::swap(&env, a_to_b, amount_in, min_amount_out)
+    }
+
+    /// Quote a swap without executing it. Read-only.
+    ///
+    /// The quote is only valid for the current reserves — anything can execute
+    /// before this caller's transaction does, which is what `min_amount_out`
+    /// on `swap` is for.
+    pub fn quote_swap(
+        env: Env,
+        a_to_b: bool,
+        amount_in: i128,
+    ) -> Result<i128, VirtualEconomyError> {
+        let pool = AmmManager::get_pool(&env)?;
+        let (reserve_in, reserve_out) = if a_to_b {
+            (pool.reserve_a, pool.reserve_b)
+        } else {
+            (pool.reserve_b, pool.reserve_a)
+        };
+        AmmManager::get_amount_out(amount_in, reserve_in, reserve_out, pool.fee_bps)
+    }
+
+    /// Current pool reserves, shares, and accumulators. Read-only.
+    pub fn get_liquidity_pool(env: Env) -> Result<LiquidityPool, VirtualEconomyError> {
+        AmmManager::get_pool(&env)
+    }
+
+    /// LP token balance for a provider. Read-only.
+    pub fn get_lp_shares(env: Env, provider: Address) -> i128 {
+        AmmManager::get_shares(&env, &provider)
+    }
+
+    /// Marginal spot price of A in B, scaled by 1e7. Read-only.
+    ///
+    /// Manipulable within a single transaction — use [`Self::observe_price`]
+    /// and a TWAP for anything that matters.
+    pub fn get_spot_price(env: Env) -> Result<i128, VirtualEconomyError> {
+        let pool = AmmManager::get_pool(&env)?;
+        AmmManager::spot_price(pool.reserve_a, pool.reserve_b)
+    }
+
+    /// Take a price observation for TWAP construction.
+    ///
+    /// Two observations separated in time give a time-weighted average, which
+    /// an attacker cannot move without holding the price away from the market
+    /// for the whole window.
+    pub fn observe_price(env: Env) -> Result<PriceSnapshot, VirtualEconomyError> {
+        AmmManager::observe(&env)
     }
 }

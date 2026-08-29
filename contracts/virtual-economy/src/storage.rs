@@ -82,9 +82,9 @@ pub enum DataKey {
     /// Aggregate NFT staking analytics.
     NftStakingAnalytics,
 
-    // Referrals
-    ReferralConfig,
-    ReferralAccount(Address),
+    // Liquidity pool (Issue #882)
+    AmmPool,
+    AmmShares(Address),
 }
 
 #[contracttype]
