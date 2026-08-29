@@ -44,6 +44,10 @@ pub enum RealtimeEvent {
         reason: String,
         timestamp: String,
     },
+    MatchmakingMetricsUpdate {
+        dashboard: serde_json::Value,
+        timestamp: String,
+    },
 }
 
 /// Envelope wrapping a realtime event for WebSocket delivery.
@@ -81,6 +85,7 @@ pub mod channels {
 
     pub const USER_CHANNEL_PATTERN: &str = "user:*";
     pub const MATCH_CHANNEL_PATTERN: &str = "match:*";
+    pub const MATCHMAKING_METRICS_CHANNEL: &str = "matchmaking:metrics";
 
     pub fn user_channel(user_id: Uuid) -> String {
         format!("user:{}", user_id)
