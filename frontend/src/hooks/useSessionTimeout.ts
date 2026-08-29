@@ -182,8 +182,7 @@ export function useSessionTimeout(): UseSessionTimeoutReturn {
     lastActivityRef.current = Date.now();
     setIsWarning(false);
     setTimeRemaining(SESSION_DURATION_SECONDS);
-    resume();
-  }, [resume]);
+  }, []);
   
   // Compute showWarning based on warning state and user presence
   const showWarning = isWarning && !!user;

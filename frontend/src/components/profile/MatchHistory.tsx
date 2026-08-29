@@ -255,7 +255,7 @@ function parseFiltersFromURL(searchParams: URLSearchParams | null | undefined): 
 function buildSearchParamsString(
   filters: MatchHistoryFilters & MatchHistorySort,
   router: any,
-  pathname: string
+  pathname: string | null
 ) {
   const params = new URLSearchParams();
   
@@ -266,11 +266,12 @@ function buildSearchParamsString(
   if (filters.field) params.set("sortField", filters.field);
   if (filters.direction) params.set("sortDirection", filters.direction);
   
+  const path = pathname ?? "";
   const queryString = params.toString();
   if (queryString) {
-    router.push(`${pathname}?${queryString}`, { scroll: false });
+    router.push(`${path}?${queryString}`, { scroll: false });
   } else {
-    router.push(pathname, { scroll: false });
+    router.push(path, { scroll: false });
   }
 }
 
