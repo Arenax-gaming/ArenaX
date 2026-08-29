@@ -27,7 +27,7 @@ const EXTEND_DURATION_SECONDS = SESSION_DURATION_SECONDS;
 
 interface SessionTimeoutModalProps {
   isOpen: boolean;
-  timeRemaining: number;
+  timeRemaining?: number | null;
   onExtend: () => Promise<void>;
   onForceLogout: () => void;
   onClose: () => void;
@@ -41,13 +41,14 @@ interface SessionTimeoutModalProps {
 
 export function SessionTimeoutModal({
   isOpen,
-  timeRemaining,
+  timeRemaining = 0,
   onExtend,
   onForceLogout,
   onClose,
   className,
   contentClassName,
 }: SessionTimeoutModalProps) {
+  const remaining = timeRemaining ?? 0;
   const isClosingRef = useRef(false);
   const extendButtonRef = useRef<HTMLButtonElement>(null);
   const gracePeriodExpired = useGracePeriodExpired();
@@ -302,14 +303,15 @@ export function SessionGracePeriodAlert({
 // ---------------------------------------------------------------------------
 
 interface SessionTimeoutIndicatorProps {
-  timeRemaining: number;
+  timeRemaining?: number | null;
   className?: string;
 }
 
 export function SessionTimeoutIndicator({
-  timeRemaining,
+  timeRemaining = 0,
   className,
 }: SessionTimeoutIndicatorProps) {
+  const remaining = timeRemaining ?? 0;
   const formatTime = useCallback((seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -324,9 +326,9 @@ export function SessionTimeoutIndicator({
   
   return (
     <div className={cn("flex items-center gap-2 text-sm", className)}>
-      <Clock className={`h-4 w-4 ${getColorClass(timeRemaining)}`} aria-hidden="true" />
-      <span className={getColorClass(timeRemaining)}>
-        {formatTime(timeRemaining)}
+      <Clock className={`h-4 w-4 ${getColorClass(remaining)}`} aria-hidden="true" />
+      <span className={getColorClass(remaining)}>
+        {formatTime(remaining)}
       </span>
     </div>
   );

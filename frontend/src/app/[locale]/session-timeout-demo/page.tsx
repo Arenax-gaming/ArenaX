@@ -301,17 +301,17 @@ const gracePeriodExpired = useGracePeriodExpired();`}
             <div className="grid gap-3 text-sm">
               <div className="flex justify-between border-b pb-2">
                 <span className="text-muted-foreground">Warning starts in</span>
-                <span className="font-medium">{WARNING_TIME_SECONDS / 60} min</span>
+                <span className="font-medium">{Math.floor(Number(WARNING_TIME_SECONDS) / 60)} min</span>
               </div>
               
               <div className="flex justify-between border-b pb-2">
                 <span className="text-muted-foreground">Total session time</span>
-                <span className="font-medium">{SESSION_DURATION_SECONDS / 60} min</span>
+                <span className="font-medium">{Math.floor(Number(SESSION_DURATION_SECONDS) / 60)} min</span>
               </div>
               
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Grace period</span>
-                <span className="font-medium">{GRACE_PERIOD_SECONDS / 60} min</span>
+                <span className="font-medium">{Math.floor(Number(GRACE_PERIOD_SECONDS) / 60)} min</span>
               </div>
             </div>
           </div>
