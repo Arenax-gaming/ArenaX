@@ -18,7 +18,7 @@ import {
   SESSION_DURATION_SECONDS, 
   WARNING_TIME_SECONDS, 
   GRACE_PERIOD_SECONDS 
-} from "@/contexts/SessionTimeoutContext";
+} from "@/hooks/useSessionTimeout";
 
 // ---------------------------------------------------------------------------
 // Constants

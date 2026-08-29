@@ -43,6 +43,8 @@ export interface MatchHistoryFilters {
   result?: "win" | "loss";
   opponentSearch?: string;
   timeRange?: "week" | "month" | "all";
+  field?: "date" | "elo" | "duration";
+  direction?: "asc" | "desc";
 }
 
 export interface MatchHistorySort {
@@ -224,8 +226,9 @@ function dedupeById(matches: AnyMatchWithPlayers[]): AnyMatchWithPlayers[] {
 }
 
 // Parse URL search params into filters object
-function parseFiltersFromURL(searchParams: URLSearchParams): MatchHistoryFilters & MatchHistorySort {
+function parseFiltersFromURL(searchParams: URLSearchParams | null | undefined): MatchHistoryFilters & MatchHistorySort {
   const filters: MatchHistoryFilters & MatchHistorySort = {};
+  if (!searchParams) return filters;
   
   const gameType = searchParams.get("gameType");
   if (gameType) filters.gameType = gameType;

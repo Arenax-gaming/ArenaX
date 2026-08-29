@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+export { SESSION_DURATION_SECONDS, WARNING_TIME_SECONDS, GRACE_PERIOD_SECONDS } from "@/hooks/useSessionTimeout";
 import { SESSION_DURATION_SECONDS, WARNING_TIME_SECONDS, GRACE_PERIOD_SECONDS } from "@/hooks/useSessionTimeout";
 
 // ---------------------------------------------------------------------------
