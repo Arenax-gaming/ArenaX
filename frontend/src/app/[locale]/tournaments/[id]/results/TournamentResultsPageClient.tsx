@@ -26,6 +26,7 @@ import { TournamentHeader } from "@/components/tournaments/TournamentHeader";
 import { TournamentShareButton } from "@/components/tournaments/TournamentShareButton";
 import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
+import { BracketErrorBoundary } from "@/components/bracket/BracketErrorBoundary";
 import { useAuth } from "@/hooks/useAuth";
 import {
   calculatePrizeDistribution,
@@ -226,10 +227,20 @@ export function TournamentResultsPageClient() {
                 >
                   Final bracket
                 </h2>
-                <SingleEliminationBracket
-                  bracketData={bracketData}
-                  currentUserId={currentUserId}
-                />
+                <BracketErrorBoundary
+                  tournamentName={tournament.name}
+                  tournamentId={tournament.id}
+                  tournamentInfo={{
+                    status: tournament.status,
+                    participantCount: tournament.participants?.length,
+                    startDate: tournament.startDate,
+                  }}
+                >
+                  <SingleEliminationBracket
+                    bracketData={bracketData}
+                    currentUserId={currentUserId}
+                  />
+                </BracketErrorBoundary>
               </section>
             )}
           </>

@@ -4,6 +4,7 @@
 // generates the Client/Args types outside the impl block itself).
 #![allow(clippy::too_many_arguments)]
 
+mod amm;
 mod analytics;
 mod batch;
 mod currency;
@@ -23,6 +24,10 @@ use nft_staking::NftStakingManager;
 use oracle::OracleManager;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
+pub use amm::{
+    AmmManager, DepositResult, LiquidityPool, PriceSnapshot, SwapResult, WithdrawResult,
+    MINIMUM_LIQUIDITY, SWAP_FEE_BPS,
+};
 pub use error::VirtualEconomyError;
 pub use storage::*;
 
@@ -289,9 +294,10 @@ impl VirtualEconomyContract {
             events::emit_currency_minted(&env, &recipient, amount, &reason);
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply + total_mint));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply + total_mint),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_minted += total_mint;
@@ -378,16 +384,18 @@ impl VirtualEconomyContract {
             let owner = owners.get_unchecked(i);
             let amount = amounts.get_unchecked(i);
             let balance = Self::get_currency_balance(env.clone(), owner.clone());
-            env.storage()
-                .persistent()
-                .set(&DataKey::CurrencyBalance(owner.clone()), &(balance - amount));
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(owner.clone()),
+                &(balance - amount),
+            );
             events::emit_currency_burned(&env, &owner, amount);
         }
 
         let current_supply = Self::get_total_currency_supply(env.clone());
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply - total_burn));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply - total_burn),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_burned += total_burn;
@@ -1270,6 +1278,223 @@ impl VirtualEconomyContract {
     }
 
     // -------------------------------------------------------------------------
+    // Referrals
+    // -------------------------------------------------------------------------
+
+    /// Configure tier thresholds and bonus rates. Tiers must be ordered by
+    /// increasing volume and each combined rate must be at most 100%.
+    pub fn configure_referrals(
+        env: Env,
+        config: ReferralConfig,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        if config.tiers.is_empty()
+            || config.max_reward_per_activity <= 0
+            || config.activity_cooldown == 0
+        {
+            return Err(VirtualEconomyError::InvalidConfig);
+        }
+        let mut previous = -1i128;
+        for tier in config.tiers.iter() {
+            if tier.min_volume < 0
+                || tier.min_volume <= previous
+                || tier.referrer_bps as u64 + tier.referee_bps as u64 > 10_000
+            {
+                return Err(VirtualEconomyError::InvalidConfig);
+            }
+            previous = tier.min_volume;
+        }
+        env.storage().instance().set(&DataKey::ReferralConfig, &config);
+        Ok(())
+    }
+
+    /// Register `referee` under `referrer`. A referee can only be registered
+    /// once and must authorize the registration themselves.
+    pub fn register_referral(
+        env: Env,
+        referee: Address,
+        referrer: Address,
+    ) -> Result<(), VirtualEconomyError> {
+        referee.require_auth();
+        if !env.storage().instance().has(&DataKey::ReferralConfig) {
+            return Err(VirtualEconomyError::ReferralNotConfigured);
+        }
+        if referee == referrer {
+            return Err(VirtualEconomyError::InvalidReferral);
+        }
+        if let Some(referrer_account) = Self::referral_account(&env, referrer.clone()) {
+            if referrer_account.flagged {
+                return Err(VirtualEconomyError::ReferralFraud);
+            }
+            // Prevent a two-account referral cycle. Cycles make attribution
+            // ambiguous and are a common sybil pattern.
+            if referrer_account.referrer == Some(referee.clone()) {
+                return Err(VirtualEconomyError::ReferralFraud);
+            }
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::ReferralAccount(referee.clone()))
+        {
+            return Err(VirtualEconomyError::ReferralAlreadyRegistered);
+        }
+        env.storage().persistent().set(
+            &DataKey::ReferralAccount(referee),
+            &ReferralAccount {
+                referrer: Some(referrer.clone()),
+                qualifying_volume: 0,
+                pending_rewards: 0,
+                total_rewards: 0,
+                referred_count: 0,
+                last_activity: 0,
+                flagged: false,
+            },
+        );
+        let mut account = Self::referral_account(&env, referrer.clone()).unwrap_or(ReferralAccount {
+            referrer: None,
+            qualifying_volume: 0,
+            pending_rewards: 0,
+            total_rewards: 0,
+            referred_count: 0,
+            last_activity: 0,
+            flagged: false,
+        });
+        account.referred_count += 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(referrer), &account);
+        Ok(())
+    }
+
+    /// Record qualifying activity and accrue both sides' tier bonuses.
+    pub fn record_referral_activity(
+        env: Env,
+        referee: Address,
+        amount: i128,
+    ) -> Result<(i128, i128), VirtualEconomyError> {
+        referee.require_auth();
+        if amount <= 0 {
+            return Err(VirtualEconomyError::InvalidAmount);
+        }
+        let config: ReferralConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReferralConfig)
+            .ok_or(VirtualEconomyError::ReferralNotConfigured)?;
+        let mut referee_account = Self::referral_account(&env, referee.clone())
+            .ok_or(VirtualEconomyError::ReferralNotFound)?;
+        let referrer = referee_account
+            .referrer
+            .clone()
+            .ok_or(VirtualEconomyError::ReferralNotFound)?;
+        let mut referrer_account = Self::referral_account(&env, referrer.clone())
+            .ok_or(VirtualEconomyError::ReferralNotFound)?;
+        if referee_account.flagged || referrer_account.flagged {
+            return Err(VirtualEconomyError::ReferralFraud);
+        }
+        let now = env.ledger().timestamp();
+        if referee_account.last_activity > 0
+            && now < referee_account.last_activity + config.activity_cooldown
+        {
+            return Err(VirtualEconomyError::ReferralCooldown);
+        }
+        referee_account.qualifying_volume += amount;
+        let mut tier = None;
+        for candidate in config.tiers.iter() {
+            if referee_account.qualifying_volume >= candidate.min_volume {
+                tier = Some(candidate);
+            }
+        }
+        let tier = tier.ok_or(VirtualEconomyError::InvalidConfig)?;
+        let mut referrer_reward = amount * tier.referrer_bps as i128 / 10_000;
+        let mut referee_reward = amount * tier.referee_bps as i128 / 10_000;
+        let total = referrer_reward + referee_reward;
+        if total > config.max_reward_per_activity {
+            let scale = config.max_reward_per_activity;
+            referrer_reward = referrer_reward * scale / total;
+            referee_reward = scale - referrer_reward;
+        }
+        referee_account.pending_rewards += referee_reward;
+        referee_account.total_rewards += referee_reward;
+        referee_account.last_activity = now;
+        referrer_account.pending_rewards += referrer_reward;
+        referrer_account.total_rewards += referrer_reward;
+        env.storage().persistent().set(
+            &DataKey::ReferralAccount(referee),
+            &referee_account,
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(referrer), &referrer_account);
+        Ok((referrer_reward, referee_reward))
+    }
+
+    /// Claim all pending referral rewards for `account`.
+    pub fn claim_referral_rewards(
+        env: Env,
+        account: Address,
+    ) -> Result<i128, VirtualEconomyError> {
+        account.require_auth();
+        let mut referral = Self::referral_account(&env, account.clone())
+            .ok_or(VirtualEconomyError::ReferralNotFound)?;
+        if referral.flagged {
+            return Err(VirtualEconomyError::ReferralFraud);
+        }
+        if referral.pending_rewards <= 0 {
+            return Err(VirtualEconomyError::NothingToClaim);
+        }
+        let amount = referral.pending_rewards;
+        let supply = Self::get_total_currency_supply(env.clone());
+        let config = Self::get_currency_config(&env);
+        if supply + amount > config.max_supply {
+            return Err(VirtualEconomyError::SupplyLimitExceeded);
+        }
+        let balance = Self::get_currency_balance(env.clone(), account.clone());
+        env.storage().persistent().set(
+            &DataKey::CurrencyBalance(account),
+            &(balance + amount),
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalCurrencySupply, &(supply + amount));
+        let mut analytics = Self::get_economy_analytics(env.clone());
+        analytics.total_currency_minted += amount;
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
+        referral.pending_rewards = 0;
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(account), &referral);
+        Ok(amount)
+    }
+
+    /// Flag or clear an account after off-chain or on-chain fraud review.
+    pub fn set_referral_fraud_flag(
+        env: Env,
+        account: Address,
+        flagged: bool,
+    ) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        let mut referral = Self::referral_account(&env, account.clone())
+            .ok_or(VirtualEconomyError::ReferralNotFound)?;
+        referral.flagged = flagged;
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(account), &referral);
+        Ok(())
+    }
+
+    pub fn get_referral_account(env: Env, account: Address) -> Option<ReferralAccount> {
+        Self::referral_account(&env, account)
+    }
+
+    pub fn get_referral_config(env: Env) -> Option<ReferralConfig> {
+        env.storage().instance().get(&DataKey::ReferralConfig)
+    }
+
+    // -------------------------------------------------------------------------
     // Analytics & Monitoring
     // -------------------------------------------------------------------------
 
@@ -1790,7 +2015,9 @@ impl VirtualEconomyContract {
         env.storage()
             .instance()
             .set(&DataKey::FairLaunchAnalytics, &analytics);
-        env.storage().instance().set(&DataKey::FairLaunchPhase, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchPhase, &0u32);
 
         events::emit_fair_launch_configured(
             &env,
@@ -1917,9 +2144,10 @@ impl VirtualEconomyContract {
 
         // Update per-wallet record
         let is_new_buyer = already_purchased == 0;
-        env.storage()
-            .instance()
-            .set(&DataKey::FairLaunchPurchased(buyer.clone()), &(already_purchased + amount));
+        env.storage().instance().set(
+            &DataKey::FairLaunchPurchased(buyer.clone()),
+            &(already_purchased + amount),
+        );
 
         // Update analytics
         analytics.total_sold += amount;
@@ -2094,8 +2322,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards > 0 {
@@ -2167,8 +2394,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards <= 0 {
@@ -2200,10 +2426,7 @@ impl VirtualEconomyContract {
     }
 
     /// Return the staked position for a given token, or `None` if not staked.
-    pub fn get_nft_staked_position(
-        env: Env,
-        token_id: BytesN<32>,
-    ) -> Option<NftStakedPosition> {
+    pub fn get_nft_staked_position(env: Env, token_id: BytesN<32>) -> Option<NftStakedPosition> {
         env.storage()
             .persistent()
             .get(&DataKey::NftStakedPosition(token_id))
@@ -2243,6 +2466,24 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
+    /// Reject pool operations while the contract is emergency-paused.
+    ///
+    /// Withdrawals are gated too. That is deliberate: a pause exists because
+    /// something is wrong with the contract's accounting, and letting LPs race
+    /// each other out of a pool whose reserves may be wrong turns a bug into a
+    /// bank run.
+    fn require_amm_not_paused(env: &Env) -> Result<(), VirtualEconomyError> {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyPaused)
+            .unwrap_or(false)
+        {
+            return Err(VirtualEconomyError::EmergencyPaused);
+        }
+        Ok(())
+    }
+
     fn require_authorized_minter(env: &Env) -> Result<(), VirtualEconomyError> {
         // Check if emergency paused
         if env
@@ -2267,6 +2508,12 @@ impl VirtualEconomyContract {
                 inflation_rate: 500,           // 5% in basis points
                 deflation_rate: 200,           // 2% in basis points
             })
+    }
+
+    fn referral_account(env: &Env, account: Address) -> Option<ReferralAccount> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReferralAccount(account))
     }
 
     fn get_marketplace_config(env: &Env) -> MarketplaceConfig {
@@ -2436,5 +2683,134 @@ impl VirtualEconomyContract {
             return Ok(pair_cfg);
         }
         Self::get_oracle_config(env)
+    }
+
+    // -------------------------------------------------------------------------
+    // Liquidity Pool / AMM (Issue #882)
+    // -------------------------------------------------------------------------
+
+    /// Create the AX liquidity pool. Admin only, and only once.
+    ///
+    /// Reserves start empty; the first `add_liquidity` sets the initial price.
+    ///
+    /// # Errors
+    /// - `Unauthorized` if the caller is not the admin.
+    /// - `PoolAlreadyExists` if a pool has already been created.
+    pub fn create_liquidity_pool(
+        env: Env,
+        fee_bps: i128,
+    ) -> Result<LiquidityPool, VirtualEconomyError> {
+        // require_admin reads the stored admin and calls require_auth itself.
+        Self::require_admin(&env)?;
+        AmmManager::create_pool(&env, fee_bps)
+    }
+
+    /// Deposit both assets and receive LP tokens.
+    ///
+    /// `min_shares` is the caller's slippage floor: the pool ratio can move
+    /// between quoting and execution, and a deposit at an unexpected ratio
+    /// mints fewer shares than intended.
+    ///
+    /// # Errors
+    /// - `InvalidAmount` for non-positive amounts.
+    /// - `InsufficientLiquidity` if the first deposit is too small to cover the
+    ///   permanently locked minimum.
+    /// - `SlippageExceeded` if fewer than `min_shares` would be minted.
+    pub fn add_liquidity(
+        env: Env,
+        provider: Address,
+        amount_a: i128,
+        amount_b: i128,
+        min_shares: i128,
+    ) -> Result<DepositResult, VirtualEconomyError> {
+        provider.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::add_liquidity(&env, &provider, amount_a, amount_b, min_shares)
+    }
+
+    /// Burn LP tokens and withdraw the proportional reserves.
+    ///
+    /// # Errors
+    /// - `InsufficientBalance` if the provider holds fewer shares than requested.
+    /// - `SlippageExceeded` if either amount would fall below its floor.
+    pub fn remove_liquidity(
+        env: Env,
+        provider: Address,
+        shares: i128,
+        min_a: i128,
+        min_b: i128,
+    ) -> Result<WithdrawResult, VirtualEconomyError> {
+        provider.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::remove_liquidity(&env, &provider, shares, min_a, min_b)
+    }
+
+    /// Swap one asset for the other along the constant-product curve.
+    ///
+    /// `min_amount_out` must be positive. A zero floor is rejected rather than
+    /// read as "no preference": an unprotected swap is sandwich bait, and the
+    /// quote a caller saw off-chain is not the price they will get.
+    ///
+    /// # Errors
+    /// - `InvalidAmount` for a non-positive input or a zero slippage floor.
+    /// - `SlippageExceeded` if the output would be below `min_amount_out`.
+    /// - `InsufficientLiquidity` if the pool cannot support the trade.
+    pub fn swap(
+        env: Env,
+        trader: Address,
+        a_to_b: bool,
+        amount_in: i128,
+        min_amount_out: i128,
+    ) -> Result<SwapResult, VirtualEconomyError> {
+        trader.require_auth();
+        Self::require_amm_not_paused(&env)?;
+        AmmManager::swap(&env, a_to_b, amount_in, min_amount_out)
+    }
+
+    /// Quote a swap without executing it. Read-only.
+    ///
+    /// The quote is only valid for the current reserves — anything can execute
+    /// before this caller's transaction does, which is what `min_amount_out`
+    /// on `swap` is for.
+    pub fn quote_swap(
+        env: Env,
+        a_to_b: bool,
+        amount_in: i128,
+    ) -> Result<i128, VirtualEconomyError> {
+        let pool = AmmManager::get_pool(&env)?;
+        let (reserve_in, reserve_out) = if a_to_b {
+            (pool.reserve_a, pool.reserve_b)
+        } else {
+            (pool.reserve_b, pool.reserve_a)
+        };
+        AmmManager::get_amount_out(amount_in, reserve_in, reserve_out, pool.fee_bps)
+    }
+
+    /// Current pool reserves, shares, and accumulators. Read-only.
+    pub fn get_liquidity_pool(env: Env) -> Result<LiquidityPool, VirtualEconomyError> {
+        AmmManager::get_pool(&env)
+    }
+
+    /// LP token balance for a provider. Read-only.
+    pub fn get_lp_shares(env: Env, provider: Address) -> i128 {
+        AmmManager::get_shares(&env, &provider)
+    }
+
+    /// Marginal spot price of A in B, scaled by 1e7. Read-only.
+    ///
+    /// Manipulable within a single transaction — use [`Self::observe_price`]
+    /// and a TWAP for anything that matters.
+    pub fn get_spot_price(env: Env) -> Result<i128, VirtualEconomyError> {
+        let pool = AmmManager::get_pool(&env)?;
+        AmmManager::spot_price(pool.reserve_a, pool.reserve_b)
+    }
+
+    /// Take a price observation for TWAP construction.
+    ///
+    /// Two observations separated in time give a time-weighted average, which
+    /// an attacker cannot move without holding the price away from the market
+    /// for the whole window.
+    pub fn observe_price(env: Env) -> Result<PriceSnapshot, VirtualEconomyError> {
+        AmmManager::observe(&env)
     }
 }

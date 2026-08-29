@@ -1,0 +1,63 @@
+# Alertmanager routing/escalation policy for #970.
+#
+# Routes every alert coming from Prometheus (arenax-server + arenax-backend
+# rule groups in alert.rules.yml / backend-alert.rules.yml) to PagerDuty,
+# split by severity:
+#   - severity: critical -> pages on-call immediately (primary escalation)
+#   - severity: warning  -> pages on-call but auto-resolves quietly, no
+#                            repeat page storm
+#
+# See ONCALL.md in this directory for the full on-call escalation policy
+# (who gets paged, how escalation steps up if unacknowledged, etc).
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: pagerduty-warning
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: pagerduty-critical
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: false
+    - matchers:
+        - severity = warning
+      receiver: pagerduty-warning
+      repeat_interval: 6h
+      continue: false
+
+receivers:
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_critical_routing_key
+        severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          firing_alerts: '{{ .Alerts.Firing | len }}'
+          service: '{{ .CommonLabels.service }}'
+          runbook: 'server/infra/monitoring/ONCALL.md'
+
+  - name: pagerduty-warning
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_warning_routing_key
+        severity: warning
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          firing_alerts: '{{ .Alerts.Firing | len }}'
+          service: '{{ .CommonLabels.service }}'
+          runbook: 'server/infra/monitoring/ONCALL.md'
+
+inhibit_rules:
+  # Don't page separately for latency/memory/pool warnings on a service
+  # that's already known to be fully down.
+  - source_matchers:
+      - alertname =~ "ArenaXServerDown|ArenaXBackendDown"
+    target_matchers:
+      - severity = warning
+    equal: ['service']
