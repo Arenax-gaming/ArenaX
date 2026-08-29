@@ -94,6 +94,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
+    // Seed IP whitelist/blacklist from env vars
+    {
+        let mut seed_conn = redis_conn.clone();
+        crate::middleware::ip_list::seed_from_env(&mut seed_conn).await;
+    }
+
     // Initialize matchmaking service — pass the shared ConnectionManager so
     // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
@@ -219,6 +225,7 @@ async fn main() -> io::Result<()> {
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
+            .wrap(IpListMiddleware::new(redis_conn.clone()))
             .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
@@ -238,6 +245,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903
                     .configure(crate::http::anti_bot_handler::configure_routes)
+                    // IP whitelist/blacklist admin endpoints — Issue #975
+                    .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
                     .configure(crate::http::player_stats_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)

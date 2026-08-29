@@ -28,6 +28,7 @@ pub use security_headers::security_headers;
 pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
 
 use actix_cors::Cors;
+use actix_web::dev::ServiceRequest;
 use actix_web::http::{header, Method};
 use std::env;
 use tracing::warn;
@@ -77,4 +78,31 @@ pub fn cors_middleware() -> Cors {
     ])
     .supports_credentials()
     .max_age(3600)
+}
+
+/// Extract the client IP from a request.
+///
+/// Checks `X-Forwarded-For` first (set by a trusted reverse proxy), then
+/// falls back to the connection's real remote address, and finally to
+/// `"unknown"`.
+pub(crate) fn extract_ip(req: &ServiceRequest) -> String {
+    req.headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            req.connection_info()
+                .realip_remote_addr()
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Current time in milliseconds since UNIX epoch.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
