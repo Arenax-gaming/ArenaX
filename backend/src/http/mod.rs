@@ -1,5 +1,6 @@
 pub mod anti_bot_handler;
-puf mod auth_handler;
+pub mod audit_handler;
+pub mod auth_handler;
 pub mod health;
 pub mod idempotency;
 pub mod idempotency_examples;

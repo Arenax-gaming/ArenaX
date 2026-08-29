@@ -124,6 +124,41 @@ The `arenax.event.store` topic is the immutable audit log of all domain events.
 
 ---
 
+### 7.1 On-Chain State Changes (`ArenaXStateChange`)
+
+Contract domains emit events shaped for their own domain, which is right for a
+consumer who knows that domain but leaves an indexer with no uniform way to
+answer *who changed what, from what, to what*. `arenax-events::state_change`
+adds a domain-agnostic envelope for exactly that.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `actor` | `Address` | Who caused the change |
+| `resource` | `Symbol` | Kind of thing changed (`match`, `tournament`, `stake`…) |
+| `resource_id` | `String` | Which instance |
+| `field` | `Symbol` | Which field of that instance |
+| `old_value` | `String` | Value before; empty when the field is first set |
+| `new_value` | `String` | Value after |
+| `sequence` | `u64` | Per-resource monotonic counter |
+| `changed_at` | `u64` | Ledger timestamp |
+
+Topics: `["ArenaXStCh_v1", "CHANGED"]`.
+
+**Values are strings on purpose.** A typed union would need extending for every
+new field type, and every change would break every consumer. A string is what an
+indexer writes to its column anyway, and the owning domain's typed event stays
+the precise record.
+
+**Rebuilding state.** `project_resource()` folds a log back into current field
+values. It applies changes in *sequence* order rather than arrival order, since
+events can reach a consumer out of order; it ignores anything at or below the
+last applied sequence, so replaying or duplicating an event cannot move state;
+and it sets `has_gap` when a sequence number is missing. That flag matters — a
+projection built over a gap is not current, and the result says so rather than
+looking authoritative.
+
+---
+
 ## 8. Observability Requirements
 
 Every service MUST:

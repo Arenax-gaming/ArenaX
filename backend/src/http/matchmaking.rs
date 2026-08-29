@@ -318,6 +318,14 @@ pub async fn get_matchmaking_stats(
     }))
 }
 
+/// Get matchmaking metrics dashboard
+pub async fn get_matchmaking_metrics_dashboard(
+    matchmaker: web::Data<MatchmakerService>,
+) -> Result<HttpResponse> {
+    let dashboard = matchmaker.get_metrics_dashboard().await?;
+    Ok(HttpResponse::Ok().json(dashboard))
+}
+
 /// Get user's ELO rating
 pub async fn get_elo(
     db_pool: web::Data<DbPool>,
