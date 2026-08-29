@@ -2,12 +2,15 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { BalanceCards } from "@/components/wallet/BalanceCards";
 import { DepositModal } from "@/components/wallet/DepositModal";
+import { SessionExpiredModal } from "@/components/wallet/SessionExpiredModal";
 import { TransactionHistory } from "@/components/wallet/TransactionHistory";
 import { TransactionToasts } from "@/components/wallet/TransactionToasts";
 import { WalletConnectCard } from "@/components/wallet/WalletConnectCard";
 import { WithdrawModal } from "@/components/wallet/WithdrawModal";
+import { useAuth } from "@/hooks/useAuth";
 import { useTxStatus } from "@/hooks/useTxStatus";
 import { useWallet } from "@/hooks/useWallet";
 import { useTokenExpiry, SessionExpiredError } from "@/hooks/useTokenExpiry";
@@ -15,9 +18,12 @@ import { SessionExpiredModal } from "@/components/wallet/SessionExpiredModal";
 import { createEmptyBalances, fetchWalletBalances } from "@/lib/wallet/balances";
 import { walletConfig } from "@/lib/wallet/config";
 import { submitWithdrawTransaction } from "@/lib/wallet/transactions";
+import { isTokenNearExpiry } from "@/lib/wallet/tokenExpiry";
 import { WalletAssetCode, WithdrawRequest } from "@/lib/wallet/types";
 
 export function WalletDashboard() {
+  const router = useRouter();
+  const { refreshAccessToken, isRefreshing } = useAuth();
   const { session, isConnected, publicKey } = useWallet();
   const { history, appendHistory, clearHistory, trackTx } = useTxStatus();
 
@@ -27,6 +33,10 @@ export function WalletDashboard() {
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [isSessionExpiredOpen, setIsSessionExpiredOpen] = useState(false);
+
+  // Pending withdraw request — held while the session-expired modal is shown.
+  const [pendingWithdraw, setPendingWithdraw] = useState<WithdrawRequest | null>(null);
+  const [sessionExpiredVisible, setSessionExpiredVisible] = useState(false);
 
   const balancesQuery = useQuery({
     queryKey: ["wallet-balances", publicKey, walletConfig.network],
@@ -109,6 +119,28 @@ export function WalletDashboard() {
     } finally {
       setWithdrawSubmitting(false);
     }
+  };
+
+  // Called by the modal when the user confirms re-authentication.
+  const handleReauthenticate = async () => {
+    try {
+      await refreshAccessToken();
+      setSessionExpiredVisible(false);
+      if (pendingWithdraw) {
+        setPendingWithdraw(null);
+        await executeWithdraw(pendingWithdraw);
+      }
+    } catch {
+      // Refresh still failing — redirect to login.
+      setSessionExpiredVisible(false);
+      setPendingWithdraw(null);
+      router.push("/login?reason=session_expired");
+    }
+  };
+
+  const handleDismissSessionExpired = () => {
+    setSessionExpiredVisible(false);
+    setPendingWithdraw(null);
   };
 
   return (
