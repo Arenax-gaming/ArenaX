@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useInterval } from "@/hooks/useInterval";
 import { useAuth } from "@/hooks/useAuth";
@@ -206,13 +206,13 @@ export function useSessionTimeout(): UseSessionTimeoutReturn {
 // ---------------------------------------------------------------------------
 
 export interface SessionProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
-export function SessionProvider({ children }: SessionProviderProps) {
+export function SessionProvider({ children }: SessionProviderProps): ReactNode {
   useSessionTimeout();
   
-  return <>{children}</>;
+  return children;
 }
 
 // ---------------------------------------------------------------------------

@@ -16,9 +16,21 @@ use crate::{UpgradeError, UpgradeManager, UpgradeManagerClient, Version, DEFAULT
 // the installing wrappers are one line each and are covered by deployment
 // testing rather than here.
 
-const V1: Version = Version { major: 1, minor: 0, patch: 0 };
-const V2: Version = Version { major: 2, minor: 0, patch: 0 };
-const V3: Version = Version { major: 3, minor: 0, patch: 0 };
+const V1: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+const V2: Version = Version {
+    major: 2,
+    minor: 0,
+    patch: 0,
+};
+const V3: Version = Version {
+    major: 3,
+    minor: 0,
+    patch: 0,
+};
 
 fn setup(env: &Env) -> (UpgradeManagerClient<'_>, Address, BytesN<32>) {
     env.mock_all_auths();
@@ -100,7 +112,11 @@ fn a_version_that_does_not_move_forward_is_rejected() {
         client.try_schedule_upgrade(&hash(&env, 2), &V1, &false),
         Err(Ok(UpgradeError::InvalidVersion))
     );
-    let older = Version { major: 0, minor: 9, patch: 0 };
+    let older = Version {
+        major: 0,
+        minor: 9,
+        patch: 0,
+    };
     assert_eq!(
         client.try_schedule_upgrade(&hash(&env, 2), &older, &false),
         Err(Ok(UpgradeError::InvalidVersion))
@@ -119,7 +135,8 @@ fn execution_before_the_timelock_elapses_is_refused() {
     );
 
     // One second short still counts as short.
-    env.ledger().with_mut(|l| l.timestamp += DEFAULT_UPGRADE_DELAY - 1);
+    env.ledger()
+        .with_mut(|l| l.timestamp += DEFAULT_UPGRADE_DELAY - 1);
     assert_eq!(
         client.try_prepare_upgrade(),
         Err(Ok(UpgradeError::TimelockNotElapsed))
@@ -155,7 +172,10 @@ fn a_migrating_upgrade_requires_a_pause_first() {
 
     // Migrating state while writes are still landing migrates an inconsistent
     // snapshot, and the corruption is silent.
-    assert_eq!(client.try_prepare_upgrade(), Err(Ok(UpgradeError::NotPaused)));
+    assert_eq!(
+        client.try_prepare_upgrade(),
+        Err(Ok(UpgradeError::NotPaused))
+    );
 
     client.pause();
     assert!(client.try_prepare_upgrade().is_ok());
@@ -226,7 +246,10 @@ fn rollback_records_rather_than_erases_the_failed_upgrade() {
 fn rollback_without_history_is_refused() {
     let env = Env::default();
     let (client, _admin, _wasm) = setup(&env);
-    assert_eq!(client.try_prepare_rollback(), Err(Ok(UpgradeError::NoRollbackTarget)));
+    assert_eq!(
+        client.try_prepare_rollback(),
+        Err(Ok(UpgradeError::NoRollbackTarget))
+    );
 }
 
 #[test]

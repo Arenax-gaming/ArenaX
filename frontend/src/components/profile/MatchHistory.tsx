@@ -569,9 +569,9 @@ export function MatchHistory({
           >
             {/* Sort options */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Sort By
-              </label>
+              </span>
               <div className="flex flex-wrap gap-2">
                 {(["date", "elo", "duration"] as const).map((field) => (
                   <button

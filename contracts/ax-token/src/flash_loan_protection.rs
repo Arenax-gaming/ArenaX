@@ -1,8 +1,8 @@
 // Flash loan protection utilities for AxToken
 // FLASH_LOAN_PROTECTED functions check this before executing
 #![allow(dead_code)]
-use soroban_sdk::{Address, Env};
 use crate::DataKey;
+use soroban_sdk::{Address, Env};
 
 /// Identifies the category of a protected operation for audit/logging purposes.
 pub enum ProtectedOperation {

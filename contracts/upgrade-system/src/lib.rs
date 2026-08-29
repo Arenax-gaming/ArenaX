@@ -379,9 +379,7 @@ impl UpgradeManager {
             .get(&HISTORY)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let last = history
-            .last()
-            .ok_or(UpgradeError::NoRollbackTarget)?;
+        let last = history.last().ok_or(UpgradeError::NoRollbackTarget)?;
 
         let record = UpgradeRecord {
             from_version: last.to_version,
@@ -424,7 +422,9 @@ impl UpgradeManager {
             return Err(UpgradeError::MigrationAlreadyApplied);
         }
 
-        env.storage().persistent().set(&key, &env.ledger().timestamp());
+        env.storage()
+            .persistent()
+            .set(&key, &env.ledger().timestamp());
         Ok(())
     }
 

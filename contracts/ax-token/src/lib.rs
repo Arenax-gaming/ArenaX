@@ -124,9 +124,7 @@ impl AxToken {
         }
 
         let current_supply = Self::total_supply(env);
-        let new_supply = current_supply
-            .checked_add(amount)
-            .expect("supply overflow");
+        let new_supply = current_supply.checked_add(amount).expect("supply overflow");
 
         let cap = Self::get_supply_cap(env.clone());
         if cap > 0 && new_supply > cap {
@@ -334,7 +332,11 @@ impl AxToken {
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
 
-        if let Some(mut info) = env.storage().instance().get::<_, PauseInfo>(&DataKey::PauseInfo) {
+        if let Some(mut info) = env
+            .storage()
+            .instance()
+            .get::<_, PauseInfo>(&DataKey::PauseInfo)
+        {
             info.paused = false;
             env.storage().instance().set(&DataKey::PauseInfo, &info);
         }
@@ -840,8 +842,8 @@ impl AxToken {
     pub fn revoke_delegation(env: Env, delegator: Address) {
         delegator.require_auth();
 
-        let delegatee = Self::get_delegate(env.clone(), delegator.clone())
-            .expect("no active delegation found");
+        let delegatee =
+            Self::get_delegate(env.clone(), delegator.clone()).expect("no active delegation found");
 
         Self::remove_delegator(&env, &delegatee, &delegator);
         env.storage()
@@ -898,14 +900,15 @@ impl AxToken {
         let own_power = if has_delegated {
             0
         } else {
-            Self::balance(&env, address.clone()) + Self::get_locked_balance(env.clone(), address.clone())
+            Self::balance(&env, address.clone())
+                + Self::get_locked_balance(env.clone(), address.clone())
         };
 
         let delegators = Self::get_delegators(env.clone(), address.clone());
         let mut delegated_power = 0i128;
         for delegator in delegators.iter() {
-            delegated_power +=
-                Self::balance(&env, delegator.clone()) + Self::get_locked_balance(env.clone(), delegator.clone());
+            delegated_power += Self::balance(&env, delegator.clone())
+                + Self::get_locked_balance(env.clone(), delegator.clone());
         }
 
         own_power + delegated_power

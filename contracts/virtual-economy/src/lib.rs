@@ -294,9 +294,10 @@ impl VirtualEconomyContract {
             events::emit_currency_minted(&env, &recipient, amount, &reason);
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply + total_mint));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply + total_mint),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_minted += total_mint;
@@ -383,16 +384,18 @@ impl VirtualEconomyContract {
             let owner = owners.get_unchecked(i);
             let amount = amounts.get_unchecked(i);
             let balance = Self::get_currency_balance(env.clone(), owner.clone());
-            env.storage()
-                .persistent()
-                .set(&DataKey::CurrencyBalance(owner.clone()), &(balance - amount));
+            env.storage().persistent().set(
+                &DataKey::CurrencyBalance(owner.clone()),
+                &(balance - amount),
+            );
             events::emit_currency_burned(&env, &owner, amount);
         }
 
         let current_supply = Self::get_total_currency_supply(env.clone());
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply - total_burn));
+        env.storage().persistent().set(
+            &DataKey::TotalCurrencySupply,
+            &(current_supply - total_burn),
+        );
 
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.total_currency_burned += total_burn;
@@ -1795,7 +1798,9 @@ impl VirtualEconomyContract {
         env.storage()
             .instance()
             .set(&DataKey::FairLaunchAnalytics, &analytics);
-        env.storage().instance().set(&DataKey::FairLaunchPhase, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::FairLaunchPhase, &0u32);
 
         events::emit_fair_launch_configured(
             &env,
@@ -1922,9 +1927,10 @@ impl VirtualEconomyContract {
 
         // Update per-wallet record
         let is_new_buyer = already_purchased == 0;
-        env.storage()
-            .instance()
-            .set(&DataKey::FairLaunchPurchased(buyer.clone()), &(already_purchased + amount));
+        env.storage().instance().set(
+            &DataKey::FairLaunchPurchased(buyer.clone()),
+            &(already_purchased + amount),
+        );
 
         // Update analytics
         analytics.total_sold += amount;
@@ -2099,8 +2105,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards > 0 {
@@ -2172,8 +2177,7 @@ impl VirtualEconomyContract {
             .persistent()
             .get(&DataKey::NFTMetadata(token_id.clone()))
             .ok_or(VirtualEconomyError::TokenNotFound)?;
-        let accrued =
-            NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
+        let accrued = NftStakingManager::calc_rewards(&position, &config, nft_metadata.rarity, now);
         let total_rewards = position.pending_rewards + accrued;
 
         if total_rewards <= 0 {
@@ -2205,10 +2209,7 @@ impl VirtualEconomyContract {
     }
 
     /// Return the staked position for a given token, or `None` if not staked.
-    pub fn get_nft_staked_position(
-        env: Env,
-        token_id: BytesN<32>,
-    ) -> Option<NftStakedPosition> {
+    pub fn get_nft_staked_position(env: Env, token_id: BytesN<32>) -> Option<NftStakedPosition> {
         env.storage()
             .persistent()
             .get(&DataKey::NftStakedPosition(token_id))

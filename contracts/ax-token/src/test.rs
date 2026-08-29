@@ -668,4 +668,3 @@ fn test_adjust_cap_via_governance() {
     client.mint(&user1, &2000i128);
     assert_eq!(client.total_supply(), 3000);
 }
-
