@@ -50,6 +50,7 @@ impl VirtualEconomyContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(VirtualEconomyError::AlreadyInitialized);
         }
+        Self::validate_address(&env, &admin)?;
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
@@ -92,9 +93,18 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
+    /// Validates that an address is not the zero address and not this contract.
+    fn validate_address(env: &Env, address: &Address) -> Result<(), VirtualEconomyError> {
+        if address == &env.current_contract_address() {
+            return Err(VirtualEconomyError::InvalidAddress);
+        }
+        Ok(())
+    }
+
     /// Add authorized minter (e.g., game contracts, reward systems)
     pub fn add_authorized_minter(env: Env, minter: Address) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
+        Self::validate_address(&env, &minter)?;
         env.storage()
             .instance()
             .set(&DataKey::AuthorizedMinter(minter.clone()), &true);
@@ -105,6 +115,7 @@ impl VirtualEconomyContract {
     /// Remove authorized minter
     pub fn remove_authorized_minter(env: Env, minter: Address) -> Result<(), VirtualEconomyError> {
         Self::require_admin(&env)?;
+        Self::validate_address(&env, &minter)?;
         env.storage()
             .instance()
             .remove(&DataKey::AuthorizedMinter(minter.clone()));
@@ -128,18 +139,20 @@ impl VirtualEconomyContract {
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
         }
+        Self::validate_address(&env, &recipient)?;
 
         let config = Self::get_currency_config(&env);
 
         // Check minting limits
         let current_supply = Self::get_total_currency_supply(env.clone());
-        if current_supply + amount > config.max_supply {
+        let new_supply = current_supply.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
+        if new_supply > config.max_supply {
             return Err(VirtualEconomyError::SupplyLimitExceeded);
         }
 
         // Update recipient balance
         let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
-        let new_balance = current_balance + amount;
+        let new_balance = current_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
         env.storage()
             .persistent()
             .set(&DataKey::CurrencyBalance(recipient.clone()), &new_balance);
@@ -147,7 +160,7 @@ impl VirtualEconomyContract {
         // Update total supply
         env.storage()
             .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply + amount));
+            .set(&DataKey::TotalCurrencySupply, &new_supply);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -168,6 +181,8 @@ impl VirtualEconomyContract {
         amount: i128,
     ) -> Result<(), VirtualEconomyError> {
         from.require_auth();
+        Self::validate_address(&env, &from)?;
+        Self::validate_address(&env, &to)?;
 
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
@@ -180,14 +195,17 @@ impl VirtualEconomyContract {
 
         let to_balance = Self::get_currency_balance(env.clone(), to.clone());
 
+        let new_from_balance = from_balance.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_to_balance = to_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
+
         // Update balances
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(from.clone()),
-            &(from_balance - amount),
+            &new_from_balance,
         );
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(to.clone()),
-            &(to_balance + amount),
+            &new_to_balance,
         );
 
         events::emit_currency_transferred(&env, &from, &to, amount);
@@ -201,6 +219,7 @@ impl VirtualEconomyContract {
         amount: i128,
     ) -> Result<(), VirtualEconomyError> {
         owner.require_auth();
+        Self::validate_address(&env, &owner)?;
 
         if amount <= 0 {
             return Err(VirtualEconomyError::InvalidAmount);
@@ -211,16 +230,18 @@ impl VirtualEconomyContract {
             return Err(VirtualEconomyError::InsufficientBalance);
         }
 
+        let current_supply = Self::get_total_currency_supply(env.clone());
+        let new_balance = balance.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_supply = current_supply.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
+
         // Update balance and supply
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(owner.clone()),
-            &(balance - amount),
+            &new_balance,
         );
-
-        let current_supply = Self::get_total_currency_supply(env.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::TotalCurrencySupply, &(current_supply - amount));
+            .set(&DataKey::TotalCurrencySupply, &new_supply);
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -277,9 +298,14 @@ impl VirtualEconomyContract {
         BatchManager::validate_matching_lengths(recipients.len(), amounts.len())?;
         let total_mint = BatchManager::sum_positive(&amounts)?;
 
+        for i in 0..recipients.len() {
+            Self::validate_address(&env, &recipients.get_unchecked(i))?;
+        }
+
         let config = Self::get_currency_config(&env);
         let current_supply = Self::get_total_currency_supply(env.clone());
-        if current_supply + total_mint > config.max_supply {
+        let new_supply = current_supply.checked_add(total_mint).ok_or(VirtualEconomyError::Overflow)?;
+        if new_supply > config.max_supply {
             return Err(VirtualEconomyError::SupplyLimitExceeded);
         }
 
@@ -287,9 +313,10 @@ impl VirtualEconomyContract {
             let recipient = recipients.get_unchecked(i);
             let amount = amounts.get_unchecked(i);
             let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
+            let new_balance = current_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
             env.storage().persistent().set(
                 &DataKey::CurrencyBalance(recipient.clone()),
-                &(current_balance + amount),
+                &new_balance,
             );
             events::emit_currency_minted(&env, &recipient, amount, &reason);
         }
@@ -318,6 +345,7 @@ impl VirtualEconomyContract {
         items: Vec<BatchTransferItem>,
     ) -> Result<BatchResult, VirtualEconomyError> {
         from.require_auth();
+        Self::validate_address(&env, &from)?;
         BatchManager::validate_batch_size(items.len())?;
 
         let mut total_amount: i128 = 0;
@@ -325,7 +353,8 @@ impl VirtualEconomyContract {
             if item.amount <= 0 {
                 return Err(VirtualEconomyError::InvalidAmount);
             }
-            total_amount += item.amount;
+            Self::validate_address(&env, &item.to)?;
+            total_amount = total_amount.checked_add(item.amount).ok_or(VirtualEconomyError::Overflow)?;
         }
 
         let from_balance = Self::get_currency_balance(env.clone(), from.clone());
@@ -335,16 +364,18 @@ impl VirtualEconomyContract {
 
         for item in items.iter() {
             let to_balance = Self::get_currency_balance(env.clone(), item.to.clone());
+            let new_to_balance = to_balance.checked_add(item.amount).ok_or(VirtualEconomyError::Overflow)?;
             env.storage().persistent().set(
                 &DataKey::CurrencyBalance(item.to.clone()),
-                &(to_balance + item.amount),
+                &new_to_balance,
             );
             events::emit_currency_transferred(&env, &from, &item.to, item.amount);
         }
 
+        let new_from_balance = from_balance.checked_sub(total_amount).ok_or(VirtualEconomyError::Overflow)?;
         env.storage().persistent().set(
             &DataKey::CurrencyBalance(from.clone()),
-            &(from_balance - total_amount),
+            &new_from_balance,
         );
 
         Ok(BatchResult {
