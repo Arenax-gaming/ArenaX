@@ -4,4 +4,9 @@ export * from "./useInterval";
 export * from "./useTokenExpiry";
 
 // Session timeout context
-export * from "../contexts/SessionTimeoutContext";
+export {
+  SessionTimeoutProvider,
+  useSessionTimeoutContext,
+  useSessionWarning,
+  useGracePeriodExpired,
+} from "../contexts/SessionTimeoutContext";

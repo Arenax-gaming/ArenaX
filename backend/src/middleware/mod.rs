@@ -1,5 +1,7 @@
 // Middleware module for ArenaX
+pub mod anti_bot;
 pub mod authorization;
+pub mod circuit_breaker;
 pub mod csrf;
 pub mod idempotency_middleware;
 pub mod metrics_middleware;
@@ -12,6 +14,10 @@ pub use anti_bot::AntiBotMiddleware;
 pub use authorization::{
     AccessControlEngine, AuditDecision, AuditLogEntry, AuthorizationMiddleware,
     Permission, PermissionAuditLogger, RoleHierarchy, RoleTemplate, RoleTemplateRegistry,
+};
+pub use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerError, CircuitBreakerRegistry,
+    CircuitBreakerStats, CircuitState, ExternalCircuitBreakerMiddleware,
 };
 pub use csrf::{csrf_protection, csrf_token_handler, CSRF_COOKIE, CSRF_HEADER};
 pub use idempotency_middleware::IdempotencyMiddleware;

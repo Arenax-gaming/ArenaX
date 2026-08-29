@@ -152,7 +152,9 @@ fn mul_div_floor(a: i128, b: i128, denominator: i128) -> Result<i128, VirtualEco
         None => {
             // Lossy fallback, only on a path that would otherwise abort.
             let reduced = a / denominator;
-            reduced.checked_mul(b).ok_or(VirtualEconomyError::InvalidAmount)
+            reduced
+                .checked_mul(b)
+                .ok_or(VirtualEconomyError::InvalidAmount)
         }
     }
 }
@@ -186,7 +188,8 @@ impl AmmManager {
             return Err(VirtualEconomyError::InsufficientLiquidity);
         }
 
-        let amount_in_after_fee = mul_div_floor(amount_in, BPS_DENOMINATOR - fee_bps, BPS_DENOMINATOR)?;
+        let amount_in_after_fee =
+            mul_div_floor(amount_in, BPS_DENOMINATOR - fee_bps, BPS_DENOMINATOR)?;
         if amount_in_after_fee <= 0 {
             // A trade so small the entire input rounds away as fee. Rejecting is
             // better than accepting an input that buys nothing.
@@ -269,10 +272,14 @@ impl AmmManager {
 
         let elapsed_i = elapsed as i128;
         if let Ok(price_a) = Self::spot_price(pool.reserve_a, pool.reserve_b) {
-            pool.price_a_cumulative = pool.price_a_cumulative.saturating_add(price_a.saturating_mul(elapsed_i));
+            pool.price_a_cumulative = pool
+                .price_a_cumulative
+                .saturating_add(price_a.saturating_mul(elapsed_i));
         }
         if let Ok(price_b) = Self::spot_price(pool.reserve_b, pool.reserve_a) {
-            pool.price_b_cumulative = pool.price_b_cumulative.saturating_add(price_b.saturating_mul(elapsed_i));
+            pool.price_b_cumulative = pool
+                .price_b_cumulative
+                .saturating_add(price_b.saturating_mul(elapsed_i));
         }
         pool.last_update = now;
     }
@@ -388,7 +395,11 @@ impl AmmManager {
             let from_b = mul_div_floor(amount_b, pool.total_shares, pool.reserve_b)?;
             // The minimum is what stops an off-ratio deposit from minting shares
             // it has not funded on both sides.
-            if from_a < from_b { from_a } else { from_b }
+            if from_a < from_b {
+                from_a
+            } else {
+                from_b
+            }
         };
 
         if shares <= 0 {
@@ -540,7 +551,8 @@ impl AmmManager {
             pool.reserve_a = new_reserve_out;
         }
 
-        let fee_paid = amount_in - mul_div_floor(amount_in, BPS_DENOMINATOR - pool.fee_bps, BPS_DENOMINATOR)?;
+        let fee_paid =
+            amount_in - mul_div_floor(amount_in, BPS_DENOMINATOR - pool.fee_bps, BPS_DENOMINATOR)?;
         Self::save_pool(env, &pool);
 
         Ok(SwapResult {
@@ -638,7 +650,8 @@ mod tests {
             Err(VirtualEconomyError::InsufficientLiquidity)
         );
         // And no finite input can take the whole reserve.
-        let out = AmmManager::get_amount_out(i128::from(u32::MAX), 1_000_000, 1_000_000, FEE).unwrap();
+        let out =
+            AmmManager::get_amount_out(i128::from(u32::MAX), 1_000_000, 1_000_000, FEE).unwrap();
         assert!(out < 1_000_000);
     }
 
@@ -720,6 +733,9 @@ mod tests {
         let large = AmmManager::get_amount_out(100_000, ra, rb, FEE).unwrap();
 
         // Price impact: 100x the input buys well under 100x the output.
-        assert!(large < small * 100, "large trade should suffer price impact");
+        assert!(
+            large < small * 100,
+            "large trade should suffer price impact"
+        );
     }
 }

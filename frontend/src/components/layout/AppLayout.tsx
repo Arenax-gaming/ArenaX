@@ -117,6 +117,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       
       {/* Session timeout warning modal - to be integrated by consumer */}
       
-    </div>
+      </div>
+    </SessionTimeoutProvider>
   );
 }

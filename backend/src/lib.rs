@@ -7,6 +7,7 @@ pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod realtime;
+pub mod security;
 pub mod service;
 pub mod telemetry;
 pub mod transaction;

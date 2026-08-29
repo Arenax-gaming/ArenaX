@@ -14,6 +14,7 @@ mod models;
 mod realtime;
 mod service;
 mod orchestrator;
+mod security;
 mod telemetry;
 mod validators;
 
