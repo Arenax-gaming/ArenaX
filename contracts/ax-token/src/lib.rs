@@ -1,5 +1,8 @@
 #![no_std]
 
+mod flash_loan_protection;
+use flash_loan_protection::FlashLoanGuard;
+
 use arenax_events::ax_token as events;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
@@ -50,6 +53,24 @@ pub struct BuybackSchedule {
     pub next_burn_time: u64,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DelegationRecord {
+    pub delegatee: Address,
+    pub timestamp: u64,
+    pub revoked: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PauseInfo {
+    pub paused: bool,
+    pub paused_at: u64,
+    pub paused_by: Address,
+    pub timeout: u64,
+    pub reason: Symbol,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -66,6 +87,9 @@ pub enum DataKey {
     BurnMetrics,
     BuybackSchedule,
     TotalBurned,
+    // Flash loan protection
+    LastOpSequence(Address),
+    GlobalLastSequence,
 }
 
 #[contract]
@@ -99,14 +123,23 @@ impl AxToken {
             panic!("amount must be positive");
         }
 
+        let current_supply = Self::total_supply(env);
+        let new_supply = current_supply.checked_add(amount).expect("supply overflow");
+
+        let cap = Self::get_supply_cap(env.clone());
+        if cap > 0 && new_supply > cap {
+            panic!("supply cap exceeded");
+        }
+
         let current_balance = Self::balance(env, to.clone());
-        let new_balance = current_balance + amount;
+        let new_balance = current_balance
+            .checked_add(amount)
+            .expect("balance overflow");
+
         env.storage()
             .instance()
             .set(&DataKey::Balance(to.clone()), &new_balance);
 
-        let current_supply = Self::total_supply(env);
-        let new_supply = current_supply + amount;
         env.storage()
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
@@ -119,6 +152,11 @@ impl AxToken {
 
         if amount <= 0 {
             panic!("amount must be positive");
+        }
+
+        // Flash loan protection: reject same-sequence re-use
+        if FlashLoanGuard::check_and_set_sequence(env, &from) {
+            panic!("flash loan detected: same-sequence burn");
         }
 
         let current_balance = Self::balance(env, from.clone());
@@ -137,11 +175,21 @@ impl AxToken {
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
 
+        let cap = Self::get_supply_cap(env.clone());
+        if cap > 0 {
+            let new_cap = cap.saturating_sub(amount);
+            env.storage().instance().set(&DataKey::SupplyCap, &new_cap);
+        }
+
         events::emit_burn(env, &from, amount);
     }
 
     pub fn transfer(env: &Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
+
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
 
         if amount <= 0 {
             panic!("amount must be positive");
@@ -149,6 +197,11 @@ impl AxToken {
 
         if from == to {
             panic!("cannot transfer to self");
+        }
+
+        // Flash loan protection: reject same-sequence re-use
+        if FlashLoanGuard::check_and_set_sequence(env, &from) {
+            panic!("flash loan detected: same-sequence transfer");
         }
 
         let from_balance = Self::balance(env, from.clone());
@@ -191,6 +244,167 @@ impl AxToken {
     pub fn set_admin(env: &Env, new_admin: Address) {
         Self::require_admin(env);
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Emergency Pause Mechanism
+    // ---------------------------------------------------------------------------
+
+    pub fn pause(env: Env, reason: Symbol) {
+        Self::require_admin(&env);
+
+        let admin = Self::get_admin(&env);
+        let timeout = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseTimeout)
+            .unwrap_or(86400u64); // 24 hours default
+
+        let info = PauseInfo {
+            paused: true,
+            paused_at: env.ledger().timestamp(),
+            paused_by: admin.clone(),
+            timeout,
+            reason: reason.clone(),
+        };
+
+        env.storage().instance().set(&DataKey::PauseInfo, &info);
+        env.storage().instance().set(&DataKey::Paused, &true);
+
+        arenax_events::emergency_pause::emit_paused(
+            &env,
+            &env.current_contract_address(),
+            &admin,
+            &reason,
+        );
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        let info_opt: Option<PauseInfo> = env.storage().instance().get(&DataKey::PauseInfo);
+        match info_opt {
+            Some(info) => {
+                if !info.paused {
+                    return false;
+                }
+                let current_time = env.ledger().timestamp();
+                if current_time >= info.paused_at.saturating_add(info.timeout) {
+                    false
+                } else {
+                    true
+                }
+            }
+            None => false,
+        }
+    }
+
+    pub fn get_pause_info(env: Env) -> Option<PauseInfo> {
+        env.storage().instance().get(&DataKey::PauseInfo)
+    }
+
+    pub fn set_pause_timeout(env: Env, timeout_seconds: u64) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseTimeout, &timeout_seconds);
+    }
+
+    pub fn unpause_via_governance(env: Env, proposal_id: u64) {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        if let Some(mut info) = env
+            .storage()
+            .instance()
+            .get::<_, PauseInfo>(&DataKey::PauseInfo)
+        {
+            info.paused = false;
+            env.storage().instance().set(&DataKey::PauseInfo, &info);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+
+        arenax_events::emergency_pause::emit_unpaused(
+            &env,
+            &env.current_contract_address(),
+            &proposal.proposer,
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Supply Cap Enforcement
+    // ---------------------------------------------------------------------------
+
+    pub fn set_supply_cap(env: Env, cap: i128) {
+        Self::require_admin(&env);
+        if cap <= 0 {
+            panic!("supply cap must be positive");
+        }
+        let current_supply = Self::total_supply(&env);
+        if current_supply > cap {
+            panic!("current supply exceeds new cap");
+        }
+        env.storage().instance().set(&DataKey::SupplyCap, &cap);
+    }
+
+    pub fn get_supply_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SupplyCap)
+            .unwrap_or(0)
+    }
+
+    pub fn adjust_cap_via_governance(env: Env, proposal_id: u64, new_cap: i128) {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        if new_cap <= 0 {
+            panic!("supply cap must be positive");
+        }
+
+        let current_supply = Self::total_supply(&env);
+        if current_supply > new_cap {
+            panic!("current supply exceeds new cap");
+        }
+
+        env.storage().instance().set(&DataKey::SupplyCap, &new_cap);
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
     }
 
     // ---------------------------------------------------------------------------
@@ -523,6 +737,11 @@ impl AxToken {
     pub fn vote_on_proposal(env: Env, voter: Address, proposal_id: u64, support: bool) {
         voter.require_auth();
 
+        // Flash loan protection: prevent same-sequence governance manipulation
+        if FlashLoanGuard::check_and_set_sequence(&env, &voter) {
+            panic!("flash loan detected: same-sequence governance vote");
+        }
+
         let mut proposal: Proposal = env
             .storage()
             .instance()
@@ -538,8 +757,7 @@ impl AxToken {
             panic!("already voted");
         }
 
-        let mut voting_power = Self::balance(&env, voter.clone());
-        voting_power += Self::get_locked_balance(env.clone(), voter.clone());
+        let voting_power = Self::get_voting_power(env.clone(), voter.clone());
 
         if voting_power <= 0 {
             panic!("no voting power");
@@ -569,6 +787,158 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Vote Delegation
+    // ---------------------------------------------------------------------------
+
+    /// Delegate voting power (own balance + locked balance) to another address.
+    /// Re-delegating simply moves the delegation from the old delegatee to the
+    /// new one. Self-delegation is blocked since holding your own power
+    /// directly already achieves the same effect.
+    pub fn delegate(env: Env, delegator: Address, delegatee: Address) {
+        delegator.require_auth();
+
+        if delegator == delegatee {
+            panic!("cannot delegate to self");
+        }
+
+        let current_time = env.ledger().timestamp();
+        let previous = Self::get_delegate(env.clone(), delegator.clone());
+
+        if let Some(previous_delegatee) = previous {
+            if previous_delegatee == delegatee {
+                panic!("already delegated to this address");
+            }
+            Self::remove_delegator(&env, &previous_delegatee, &delegator);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Delegate(delegator.clone()), &delegatee);
+        Self::add_delegator(&env, &delegatee, &delegator);
+
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: current_time,
+            revoked: false,
+        });
+        env.storage()
+            .instance()
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATE"),
+            ),
+            (delegator, delegatee),
+        );
+    }
+
+    /// Revoke an active delegation, returning voting power to the delegator.
+    pub fn revoke_delegation(env: Env, delegator: Address) {
+        delegator.require_auth();
+
+        let delegatee =
+            Self::get_delegate(env.clone(), delegator.clone()).expect("no active delegation found");
+
+        Self::remove_delegator(&env, &delegatee, &delegator);
+        env.storage()
+            .instance()
+            .remove(&DataKey::Delegate(delegator.clone()));
+
+        let mut history = Self::get_delegation_history(env.clone(), delegator.clone());
+        history.push_back(DelegationRecord {
+            delegatee: delegatee.clone(),
+            timestamp: env.ledger().timestamp(),
+            revoked: true,
+        });
+        env.storage()
+            .instance()
+            .set(&DataKey::DelegationHistory(delegator.clone()), &history);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "DELEGATION_REVOKE"),
+            ),
+            (delegator, delegatee),
+        );
+    }
+
+    /// The address `delegator` currently delegates to, if any.
+    pub fn get_delegate(env: Env, delegator: Address) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Delegate(delegator))
+    }
+
+    /// Addresses that currently delegate their voting power to `delegatee`.
+    pub fn get_delegators(env: Env, delegatee: Address) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Delegators(delegatee))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Full history of delegation/revocation events for `delegator`.
+    pub fn get_delegation_history(env: Env, delegator: Address) -> Vec<DelegationRecord> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DelegationHistory(delegator))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Effective voting power for `address`: their own balance + locked
+    /// balance (zero if they've delegated it away) plus the raw power of
+    /// every address currently delegating to them. Delegation chains are not
+    /// followed further than one hop — a delegatee's received power isn't
+    /// forwarded on if they in turn delegate elsewhere.
+    pub fn get_voting_power(env: Env, address: Address) -> i128 {
+        let has_delegated = Self::get_delegate(env.clone(), address.clone()).is_some();
+        let own_power = if has_delegated {
+            0
+        } else {
+            Self::balance(&env, address.clone())
+                + Self::get_locked_balance(env.clone(), address.clone())
+        };
+
+        let delegators = Self::get_delegators(env.clone(), address.clone());
+        let mut delegated_power = 0i128;
+        for delegator in delegators.iter() {
+            delegated_power += Self::balance(&env, delegator.clone())
+                + Self::get_locked_balance(env.clone(), delegator.clone());
+        }
+
+        own_power + delegated_power
+    }
+
+    fn add_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let mut delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        delegators.push_back(delegator.clone());
+        env.storage().instance().set(&key, &delegators);
+    }
+
+    fn remove_delegator(env: &Env, delegatee: &Address, delegator: &Address) {
+        let key = DataKey::Delegators(delegatee.clone());
+        let delegators: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut remaining = Vec::new(env);
+        for existing in delegators.iter() {
+            if existing != *delegator {
+                remaining.push_back(existing);
+            }
+        }
+        env.storage().instance().set(&key, &remaining);
     }
 
     // ---------------------------------------------------------------------------

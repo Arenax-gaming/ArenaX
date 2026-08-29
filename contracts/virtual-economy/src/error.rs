@@ -64,4 +64,30 @@ pub enum VirtualEconomyError {
     InvalidAssetPair = 85,
     /// The price submitted to the oracle is not positive.
     OracleInvalidPrice = 86,
+
+    // NFT staking errors
+    /// NFT staking has not been configured yet.
+    NftStakingNotConfigured = 110,
+    /// The NFT is already staked.
+    NftAlreadyStaked = 111,
+    /// The NFT is not currently staked.
+    NftNotStaked = 112,
+    /// The minimum lock period has not been met yet.
+    NftLockPeriodNotMet = 113,
+    /// NFT staking is currently paused.
+    NftStakingPaused = 114,
+
+    // ---- Liquidity pool / AMM (Issue #882) ----
+    /// No liquidity pool has been created yet.
+    PoolNotFound = 120,
+    /// A liquidity pool already exists; there is only ever one.
+    PoolAlreadyExists = 121,
+    /// The pool holds too little liquidity to satisfy this operation.
+    InsufficientLiquidity = 122,
+    /// The result fell outside the caller's slippage tolerance.
+    SlippageExceeded = 123,
+    /// The constant-product invariant would have been violated. This should be
+    /// unreachable; it is checked rather than assumed because a path that
+    /// shrinks `k` drains the pool.
+    InvariantViolation = 124,
 }

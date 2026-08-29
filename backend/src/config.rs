@@ -12,12 +12,35 @@ pub struct Config {
     pub ai: AiConfig,
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
+    pub idempotency: IdempotencyConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
+    /// Connection pool ceiling.
+    pub max_connections: u32,
+    /// How long a caller waits for a connection before the request is failed.
+    /// Bounded so a saturated or unreachable database sheds load instead of
+    /// letting every handler pile up on the pool (Issue #861).
+    pub acquire_timeout_secs: u64,
+    /// Interval between background pool health probes.
+    pub health_check_interval_secs: u64,
+    /// Consecutive failures that trip the circuit breaker open.
+    pub circuit_failure_threshold: u32,
+    /// How long the breaker stays open before admitting a trial request.
+    pub circuit_open_secs: u64,
+}
+
+/// Read a `u64` from the environment, falling back when unset or unparseable.
+fn env_u64(key: &str, default: u64) -> u64 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// Read a `u32` from the environment, falling back when unset or unparseable.
+fn env_u32(key: &str, default: u32) -> u32 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +123,12 @@ pub struct RateLimitConfig {
     pub window: u64,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct IdempotencyConfig {
+    pub ttl_seconds: u64,
+    pub max_response_size_kb: u32,
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
@@ -133,11 +162,22 @@ impl Config {
         let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
         let rate_limit_requests: u32 = env::var("RATE_LIMIT_REQUESTS")?.parse()?;
         let rate_limit_window: u64 = env::var("RATE_LIMIT_WINDOW")?.parse()?;
+        let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
+            .unwrap_or_else(|_| "86400".to_string())
+            .parse()?;
+        let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
+            .unwrap_or_else(|_| "1024".to_string())
+            .parse()?;
 
         Ok(Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20),
+                acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
+                health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
+                circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
+                circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -174,6 +214,10 @@ impl Config {
             rate_limit: RateLimitConfig {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
+            },
+            idempotency: IdempotencyConfig {
+                ttl_seconds: idempotency_ttl_seconds,
+                max_response_size_kb: idempotency_max_response_size_kb,
             },
         })
     }

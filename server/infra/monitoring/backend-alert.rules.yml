@@ -1,0 +1,64 @@
+groups:
+  - name: arenax-backend
+    rules:
+      - alert: ArenaXBackendDown
+        expr: up{job="arenax-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: arenax-backend
+        annotations:
+          summary: "arenax-backend is not being scraped"
+          description: "Prometheus has not been able to scrape /metrics on arenax-backend for 1 minute."
+
+      - alert: BackendHighHttpErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="arenax-backend", status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="arenax-backend"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: arenax-backend
+        annotations:
+          summary: "arenax-backend 5xx error rate above 5%"
+          description: "More than 5% of HTTP responses from arenax-backend have been 5xx over the last 5 minutes."
+
+      - alert: BackendHighHttpLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="arenax-backend"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: arenax-backend
+        annotations:
+          summary: "arenax-backend p95 HTTP latency above 1s"
+          description: "95th percentile request duration on arenax-backend has been above 1 second for 5 minutes."
+
+      - alert: BackendDbPoolNearExhaustion
+        expr: |
+          db_pool_connections_active{job="arenax-backend"}
+          /
+          (db_pool_connections_active{job="arenax-backend"} + db_pool_connections_idle{job="arenax-backend"})
+          > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: arenax-backend
+        annotations:
+          summary: "arenax-backend DB connection pool over 90% utilized"
+          description: "The Postgres connection pool has been over 90% active for 5 minutes — requests may start queuing on pool checkout."
+
+      - alert: BackendHighProcessMemory
+        expr: process_resident_memory_bytes{job="arenax-backend"} > 1.5e9
+        for: 10m
+        labels:
+          severity: warning
+          service: arenax-backend
+        annotations:
+          summary: "arenax-backend resident memory above 1.5GB"
+          description: "Process RSS has been above 1.5GB for 10 minutes — check for leaks or scale up."
