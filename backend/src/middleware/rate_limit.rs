@@ -49,6 +49,9 @@
 //! - `RateLimit-Remaining`   — requests left in the current window
 //! - `RateLimit-Reset`       — Unix seconds when the window resets
 //!
+//! These headers are exposed to browser clients through
+//! `Access-Control-Expose-Headers`, so client-side libraries can read them.
+//!
 //! Clients should treat a 429 as a signal to stop making requests until
 //! `Retry-After` has elapsed and use exponential backoff with jitter for
 //! subsequent retries.
@@ -371,6 +374,11 @@ where
                 insert_header(&mut response, "RateLimit-Remaining", 0u32);
                 insert_header(&mut response, "RateLimit-Reset", reset_secs);
                 insert_header(&mut response, "Retry-After", retry_after);
+                insert_header(
+                    &mut response,
+                    "Access-Control-Expose-Headers",
+                    "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After",
+                );
 
                 return Ok(req.into_response(response).map_into_right_body());
             }
@@ -383,6 +391,11 @@ where
             try_insert(headers, "RateLimit-Limit", limit);
             try_insert(headers, "RateLimit-Remaining", remaining);
             try_insert(headers, "RateLimit-Reset", reset_secs);
+            try_insert(
+                headers,
+                "Access-Control-Expose-Headers",
+                "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After",
+            );
 
             Ok(res)
         })
