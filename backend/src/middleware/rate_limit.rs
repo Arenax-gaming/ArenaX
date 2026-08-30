@@ -56,7 +56,6 @@ use std::{
     future::{ready, Ready},
     rc::Rc,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use actix_web::{
@@ -224,29 +223,10 @@ async fn sliding_window_check(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IP extraction (mirrors SecurityMiddleware)
+// IP extraction / time helpers — shared with other middleware
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn extract_ip(req: &ServiceRequest) -> String {
-    req.headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            req.connection_info()
-                .realip_remote_addr()
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+use super::{extract_ip, now_ms};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Middleware factory
@@ -323,6 +303,11 @@ where
         let default_window = self.config.window;
 
         Box::pin(async move {
+            // Skip rate limiting for whitelisted IPs
+            if req.extensions().get::<super::ip_list::IpWhitelisted>().is_some() {
+                return svc.call(req).await.map(|res| res.map_into_left_body());
+            }
+
             let path = req.path().to_string();
             let method = req.method().as_str().to_string();
             let now = now_ms();

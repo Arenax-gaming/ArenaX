@@ -14,6 +14,7 @@ mod models;
 mod realtime;
 mod service;
 mod orchestrator;
+mod security;
 mod telemetry;
 mod validators;
 
@@ -93,6 +94,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
+    // Seed IP whitelist/blacklist from env vars
+    {
+        let mut seed_conn = redis_conn.clone();
+        crate::middleware::ip_list::seed_from_env(&mut seed_conn).await;
+    }
+
     // Initialize matchmaking service — pass the shared ConnectionManager so
     // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
@@ -101,6 +108,15 @@ async fn main() -> io::Result<()> {
         redis_conn.clone(),
         matchmaking_config,
     ));
+
+    // Build idempotency middleware policy from config
+    let idempotency_policy = IdempotencyPolicy {
+        enabled: true,
+        key_header_name: "Idempotency-Key".to_string(),
+        ttl_seconds: config.idempotency.ttl_seconds,
+        max_response_size_kb: config.idempotency.max_response_size_kb,
+        conflict_status_code: 422,
+    };
 
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
@@ -205,10 +221,11 @@ async fn main() -> io::Result<()> {
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
-            .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
+            .wrap(IpListMiddleware::new(redis_conn.clone()))
             .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
@@ -228,6 +245,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903
                     .configure(crate::http::anti_bot_handler::configure_routes)
+                    // IP whitelist/blacklist admin endpoints — Issue #975
+                    .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
                     .configure(crate::http::player_stats_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)

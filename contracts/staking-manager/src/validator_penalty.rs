@@ -7,7 +7,9 @@
 //! - Immutable slash records stored per slash ID
 //! - Per-validator slash history
 
-use crate::{AppealRecord, DataKey, SlashConfig, SlashRecord, UserStakeInfo, ValidatorSlashHistory};
+use crate::{
+    AppealRecord, DataKey, SlashConfig, SlashRecord, UserStakeInfo, ValidatorSlashHistory,
+};
 use arenax_events::slashing as slash_events;
 use arenax_events::staking as stake_events;
 use soroban_sdk::{Address, Bytes, BytesN, Env};
@@ -35,9 +37,7 @@ impl ValidatorPenaltyManager {
 
     /// Read the current slash config. Returns `None` if not yet configured.
     pub fn get_slash_config(env: &Env) -> Option<SlashConfig> {
-        env.storage()
-            .instance()
-            .get(&DataKey::ValidatorSlashConfig)
+        env.storage().instance().get(&DataKey::ValidatorSlashConfig)
     }
 
     // ── Slash ────────────────────────────────────────────────────────────────
@@ -73,7 +73,10 @@ impl ValidatorPenaltyManager {
             panic!("invalid severity level");
         }
 
-        let requested_amount = config.slash_amounts.get(severity).expect("severity out of range");
+        let requested_amount = config
+            .slash_amounts
+            .get(severity)
+            .expect("severity out of range");
 
         // Load the validator's current stake info (or default zero-state)
         let mut stake_info: UserStakeInfo = env
@@ -310,9 +313,10 @@ impl ValidatorPenaltyManager {
                 });
             stake_info.total_staked += restored;
             stake_info.total_slashed = stake_info.total_slashed.saturating_sub(restored);
-            env.storage()
-                .instance()
-                .set(&DataKey::UserStakeInfo(record.validator.clone()), &stake_info);
+            env.storage().instance().set(
+                &DataKey::UserStakeInfo(record.validator.clone()),
+                &stake_info,
+            );
 
             // Reverse burn supply counter
             if record.burned_amount > 0 {
@@ -321,9 +325,10 @@ impl ValidatorPenaltyManager {
                     .instance()
                     .get(&DataKey::BurnedSupply)
                     .unwrap_or(0);
-                env.storage()
-                    .instance()
-                    .set(&DataKey::BurnedSupply, &(burned - record.burned_amount).max(0));
+                env.storage().instance().set(
+                    &DataKey::BurnedSupply,
+                    &(burned - record.burned_amount).max(0),
+                );
             }
 
             // Remove pool portion from reward pool
@@ -346,9 +351,10 @@ impl ValidatorPenaltyManager {
                 .expect("slash history not found");
             history.total_slashed = history.total_slashed.saturating_sub(restored);
             history.active_appeal = None;
-            env.storage()
-                .persistent()
-                .set(&DataKey::ValidatorSlashRecord(record.validator.clone()), &history);
+            env.storage().persistent().set(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                &history,
+            );
         } else {
             // Denied — clear the active appeal on history
             let mut history: ValidatorSlashHistory = env
@@ -357,9 +363,10 @@ impl ValidatorPenaltyManager {
                 .get(&DataKey::ValidatorSlashRecord(record.validator.clone()))
                 .expect("slash history not found");
             history.active_appeal = None;
-            env.storage()
-                .persistent()
-                .set(&DataKey::ValidatorSlashRecord(record.validator.clone()), &history);
+            env.storage().persistent().set(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                &history,
+            );
         }
 
         env.storage()

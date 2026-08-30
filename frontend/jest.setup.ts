@@ -44,3 +44,20 @@ if (typeof global.ResizeObserver === "undefined") {
     disconnect(): void {}
   } as unknown as typeof ResizeObserver;
 }
+
+// Global next/navigation mock so components using useRouter, useSearchParams,
+// or usePathname (such as MatchHistory) mount cleanly in tests without requiring
+// every single test suite to manually declare the same mock.
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    refresh: jest.fn(),
+  }),
+  usePathname: () => "/en/profile",
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({ locale: "en" }),
+}));

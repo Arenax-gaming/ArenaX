@@ -20,13 +20,13 @@ pub const ROLE_CROSS_GAME_ADMIN: u32 = 10;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
-    Role(Address, u32),                     // (Account, Role) -> bool
-    Delegation(Address, Address),           // (Delegator, Delegatee) -> DelegationInfo
-    Permission(String),                     // (PermissionName) -> PermissionDefinition
-    RolePermissions(u32),                   // (Role) -> Vec<String>
-    PermissionCache(Address, String),       // (Account, PermissionName) -> bool
-    TimeRestriction(Address, u32),          // (Account, Role) -> TimeRestriction
-    AuditLog(u64),                          // (EntryId) -> AuditEntry
+    Role(Address, u32),               // (Account, Role) -> bool
+    Delegation(Address, Address),     // (Delegator, Delegatee) -> DelegationInfo
+    Permission(String),               // (PermissionName) -> PermissionDefinition
+    RolePermissions(u32),             // (Role) -> Vec<String>
+    PermissionCache(Address, String), // (Account, PermissionName) -> bool
+    TimeRestriction(Address, u32),    // (Account, Role) -> TimeRestriction
+    AuditLog(u64),                    // (EntryId) -> AuditEntry
     AuditCounter,
 }
 

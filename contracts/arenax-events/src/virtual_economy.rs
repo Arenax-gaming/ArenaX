@@ -563,12 +563,7 @@ pub fn emit_nft_staked(env: &Env, token_id: &BytesN<32>, owner: &Address, staked
     .publish(env);
 }
 
-pub fn emit_nft_unstaked(
-    env: &Env,
-    token_id: &BytesN<32>,
-    owner: &Address,
-    rewards_claimed: i128,
-) {
+pub fn emit_nft_unstaked(env: &Env, token_id: &BytesN<32>, owner: &Address, rewards_claimed: i128) {
     NftUnstaked {
         token_id: token_id.clone(),
         owner: owner.clone(),

@@ -108,7 +108,14 @@ pub fn emit_and_advance(
     sequence: u64,
 ) -> u64 {
     emit_state_change(
-        env, actor, resource, resource_id, field, old_value, new_value, sequence,
+        env,
+        actor,
+        resource,
+        resource_id,
+        field,
+        old_value,
+        new_value,
+        sequence,
     );
     sequence.saturating_add(1)
 }
@@ -361,7 +368,10 @@ mod tests {
         let mut other = record(&env, &actor, "status", "", "cancelled", 2);
         other.resource_id = String::from_str(&env, "m-2");
 
-        let changes = log(&env, &[record(&env, &actor, "status", "", "pending", 1), other]);
+        let changes = log(
+            &env,
+            &[record(&env, &actor, "status", "", "pending", 1), other],
+        );
 
         let projected = project_resource(
             &env,
@@ -384,7 +394,10 @@ mod tests {
         let mut other = record(&env, &actor, "status", "", "open", 2);
         other.resource = symbol_short!("tourney");
 
-        let changes = log(&env, &[record(&env, &actor, "status", "", "pending", 1), other]);
+        let changes = log(
+            &env,
+            &[record(&env, &actor, "status", "", "pending", 1), other],
+        );
 
         let projected = project_resource(
             &env,

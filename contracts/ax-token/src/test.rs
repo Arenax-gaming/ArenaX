@@ -5,8 +5,16 @@ extern crate std;
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    Address, Env, String,
+    Address, Env, String, Vec,
 };
+
+// ============================================================================
+// TEST HELPERS
+// ============================================================================
+
+fn setup_env() -> Env {
+    Env::default()
+}
 
 fn create_test_env() -> (Env, Address, Address, Address) {
     let env = Env::default();
@@ -21,6 +29,42 @@ fn initialize_contract(env: &Env, admin: &Address) -> Address {
     let client = AxTokenClient::new(env, &contract_id);
     client.initialize(admin);
     contract_id
+}
+
+fn create_token(env: &Env) -> (Address, Address) {
+    let admin = Address::generate(env);
+    let contract_id = initialize_contract(env, &admin);
+    (contract_id, admin)
+}
+
+fn mint_tokens(env: &Env, contract: &Address, to: &Address, amount: i128) {
+    let client = AxTokenClient::new(env, contract);
+    env.mock_all_auths();
+    client.mint(to, &amount);
+}
+
+fn get_balance(env: &Env, contract: &Address, of: &Address) -> i128 {
+    let client = AxTokenClient::new(env, contract);
+    client.balance(of)
+}
+
+fn get_total_supply(env: &Env, contract: &Address) -> i128 {
+    let client = AxTokenClient::new(env, contract);
+    client.total_supply()
+}
+
+fn assert_supply_equals_balances(env: &Env, contract: &Address, holders: &[Address]) {
+    let client = AxTokenClient::new(env, contract);
+    let total_supply = client.total_supply();
+    let mut sum_balances = 0i128;
+    for holder in holders {
+        sum_balances += client.balance(holder);
+    }
+    assert_eq!(
+        total_supply, sum_balances,
+        "Total supply {} does not equal sum of balances {}",
+        total_supply, sum_balances
+    );
 }
 
 #[test]
@@ -668,4 +712,3 @@ fn test_adjust_cap_via_governance() {
     client.mint(&user1, &2000i128);
     assert_eq!(client.total_supply(), 3000);
 }
-

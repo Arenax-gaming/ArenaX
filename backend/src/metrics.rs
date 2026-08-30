@@ -8,7 +8,7 @@
 use actix_web::{HttpResponse, Result};
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, HistogramVec, IntCounterVec, IntGauge, Opts, Registry, TextEncoder,
+    Encoder, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
 };
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -67,6 +67,52 @@ pub static DB_POOL_CONNECTIONS_IDLE: Lazy<IntGauge> = Lazy::new(|| {
     gauge
 });
 
+// Circuit Breaker Metrics (Issue #944)
+pub static CIRCUIT_BREAKER_STATE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "circuit_breaker_state",
+            "Current state of external service circuit breaker (0=Closed, 1=HalfOpen, 2=Open)",
+        ),
+        &["service"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .expect("metric can be registered");
+    gauge
+});
+
+pub static CIRCUIT_BREAKER_REQUESTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "circuit_breaker_requests_total",
+            "Total external service requests processed by circuit breaker",
+        ),
+        &["service", "status"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static CIRCUIT_BREAKER_TRIPS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "circuit_breaker_trips_total",
+            "Total number of times external service circuit breaker tripped OPEN",
+        ),
+        &["service"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
 /// Force all lazily-registered metrics to initialize (and therefore
 /// register with the collector registry) at startup, before the first
 /// scrape — otherwise a metric with no observations yet simply wouldn't
@@ -76,6 +122,9 @@ pub fn init_metrics() {
     Lazy::force(&HTTP_REQUEST_DURATION_SECONDS);
     Lazy::force(&DB_POOL_CONNECTIONS_ACTIVE);
     Lazy::force(&DB_POOL_CONNECTIONS_IDLE);
+    Lazy::force(&CIRCUIT_BREAKER_STATE);
+    Lazy::force(&CIRCUIT_BREAKER_REQUESTS_TOTAL);
+    Lazy::force(&CIRCUIT_BREAKER_TRIPS_TOTAL);
 
     // Process-level metrics (process_resident_memory_bytes, process_cpu_seconds_total,
     // open fds, ...) — only available on Linux in prometheus crate.
@@ -92,6 +141,27 @@ pub fn init_metrics() {
 pub fn record_pool_stats(size: u32, idle: usize) {
     DB_POOL_CONNECTIONS_ACTIVE.set(size as i64 - idle as i64);
     DB_POOL_CONNECTIONS_IDLE.set(idle as i64);
+}
+
+/// Record circuit breaker state metric snapshot for an external service.
+pub fn record_circuit_breaker_state(service: &str, state_code: i64) {
+    CIRCUIT_BREAKER_STATE
+        .with_label_values(&[service])
+        .set(state_code);
+}
+
+/// Record a circuit breaker request outcome.
+pub fn record_circuit_breaker_request(service: &str, status: &str) {
+    CIRCUIT_BREAKER_REQUESTS_TOTAL
+        .with_label_values(&[service, status])
+        .inc();
+}
+
+/// Record a circuit breaker trip event.
+pub fn record_circuit_breaker_trip(service: &str) {
+    CIRCUIT_BREAKER_TRIPS_TOTAL
+        .with_label_values(&[service])
+        .inc();
 }
 
 pub async fn metrics_handler() -> Result<HttpResponse> {

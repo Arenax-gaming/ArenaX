@@ -8,10 +8,12 @@ import { Modal } from "@/components/ui/Modal";
 import {
   useSessionExtender,
   useGracePeriodExpired,
+} from "@/contexts/SessionTimeoutContext";
+import {
   SESSION_DURATION_SECONDS,
   WARNING_TIME_SECONDS,
   GRACE_PERIOD_SECONDS,
-} from "@/contexts/SessionTimeoutContext";
+} from "@/hooks/useSessionTimeout";
 
 // ---------------------------------------------------------------------------
 // Constants
