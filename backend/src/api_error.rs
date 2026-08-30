@@ -62,6 +62,8 @@ pub enum ApiError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// Rate limit exceeded. The `RateLimit-*` headers describe the current
+    /// window; clients should wait `retry_after` seconds before retrying.
     #[error("Too many requests: {message}")]
     TooManyRequests {
         message: String,
@@ -205,6 +207,7 @@ impl ResponseError for ApiError {
             builder.insert_header(("RateLimit-Remaining", remaining.to_string()));
             builder.insert_header(("RateLimit-Reset", reset.to_string()));
             builder.insert_header(("Retry-After", retry_after.to_string()));
+            builder.insert_header(("Access-Control-Expose-Headers", "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
         }
         builder.json(error_response)
     }
