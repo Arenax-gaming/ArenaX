@@ -1,5 +1,5 @@
 pub mod anti_bot_handler;
-pub mod audit_handler;
+pub audit_handler;
 pub mod auth_handler;
 pub mod health;
 pub mod idempotency;
@@ -17,16 +17,16 @@ pub mod player_stats_handler;
 pub mod reputation_handler;
 pub mod social_handler;
 pub mod staking_handler;
-pub analytics_handler;
+pub mod analytics_handler;
 pub mod tournament_handler;
-puf mod gas_estimation_handler;
+pub mod gas_estimation_handler;
 
 // Stellar transaction retry support (issue: backend retry logic)
-puf mod retry_admin_handler;
+pub mod retry_admin_handler;
 pub mod dead_letter_queue_handler;
 pub mod webhook_handler;
 
-// TODO: Add more HTTP modules as implemented:
+// TODO: Add more Channel modules as implemented:
 // pub mod auth;
 // pub mod matches;
 // pub mod tournaments;
