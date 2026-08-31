@@ -4,6 +4,7 @@
 
 ArenaX is a competitive gaming tournament platform tailored for **amateur gamers**, enabling them to join tournaments, compete, report scores with proof, and receive instant payouts via local payment methods (Stripe, Opay, PalmPay, Bank transfers) and **Stellar blockchain-based payouts**. The platform leverages Stellar’s low-cost, fast, and transparent blockchain to manage tournament prize pools, payouts, and reputation systems, ensuring trust and fairness. Advanced features like real-time matchmaking, AI-driven anti-cheat, and community-driven tournaments enhance scalability and engagement.
 
+
 **Core Goals**:
 - Make **esports accessible** to everyday mobile and console gamers in Nigeria.
 - Provide a **secure, fair environment** with advanced anti-cheat, score verification, and Stellar-based transparency.
