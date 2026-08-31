@@ -2,23 +2,40 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 rule_files:
   - /etc/prometheus/alert.rules.yml
+  - /etc/prometheus/backend-alert.rules.yml
 
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ['localhost:9090']
 
-  # arenax-server runs on the host (npm run dev / npm start), not inside
-  # this compose network — same pattern as infra/elk's bind-mounted log
-  # tailing. `host.docker.internal` reaches the host from a container on
-  # Docker Desktop (Mac/Windows). On Linux, either run Docker with
-  # `--add-host=host.docker.internal:host-gateway` (Docker Engine 20.10+)
-  # or replace the target below with the host's actual IP/hostname.
+  # arenax-server and arenax-backend both run on the host (npm run dev /
+  # npm start, cargo run), not inside this compose network — same pattern
+  # as infra/elk's bind-mounted log tailing. `host.docker.internal` reaches
+  # the host from a container on Docker Desktop (Mac/Windows). On Linux,
+  # either run Docker with `--add-host=host.docker.internal:host-gateway`
+  # (Docker Engine 20.10+) or replace the targets below with the host's
+  # actual IP/hostname.
   - job_name: arenax-server
     metrics_path: /api/metrics
     static_configs:
       - targets: ['host.docker.internal:3001']
         labels:
           service: arenax-server
+
+  # Rust backend (backend/) — Prometheus metrics added for #970 so both
+  # services are visible in one unified stack instead of arenax-server
+  # being the only instrumented one.
+  - job_name: arenax-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          service: arenax-backend

@@ -8,7 +8,7 @@ CA in the platform's trust store. If that trust store is compromised
 device, a compromised CA — an attacker can MITM API traffic even
 though the connection is "valid HTTPS". Pinning adds a second check:
 the server's key must match one we've explicitly published, not just
-chain to *any* trusted CA.
+chain to *any* trusted CA..
 
 ## Where this lives
 

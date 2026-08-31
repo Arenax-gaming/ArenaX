@@ -331,12 +331,26 @@ pub fn localize_validation_error(error: &ValidationError, locale: Locale) -> Str
 /// embedded in an API error response.
 pub fn localize_validation_errors(errors: &ValidationErrors, locale: Locale) -> Value {
     let mut map = Map::new();
-    for (field, field_errors) in errors.errors() {
-        let messages: Vec<Value> = field_errors
-            .iter()
-            .map(|e| Value::String(localize_validation_error(e, locale)))
-            .collect();
-        map.insert((*field).to_string(), Value::Array(messages));
+    for (field, kind) in errors.errors() {
+        match kind {
+            validator::ValidationErrorsKind::Field(field_errors) => {
+                let messages: Vec<Value> = field_errors
+                    .iter()
+                    .map(|e| Value::String(localize_validation_error(e, locale)))
+                    .collect();
+                map.insert((*field).to_string(), Value::Array(messages));
+            }
+            validator::ValidationErrorsKind::Struct(nested_errors) => {
+                map.insert((*field).to_string(), localize_validation_errors(nested_errors, locale));
+            }
+            validator::ValidationErrorsKind::List(list_errors) => {
+                let mut list_map = Map::new();
+                for (idx, item_errors) in list_errors {
+                    list_map.insert(idx.to_string(), localize_validation_errors(item_errors, locale));
+                }
+                map.insert((*field).to_string(), Value::Object(list_map));
+            }
+        }
     }
     Value::Object(map)
 }

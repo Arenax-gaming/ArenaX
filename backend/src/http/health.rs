@@ -45,7 +45,7 @@ pub async fn health_check(
     // Redis connectivity
     let redis_started = Instant::now();
     let redis_status: Result<String, _> = redis::cmd("PING")
-        .query_async::<_, String>(&mut redis_conn(&redis))
+        .query_async(&mut redis_conn(&redis))
         .await;
     let redis_ok = redis_status.as_deref() == Ok("PONG");
     let redis_latency_ms = redis_started.elapsed().as_secs_f64() * 1000.0;

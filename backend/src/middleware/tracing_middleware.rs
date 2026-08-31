@@ -199,7 +199,8 @@ where
 }
 
 fn insert_header<B>(res: &mut ServiceResponse<B>, name: &'static str, value: &str) {
-    if let (Ok(name), Ok(value)) = (HeaderName::from_static(name), HeaderValue::from_str(value)) {
+    if let Ok(value) = HeaderValue::from_str(value) {
+        let name = HeaderName::from_static(name);
         res.headers_mut().insert(name, value);
     }
 }

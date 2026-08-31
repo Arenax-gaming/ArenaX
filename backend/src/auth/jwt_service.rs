@@ -222,6 +222,7 @@ fn token_hash(token: &str) -> String {
 }
 
 /// Main JWT Service
+#[derive(Clone)]
 pub struct JwtService {
     config: JwtConfig,
     redis: ConnectionManager,

@@ -76,4 +76,18 @@ pub enum VirtualEconomyError {
     NftLockPeriodNotMet = 113,
     /// NFT staking is currently paused.
     NftStakingPaused = 114,
+
+    // ---- Liquidity pool / AMM (Issue #882) ----
+    /// No liquidity pool has been created yet.
+    PoolNotFound = 120,
+    /// A liquidity pool already exists; there is only ever one.
+    PoolAlreadyExists = 121,
+    /// The pool holds too little liquidity to satisfy this operation.
+    InsufficientLiquidity = 122,
+    /// The result fell outside the caller's slippage tolerance.
+    SlippageExceeded = 123,
+    /// The constant-product invariant would have been violated. This should be
+    /// unreachable; it is checked rather than assumed because a path that
+    /// shrinks `k` drains the pool.
+    InvariantViolation = 124,
 }

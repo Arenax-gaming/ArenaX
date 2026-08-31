@@ -39,6 +39,7 @@ pub mod reputation;
 pub mod reputation_index;
 pub mod slashing;
 pub mod staking;
+pub mod state_change;
 pub mod time_lock;
 pub mod tournament;
 pub mod upgrade_manager;

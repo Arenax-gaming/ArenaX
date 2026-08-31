@@ -285,7 +285,9 @@ mod tests {
         });
         let errors = validator.validate(&payload).unwrap_err();
         let field_errors = errors
-            .field_errors("register")
+            .field_errors()
+            .get("register")
+            .copied()
             .expect("errors are keyed by schema name");
         assert!(!field_errors.is_empty());
         for e in field_errors {
@@ -382,7 +384,7 @@ mod tests {
     #[test]
     fn schema_error_converts_aggregate_into_validation_errors() {
         let errors = validate_instance(&json!({ "type": "integer" }), &json!("oops")).unwrap_err();
-        let field_errors = errors.field_errors("instance").unwrap();
+        let field_errors = errors.field_errors().get("instance").copied().unwrap();
         assert_eq!(field_errors[0].code.as_ref(), "json_schema");
     }
 
