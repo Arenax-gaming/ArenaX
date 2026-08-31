@@ -1355,12 +1355,12 @@ impl VirtualEconomyContract {
         }
         if let Some(referrer_account) = Self::referral_account(&env, referrer.clone()) {
             if referrer_account.flagged {
-                return Err(VirtualEconomyError::ReferralFraud);
+                return Err(VirtualEconomyError::Unauthorized);
             }
             // Prevent a two-account referral cycle. Cycles make attribution
             // ambiguous and are a common sybil pattern.
             if referrer_account.referrer == Some(referee.clone()) {
-                return Err(VirtualEconomyError::ReferralFraud);
+                return Err(VirtualEconomyError::Unauthorized);
             }
         }
         if env
@@ -1422,7 +1422,7 @@ impl VirtualEconomyContract {
         let mut referrer_account = Self::referral_account(&env, referrer.clone())
             .ok_or(VirtualEconomyError::ReferralNotFound)?;
         if referee_account.flagged || referrer_account.flagged {
-            return Err(VirtualEconomyError::ReferralFraud);
+            return Err(VirtualEconomyError::Unauthorized);
         }
         let now = env.ledger().timestamp();
         if referee_account.last_activity > 0
@@ -1470,7 +1470,7 @@ impl VirtualEconomyContract {
         let mut referral = Self::referral_account(&env, account.clone())
             .ok_or(VirtualEconomyError::ReferralNotFound)?;
         if referral.flagged {
-            return Err(VirtualEconomyError::ReferralFraud);
+            return Err(VirtualEconomyError::Unauthorized);
         }
         if referral.pending_rewards <= 0 {
             return Err(VirtualEconomyError::NothingToClaim);
@@ -1483,7 +1483,7 @@ impl VirtualEconomyContract {
         }
         let balance = Self::get_currency_balance(env.clone(), account.clone());
         env.storage().persistent().set(
-            &DataKey::CurrencyBalance(account),
+            &DataKey::CurrencyBalance(account.clone()),
             &(balance + amount),
         );
         env.storage()
@@ -2582,7 +2582,7 @@ impl VirtualEconomyContract {
         }
 
         if license.license_type > 3 {
-            return Err(VirtualEconomyError::InvalidLicenseType);
+            return Err(VirtualEconomyError::InvalidConfig);
         }
 
         env.storage()
