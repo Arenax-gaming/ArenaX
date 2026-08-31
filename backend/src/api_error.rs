@@ -62,8 +62,16 @@ pub enum ApiError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
-    #[error("Too many requests: {0}")]
-    TooManyRequests(String),
+    /// Rate limit exceeded. The `RateLimit-*` headers describe the current
+    /// window; clients should wait `retry_after` seconds before retrying.
+    #[error("Too many requests: {message}")]
+    TooManyRequests {
+        message: String,
+        limit: u64,
+        remaining: u64,
+        reset: u64,
+        retry_after: u64,
+    },
 
     /// One or more fields failed validation. Carries a per-field breakdown and
     /// answers 422, so a client can distinguish "this request was malformed"
@@ -166,7 +174,7 @@ impl ResponseError for ApiError {
                 actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
                 self.to_string(),
             ),
-            ApiError::TooManyRequests(_) => (
+            ApiError::TooManyRequests { .. } => (
                 actix_web::http::StatusCode::TOO_MANY_REQUESTS,
                 self.to_string(),
             ),
@@ -190,7 +198,22 @@ impl ResponseError for ApiError {
             },
         };
 
-        HttpResponse::build(status).json(error_response)
+        let mut builder = HttpResponse::build(status);
+        if let ApiError::TooManyRequests {
+            limit,
+            remaining,
+            reset,
+            retry_after,
+            ..
+        } = self
+        {
+            builder.insert_header(("RateLimit-Limit", limit.to_string()));
+            builder.insert_header(("RateLimit-Remaining", remaining.to_string()));
+            builder.insert_header(("RateLimit-Reset", reset.to_string()));
+            builder.insert_header(("Retry-After", retry_after.to_string()));
+            builder.insert_header(("Access-Control-Expose-Headers", "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
+        }
+        builder.json(error_response)
     }
 }
 
