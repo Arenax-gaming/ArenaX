@@ -11,9 +11,7 @@
 //! - Full transaction lifecycle management
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -112,37 +110,12 @@ impl Default for RetryConfig {
     }
 }
 
-/// Configuration for webhook notifications
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebhookConfig {
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub secret: Option<String>,
-}
-
-/// Entry in the dead-letter queue for failed transactions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeadLetterEntry {
-    pub idempotency_key: String,
-    pub contract_id: String,
-    pub function_name: String,
-    pub args: serde_json::Value,
-    pub error: String,
-    pub attempts: u32,
-    pub last_attempt_at: u64,
-    #[serde(skip)]
-    signer_secret: String,
-}
-
 /// Soroban service for transaction management
 #[derive(Clone)]
 pub struct SorobanService {
     network: NetworkConfig,
     client: reqwest::Client,
     retry_config: RetryConfig,
-    webhook_config: Option<WebhookConfig>,
-    dead_letter_queue: Arc<Mutex<Vec<DeadLetterEntry>>>,
-    idempotency_store: Arc<Mutex<HashMap<String, SorobanTxResult>>>,
 }
 
 #[derive(Debug, Error)]
@@ -264,9 +237,6 @@ impl SorobanService {
             network,
             client: reqwest::Client::new(),
             retry_config: RetryConfig::default(),
-            webhook_config: None,
-            dead_letter_queue: Arc::new(Mutex::new(Vec::new())),
-            idempotency_store: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -276,16 +246,7 @@ impl SorobanService {
             network,
             client: reqwest::Client::new(),
             retry_config,
-            webhook_config: None,
-            dead_letter_queue: Arc::new(Mutex::new(Vec::new())),
-            idempotency_store: Arc::new(Mutex::new(HashMap::new())),
         }
-    }
-
-    /// Configure webhook notifications for transaction events
-    pub fn with_webhook(mut self, webhook_config: WebhookConfig) -> Self {
-        self.webhook_config = Some(webhook_config);
-        self
     }
 
     /// Return the network configuration (e.g., to inspect the friendbot URL).
@@ -304,83 +265,6 @@ impl SorobanService {
     /// # Returns
     /// A `SorobanTxResult` containing the transaction hash and status
     pub async fn invoke(
-        &self,
-        contract_id: &str,
-        function_name: &str,
-        args: &serde_json::Value,
-        signer_secret: &str,
-    ) -> Result<SorobanTxResult, SorobanError> {
-        let idempotency_key = Self::make_idempotency_key(contract_id, function_name, args, signer_secret);
-        self.invoke_with_idempotency(&idempotency_key, contract_id, function_name, args, signer_secret)
-            .await
-    }
-
-    /// Invoke a Soroban contract function with explicit idempotency and retry handling.
-    pub async fn invoke_with_idempotency(
-        &self,
-        idempotency_key: &str,
-        contract_id: &str,
-        function_name: &str,
-        args: &serde_json::Value,
-        signer_secret: &str,
-    ) -> Result<SorobanTxResult, SorobanError> {
-        if let Some(result) = self.idempotency_store.lock().unwrap().get(idempotency_key).cloned() {
-            info!(idempotency_key = idempotency_key, "Returning cached idempotent result");
-            return Ok(result);
-        }
-
-        let mut attempts = 0u32;
-        let mut delay = self.retry_config.initial_delay_ms;
-
-        loop {
-            match self.invoke_internal(contract_id, function_name, args, signer_secret).await {
-                Ok(result) => {
-                    self.idempotency_store.lock().unwrap().insert(
-                        idempotency_key.to_string(),
-                        result.clone(),
-                    );
-                    self.notify_webhook("transaction.succeeded", &serde_json::json!({
-                        "idempotency_key": idempotency_key,
-                        "hash": result.hash,
-                        "status": result.status,
-                    })).await;
-                    return Ok(result);
-                }
-                Err(e) => {
-                    if attempts >= self.retry_config.max_retries {
-                        self.enqueue_dead_letter(
-                            idempotency_key,
-                            contract_id,
-                            function_name,
-                            args,
-                            signer_secret,
-                            e.to_string(),
-                            attempts + 1,
-                        );
-                        self.notify_webhook("transaction.failed", &serde_json::json!({
-                            "idempotency_key": idempotency_key,
-                            "error": e.to_string(),
-                        })).await;
-                        return Err(e);
-                    }
-
-                    warn!(
-                        idempotency_key = idempotency_key,
-                        attempt = attempts,
-                        error = %e,
-                        "Retrying transaction after error"
-                    );
-
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                    attempts += 1;
-                    delay = (delay as f64 * self.retry_config.backoff_multiplier) as u64;
-                    delay = delay.min(self.retry_config.max_delay_ms);
-                }
-            }
-        }
-    }
-
-    async fn invoke_internal(
         &self,
         contract_id: &str,
         function_name: &str,
@@ -426,19 +310,7 @@ impl SorobanService {
                 }
             });
 
-        match result.status {
-            TxStatus::Success => Ok(result),
-            TxStatus::Failed => Err(SorobanError::TransactionFailed(
-                result.error
-                    .clone()
-                    .unwrap_or_else(|| "Transaction failed on network".to_string()),
-            )),
-            TxStatus::Pending => Err(SorobanError::TransactionFailed(
-                result.error
-                    .clone()
-                    .unwrap_or_else(|| "Transaction pending after monitoring timeout".to_string()),
-            )),
-        }
+        Ok(result)
     }
 
     /// Estimate gas costs for a transaction pre-execution
@@ -673,54 +545,6 @@ impl SorobanService {
         Ok(events)
     }
 
-    /// List all transactions currently in the dead-letter queue.
-    pub fn list_dead_letter_queue(&self) -> Vec<DeadLetterEntry> {
-        self.dead_letter_queue.lock().unwrap().clone()
-    }
-
-    /// Retry a failed transaction from the dead-letter queue.
-    pub async fn retry_dead_letter(&self, idempotency_key: &str) -> Result<SorobanTxResult, SorobanError> {
-        let entry = {
-            let queue = self.dead_letter_queue.lock().unwrap();
-            queue.iter().find(|entry| entry.idempotency_key == idempotency_key).cloned()
-        };
-
-        let entry = match entry {
-            Some(entry) => entry,
-            None => {
-                return Err(SorobanError::InvalidResponse(format!(
-                    "Dead-letter entry '{}' not found",
-                    idempotency_key
-                )));
-            }
-        };
-
-        self.dead_letter_queue
-            .lock()
-            .unwrap()
-            .retain(|entry| entry.idempotency_key != idempotency_key);
-
-        self.invoke_with_idempotency(
-            &entry.idempotency_key,
-            &entry.contract_id,
-            &entry.function_name,
-            &entry.args,
-            &entry.signer_secret,
-        )
-        .await
-    }
-
-    fn enqueue_dead_letter(
-        &self,
-        idempotency_key: &str,
-        contract_id: &str,
-        function_name: &str,
-        args: &serde_json::Value,
-        signer_secret: &str,
-        error: String,
-        attempts: u32,
-    ) {
-        let entry
     /// Parse events from transaction metadata XDR
     fn parse_events_from_meta(
         &self,

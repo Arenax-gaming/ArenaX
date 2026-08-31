@@ -6,6 +6,7 @@ pub mod http;
 pub mod metrics;
 pub mod middleware;
 pub mod models;
+pub mod orchestrator;
 pub mod realtime;
 pub mod security;
 pub mod service;

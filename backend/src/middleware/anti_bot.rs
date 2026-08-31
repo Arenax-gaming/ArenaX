@@ -41,7 +41,7 @@ use super::extract_ip;
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    HttpResponse,
+    HttpMessage, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use redis::aio::ConnectionManager;

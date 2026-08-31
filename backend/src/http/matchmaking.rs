@@ -2,7 +2,7 @@ use crate::api_error::ApiError;
 use crate::auth::Claims;
 use crate::db::DbPool;
 use crate::models::matchmaker::*;
-use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig};
+use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig, QueueEntry};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use actix_web::{web, HttpResponse, Result};
 use chrono::Utc;
@@ -77,7 +77,8 @@ pub async fn join_queue(
     claims: web::ReqData<Claims>,
     request: web::Json<JoinQueueRequest>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let game = request.game.clone();
     let game_mode = request.game_mode.clone();
 
@@ -136,7 +137,8 @@ pub async fn leave_queue(
     claims: web::ReqData<Claims>,
     request: web::Json<LeaveQueueRequest>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let game = request.game.clone();
     let game_mode = request.game_mode.clone();
 
@@ -175,7 +177,8 @@ pub async fn get_queue_status(
     claims: web::ReqData<Claims>,
     path: web::Path<(String, String)>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let (game, game_mode) = path.into_inner();
 
     let queue_entry = matchmaker.is_user_in_queue(user_id, &game, &game_mode).await?;
@@ -332,7 +335,8 @@ pub async fn get_elo(
     claims: web::ReqData<Claims>,
     path: web::Path<String>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let game = path.into_inner();
 
     let elo_record = sqlx::query_as!(
@@ -361,7 +365,8 @@ pub async fn get_elo_history(
     claims: web::ReqData<Claims>,
     path: web::Path<(String, i32, i32)>,
 ) -> Result<HttpResponse> {
-    let user_id = claims.user_id;
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let (game, page, limit) = path.into_inner();
     let offset = (page - 1) * limit;
 

@@ -304,9 +304,9 @@ where
             if method_is_mutating(&method) || status >= 400 {
                 emit_audit(AuditEntry {
                     ts: start / 1000,
-                    ip,
+                    ip: ip.clone(),
                     method,
-                    path,
+                    path: path.clone(),
                     status,
                     user_id: None, // populated by auth layer if needed
                     latency_ms: latency,
@@ -383,10 +383,8 @@ fn calculate_backoff(level: u32, config: &SecurityConfig) -> u64 {
 /// Insert a header into an `HttpResponse`.
 fn insert_header(response: &mut HttpResponse, name: &'static str, value: impl ToString) {
     use actix_web::http::header::{HeaderName, HeaderValue};
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_static(name),
-        HeaderValue::from_str(&value.to_string()),
-    ) {
+    let n = HeaderName::from_static(name);
+    if let Ok(v) = HeaderValue::from_str(&value.to_string()) {
         response.headers_mut().insert(n, v);
     }
 }

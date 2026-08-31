@@ -41,8 +41,11 @@ futures = "0.3"
 futures-util = "0.3"
 hex = "0.4"
 fs2 = "0.4"
+once_cell = "1.19"
+prometheus = { version = "0.13", features = ["process"] }
 aes-gcm = { version = "0.10", features = ["zeroize"] }
 zeroize = { version = "1.8", features = ["derive"] }
+
 
 # Security: pin patched versions of transitive deps
 quinn-proto = "0.11.14"

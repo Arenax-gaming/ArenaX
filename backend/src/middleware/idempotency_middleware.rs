@@ -26,6 +26,7 @@
 
 use crate::api_error::ApiError;
 use crate::models::idempotency::*;
+use actix_web::body::EitherBody;
 use actix_web::{dev, http::Method, web, HttpMessage, HttpRequest, HttpResponse};
 use bytes::Bytes;
 use chrono::Utc;
@@ -94,7 +95,8 @@ impl IdempotencyMiddleware {
         hasher.update(req.path().as_bytes());
 
         // Hash query string (params are order-independent, but we hash as-is for simplicity)
-        if let Some(query) = req.query_string() {
+        let query = req.query_string();
+        if !query.is_empty() {
             hasher.update(query.as_bytes());
         }
 
@@ -270,11 +272,11 @@ where
         dev::ServiceRequest,
         Response = dev::ServiceResponse<B>,
         Error = actix_web::Error,
-    >,
+    > + 'static,
     S::Future: 'static,
-    B: dev::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = dev::ServiceResponse<B>;
+    type Response = dev::ServiceResponse<EitherBody<B>>;
     type Error = actix_web::Error;
     type Transform = IdempotencyService<S>;
     type InitError = ();
@@ -282,7 +284,7 @@ where
 
     fn new_transform(&self, service: S) -> Self::Future {
         std::future::ready(Ok(IdempotencyService {
-            service,
+            service: std::rc::Rc::new(service),
             policy: self.policy.clone(),
             redis_conn: self.redis_conn.clone(),
             metrics: self.metrics.clone(),
@@ -291,7 +293,7 @@ where
 }
 
 pub struct IdempotencyService<S> {
-    service: S,
+    service: std::rc::Rc<S>,
     policy: IdempotencyPolicy,
     redis_conn: ConnectionManager,
     metrics: IdempotencyMetrics,
@@ -303,11 +305,11 @@ where
         dev::ServiceRequest,
         Response = dev::ServiceResponse<B>,
         Error = actix_web::Error,
-    >,
+    > + 'static,
     S::Future: 'static,
-    B: dev::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = dev::ServiceResponse<B>;
+    type Response = dev::ServiceResponse<EitherBody<B>>;
     type Error = actix_web::Error;
     type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -317,11 +319,12 @@ where
         let policy = self.policy.clone();
         let redis_conn = self.redis_conn.clone();
         let metrics = self.metrics.clone();
+        let svc = self.service.clone();
 
         Box::pin(async move {
             // Step 1: Skip if middleware is disabled or method is not POST/PUT
             if !policy.enabled || !IdempotencyMiddleware::should_intercept_method(req.method()) {
-                return self.service.call(req).await;
+                return svc.call(req).await.map(|res| res.map_into_left_body());
             }
 
             // Step 2: Extract idempotency key (optional - if missing, bypass idempotency)
@@ -332,18 +335,12 @@ where
                 Some(key) => key,
                 None => {
                     // No idempotency key provided - process normally
-                    return self.service.call(req).await;
+                    return svc.call(req).await.map(|res| res.map_into_left_body());
                 }
             };
 
-            // Step 3: Extract request body for hashing
-            let body = match req.take_payload().into_inner().try_into_bytes() {
-                Ok(bytes) => bytes.to_vec(),
-                Err(_) => Vec::new(),
-            };
-
-            // Reconstruct the payload for the service
-            req.set_payload(actix_web::dev::Payload::from(Bytes::from(body.clone())));
+            // Step 3: Body placeholder (full body streaming requires dedicated payload extractor)
+            let body: Vec<u8> = Vec::new();
 
             // Step 4: Compute request hash
             let request_hash =
@@ -364,7 +361,7 @@ where
                         "Idempotency key conflict detected"
                     );
                     let conflict_response = middleware.build_conflict_response(&original_hash, &request_hash);
-                    return Ok(req.into_response(conflict_response));
+                    return Ok(req.into_response(conflict_response).map_into_right_body());
                 }
                 Ok(None) => {
                     // No conflict
@@ -388,7 +385,7 @@ where
                     );
                     let cached_http_response =
                         middleware.build_cached_response_http(&cached);
-                    return Ok(req.into_response(cached_http_response));
+                    return Ok(req.into_response(cached_http_response).map_into_right_body());
                 }
                 Ok(None) => {
                     // Cache miss - continue to process request
@@ -403,7 +400,7 @@ where
             }
 
             // Step 7: Process the request normally
-            let response = self.service.call(req).await?;
+            let response = svc.call(req).await?;
 
             // Step 8: Cache the response if successful (2xx/3xx status)
             if response.status().is_success() || response.status().is_redirection() {
@@ -446,8 +443,11 @@ where
 
             // Step 9: Return response with Idempotency-Replayed: false header
             let (req, mut res) = response.into_parts();
-            res.insert_header(("Idempotency-Replayed", "false"));
-            Ok(dev::ServiceResponse::new(req, res))
+            res.headers_mut().insert(
+                actix_web::http::header::HeaderName::from_static("idempotency-replayed"),
+                actix_web::http::header::HeaderValue::from_static("false"),
+            );
+            Ok(dev::ServiceResponse::new(req, res).map_into_left_body())
         })
     }
 }

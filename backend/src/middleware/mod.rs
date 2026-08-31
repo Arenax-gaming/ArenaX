@@ -1,9 +1,11 @@
 // Middleware module for ArenaX
+
 pub mod anti_bot;
 pub mod authorization;
 pub mod circuit_breaker;
 pub mod csrf;
 pub mod idempotency_middleware;
+pub mod ip_list;
 pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;

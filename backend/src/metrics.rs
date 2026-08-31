@@ -127,9 +127,8 @@ pub fn init_metrics() {
     Lazy::force(&CIRCUIT_BREAKER_TRIPS_TOTAL);
 
     // Process-level metrics (process_resident_memory_bytes, process_cpu_seconds_total,
-    // open fds, ...) — same names Node's prom-client exports by default, so the
-    // existing `HighProcessMemory`-style alert expressions work unchanged for
-    // this service too.
+    // open fds, ...) — only available on Linux in prometheus crate.
+    #[cfg(target_os = "linux")]
     if let Err(e) = REGISTRY.register(Box::new(
         prometheus::process_collector::ProcessCollector::for_self(),
     )) {

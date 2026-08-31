@@ -286,7 +286,7 @@ impl SocialService {
         Ok(Party {
             id: party_id,
             leader_id,
-            leader_username,
+            leader_username: leader_username.clone(),
             name,
             description,
             max_members,

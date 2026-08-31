@@ -20,6 +20,7 @@
 
 use std::sync::Arc;
 
+use actix_web::HttpMessage;
 use redis::aio::ConnectionManager;
 use tracing::warn;
 

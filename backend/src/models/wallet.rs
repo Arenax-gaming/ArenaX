@@ -208,9 +208,16 @@ pub struct TransactionResponse {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+fn validate_positive_decimal(amount: &Decimal) -> Result<(), validator::ValidationError> {
+    if *amount <= Decimal::ZERO {
+        return Err(validator::ValidationError::new("amount_must_be_positive"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct DepositRequest {
-    #[validate(range(min = 1))]
+    #[validate(custom(function = "validate_positive_decimal"))]
     pub amount: Decimal,
     #[validate(length(min = 3, max = 10))]
     pub currency: String, // "NGN", "XLM", "ARENAX_TOKEN"
@@ -219,7 +226,7 @@ pub struct DepositRequest {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct WithdrawalRequest {
-    #[validate(range(min = 1))]
+    #[validate(custom(function = "validate_positive_decimal"))]
     pub amount: Decimal,
     #[validate(length(min = 3, max = 10))]
     pub currency: String,

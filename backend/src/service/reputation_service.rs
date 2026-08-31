@@ -25,8 +25,10 @@ pub enum ReputationError {
     InvalidData(String),
 }
 
+use serde::{Deserialize, Serialize};
+
 /// Reputation data for a player
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerReputation {
     pub user_id: uuid::Uuid,
     pub skill_score: i32,
@@ -412,5 +414,5 @@ pub struct ReputationStats {
     pub avg_fair_play: f64,
 }
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests {}

@@ -131,17 +131,10 @@ pub async fn test_concurrent_deductions_with_insufficient_balance(
 
                     let current_balance = wallet.balance_ngn.unwrap_or(0);
                     if current_balance < 100 {
-                        return Err(sqlx::Error::Database(
-                            sqlx::postgres::PgDatabaseError::new(
-                                "INSUFFICIENT_BALANCE",
-                                "wallets",
-                                "balance_ngn",
-                                None,
-                                None,
-                                None,
-                            )
-                            .into(),
-                        ));
+                        return Err(sqlx::Error::Io(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "INSUFFICIENT_BALANCE",
+                        )));
                     }
 
                     // Simulate processing time
@@ -363,9 +356,9 @@ pub async fn test_deadlock_detection(pool: &PgPool) -> Result<(), String> {
 
                     Ok::<(), sqlx::Error>(())
                 })
-            })
-            .await,
-        );
+            }),
+        )
+        .await;
 
         match result {
             Ok(inner) => inner.map_err(|e| format!("Transaction failed: {}", e)),
@@ -385,7 +378,8 @@ pub async fn test_deadlock_detection(pool: &PgPool) -> Result<(), String> {
     // Wait for long transaction to complete
     long_tx_handle
         .await
-        .map_err(|e| format!("Long tx join failed: {}", e))??;
+        .map_err(|e| format!("Long tx join failed: {}", e))?
+        .map_err(|e| format!("Long tx failed: {}", e))?;
 
     Ok(())
 }
