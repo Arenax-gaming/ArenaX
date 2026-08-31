@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS prize_distribution_failures (
     amount        BIGINT      NOT NULL,
     currency      TEXT        NOT NULL,
     reason        TEXT        NOT NULL,
-    retry_count   INT         NOT DEFAULT 0,
-    created_at    TIMESTAMPTZ NOT DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT DEFAULT NOW(),
+    retry_count   INT         NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- One failure row per (tournament, user) pair; retries increment retry_count.
     CONSTRAINT uq_prize_failure_tournament_user UNIQUE (tournament_id, user_id)
