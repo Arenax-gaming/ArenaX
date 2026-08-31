@@ -42,5 +42,6 @@ pub mod staking;
 pub mod state_change;
 pub mod time_lock;
 pub mod tournament;
+pub mod upgrade_manager;
 pub mod virtual_economy;
 pub mod zk_proof;

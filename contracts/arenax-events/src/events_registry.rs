@@ -43,6 +43,7 @@ pub const NAMESPACES: &[NamespaceEntry] = &[
     NamespaceEntry { namespace: state_change::NAMESPACE, version: state_change::VERSION },
     NamespaceEntry { namespace: time_lock::NAMESPACE, version: time_lock::VERSION },
     NamespaceEntry { namespace: tournament::NAMESPACE, version: tournament::VERSION },
+    NamespaceEntry { namespace: upgrade_manager::NAMESPACE, version: upgrade_manager::VERSION },
     NamespaceEntry { namespace: virtual_economy::NAMESPACE, version: virtual_economy::VERSION },
 ];
 
