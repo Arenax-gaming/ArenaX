@@ -60,7 +60,7 @@ export default function ProfilePage() {
     if (authUser) {
       setDraftUsername(authUser.username);
     }
-  }, [authUser?.username]);
+  }, [authUser]);
 
   // Track unsaved state
   useEffect(() => {

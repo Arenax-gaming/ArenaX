@@ -9,6 +9,7 @@ import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
+import { BracketErrorBoundary } from "@/components/bracket/BracketErrorBoundary";
 import { generateMockBracket } from "@/data/mockBracket";
 import { ArrowLeft, RadioTower, ShieldAlert, Swords, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -179,10 +180,20 @@ export function TournamentDetailsPageClient() {
                   ) : null}
                 </div>
 
-                <SingleEliminationBracket
-                  bracketData={bracketData}
-                  currentUserId={currentUserId}
-                />
+                <BracketErrorBoundary
+                  tournamentName={tournament.name}
+                  tournamentId={tournament.id}
+                  tournamentInfo={{
+                    status: tournament.status,
+                    participantCount: tournament.participants?.length,
+                    startDate: tournament.startDate,
+                  }}
+                >
+                  <SingleEliminationBracket
+                    bracketData={bracketData}
+                    currentUserId={currentUserId}
+                  />
+                </BracketErrorBoundary>
               </div>
             </section>
           ) : null}

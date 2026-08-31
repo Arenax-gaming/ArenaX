@@ -8,11 +8,13 @@ mod auth;
 mod config;
 mod db;
 mod http;
+mod metrics;
 mod middleware;
 mod models;
 mod realtime;
 mod service;
 mod orchestrator;
+mod security;
 mod telemetry;
 mod validators;
 
@@ -22,6 +24,7 @@ use crate::middleware::cors_middleware;
 use crate::middleware::anti_bot::{AntiBotConfig, AntiBotMiddleware};
 use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::metrics_middleware::RequestMetrics;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::middleware::security_headers::security_headers;
@@ -45,6 +48,10 @@ async fn main() -> io::Result<()> {
     // are flushed to the OTLP exporter (Jaeger/Datadog) on shutdown.
     let _telemetry_guard = init_telemetry();
 
+    // Register Prometheus collectors so they show up in /metrics even
+    // before their first observation.
+    crate::metrics::init_metrics();
+
     // Create database pool
     let db_pool = create_pool(&config)
         .await
@@ -53,6 +60,20 @@ async fn main() -> io::Result<()> {
     run_startup_migrations(&config, &db_pool)
         .await
         .expect("Failed to run database migrations");
+
+    // Periodically snapshot DB pool utilization into the
+    // db_pool_connections_active / db_pool_connections_idle gauges.
+    let pool_metrics_handle = db_pool.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            crate::metrics::record_pool_stats(
+                pool_metrics_handle.size(),
+                pool_metrics_handle.num_idle(),
+            );
+        }
+    });
 
     // Spawn the Reaper — forfeits players who miss the reporting deadline
     let reaper = Arc::new(ReaperService::new(db_pool.clone()));
@@ -74,6 +95,12 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create Redis connection manager");
 
+    // Seed IP whitelist/blacklist from env vars
+    {
+        let mut seed_conn = redis_conn.clone();
+        crate::middleware::ip_list::seed_from_env(&mut seed_conn).await;
+    }
+
     // Initialize matchmaking service — pass the shared ConnectionManager so
     // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
@@ -82,6 +109,15 @@ async fn main() -> io::Result<()> {
         redis_conn.clone(),
         matchmaking_config,
     ));
+
+    // Build idempotency middleware policy from config
+    let idempotency_policy = IdempotencyPolicy {
+        enabled: true,
+        key_header_name: "Idempotency-Key".to_string(),
+        ttl_seconds: config.idempotency.ttl_seconds,
+        max_response_size_kb: config.idempotency.max_response_size_kb,
+        conflict_status_code: 422,
+    };
 
     // Start background matchmaker worker
     let matchmaker_worker = matchmaker_service.clone();
@@ -186,10 +222,11 @@ async fn main() -> io::Result<()> {
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
-            .wrap(IdempotencyMiddleware::default(db_pool.clone()))
+            .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
             .wrap(AntiBotMiddleware::new(redis_conn.clone(), AntiBotConfig::default()))
+            .wrap(IpListMiddleware::new(redis_conn.clone()))
             .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
@@ -209,6 +246,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903
                     .configure(crate::http::anti_bot_handler::configure_routes)
+                    // IP whitelist/blacklist admin endpoints — Issue #975
+                    .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
                     .configure(crate::http::player_stats_handler::configure_routes)
                     // Feature toggle management — Issue #948
@@ -299,6 +338,7 @@ async fn main() -> io::Result<()> {
                             .route("/leave", web::post().to(crate::http::matchmaking::leave_queue))
                             .route("/status/{game}/{game_mode}", web::get().to(crate::http::matchmaking::get_queue_status))
                             .route("/stats", web::get().to(crate::http::matchmaking::get_matchmaking_stats))
+                            .route("/metrics", web::get().to(crate::http::matchmaking::get_matchmaking_metrics_dashboard))
                             .route("/elo/{game}", web::get().to(crate::http::matchmaking::get_elo))
                             .route("/elo/{game}/{page}/{limit}", web::get().to(crate::http::matchmaking::get_elo_history))
                     )

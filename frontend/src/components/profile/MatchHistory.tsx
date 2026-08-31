@@ -43,6 +43,8 @@ export interface MatchHistoryFilters {
   result?: "win" | "loss";
   opponentSearch?: string;
   timeRange?: "week" | "month" | "all";
+  field?: "date" | "elo" | "duration";
+  direction?: "asc" | "desc";
 }
 
 export interface MatchHistorySort {
@@ -224,8 +226,11 @@ function dedupeById(matches: AnyMatchWithPlayers[]): AnyMatchWithPlayers[] {
 }
 
 // Parse URL search params into filters object
-function parseFiltersFromURL(searchParams: URLSearchParams): MatchHistoryFilters & MatchHistorySort {
+function parseFiltersFromURL(
+  searchParams: { get(name: string): string | null } | null | undefined
+): MatchHistoryFilters & MatchHistorySort {
   const filters: MatchHistoryFilters & MatchHistorySort = {};
+  if (!searchParams) return filters;
   
   const gameType = searchParams.get("gameType");
   if (gameType) filters.gameType = gameType;
@@ -252,7 +257,7 @@ function parseFiltersFromURL(searchParams: URLSearchParams): MatchHistoryFilters
 function buildSearchParamsString(
   filters: MatchHistoryFilters & MatchHistorySort,
   router: any,
-  pathname: string
+  pathname: string | null
 ) {
   const params = new URLSearchParams();
   
@@ -263,11 +268,12 @@ function buildSearchParamsString(
   if (filters.field) params.set("sortField", filters.field);
   if (filters.direction) params.set("sortDirection", filters.direction);
   
+  const path = pathname ?? "";
   const queryString = params.toString();
   if (queryString) {
-    router.push(`${pathname}?${queryString}`, { scroll: false });
+    router.push(`${path}?${queryString}`, { scroll: false });
   } else {
-    router.push(pathname, { scroll: false });
+    router.push(path, { scroll: false });
   }
 }
 
@@ -569,9 +575,9 @@ export function MatchHistory({
           >
             {/* Sort options */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Sort By
-              </label>
+              </span>
               <div className="flex flex-wrap gap-2">
                 {(["date", "elo", "duration"] as const).map((field) => (
                   <button
@@ -776,7 +782,7 @@ export function MatchHistory({
         )}
 
         {/* Pagination (used alongside non-virtual render) */}
-        {showPagination && !useVirtual && (
+        {paginationProvided && !useVirtual && (
           <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t">
             <Button
               variant="outline"
@@ -789,13 +795,13 @@ export function MatchHistory({
               Previous
             </Button>
             <span className="text-sm text-muted-foreground px-4">
-              Page {currentPage} of {totalPages}
+              Page {currentPage} of {totalPages ?? 1}
             </span>
             <Button
               variant="outline"
               size="sm"
               onClick={() => onPageChange?.(currentPage + 1)}
-              disabled={currentPage >= totalPages}
+              disabled={totalPages !== undefined && currentPage >= totalPages}
               aria-label="Next page"
             >
               Next
