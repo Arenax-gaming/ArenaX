@@ -2331,7 +2331,7 @@ impl VirtualEconomyContract {
             return Err(VirtualEconomyError::NftStakingPaused);
         }
 
-        let mut position: NftStakedPosition = env
+        let position: NftStakedPosition = env
             .storage()
             .persistent()
             .get(&DataKey::NftStakedPosition(token_id.clone()))

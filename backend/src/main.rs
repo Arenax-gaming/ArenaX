@@ -29,6 +29,7 @@ use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::middleware::security_headers::security_headers;
 use crate::middleware::tracing_middleware::RequestTracing;
+use crate::service::batch_service::BatchService;
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -36,6 +37,7 @@ use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
 use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
+use crate::service::batch_service::BatchService;
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
@@ -167,6 +169,9 @@ async fn main() -> io::Result<()> {
     let protocol_signer_secret =
         crate::http::match_authority_handler::SignerSecret(config.stellar.admin_secret.clone());
 
+    // Initialize BatchService — Issue #952
+    let batch_service = Arc::new(BatchService::new(db_pool.clone()));
+
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
     let session_registry = Arc::new(SessionRegistry::new());
@@ -220,6 +225,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
             // Match authority service + protocol signer for on-chain match lifecycle
+            .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
@@ -242,6 +248,8 @@ async fn main() -> io::Result<()> {
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
                     .route("/csrf-token", web::get().to(csrf_token_handler))
+                    // Batch operations endpoints — Issue #952
+                    .configure(crate::http::batch_handler::configure_routes)
                     // OpenAPI 3.0 docs — Issue #901
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903

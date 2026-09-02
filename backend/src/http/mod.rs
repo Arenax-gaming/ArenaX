@@ -19,6 +19,7 @@ pub mod reputation_handler;
 pub mod social_handler;
 pub mod staking_handler;
 pub mod analytics_handler;
+pub mod batch_handler;
 pub mod tournament_handler;
 pub mod gas_estimation_handler;
 

@@ -52,11 +52,13 @@ export interface MatchHistorySort {
   direction?: "asc" | "desc";
 }
 
+type MatchHistoryFiltersAndSort = MatchHistoryFilters & MatchHistorySort;
+
 interface MatchHistoryProps {
   matches: AnyMatchWithPlayers[];
   currentUserId: string;
-  filters?: MatchHistoryFilters;
-  onFilterChange?: (filters: MatchHistoryFilters) => void;
+  filters?: MatchHistoryFiltersAndSort;
+  onFilterChange?: (filters: MatchHistoryFiltersAndSort) => void;
   page?: number;
   totalPages?: number;
   onPageChange?: (page: number) => void;
@@ -306,7 +308,7 @@ export function MatchHistory({
   
   // Handle filter changes - update both local state and URL
   const handleFilterChange = useCallback(
-    (newFilters: MatchHistoryFilters) => {
+    (newFilters: MatchHistoryFiltersAndSort) => {
       // If we have a callback, use it
       if (onFilterChange) {
         onFilterChange(newFilters);
