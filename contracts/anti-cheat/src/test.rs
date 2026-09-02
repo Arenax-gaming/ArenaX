@@ -4,7 +4,7 @@ use crate::{
     AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, BehaviorPattern, DataKey,
     MlModelParams, Sanction, SanctionStatus, SanctionType, SuspiciousActivity,
 };
-use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, Map, String, Vec};
+use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Bytes, Env, Map, String, Vec};
 
 fn setup_env() -> (Env, Address, Address, Address) {
     let env = Env::default();
@@ -632,4 +632,166 @@ fn test_ml_action_validation_triggers() {
 
     let valid = client.validate_game_action(&player, &action_bytes, &state_bytes);
     assert!(!valid); // Blocked by ML model!
+}
+
+// ---------------------------------------------------------------------------
+// Spam-protection tests (acceptance criteria)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "already reported this match")]
+fn test_one_report_per_reporter_per_match() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+    let match_id = 42u64;
+
+    env.mock_all_auths();
+    // First report succeeds
+    client.report_suspicious_activity(
+        &reporter, &player, &match_id, &pattern, &evidence, &5, &false,
+    );
+    // Second report in the same match must panic
+    client.report_suspicious_activity(
+        &reporter, &player, &match_id, &pattern, &evidence, &5, &false,
+    );
+}
+
+#[test]
+fn test_different_reporters_same_match_allowed() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter_a = Address::generate(&env);
+    let reporter_b = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+    let match_id = 42u64;
+
+    env.mock_all_auths();
+    let id_a = client.report_suspicious_activity(
+        &reporter_a, &player, &match_id, &pattern, &evidence, &5, &false,
+    );
+    let id_b = client.report_suspicious_activity(
+        &reporter_b, &player, &match_id, &pattern, &evidence, &5, &false,
+    );
+    assert_ne!(id_a, id_b);
+}
+
+#[test]
+#[should_panic(expected = "reporter cooldown not met")]
+fn test_reporter_cooldown_between_matches() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+
+    env.mock_all_auths();
+    // Report in match 1
+    client.report_suspicious_activity(
+        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
+    );
+    // Immediately try a different match — cooldown not elapsed, must panic
+    client.report_suspicious_activity(
+        &reporter, &player, &2u64, &pattern, &evidence, &5, &false,
+    );
+}
+
+#[test]
+fn test_reporter_cooldown_elapsed_allows_report() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+
+    env.mock_all_auths();
+    client.report_suspicious_activity(
+        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
+    );
+
+    // Advance ledger time past the 1-hour cooldown (3600 s)
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+    let id = client.report_suspicious_activity(
+        &reporter, &player, &2u64, &pattern, &evidence, &5, &false,
+    );
+    assert!(id > 1);
+}
+
+#[test]
+fn test_spam_metrics_accumulate() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+
+    env.mock_all_auths();
+    client.report_suspicious_activity(
+        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
+    );
+
+    let metrics = client.get_reporter_spam_metrics(&reporter);
+    assert_eq!(metrics.total_reports, 1);
+    assert_eq!(metrics.false_reports, 0);
+    assert!(!metrics.flagged_as_spammer);
+}
+
+#[test]
+fn test_flagged_reporter_blocked() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (contract_id, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let pattern = BehaviorPattern::AbnormalReactionTime;
+    let reason = soroban_sdk::String::from_str(&env, "test");
+    let duration = 86400u64;
+
+    env.mock_all_auths();
+
+    // Submit 10 reports across different matches (advancing time past cooldown each time)
+    for i in 0u64..10 {
+        let target = Address::generate(&env);
+        client.report_suspicious_activity(
+            &reporter, &target, &i, &pattern, &evidence, &5, &false,
+        );
+        // Advance past 1-hour cooldown so next report is not blocked by cooldown
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    }
+
+    // Apply sanctions for each of the 10 reports and overturn them all
+    // to drive false_reports to 10 out of 10 (100% > 10%).
+    for report_num in 1u64..=10 {
+        let report_ids = {
+            let mut v = Vec::new(&env);
+            v.push_back(report_num);
+            v
+        };
+        let sanction_id = client.apply_sanction(
+            &player, &SanctionType::Warning, &reason, &duration, &report_ids,
+        );
+        let appeal_id = client.appeal_sanction(&player, &sanction_id, &reason, &evidence);
+        client.review_appeal(&appeal_id, &true); // overturn → triggers penalize_false_reporter
+    }
+
+    let metrics = client.get_reporter_spam_metrics(&reporter);
+    assert!(metrics.flagged_as_spammer, "reporter should be flagged");
+
+    let analytics = client.get_analytics();
+    assert_eq!(analytics.flagged_reporters, 1);
 }

@@ -85,6 +85,10 @@ pub enum DataKey {
     // Liquidity pool (Issue #882)
     AmmPool,
     AmmShares(Address),
+
+    // Referral
+    ReferralConfig,
+    ReferralAccount(Address),
 }
 
 #[contracttype]

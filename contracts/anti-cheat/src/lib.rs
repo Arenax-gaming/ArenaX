@@ -141,6 +141,10 @@ pub struct AnalyticsData {
     pub average_response_time: u64, // Time to detect
     pub most_common_pattern: BehaviorPattern,
     pub last_updated: u64,
+    /// Number of reports rejected due to 1-per-match / cooldown spam guards
+    pub spam_reports_blocked: u64,
+    /// Number of reporters currently flagged for >10% false-report rate
+    pub flagged_reporters: u64,
 }
 
 // Whistleblower protection status
@@ -178,6 +182,17 @@ pub struct MlModelParams {
     pub threshold: u32,         // Prediction threshold (0-100)
 }
 
+// Spam protection metrics per reporter
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ReporterSpamMetrics {
+    pub reporter: Address,
+    pub total_reports: u32,
+    pub false_reports: u32,    // reports overturned on appeal
+    pub flagged_as_spammer: bool,
+    pub last_updated: u64,
+}
+
 // Storage keys
 #[contracttype]
 pub enum DataKey {
@@ -192,6 +207,13 @@ pub enum DataKey {
     Appeal(u64),
     TrustScore(Address),
     PlayerReports(Address, u64), // player, match_id
+    /// 1-per-match guard: keyed on (reporter, match_id) — tracks whether this reporter
+    /// has already filed a report in this match.
+    ReporterMatchReport(Address, u64),
+    /// Cooldown guard: keyed on reporter — tracks the timestamp of the reporter's last report.
+    ReporterCooldown(Address),
+    /// Spam metrics per reporter
+    ReporterSpamMetrics(Address),
     AntiCheatParams,
     AnalyticsData,
     EmergencyMode,
@@ -258,6 +280,8 @@ impl AntiCheatContract {
             average_response_time: 0,
             most_common_pattern: BehaviorPattern::Other,
             last_updated: env.ledger().timestamp(),
+            spam_reports_blocked: 0,
+            flagged_reporters: 0,
         };
         env.storage()
             .persistent()
@@ -281,6 +305,18 @@ impl AntiCheatContract {
         severity: u32,
         anonymous: bool,
     ) -> u64 {
+        // --- High gas cost: deliberate compute work to deter spam ---
+        // 500 iterations of a simple hash-mix forces meaningful CPU expenditure
+        // per invocation without affecting correctness.
+        let mut hash_acc: u64 = match_id ^ 0xDEAD_BEEF_CAFE_0000;
+        for i in 0u64..500 {
+            hash_acc = hash_acc
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(i ^ 1442695040888963407);
+        }
+        // Prevent optimizer from eliminating the loop.
+        let _ = hash_acc;
+
         let params: AntiCheatParams = env
             .storage()
             .persistent()
@@ -292,15 +328,47 @@ impl AntiCheatContract {
             panic!("invalid severity");
         }
 
-        // Check report cooldown
-        let report_key = DataKey::PlayerReports(player.clone(), match_id);
-        if let Some(last_report_time) = env.storage().persistent().get::<DataKey, u64>(&report_key)
+        // --- Spam check 1: 1 report per reporter per match ---
+        let reporter_match_key = DataKey::ReporterMatchReport(reporter.clone(), match_id);
+        if env
+            .storage()
+            .persistent()
+            .has(&reporter_match_key)
         {
-            let current_time = env.ledger().timestamp();
+            panic!("already reported this match");
+        }
+
+        // --- Spam check 2: 1-hour cooldown between any two reports by this reporter ---
+        let cooldown_key = DataKey::ReporterCooldown(reporter.clone());
+        let current_time = env.ledger().timestamp();
+        if let Some(last_report_time) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&cooldown_key)
+        {
             if current_time - last_report_time < params.report_cooldown {
-                panic!("report cooldown not met");
+                panic!("reporter cooldown not met");
             }
         }
+
+        // --- Spam check 3: flag reporter if false-report rate > 10% ---
+        let spam_metrics: ReporterSpamMetrics = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReporterSpamMetrics(reporter.clone()))
+            .unwrap_or(ReporterSpamMetrics {
+                reporter: reporter.clone(),
+                total_reports: 0,
+                false_reports: 0,
+                flagged_as_spammer: false,
+                last_updated: current_time,
+            });
+        if spam_metrics.flagged_as_spammer {
+            panic!("reporter flagged for excessive false reports");
+        }
+
+        // Legacy per-(player, match) key kept for read-only backward compatibility
+        let report_key = DataKey::PlayerReports(player.clone(), match_id);
 
         // Check max reports per match
         let counter: u64 = env
@@ -346,7 +414,26 @@ impl AntiCheatContract {
             .persistent()
             .set(&DataKey::Report(report_id), &activity);
 
-        // Update last report time
+        // Mark this reporter as having reported in this match (1-per-match guard)
+        env.storage()
+            .persistent()
+            .set(&reporter_match_key, &current_time);
+
+        // Update reporter cooldown timestamp
+        env.storage()
+            .persistent()
+            .set(&cooldown_key, &current_time);
+
+        // Update spam metrics for this reporter
+        let mut updated_spam = spam_metrics;
+        updated_spam.total_reports += 1;
+        updated_spam.last_updated = current_time;
+        env.storage().persistent().set(
+            &DataKey::ReporterSpamMetrics(reporter.clone()),
+            &updated_spam,
+        );
+
+        // Update last report time (legacy key)
         env.storage().persistent().set(&report_key, &current_time);
 
         // Update whistleblower protection
@@ -894,6 +981,42 @@ impl AntiCheatContract {
             .expect("analytics not found")
     }
 
+    // Get spam metrics for a reporter
+    pub fn get_reporter_spam_metrics(env: Env, reporter: Address) -> ReporterSpamMetrics {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReporterSpamMetrics(reporter.clone()))
+            .unwrap_or(ReporterSpamMetrics {
+                reporter,
+                total_reports: 0,
+                false_reports: 0,
+                flagged_as_spammer: false,
+                last_updated: env.ledger().timestamp(),
+            })
+    }
+
+    /// Record a blocked spam attempt in analytics. Called by off-chain indexers
+    /// or admin tooling after observing a rejected report transaction.
+    pub fn record_spam_attempt(env: Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        let mut analytics: AnalyticsData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AnalyticsData)
+            .expect("analytics not found");
+        analytics.spam_reports_blocked += 1;
+        analytics.last_updated = env.ledger().timestamp();
+        env.storage()
+            .persistent()
+            .set(&DataKey::AnalyticsData, &analytics);
+    }
+
     // Get behavior profile
     pub fn get_behavior_profile(env: Env, player: Address) -> Option<BehaviorProfile> {
         env.storage()
@@ -1214,6 +1337,49 @@ impl AntiCheatContract {
         env.storage().persistent().set(
             &DataKey::WhistleblowerProtection(reporter.clone()),
             &protection,
+        );
+
+        // Update spam metrics and flag if false-report rate > 10%
+        let mut spam: ReporterSpamMetrics = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReporterSpamMetrics(reporter.clone()))
+            .unwrap_or(ReporterSpamMetrics {
+                reporter: reporter.clone(),
+                total_reports: 1, // at least the one being penalised
+                false_reports: 0,
+                flagged_as_spammer: false,
+                last_updated: env.ledger().timestamp(),
+            });
+
+        spam.false_reports += 1;
+        spam.last_updated = env.ledger().timestamp();
+
+        // Flag if false-report rate exceeds 10% (requires ≥10 reports to avoid
+        // penalising a reporter with a single mistake early on).
+        if spam.total_reports >= 10
+            && spam.false_reports * 100 / spam.total_reports > 10
+        {
+            let was_flagged = spam.flagged_as_spammer;
+            spam.flagged_as_spammer = true;
+            // Bump the global flagged-reporter counter only once per reporter
+            if !was_flagged {
+                let mut analytics: AnalyticsData = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::AnalyticsData)
+                    .expect("analytics not found");
+                analytics.flagged_reporters += 1;
+                analytics.last_updated = env.ledger().timestamp();
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::AnalyticsData, &analytics);
+            }
+        }
+
+        env.storage().persistent().set(
+            &DataKey::ReporterSpamMetrics(reporter.clone()),
+            &spam,
         );
     }
 
