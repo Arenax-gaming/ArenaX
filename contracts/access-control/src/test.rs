@@ -160,3 +160,109 @@ fn test_batch_role_check() {
     assert!(results.get(0).unwrap());
     assert!(!results.get(1).unwrap());
 }
+
+// ── Emergency Stop tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_set_paused_by_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    assert!(!client.is_paused());
+    client.set_paused(&true);
+    assert!(client.is_paused());
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_grant_role_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    client.set_paused(&true);
+    client.grant_role(&user1, &ROLE_OPERATOR);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_revoke_role_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    client.grant_role(&user1, &ROLE_OPERATOR);
+
+    client.set_paused(&true);
+    client.revoke_role(&user1, &ROLE_OPERATOR);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_define_permission_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    client.set_paused(&true);
+    client.define_permission(
+        &String::from_str(&env, "test_perm"),
+        &String::from_str(&env, "Test permission"),
+        &String::from_str(&env, "resource"),
+        &String::from_str(&env, "action"),
+    );
+}
+
+#[test]
+fn test_reads_work_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    client.grant_role(&user1, &ROLE_OPERATOR);
+
+    client.set_paused(&true);
+
+    // Reads should still work while paused
+    assert!(client.has_role(&admin, &ROLE_ADMIN));
+    assert!(client.has_role(&user1, &ROLE_OPERATOR));
+    assert_eq!(client.get_admin(), admin);
+    assert!(client.is_paused());
+    assert_eq!(client.get_audit_count(), 3); // init + grant + set_paused
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_delegate_role_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+    client.grant_role(&user1, &ROLE_OPERATOR);
+
+    client.set_paused(&true);
+    client.delegate_role(&user1, &user2, &ROLE_OPERATOR, &100);
+}

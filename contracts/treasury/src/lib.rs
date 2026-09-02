@@ -1,6 +1,7 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use arenax_events::emergency_pause as ep_events;
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -58,6 +59,7 @@ pub struct TreasuryDashboard {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Paused,
     Signers,
     Threshold,
     TimeLockDuration,
@@ -112,11 +114,9 @@ impl Treasury {
             .set(&DataKey::SpendingProposalCounter, &0u64);
         env.storage()
             .instance()
-            .set(&DataKey::AllocationProposalCounter, &0u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAllocated, &0i128);
+            .set(&DataKey::AllocationProposalCounter, &0u64);        env.storage().instance().set(&DataKey::TotalAllocated, &0i128);
         env.storage().instance().set(&DataKey::TotalSpent, &0i128);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         env.events().publish(
             (Symbol::new(&env, "Treasury"), Symbol::new(&env, "INIT")),
@@ -130,6 +130,7 @@ impl Treasury {
 
     /// Record a deposit into the treasury's internal ledger balance.
     pub fn deposit(env: Env, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
@@ -248,6 +249,7 @@ impl Treasury {
         category: Symbol,
         description: String,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &proposer);
         if amount <= 0 {
             panic!("amount must be positive");
@@ -368,6 +370,7 @@ impl Treasury {
     /// approvals is met, the time-lock delay has elapsed, and the
     /// proposal's budget category has sufficient unspent allocation.
     pub fn execute_proposal(env: Env, caller: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &caller);
 
         let mut proposal =
@@ -479,6 +482,7 @@ impl Treasury {
         category: Symbol,
         amount: i128,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &proposer);
         if amount <= 0 {
             panic!("amount must be positive");
@@ -563,6 +567,7 @@ impl Treasury {
     /// Finalize a budget allocation vote once the multi-sig threshold of
     /// `for` votes is reached, crediting the category's spendable envelope.
     pub fn finalize_budget_allocation(env: Env, caller: Address, allocation_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &caller);
 
         let mut proposal = Self::get_allocation_proposal(env.clone(), allocation_id)
@@ -674,6 +679,40 @@ impl Treasury {
 
     pub fn get_admin(env: Env) -> Address {
         env.storage().instance().get(&DataKey::Admin).unwrap()
+    }
+
+    // -----------------------------------------------------------------
+    // Pause controls
+    // -----------------------------------------------------------------
+
+    pub fn set_paused(env: Env, paused: bool) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
+        let contract_address = env.current_contract_address();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            panic!("contract is paused");
+        }
     }
 
     // -----------------------------------------------------------------

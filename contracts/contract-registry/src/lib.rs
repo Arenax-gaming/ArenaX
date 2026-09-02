@@ -1,6 +1,6 @@
 #![no_std]
 
-use arenax_events::contract_registry as events;
+use arenax_events::{contract_registry as events, emergency_pause as ep_events};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
@@ -352,11 +352,16 @@ impl ContractRegistry {
     /// * If caller is not admin
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
-        let admin = env.current_contract_address();
+        let contract_address = env.current_contract_address();
+        let admin = Self::get_admin(env.clone());
 
         env.storage().instance().set(&DataKey::Paused, &paused);
 
-        events::emit_registry_paused(&env, paused, &admin);
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &soroban_sdk::symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
     }
 
     /// Get the admin address

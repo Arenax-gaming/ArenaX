@@ -3,7 +3,7 @@
 mod flexible_rewards;
 mod validator_penalty;
 
-use arenax_events::staking as events;
+use arenax_events::{staking as events, emergency_pause as ep_events};
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
@@ -735,8 +735,14 @@ impl StakingManager {
 
     pub fn set_paused(env: Env, paused: bool) {
         Self::require_admin(&env);
+        let contract_address = env.current_contract_address();
+        let admin = Self::get_admin(env.clone());
         env.storage().instance().set(&DataKey::Paused, &paused);
-        events::emit_contract_paused(&env, paused, &env.current_contract_address());
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &soroban_sdk::symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
     }
 
     // ── Flexible Reward Pools ────────────────────────────────────────────────

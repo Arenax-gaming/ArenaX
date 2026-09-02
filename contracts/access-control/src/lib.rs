@@ -1,7 +1,7 @@
 #![no_std]
 
-use arenax_events::access_control as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
+use arenax_events::{access_control as events, emergency_pause as ep_events};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
 
 // Role Constants
 pub const ROLE_ADMIN: u32 = 1;
@@ -28,6 +28,7 @@ pub enum DataKey {
     TimeRestriction(Address, u32),    // (Account, Role) -> TimeRestriction
     AuditLog(u64),                    // (EntryId) -> AuditEntry
     AuditCounter,
+    Paused,
 }
 
 #[contracttype]
@@ -87,6 +88,8 @@ impl AccessControl {
         env.storage().persistent().set(&key, &true);
         events::emit_role_granted(&env, &admin, ROLE_ADMIN, &admin);
 
+        env.storage().instance().set(&DataKey::Paused, &false);
+
         Self::record_audit_entry_internal(
             &env,
             admin.clone(),
@@ -124,6 +127,7 @@ impl AccessControl {
 
     /// Grant a role to an account
     pub fn grant_role(env: Env, account: Address, role: u32) {
+        Self::require_not_paused(&env);
         let admin = Self::get_admin(env.clone());
         admin.require_auth();
 
@@ -143,6 +147,7 @@ impl AccessControl {
 
     /// Revoke a role from an account
     pub fn revoke_role(env: Env, account: Address, role: u32) {
+        Self::require_not_paused(&env);
         let admin = Self::get_admin(env.clone());
         admin.require_auth();
 
@@ -168,6 +173,7 @@ impl AccessControl {
         role: u32,
         duration: u64,
     ) {
+        Self::require_not_paused(&env);
         delegator.require_auth();
 
         if !Self::has_role(env.clone(), delegator.clone(), role) {
@@ -199,6 +205,7 @@ impl AccessControl {
 
     /// Revoke a delegated role
     pub fn revoke_delegation(env: Env, delegator: Address, delegatee: Address, role: u32) {
+        Self::require_not_paused(&env);
         delegator.require_auth();
 
         let key = DataKey::Delegation(delegator.clone(), delegatee.clone());
@@ -279,6 +286,7 @@ impl AccessControl {
         resource: String,
         action: String,
     ) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env);
         let perm = PermissionDefinition {
             name: name.clone(),
@@ -293,6 +301,7 @@ impl AccessControl {
 
     /// Assign a permission to a role
     pub fn assign_permission_to_role(env: Env, role: u32, permission_name: String) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env);
         let key = DataKey::RolePermissions(role);
         let mut perms: Vec<String> = env
@@ -322,6 +331,7 @@ impl AccessControl {
 
     /// Remove a permission from a role
     pub fn remove_permission_from_role(env: Env, role: u32, permission_name: String) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env);
         let key = DataKey::RolePermissions(role);
         let perms: Vec<String> = env
@@ -491,6 +501,7 @@ impl AccessControl {
         duration: u64,
         max_uses: u64,
     ) {
+        Self::require_not_paused(&env);
         delegator.require_auth();
 
         if !Self::has_role(env.clone(), delegator.clone(), role) {
@@ -618,6 +629,25 @@ impl AccessControl {
 
     // ── Views ──────────────────────────────────────────────────────────────
 
+    pub fn set_paused(env: Env, paused: bool) {
+        Self::require_admin(&env);
+        let contract_address = env.current_contract_address();
+        let admin = Self::get_admin(env.clone());
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     pub fn get_admin(env: Env) -> Address {
         env.storage()
             .instance()
@@ -628,6 +658,17 @@ impl AccessControl {
     fn require_admin(env: &Env) {
         let admin = Self::get_admin(env.clone());
         admin.require_auth();
+    }
+
+    fn require_not_paused(env: &Env) {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            panic!("contract is paused");
+        }
     }
 
     pub fn get_permission_definitions(
