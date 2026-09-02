@@ -49,6 +49,7 @@ pub enum DataKey {
     ApprovedWasmHash(Symbol),
     PreviousWasmHash(Symbol),
     History(Symbol),
+    Paused,
 }
 
 #[contracttype]
@@ -103,6 +104,7 @@ pub enum UpgradeError {
     AlreadyExecuted = 12,
     NoPriorVersion = 13,
     InvalidThreshold = 14,
+    ContractPaused = 15,
 }
 
 #[contract]
@@ -134,7 +136,10 @@ impl UpgradeManager {
         env.storage()
             .instance()
             .set(&DataKey::Governors, &governors);
-        env.storage().instance().set(&DataKey::NextProposalId, &1u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextProposalId, &1u32);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         events::emit_initialized(&env, &admin, approval_threshold);
         Ok(())
@@ -153,6 +158,7 @@ impl UpgradeManager {
     ) -> Result<u32, UpgradeError> {
         proposer.require_auth();
         Self::require_initialized(&env)?;
+        Self::require_not_paused(&env)?;
 
         let proposal_id: u32 = env
             .storage()
@@ -204,6 +210,7 @@ impl UpgradeManager {
     ) -> Result<(), UpgradeError> {
         validator.require_auth();
         Self::require_governor(&env, &validator)?;
+        Self::require_not_paused(&env)?;
         Self::get_proposal(&env, proposal_id)?;
 
         if env
@@ -238,6 +245,7 @@ impl UpgradeManager {
     ) -> Result<u32, UpgradeError> {
         voter.require_auth();
         Self::require_governor(&env, &voter)?;
+        Self::require_not_paused(&env)?;
         Self::get_proposal(&env, proposal_id)?;
 
         let mut votes: Vec<Address> = env
@@ -268,9 +276,14 @@ impl UpgradeManager {
     /// For [`SELF_CONTRACT`] this calls `update_current_contract_wasm`
     /// directly. For any other tracked contract it records the approved
     /// hash so that contract's own upgrade entrypoint can apply it.
-    pub fn execute_upgrade(env: Env, caller: Address, proposal_id: u32) -> Result<(), UpgradeError> {
+    pub fn execute_upgrade(
+        env: Env,
+        caller: Address,
+        proposal_id: u32,
+    ) -> Result<(), UpgradeError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
+        Self::require_not_paused(&env)?;
 
         let proposal = Self::get_proposal(&env, proposal_id)?;
 
@@ -379,6 +392,7 @@ impl UpgradeManager {
         if caller != admin {
             Self::require_governor(&env, &caller)?;
         }
+        Self::require_not_paused(&env)?;
 
         let previous_hash: BytesN<32> = env
             .storage()
@@ -432,7 +446,9 @@ impl UpgradeManager {
     }
 
     pub fn get_proposal_query(env: Env, proposal_id: u32) -> Option<UpgradeProposal> {
-        env.storage().persistent().get(&DataKey::Proposal(proposal_id))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
     }
 
     pub fn get_validation_query(env: Env, proposal_id: u32) -> Option<ValidationResult> {
@@ -456,9 +472,61 @@ impl UpgradeManager {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Pause or resume the upgrade manager (admin only, emergency stop).
+    ///
+    /// While paused, all state mutations (proposals, votes, validations,
+    /// executions, rollbacks) are rejected; queries keep working. Deliberately
+    /// NOT guarded by `require_not_paused` itself — unpausing must stay
+    /// reachable while paused. The flag lives in instance storage, which
+    /// persists across wasm upgrades of this contract at the same address.
+    pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), UpgradeError> {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(UpgradeError::NotInitialized)?;
+        if caller != admin {
+            return Err(UpgradeError::NotAdmin);
+        }
+
+        env.storage().instance().set(&DataKey::Paused, &paused);
+
+        if paused {
+            arenax_events::emergency_pause::emit_paused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+                &symbol_short!("ADMIN"),
+            );
+        } else {
+            arenax_events::emergency_pause::emit_unpaused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+            );
+        }
+        Ok(())
+    }
+
+    /// Check if the upgrade manager is paused (read; works while paused).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     fn require_initialized(env: &Env) -> Result<(), UpgradeError> {
         if !env.storage().instance().has(&DataKey::Admin) {
             return Err(UpgradeError::NotInitialized);
+        }
+        Ok(())
+    }
+
+    fn require_not_paused(env: &Env) -> Result<(), UpgradeError> {
+        if Self::is_paused(env.clone()) {
+            return Err(UpgradeError::ContractPaused);
         }
         Ok(())
     }
@@ -502,3 +570,6 @@ impl UpgradeManager {
             .set(&DataKey::History(contract_name.clone()), &history);
     }
 }
+
+#[cfg(test)]
+mod test;

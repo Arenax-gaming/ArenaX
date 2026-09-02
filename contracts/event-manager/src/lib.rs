@@ -44,6 +44,7 @@ pub enum DataKey {
     AnomalyCounter,
     RateLimit(Symbol),
     LastEventTimestamp(Symbol),
+    Paused,
 }
 
 #[contract]
@@ -63,6 +64,7 @@ impl EventManagerContract {
         env.storage()
             .persistent()
             .set(&DataKey::AnomalyCounter, &0u64);
+        env.storage().persistent().set(&DataKey::Paused, &false);
     }
 
     /// Index a new event record.
@@ -78,6 +80,7 @@ impl EventManagerContract {
         topic: Symbol,
         data: Bytes,
     ) -> u64 {
+        Self::require_not_paused(&env);
         caller.require_auth();
 
         let mut counter: u64 = env
@@ -271,6 +274,8 @@ impl EventManagerContract {
 
     /// Archive events before a certain timestamp to save storage (archives them).
     pub fn archive_events(env: Env, before_timestamp: u64) -> u32 {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -302,6 +307,8 @@ impl EventManagerContract {
 
     /// Set rate limit parameter for monitoring.
     pub fn set_rate_limit(env: Env, topic: Symbol, limit_seconds: u32) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -315,6 +322,10 @@ impl EventManagerContract {
     }
 
     /// Set new admin for governance.
+    ///
+    /// Deliberately NOT pause-guarded (matching `auth-gateway`'s
+    /// `transfer_admin`): admin rotation stays reachable during an incident so
+    /// a compromised admin can be replaced while the contract is paused.
     pub fn set_admin(env: Env, new_admin: Address) {
         let admin: Address = env
             .storage()
@@ -324,6 +335,52 @@ impl EventManagerContract {
         admin.require_auth();
 
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
+    }
+
+    /// Pause or resume the event manager (admin only, emergency stop).
+    ///
+    /// Deliberately NOT guarded by `require_not_paused` — unpausing must stay
+    /// reachable while paused. The flag lives in persistent storage, which
+    /// persists across wasm upgrades of this contract at the same address.
+    #[allow(deprecated)]
+    pub fn set_paused(env: Env, paused: bool) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage().persistent().set(&DataKey::Paused, &paused);
+
+        let action = if paused {
+            Symbol::new(&env, "PAUSED")
+        } else {
+            Symbol::new(&env, "UNPAUSED")
+        };
+        env.events().publish(
+            (Symbol::new(&env, "event_manager"), action),
+            (admin, paused),
+        );
+    }
+
+    /// Check if the event manager is paused (read; works while paused).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        let paused: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            panic!("contract is paused");
+        }
     }
 
     fn matches_filter(record: &EventRecord, filter: &EventFilter) -> bool {
@@ -431,5 +488,112 @@ mod tests {
         assert!(client.get_event(&1).is_none());
         assert!(client.get_event(&2).is_none());
         assert!(client.get_event(&3).is_some());
+    }
+
+    #[test]
+    fn test_pause_round_trip() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        assert!(!client.is_paused());
+        client.set_paused(&true);
+        assert!(client.is_paused());
+        client.set_paused(&false);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
+    fn test_pause_unauthorized() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        // No mocked auths: the admin signature requirement is not satisfied.
+        client.set_paused(&true);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_index_event_blocked_while_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        client.set_paused(&true);
+
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_join"),
+            &Bytes::new(&env),
+        );
+    }
+
+    #[test]
+    fn test_reads_work_while_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        env.ledger().set_timestamp(100);
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        let topic = Symbol::new(&env, "match_join");
+        client.index_event(&caller, &player, &topic, &Bytes::new(&env));
+
+        client.set_paused(&true);
+
+        // Read entry points must stay available during an emergency stop.
+        assert!(client.is_paused());
+        assert!(client.get_event(&1).is_some());
+        assert_eq!(
+            client
+                .get_analytics(&Vec::from_array(&env, [topic]))
+                .total_indexed,
+            1
+        );
+    }
+
+    #[test]
+    fn test_unpause_restores_mutations() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        client.set_paused(&true);
+        client.set_paused(&false);
+
+        env.ledger().set_timestamp(300);
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        let id = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_win"),
+            &Bytes::new(&env),
+        );
+        assert_eq!(id, 1);
     }
 }

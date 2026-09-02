@@ -4,7 +4,10 @@ use crate::{
     AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, BehaviorPattern, DataKey,
     MlModelParams, Sanction, SanctionStatus, SanctionType, SuspiciousActivity,
 };
-use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Bytes, Env, Map, String, Vec};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Bytes, Env, Map, String, Vec,
+};
 
 fn setup_env() -> (Env, Address, Address, Address) {
     let env = Env::default();
@@ -675,10 +678,22 @@ fn test_different_reporters_same_match_allowed() {
 
     env.mock_all_auths();
     let id_a = client.report_suspicious_activity(
-        &reporter_a, &player, &match_id, &pattern, &evidence, &5, &false,
+        &reporter_a,
+        &player,
+        &match_id,
+        &pattern,
+        &evidence,
+        &5,
+        &false,
     );
     let id_b = client.report_suspicious_activity(
-        &reporter_b, &player, &match_id, &pattern, &evidence, &5, &false,
+        &reporter_b,
+        &player,
+        &match_id,
+        &pattern,
+        &evidence,
+        &5,
+        &false,
     );
     assert_ne!(id_a, id_b);
 }
@@ -696,13 +711,9 @@ fn test_reporter_cooldown_between_matches() {
 
     env.mock_all_auths();
     // Report in match 1
-    client.report_suspicious_activity(
-        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
-    );
+    client.report_suspicious_activity(&reporter, &player, &1u64, &pattern, &evidence, &5, &false);
     // Immediately try a different match — cooldown not elapsed, must panic
-    client.report_suspicious_activity(
-        &reporter, &player, &2u64, &pattern, &evidence, &5, &false,
-    );
+    client.report_suspicious_activity(&reporter, &player, &2u64, &pattern, &evidence, &5, &false);
 }
 
 #[test]
@@ -716,16 +727,13 @@ fn test_reporter_cooldown_elapsed_allows_report() {
     let pattern = BehaviorPattern::AbnormalReactionTime;
 
     env.mock_all_auths();
-    client.report_suspicious_activity(
-        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
-    );
+    client.report_suspicious_activity(&reporter, &player, &1u64, &pattern, &evidence, &5, &false);
 
     // Advance ledger time past the 1-hour cooldown (3600 s)
     env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
 
-    let id = client.report_suspicious_activity(
-        &reporter, &player, &2u64, &pattern, &evidence, &5, &false,
-    );
+    let id = client
+        .report_suspicious_activity(&reporter, &player, &2u64, &pattern, &evidence, &5, &false);
     assert!(id > 1);
 }
 
@@ -740,9 +748,7 @@ fn test_spam_metrics_accumulate() {
     let pattern = BehaviorPattern::AbnormalReactionTime;
 
     env.mock_all_auths();
-    client.report_suspicious_activity(
-        &reporter, &player, &1u64, &pattern, &evidence, &5, &false,
-    );
+    client.report_suspicious_activity(&reporter, &player, &1u64, &pattern, &evidence, &5, &false);
 
     let metrics = client.get_reporter_spam_metrics(&reporter);
     assert_eq!(metrics.total_reports, 1);
@@ -753,7 +759,7 @@ fn test_spam_metrics_accumulate() {
 #[test]
 fn test_flagged_reporter_blocked() {
     let (env, admin, player, reputation_contract) = setup_env();
-    let (contract_id, client) = register_contract(&env);
+    let (_contract_id, client) = register_contract(&env);
     client.initialize(&admin, &reputation_contract);
 
     let reporter = Address::generate(&env);
@@ -767,9 +773,7 @@ fn test_flagged_reporter_blocked() {
     // Submit 10 reports across different matches (advancing time past cooldown each time)
     for i in 0u64..10 {
         let target = Address::generate(&env);
-        client.report_suspicious_activity(
-            &reporter, &target, &i, &pattern, &evidence, &5, &false,
-        );
+        client.report_suspicious_activity(&reporter, &target, &i, &pattern, &evidence, &5, &false);
         // Advance past 1-hour cooldown so next report is not blocked by cooldown
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
     }
@@ -783,7 +787,11 @@ fn test_flagged_reporter_blocked() {
             v
         };
         let sanction_id = client.apply_sanction(
-            &player, &SanctionType::Warning, &reason, &duration, &report_ids,
+            &player,
+            &SanctionType::Warning,
+            &reason,
+            &duration,
+            &report_ids,
         );
         let appeal_id = client.appeal_sanction(&player, &sanction_id, &reason, &evidence);
         client.review_appeal(&appeal_id, &true); // overturn → triggers penalize_false_reporter
@@ -794,4 +802,142 @@ fn test_flagged_reporter_blocked() {
 
     let analytics = client.get_analytics();
     assert_eq!(analytics.flagged_reporters, 1);
+}
+
+// ─── Emergency stop (#877) ─────────────────────────────────────────────────
+
+#[test]
+fn test_pause_round_trip() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_contract_id, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    assert!(!client.is_paused());
+    client.set_paused(&true);
+    assert!(client.is_paused());
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic]
+fn test_pause_unauthorized() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+
+    // No mocked auths: the admin signature requirement is not satisfied.
+    client.set_paused(&true);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_report_suspicious_activity_blocked_while_paused() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+    client.set_paused(&true);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    client.report_suspicious_activity(
+        &reporter,
+        &player,
+        &12345,
+        &BehaviorPattern::AbnormalReactionTime,
+        &evidence,
+        &5,
+        &false,
+    );
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_apply_sanction_blocked_while_paused() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+    client.set_paused(&true);
+
+    let reason = String::from_str(&env, "paused");
+    let report_ids = Vec::new(&env);
+    client.apply_sanction(
+        &player,
+        &SanctionType::TemporaryBan,
+        &reason,
+        &0,
+        &report_ids,
+    );
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_verify_activity_blocked_while_paused() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+    client.set_paused(&true);
+
+    let report_id = client.report_suspicious_activity(
+        &Address::generate(&env),
+        &player,
+        &1,
+        &BehaviorPattern::AbnormalReactionTime,
+        &Bytes::new(&env),
+        &5,
+        &false,
+    );
+    client.set_paused(&true);
+    client.verify_activity(&admin, &report_id, &true);
+}
+
+#[test]
+fn test_reads_work_while_paused() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+    client.set_paused(&true);
+
+    // Read entry points must stay available during an emergency stop.
+    assert!(client.is_paused());
+    let score = client.get_player_trust_score(&player);
+    assert_eq!(score.score, 100);
+    let analytics = client.get_analytics();
+    assert_eq!(analytics.total_reports, 0);
+}
+
+#[test]
+fn test_unpause_restores_mutations() {
+    let (env, admin, player, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    client.set_paused(&true);
+    client.set_paused(&false);
+
+    let reporter = Address::generate(&env);
+    let evidence = Bytes::new(&env);
+    let report_id = client.report_suspicious_activity(
+        &reporter,
+        &player,
+        &777,
+        &BehaviorPattern::AbnormalReactionTime,
+        &evidence,
+        &5,
+        &false,
+    );
+    assert_eq!(report_id, 1);
 }

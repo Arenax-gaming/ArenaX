@@ -8,9 +8,10 @@
 //! unregistered event or a version mismatch.
 
 use crate::{
-    anti_cheat, auth_gateway, ax_token, contract_registry, dispute, escrow, governance, identity,
-    match_contract, match_lifecycle, player_reputation, prize_distribution, registry, reputation,
-    reputation_index, slashing, staking, state_change, time_lock, tournament, virtual_economy,
+    anti_cheat, auth_gateway, ax_token, contract_registry, dispute, emergency_pause, escrow,
+    governance, identity, match_contract, match_lifecycle, player_reputation, prize_distribution,
+    registry, reputation, reputation_index, slashing, staking, state_change, time_lock, tournament,
+    virtual_economy,
 };
 
 /// A single entry in the namespace registry.
@@ -28,6 +29,7 @@ pub const NAMESPACES: &[NamespaceEntry] = &[
     NamespaceEntry { namespace: ax_token::NAMESPACE, version: ax_token::VERSION },
     NamespaceEntry { namespace: contract_registry::NAMESPACE, version: contract_registry::VERSION },
     NamespaceEntry { namespace: dispute::NAMESPACE, version: dispute::VERSION },
+    NamespaceEntry { namespace: emergency_pause::NAMESPACE, version: emergency_pause::VERSION },
     NamespaceEntry { namespace: escrow::NAMESPACE, version: escrow::VERSION },
     NamespaceEntry { namespace: governance::NAMESPACE, version: governance::VERSION },
     NamespaceEntry { namespace: identity::NAMESPACE, version: identity::VERSION },

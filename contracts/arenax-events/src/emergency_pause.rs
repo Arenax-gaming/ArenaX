@@ -1,5 +1,8 @@
 use soroban_sdk::{contractevent, Address, Env, Symbol};
 
+pub const NAMESPACE: &str = "ArenaXEmergencyPause";
+pub const VERSION: &str = "v1";
+
 #[contractevent(topics = ["EmergencyPause", "PAUSED"])]
 pub struct Paused {
     pub contract_address: Address,
