@@ -9,6 +9,10 @@ pub enum VirtualEconomyError {
     NotInitialized = 2,
     Unauthorized = 3,
     EmergencyPaused = 4,
+    /// An arithmetic operation would overflow.
+    Overflow = 5,
+    /// The provided address is invalid (e.g. the contract's own address).
+    InvalidAddress = 6,
 
     // Currency errors
     InvalidAmount = 10,
@@ -30,18 +34,14 @@ pub enum VirtualEconomyError {
     InvalidMetadata = 40,
     InvalidConfig = 41,
 
-    // Royalty & Licensing errors
+    // Royalty & Licensing errors (merged with InvalidConfig to stay within 50-case XDR limit)
     RoyaltyTooHigh = 50,
-    CreatorNotFound = 51,
-    LicenseViolation = 52,
-    InvalidLicenseType = 53,
 
     // Dynamic pricing errors
     AuctionNotFound = 60,
     AuctionNotActive = 61,
-    AuctionNotStarted = 62,
-    AuctionEnded = 63,
-    InvalidAuctionParams = 64,
+    AuctionEnded = 62,
+    InvalidAuctionParams = 63,
 
     DropNotFound = 70,
     DropInactive = 71,
@@ -49,31 +49,33 @@ pub enum VirtualEconomyError {
     InvalidCurveParams = 73,
 
     // Price oracle errors
-    /// An oracle address has not been registered on the contract.
     OracleNotConfigured = 80,
-    /// The oracle configuration values failed validation.
     InvalidOracleConfig = 81,
-    /// Both the primary and fallback oracles returned stale data.
     OraclePriceStale = 82,
-    /// The incoming price deviates from the last accepted price by more than
-    /// `max_variance_bps` and no valid fallback is available.
     OraclePriceVarianceTooHigh = 83,
-    /// An update was attempted before `update_interval` seconds have elapsed.
     OracleUpdateTooFrequent = 84,
-    /// The asset-pair identifier provided to the oracle is invalid.
     InvalidAssetPair = 85,
-    /// The price submitted to the oracle is not positive.
     OracleInvalidPrice = 86,
 
     // NFT staking errors
-    /// NFT staking has not been configured yet.
-    NftStakingNotConfigured = 110,
-    /// The NFT is already staked.
-    NftAlreadyStaked = 111,
-    /// The NFT is not currently staked.
-    NftNotStaked = 112,
-    /// The minimum lock period has not been met yet.
-    NftLockPeriodNotMet = 113,
-    /// NFT staking is currently paused.
-    NftStakingPaused = 114,
+    NftStakingNotConfigured = 90,
+    NftAlreadyStaked = 91,
+    NftNotStaked = 92,
+    NftLockPeriodNotMet = 93,
+    NftStakingPaused = 94,
+
+    // Liquidity pool / AMM
+    PoolNotFound = 100,
+    PoolAlreadyExists = 101,
+    InsufficientLiquidity = 102,
+    SlippageExceeded = 103,
+    InvariantViolation = 104,
+
+    // Referral errors
+    ReferralNotConfigured = 110,
+    ReferralNotFound = 111,
+    ReferralAlreadyRegistered = 112,
+    InvalidReferral = 113,
+    ReferralCooldown = 114,
+    NothingToClaim = 115,
 }

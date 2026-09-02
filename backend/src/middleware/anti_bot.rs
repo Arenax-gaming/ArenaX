@@ -36,10 +36,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use super::extract_ip;
+
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    HttpResponse,
+    HttpMessage, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use redis::aio::ConnectionManager;
@@ -184,6 +186,11 @@ where
 
             // Skip configured paths
             if config.skip_paths.iter().any(|p| path.starts_with(p.as_str())) {
+                return Ok(svc.call(req).await?.map_into_left_body());
+            }
+
+            // Skip bot detection for whitelisted IPs
+            if req.extensions().get::<super::ip_list::IpWhitelisted>().is_some() {
                 return Ok(svc.call(req).await?.map_into_left_body());
             }
 
@@ -342,20 +349,6 @@ async fn score_request(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-fn extract_ip(req: &ServiceRequest) -> String {
-    req.headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            req.connection_info()
-                .realip_remote_addr()
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string())
-}
 
 async fn inc_metric(conn: &mut ConnectionManager, key: &str) {
     let _: Result<i64, _> = redis::cmd("INCR").arg(key).query_async(conn).await;

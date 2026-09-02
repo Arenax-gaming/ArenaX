@@ -9,7 +9,7 @@ deployment metrics for both `backend` and `frontend`.
 ```
 GitHub Actions (deploy.yml)
   1. build + push backend/frontend images to GHCR, tagged with the commit SHA
-  2. SSH to the deploy host, run scripts/deploy/blue-green-deploy.sh
+  2. SSH to the deploy host, run scripts/deploy/blue-green-deploy.sh.
 
 blue-green-deploy.sh, on the deploy host:
   1. Read deploy/state/active-slot (blue|green) -> idle slot is the other color

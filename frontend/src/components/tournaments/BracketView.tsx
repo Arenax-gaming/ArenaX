@@ -423,7 +423,7 @@ function PlayerRow({
           {player.elo && <span>{player.elo} ELO</span>}
         </div>
       </div>
-      {score !== undefined && (
+      {score !== undefined && score !== null && (
         <span
           className={`text-lg font-bold min-w-[2rem] text-center ${
             isWinner ? "text-success dark:text-success/80" : "text-foreground"

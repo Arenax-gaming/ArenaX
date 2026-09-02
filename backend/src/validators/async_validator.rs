@@ -189,7 +189,7 @@ mod tests {
             email: "player@example.com".to_string(),
         };
         let errors = set.validate(&bad).await.unwrap_err();
-        let field_errors = errors.field_errors("username").expect("username rule ran");
+        let field_errors = errors.field_errors().get("username").copied().expect("username rule ran");
         assert_eq!(field_errors[0].code.as_ref(), "unique");
 
         let ok = RegisterInput {
@@ -222,8 +222,8 @@ mod tests {
             email: "banned@example.com".to_string(),
         };
         let errors = set.validate(&bad).await.unwrap_err();
-        assert!(errors.field_errors("username").is_some());
-        assert!(errors.field_errors("email").is_some());
+        assert!(errors.field_errors().get("username").is_some());
+        assert!(errors.field_errors().get("email").is_some());
     }
 
     #[tokio::test]

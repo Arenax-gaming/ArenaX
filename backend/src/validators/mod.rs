@@ -93,7 +93,7 @@ mod tests {
 
     #[derive(Debug, validator::Validate)]
     struct CreateUserInput {
-        #[validate(length(min = 3, max = 32), custom = "validate_username")]
+        #[validate(length(min = 3, max = 32), custom(function = "validate_username"))]
         username: String,
         #[validate(email)]
         email: String,
@@ -116,8 +116,8 @@ mod tests {
             email: "not-an-email".to_string(),
         };
         let errors = validator.validate(&bad).unwrap_err();
-        assert!(errors.field_errors("username").is_some());
-        assert!(errors.field_errors("email").is_some());
+        assert!(errors.field_errors().get("username").is_some());
+        assert!(errors.field_errors().get("email").is_some());
     }
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
 
         let bad = CreateUserInput {
             username: "x".to_string(),
-            email: "player@example.com".to_string(),
+            email: "not-an-email".to_string(),
         };
         assert!(validate(&bad).is_err());
     }

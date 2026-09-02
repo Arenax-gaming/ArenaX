@@ -21,6 +21,8 @@ members = [
     "zk-proof",
     "airdrop",
     "event-manager",
+    "upgrade-system",
+    "testing-infrastructure",
 ]
 resolver = "2"
 

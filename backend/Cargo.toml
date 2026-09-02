@@ -12,7 +12,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal", "migrate"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal", "migrate", "json"] }
 validator = { version = "0.20.0", features = ["derive"] }
 rust_decimal = { version = "1.40.0", features = ["db-postgres"] }
 actix-web = "4.12.1"
@@ -41,6 +41,11 @@ futures = "0.3"
 futures-util = "0.3"
 hex = "0.4"
 fs2 = "0.4"
+once_cell = "1.19"
+prometheus = { version = "0.13", features = ["process"] }
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
 
 # Security: pin patched versions of transitive deps
 quinn-proto = "0.11.14"
