@@ -21,6 +21,7 @@ mod validators;
 use crate::config::Config;
 use crate::db::{create_pool, run_startup_migrations};
 use crate::middleware::cors_middleware;
+use crate::middleware::anti_bot::{AntiBotConfig, AntiBotMiddleware};
 use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
 use crate::middleware::metrics_middleware::RequestMetrics;
@@ -249,6 +250,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
                     .configure(crate::http::player_stats_handler::configure_routes)
+                    // Feature toggle management — Issue #948
+                    .configure(crate::http::feature_flag_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)
                     .configure(crate::http::auth_handler::configure_routes)
                     .route(

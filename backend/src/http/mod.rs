@@ -1,6 +1,7 @@
 pub mod anti_bot_handler;
 pub audit_handler;
 pub mod auth_handler;
+pub mod feature_flag_handler;
 pub mod health;
 pub mod idempotency;
 pub mod idempotency_examples;
