@@ -6,7 +6,9 @@
 #![allow(clippy::too_many_arguments)]
 
 use arenax_events::time_lock as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
+};
 
 // ─── Operation Status ─────────────────────────────────────────────────────────
 pub const STATUS_SCHEDULED: u32 = 0;
@@ -43,6 +45,7 @@ pub enum DataKey {
     GracePeriod,
     AccelQuorum,
     Governors,
+    Paused,
 
     // Persistent storage (per-operation)
     Operation(BytesN<32>),
@@ -144,6 +147,7 @@ impl TimeLock {
         env.storage()
             .instance()
             .set(&DataKey::Governors, &governors);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         // Initialise analytics
         let totals = AnalyticsTotals {
@@ -182,6 +186,7 @@ impl TimeLock {
     ) {
         caller.require_auth();
         Self::require_governor(&env, &caller);
+        Self::require_not_paused(&env);
 
         let min_delay: u64 = env
             .storage()
@@ -270,6 +275,7 @@ impl TimeLock {
     pub fn execute_operation(env: Env, caller: Address, operation_id: BytesN<32>) {
         caller.require_auth();
         Self::require_governor(&env, &caller);
+        Self::require_not_paused(&env);
 
         let key = DataKey::Operation(operation_id.clone());
         let mut op: Operation = env
@@ -328,6 +334,7 @@ impl TimeLock {
     pub fn cancel_operation(env: Env, caller: Address, operation_id: BytesN<32>) {
         caller.require_auth();
         Self::require_governor(&env, &caller);
+        Self::require_not_paused(&env);
 
         let key = DataKey::Operation(operation_id.clone());
         let mut op: Operation = env
@@ -364,6 +371,7 @@ impl TimeLock {
     pub fn vote_accelerate(env: Env, voter: Address, operation_id: BytesN<32>) {
         voter.require_auth();
         Self::require_governor(&env, &voter);
+        Self::require_not_paused(&env);
 
         let key = DataKey::Operation(operation_id.clone());
         let mut op: Operation = env
@@ -499,6 +507,7 @@ impl TimeLock {
         if caller != admin {
             panic!("only admin can add governors");
         }
+        Self::require_not_paused(&env);
 
         let mut governors: Vec<Address> = env
             .storage()
@@ -534,6 +543,7 @@ impl TimeLock {
         if caller != admin {
             panic!("only admin can remove governors");
         }
+        Self::require_not_paused(&env);
 
         let governors: Vec<Address> = env
             .storage()
@@ -570,6 +580,7 @@ impl TimeLock {
     pub fn update_min_delay(env: Env, caller: Address, new_delay: u64) {
         caller.require_auth();
         Self::require_admin(&env, &caller);
+        Self::require_not_paused(&env);
 
         let old: u64 = env
             .storage()
@@ -584,6 +595,7 @@ impl TimeLock {
     pub fn update_grace_period(env: Env, caller: Address, new_grace: u64) {
         caller.require_auth();
         Self::require_admin(&env, &caller);
+        Self::require_not_paused(&env);
 
         if new_grace == 0 {
             panic!("grace period must be > 0");
@@ -603,6 +615,7 @@ impl TimeLock {
     pub fn update_accel_quorum(env: Env, caller: Address, new_quorum: u32) {
         caller.require_auth();
         Self::require_admin(&env, &caller);
+        Self::require_not_paused(&env);
 
         if new_quorum == 0 {
             panic!("quorum must be > 0");
@@ -618,7 +631,44 @@ impl TimeLock {
         events::emit_quorum_updated(&env, old, new_quorum, &caller);
     }
 
-    // ── Read / Query ──────────────────────────────────────────────────────────
+    // ── Emergency Stop ─────────────────────────────────────────────────────
+
+    /// Pause or resume the whole time-lock (admin only, emergency stop).
+    ///
+    /// Deliberately NOT guarded by `require_not_paused` — unpausing must stay
+    /// reachable while paused. The flag lives in instance storage, which
+    /// persists across wasm upgrades of this contract at the same address.
+    pub fn set_paused(env: Env, caller: Address, paused: bool) {
+        caller.require_auth();
+        Self::require_admin(&env, &caller);
+
+        env.storage().instance().set(&DataKey::Paused, &paused);
+
+        if paused {
+            arenax_events::emergency_pause::emit_paused(
+                &env,
+                &env.current_contract_address(),
+                &caller,
+                &symbol_short!("ADMIN"),
+            );
+        } else {
+            arenax_events::emergency_pause::emit_unpaused(
+                &env,
+                &env.current_contract_address(),
+                &caller,
+            );
+        }
+    }
+
+    /// Check if the time-lock is paused (read; works while paused).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    // ── Read / Query ──────────────────────────────────────────────────────
 
     pub fn get_operation(env: Env, operation_id: BytesN<32>) -> Option<Operation> {
         env.storage()
@@ -769,6 +819,12 @@ impl TimeLock {
             }
         }
         panic!("caller is not a governor");
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
     }
 
     fn get_analytics_totals(env: &Env) -> AnalyticsTotals {

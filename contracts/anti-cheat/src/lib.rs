@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Map, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Map, String, Vec,
+};
 
 mod test;
 
@@ -188,7 +190,7 @@ pub struct MlModelParams {
 pub struct ReporterSpamMetrics {
     pub reporter: Address,
     pub total_reports: u32,
-    pub false_reports: u32,    // reports overturned on appeal
+    pub false_reports: u32, // reports overturned on appeal
     pub flagged_as_spammer: bool,
     pub last_updated: u64,
 }
@@ -217,6 +219,7 @@ pub enum DataKey {
     AntiCheatParams,
     AnalyticsData,
     EmergencyMode,
+    Paused,
     WhistleblowerProtection(Address), // Reporter protection status
     BehaviorProfile(Address),         // Player behavior profile
     PatternDatabase(u32),             // Pattern detection database
@@ -291,6 +294,9 @@ impl AntiCheatContract {
         env.storage()
             .persistent()
             .set(&DataKey::EmergencyMode, &false);
+
+        // Emergency stop starts unpaused
+        env.storage().persistent().set(&DataKey::Paused, &false);
     }
 
     // Report suspicious activity
@@ -305,6 +311,8 @@ impl AntiCheatContract {
         severity: u32,
         anonymous: bool,
     ) -> u64 {
+        Self::require_not_paused(&env);
+
         // --- High gas cost: deliberate compute work to deter spam ---
         // 500 iterations of a simple hash-mix forces meaningful CPU expenditure
         // per invocation without affecting correctness.
@@ -330,11 +338,7 @@ impl AntiCheatContract {
 
         // --- Spam check 1: 1 report per reporter per match ---
         let reporter_match_key = DataKey::ReporterMatchReport(reporter.clone(), match_id);
-        if env
-            .storage()
-            .persistent()
-            .has(&reporter_match_key)
-        {
+        if env.storage().persistent().has(&reporter_match_key) {
             panic!("already reported this match");
         }
 
@@ -420,9 +424,7 @@ impl AntiCheatContract {
             .set(&reporter_match_key, &current_time);
 
         // Update reporter cooldown timestamp
-        env.storage()
-            .persistent()
-            .set(&cooldown_key, &current_time);
+        env.storage().persistent().set(&cooldown_key, &current_time);
 
         // Update spam metrics for this reporter
         let mut updated_spam = spam_metrics;
@@ -582,6 +584,8 @@ impl AntiCheatContract {
         duration: u64,
         report_ids: Vec<u64>,
     ) -> u64 {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -674,6 +678,8 @@ impl AntiCheatContract {
         reason: String,
         evidence: Bytes,
     ) -> u64 {
+        Self::require_not_paused(&env);
+
         let mut sanction: Sanction = env
             .storage()
             .persistent()
@@ -742,6 +748,8 @@ impl AntiCheatContract {
 
     // Review appeal (admin only)
     pub fn review_appeal(env: Env, appeal_id: u64, approved: bool) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -852,6 +860,8 @@ impl AntiCheatContract {
 
     // Update anti-cheat parameters (admin only)
     pub fn update_anticheat_params(env: Env, caller: Address, params: AntiCheatParams) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -869,6 +879,8 @@ impl AntiCheatContract {
 
     // Verify suspicious activity (admin only)
     pub fn verify_activity(env: Env, caller: Address, report_id: u64, verified: bool) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -907,6 +919,8 @@ impl AntiCheatContract {
 
     // Set emergency mode (admin only)
     pub fn set_emergency_mode(env: Env, enabled: bool) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -939,6 +953,8 @@ impl AntiCheatContract {
         bias: i32,
         threshold: u32,
     ) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -998,6 +1014,8 @@ impl AntiCheatContract {
     /// Record a blocked spam attempt in analytics. Called by off-chain indexers
     /// or admin tooling after observing a rejected report transaction.
     pub fn record_spam_attempt(env: Env) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -1036,6 +1054,8 @@ impl AntiCheatContract {
 
     // Set governance contract (admin only)
     pub fn set_governance_contract(env: Env, governance: Address) {
+        Self::require_not_paused(&env);
+
         let admin: Address = env
             .storage()
             .persistent()
@@ -1047,6 +1067,53 @@ impl AntiCheatContract {
         env.storage()
             .persistent()
             .set(&DataKey::GovernanceContract, &governance);
+    }
+
+    // Pause / resume the contract (admin only, emergency stop)
+    //
+    // Deliberately NOT guarded by `require_not_paused` — unpausing must stay
+    // reachable while paused. Storage is persistent, so the flag survives wasm
+    // upgrades of this contract at the same address.
+    pub fn set_paused(env: Env, paused: bool) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+
+        admin.require_auth();
+
+        env.storage().persistent().set(&DataKey::Paused, &paused);
+
+        if paused {
+            arenax_events::emergency_pause::emit_paused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+                &symbol_short!("ADMIN"),
+            );
+        } else {
+            arenax_events::emergency_pause::emit_unpaused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+            );
+        }
+    }
+
+    // Check if the contract is paused (read; works while paused)
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    // Helper: reject state mutations while the contract is paused
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
     }
 
     // Helper: Update trust score with weighted factors
@@ -1357,9 +1424,7 @@ impl AntiCheatContract {
 
         // Flag if false-report rate exceeds 10% (requires ≥10 reports to avoid
         // penalising a reporter with a single mistake early on).
-        if spam.total_reports >= 10
-            && spam.false_reports * 100 / spam.total_reports > 10
-        {
+        if spam.total_reports >= 10 && spam.false_reports * 100 / spam.total_reports > 10 {
             let was_flagged = spam.flagged_as_spammer;
             spam.flagged_as_spammer = true;
             // Bump the global flagged-reporter counter only once per reporter
@@ -1377,10 +1442,9 @@ impl AntiCheatContract {
             }
         }
 
-        env.storage().persistent().set(
-            &DataKey::ReporterSpamMetrics(reporter.clone()),
-            &spam,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReporterSpamMetrics(reporter.clone()), &spam);
     }
 
     // Helper: Update analytics

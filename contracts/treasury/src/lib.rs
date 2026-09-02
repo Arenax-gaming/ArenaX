@@ -1,4 +1,9 @@
 #![no_std]
+// Every event in this contract is published via the raw `env.events().publish`
+// API; migrating them all to `#[contractevent]` is out of scope. Silenced at
+// crate level so the deprecation warning doesn't fail `-D warnings` CI runs
+// now that this crate is a workspace member.
+#![allow(deprecated)]
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 
@@ -70,6 +75,7 @@ pub enum DataKey {
     BudgetAllocation(Symbol),
     TotalAllocated,
     TotalSpent,
+    Paused,
 }
 
 #[contract]
@@ -117,6 +123,7 @@ impl Treasury {
             .instance()
             .set(&DataKey::TotalAllocated, &0i128);
         env.storage().instance().set(&DataKey::TotalSpent, &0i128);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         env.events().publish(
             (Symbol::new(&env, "Treasury"), Symbol::new(&env, "INIT")),
@@ -130,6 +137,7 @@ impl Treasury {
 
     /// Record a deposit into the treasury's internal ledger balance.
     pub fn deposit(env: Env, from: Address, amount: i128) {
+        Self::require_not_paused(&env);
         from.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
@@ -154,6 +162,7 @@ impl Treasury {
     // -----------------------------------------------------------------
 
     pub fn add_signer(env: Env, caller: Address, new_signer: Address) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &caller);
         let mut signers = Self::get_signers(env.clone());
         for signer in signers.iter() {
@@ -174,6 +183,7 @@ impl Treasury {
     }
 
     pub fn remove_signer(env: Env, caller: Address, signer: Address) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &caller);
         let signers = Self::get_signers(env.clone());
         let threshold = Self::get_threshold(env.clone());
@@ -205,6 +215,7 @@ impl Treasury {
     }
 
     pub fn update_threshold(env: Env, caller: Address, new_threshold: u32) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &caller);
         let signers = Self::get_signers(env.clone());
         if new_threshold == 0 || new_threshold > signers.len() {
@@ -223,7 +234,10 @@ impl Treasury {
     }
 
     pub fn get_threshold(env: Env) -> u32 {
-        env.storage().instance().get(&DataKey::Threshold).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::Threshold)
+            .unwrap_or(0)
     }
 
     pub fn is_signer(env: Env, address: Address) -> bool {
@@ -248,6 +262,7 @@ impl Treasury {
         category: Symbol,
         description: String,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &proposer);
         if amount <= 0 {
             panic!("amount must be positive");
@@ -303,6 +318,7 @@ impl Treasury {
     }
 
     pub fn approve_proposal(env: Env, signer: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &signer);
 
         let mut proposal =
@@ -330,6 +346,7 @@ impl Treasury {
     }
 
     pub fn revoke_approval(env: Env, signer: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
         signer.require_auth();
 
         let mut proposal =
@@ -368,6 +385,7 @@ impl Treasury {
     /// approvals is met, the time-lock delay has elapsed, and the
     /// proposal's budget category has sufficient unspent allocation.
     pub fn execute_proposal(env: Env, caller: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &caller);
 
         let mut proposal =
@@ -410,7 +428,11 @@ impl Treasury {
             &allocation,
         );
 
-        let total_spent: i128 = env.storage().instance().get(&DataKey::TotalSpent).unwrap_or(0);
+        let total_spent: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalSpent)
+            .unwrap_or(0);
         env.storage()
             .instance()
             .set(&DataKey::TotalSpent, &(total_spent + proposal.amount));
@@ -430,6 +452,8 @@ impl Treasury {
     }
 
     pub fn cancel_proposal(env: Env, caller: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
+
         let mut proposal =
             Self::get_spending_proposal(env.clone(), proposal_id).expect("proposal not found");
         if proposal.executed {
@@ -479,6 +503,7 @@ impl Treasury {
         category: Symbol,
         amount: i128,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &proposer);
         if amount <= 0 {
             panic!("amount must be positive");
@@ -528,6 +553,7 @@ impl Treasury {
     }
 
     pub fn vote_budget_allocation(env: Env, signer: Address, allocation_id: u64, support: bool) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &signer);
 
         let vote_key = DataKey::AllocationVote(allocation_id, signer.clone());
@@ -563,6 +589,7 @@ impl Treasury {
     /// Finalize a budget allocation vote once the multi-sig threshold of
     /// `for` votes is reached, crediting the category's spendable envelope.
     pub fn finalize_budget_allocation(env: Env, caller: Address, allocation_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_signer(&env, &caller);
 
         let mut proposal = Self::get_allocation_proposal(env.clone(), allocation_id)
@@ -595,9 +622,10 @@ impl Treasury {
             .instance()
             .get(&DataKey::TotalAllocated)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAllocated, &(total_allocated + proposal.amount));
+        env.storage().instance().set(
+            &DataKey::TotalAllocated,
+            &(total_allocated + proposal.amount),
+        );
 
         env.events().publish(
             (
@@ -654,7 +682,11 @@ impl Treasury {
                 .instance()
                 .get(&DataKey::TotalAllocated)
                 .unwrap_or(0),
-            total_spent: env.storage().instance().get(&DataKey::TotalSpent).unwrap_or(0),
+            total_spent: env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalSpent)
+                .unwrap_or(0),
             signer_count: signers.len(),
             threshold: Self::get_threshold(env.clone()),
             time_lock_duration: env
@@ -677,6 +709,37 @@ impl Treasury {
     }
 
     // -----------------------------------------------------------------
+    // Emergency stop
+    // -----------------------------------------------------------------
+
+    /// Pause or resume the treasury (admin only, emergency stop).
+    ///
+    /// Deliberately NOT guarded by `require_not_paused` — unpausing must stay
+    /// reachable while paused. The flag lives in instance storage, which
+    /// persists across wasm upgrades of this contract at the same address.
+    pub fn set_paused(env: Env, caller: Address, paused: bool) {
+        Self::require_admin(&env, &caller);
+
+        env.storage().instance().set(&DataKey::Paused, &paused);
+
+        let action = if paused {
+            Symbol::new(&env, "PAUSED")
+        } else {
+            Symbol::new(&env, "UNPAUSED")
+        };
+        env.events()
+            .publish((Symbol::new(&env, "Treasury"), action), (caller, paused));
+    }
+
+    /// Check if the treasury is paused (read; works while paused).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    // -----------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------
 
@@ -690,6 +753,12 @@ impl Treasury {
             panic!("caller is not admin");
         }
         caller.require_auth();
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
     }
 
     fn require_signer(env: &Env, caller: &Address) {
@@ -707,3 +776,6 @@ impl Treasury {
         panic!("caller is not a signer");
     }
 }
+
+#[cfg(test)]
+mod test;

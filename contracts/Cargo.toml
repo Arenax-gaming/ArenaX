@@ -21,6 +21,8 @@ members = [
     "zk-proof",
     "airdrop",
     "event-manager",
+    "treasury",
+    "upgrade-manager",
     "upgrade-system",
     "testing-infrastructure",
 ]

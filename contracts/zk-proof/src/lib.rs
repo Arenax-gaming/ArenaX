@@ -1,7 +1,7 @@
 #![no_std]
 
 use arenax_events::zk_proof as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Vec};
 
 // Proof type constants
 pub const PROOF_TYPE_PRIVATE_TX: u32 = 1;
@@ -17,6 +17,7 @@ pub enum DataKey {
     PrivateTx(u64),
     AnonymousVote(u64),
     ConfidentialData(u64),
+    Paused,
 }
 
 #[contracttype]
@@ -60,6 +61,7 @@ impl ZkProof {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ProofCounter, &0u64);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     /// Generate a new ZK proof (off-chain proof data submitted on-chain)
@@ -70,6 +72,7 @@ impl ZkProof {
         proof_data: Bytes,
         public_inputs: Vec<Bytes>,
     ) -> u64 {
+        Self::require_not_paused(&env);
         generator.require_auth();
 
         let mut counter: u64 = env
@@ -103,6 +106,7 @@ impl ZkProof {
 
     /// Verify a ZK proof
     pub fn verify_proof(env: Env, verifier: Address, proof_id: u64) -> bool {
+        Self::require_not_paused(&env);
         verifier.require_auth();
 
         let key = DataKey::Proof(proof_id);
@@ -124,6 +128,7 @@ impl ZkProof {
 
     /// Execute a private transaction using a verified ZK proof
     pub fn execute_private_transaction(env: Env, executor: Address, proof_id: u64) -> u64 {
+        Self::require_not_paused(&env);
         executor.require_auth();
 
         let proof_key = DataKey::Proof(proof_id);
@@ -157,6 +162,7 @@ impl ZkProof {
 
     /// Cast an anonymous vote using a verified ZK proof
     pub fn cast_anonymous_vote(env: Env, voter: Address, proof_id: u64) -> u64 {
+        Self::require_not_paused(&env);
         voter.require_auth();
 
         let proof_key = DataKey::Proof(proof_id);
@@ -190,6 +196,7 @@ impl ZkProof {
 
     /// Store confidential data using a verified ZK proof
     pub fn store_confidential_data(env: Env, owner: Address, proof_id: u64, data: Bytes) -> u64 {
+        Self::require_not_paused(&env);
         owner.require_auth();
 
         let proof_key = DataKey::Proof(proof_id);
@@ -228,6 +235,51 @@ impl ZkProof {
             .instance()
             .get(&DataKey::Admin)
             .expect("not initialized")
+    }
+
+    /// Pause or resume the contract (admin only, emergency stop).
+    ///
+    /// Deliberately NOT guarded by `require_not_paused` — unpausing must stay
+    /// reachable while paused. The flag lives in instance storage, which
+    /// persists across wasm upgrades of this contract at the same address.
+    pub fn set_paused(env: Env, paused: bool) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::Paused, &paused);
+
+        if paused {
+            arenax_events::emergency_pause::emit_paused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+                &symbol_short!("ADMIN"),
+            );
+        } else {
+            arenax_events::emergency_pause::emit_unpaused(
+                &env,
+                &env.current_contract_address(),
+                &admin,
+            );
+        }
+    }
+
+    /// Check if the contract is paused (read; works while paused).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
     }
 }
 
