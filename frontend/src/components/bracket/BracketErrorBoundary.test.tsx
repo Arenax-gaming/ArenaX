@@ -18,6 +18,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { BracketErrorBoundary } from "./BracketErrorBoundary";
 import * as errorLogger from "@/lib/errorLogger";
+import { ErrorCategory, ErrorSeverity } from "@/lib/errors";
 
 // ─── Helper Component ─────────────────────────────────────────────────────────
 
@@ -46,8 +47,8 @@ describe("BracketErrorBoundary", () => {
       timestamp: Date.now(),
       message: err.message,
       stack: err.stack,
-      category: "UNKNOWN",
-      severity: "MEDIUM",
+      category: ErrorCategory.UNKNOWN,
+      severity: ErrorSeverity.MEDIUM,
       metadata: {},
       recoveryAttempts: 0,
       recovered: false,
@@ -216,8 +217,8 @@ describe("BracketErrorBoundary", () => {
     // After first retry, button should show attempt count
     // The component re-renders with the same children, so it throws again
     // We need to verify the state changed (it shows the retry count)
-    retryButton = screen.queryByRole("button", { name: /Retry \(1\/2\)/i });
-    expect(retryButton).toBeInTheDocument();
+    const retryButtonAfterClick = screen.queryByRole("button", { name: /Retry \(1\/2\)/i });
+    expect(retryButtonAfterClick).toBeInTheDocument();
   });
 
   // ────────────────────────────────────────────────────────────────────────────

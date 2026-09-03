@@ -25,7 +25,7 @@
 //!   - Every execution and rollback is appended to a per-contract
 //!     history log.
 
-use arenax_events::upgrade_manager as events;
+use arenax_events::{upgrade_manager as events, emergency_pause as ep_events};
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
     String, Symbol, Vec,
@@ -41,6 +41,7 @@ pub enum DataKey {
     Admin,
     ApprovalThreshold,
     Governors,
+    Paused,
     NextProposalId,
     Proposal(u32),
     Validation(u32),
@@ -103,6 +104,7 @@ pub enum UpgradeError {
     AlreadyExecuted = 12,
     NoPriorVersion = 13,
     InvalidThreshold = 14,
+    Paused = 15,
 }
 
 #[contract]
@@ -135,6 +137,7 @@ impl UpgradeManager {
             .instance()
             .set(&DataKey::Governors, &governors);
         env.storage().instance().set(&DataKey::NextProposalId, &1u32);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         events::emit_initialized(&env, &admin, approval_threshold);
         Ok(())
@@ -153,6 +156,7 @@ impl UpgradeManager {
     ) -> Result<u32, UpgradeError> {
         proposer.require_auth();
         Self::require_initialized(&env)?;
+        Self::require_not_paused(&env)?;
 
         let proposal_id: u32 = env
             .storage()
@@ -456,6 +460,43 @@ impl UpgradeManager {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    pub fn set_paused(env: Env, paused: bool) -> Result<(), UpgradeError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(UpgradeError::NotInitialized)?;
+        admin.require_auth();
+        let contract_address = env.current_contract_address();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) -> Result<(), UpgradeError> {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            Err(UpgradeError::Paused)
+        } else {
+            Ok(())
+        }
+    }
+
     fn require_initialized(env: &Env) -> Result<(), UpgradeError> {
         if !env.storage().instance().has(&DataKey::Admin) {
             return Err(UpgradeError::NotInitialized);
@@ -502,3 +543,6 @@ impl UpgradeManager {
             .set(&DataKey::History(contract_name.clone()), &history);
     }
 }
+
+#[cfg(test)]
+mod test;

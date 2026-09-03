@@ -188,7 +188,7 @@ pub struct MlModelParams {
 pub struct ReporterSpamMetrics {
     pub reporter: Address,
     pub total_reports: u32,
-    pub false_reports: u32,    // reports overturned on appeal
+    pub false_reports: u32, // reports overturned on appeal
     pub flagged_as_spammer: bool,
     pub last_updated: u64,
 }
@@ -330,11 +330,7 @@ impl AntiCheatContract {
 
         // --- Spam check 1: 1 report per reporter per match ---
         let reporter_match_key = DataKey::ReporterMatchReport(reporter.clone(), match_id);
-        if env
-            .storage()
-            .persistent()
-            .has(&reporter_match_key)
-        {
+        if env.storage().persistent().has(&reporter_match_key) {
             panic!("already reported this match");
         }
 
@@ -420,9 +416,7 @@ impl AntiCheatContract {
             .set(&reporter_match_key, &current_time);
 
         // Update reporter cooldown timestamp
-        env.storage()
-            .persistent()
-            .set(&cooldown_key, &current_time);
+        env.storage().persistent().set(&cooldown_key, &current_time);
 
         // Update spam metrics for this reporter
         let mut updated_spam = spam_metrics;

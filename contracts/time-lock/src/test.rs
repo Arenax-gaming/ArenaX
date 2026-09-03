@@ -756,3 +756,60 @@ fn test_full_governance_workflow() {
     assert_eq!(client.get_governors().len(), 4);
     assert!(client.is_governor(&new_gov));
 }
+
+// ── Emergency Stop tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_set_paused_by_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env, 10, 86400, 1, 1);
+
+    assert!(!client.is_paused());
+    client.set_paused(&true);
+    assert!(client.is_paused());
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_schedule_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env, 10, 86400, 1, 1);
+    let id = make_id(&env, 1);
+    let target = Address::generate(&env);
+
+    client.set_paused(&true);
+    schedule_default(&client, &admin, &id, &target, &env);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_add_governor_blocked_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env, 10, 86400, 1, 1);
+    let new_gov = Address::generate(&env);
+
+    client.set_paused(&true);
+    client.add_governor(&admin, &new_gov);
+}
+
+#[test]
+fn test_reads_work_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env, 10, 86400, 1, 1);
+
+    client.set_paused(&true);
+
+    // Reads should still work
+    assert!(client.is_paused());
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_min_delay(), 10);
+    assert!(client.is_governor(&admin));
+    let analytics = client.get_analytics();
+    assert_eq!(analytics.total_scheduled, 0);
+}

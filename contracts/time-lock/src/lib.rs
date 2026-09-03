@@ -5,8 +5,8 @@
 // block itself, so this needs to be crate-level to cover them too.
 #![allow(clippy::too_many_arguments)]
 
-use arenax_events::time_lock as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Symbol, Vec};
+use arenax_events::{time_lock as events, emergency_pause as ep_events};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 // ─── Operation Status ─────────────────────────────────────────────────────────
 pub const STATUS_SCHEDULED: u32 = 0;
@@ -53,6 +53,7 @@ pub enum DataKey {
     AnalyticsTotal,
     AnalyticsByCategory(u32),
     LastExecution,
+    Paused,
 }
 
 // ─── Structs ──────────────────────────────────────────────────────────────────
@@ -140,10 +141,8 @@ impl TimeLock {
             .set(&DataKey::GracePeriod, &grace_period);
         env.storage()
             .instance()
-            .set(&DataKey::AccelQuorum, &accel_quorum);
-        env.storage()
-            .instance()
-            .set(&DataKey::Governors, &governors);
+            .set(&DataKey::AccelQuorum, &accel_quorum);        env.storage().instance().set(&DataKey::Governors, &governors);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         // Initialise analytics
         let totals = AnalyticsTotals {
@@ -181,6 +180,7 @@ impl TimeLock {
         custom_grace_period: u64,
     ) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         Self::require_governor(&env, &caller);
 
         let min_delay: u64 = env
@@ -269,6 +269,7 @@ impl TimeLock {
     /// expired instead of executed.
     pub fn execute_operation(env: Env, caller: Address, operation_id: BytesN<32>) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         Self::require_governor(&env, &caller);
 
         let key = DataKey::Operation(operation_id.clone());
@@ -327,6 +328,7 @@ impl TimeLock {
     /// Cancel a scheduled operation.  Any governor may cancel any pending op.
     pub fn cancel_operation(env: Env, caller: Address, operation_id: BytesN<32>) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         Self::require_governor(&env, &caller);
 
         let key = DataKey::Operation(operation_id.clone());
@@ -363,6 +365,7 @@ impl TimeLock {
     /// Each governor may vote at most once per operation.
     pub fn vote_accelerate(env: Env, voter: Address, operation_id: BytesN<32>) {
         voter.require_auth();
+        Self::require_not_paused(&env);
         Self::require_governor(&env, &voter);
 
         let key = DataKey::Operation(operation_id.clone());
@@ -491,6 +494,7 @@ impl TimeLock {
     /// Add a new governor.  Only the admin may call this.
     pub fn add_governor(env: Env, caller: Address, new_governor: Address) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .instance()
@@ -526,6 +530,7 @@ impl TimeLock {
     /// The admin cannot remove themselves if they are the last governor.
     pub fn remove_governor(env: Env, caller: Address, governor: Address) {
         caller.require_auth();
+        Self::require_not_paused(&env);
         let admin: Address = env
             .storage()
             .instance()
@@ -746,6 +751,25 @@ impl TimeLock {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    pub fn set_paused(env: Env, paused: bool) {
+        Self::require_admin(&env, &env.current_contract_address());
+        let contract_address = env.current_contract_address();
+        let admin = Self::get_admin(env.clone());
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        if paused {
+            ep_events::emit_paused(&env, &contract_address, &admin, &symbol_short!("EMERGENCY"));
+        } else {
+            ep_events::emit_unpaused(&env, &contract_address, &admin);
+        }
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     fn require_admin(env: &Env, caller: &Address) {
         let admin: Address = env
             .storage()
@@ -754,6 +778,17 @@ impl TimeLock {
             .expect("not initialized");
         if caller != &admin {
             panic!("only admin can perform this action");
+        }
+    }
+
+    fn require_not_paused(env: &Env) {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            panic!("contract is paused");
         }
     }
 
