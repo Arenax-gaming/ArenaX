@@ -372,11 +372,12 @@ impl VirtualEconomyContract {
             events::emit_currency_transferred(&env, &from, &item.to, item.amount);
         }
 
-        let new_from_balance = from_balance.checked_sub(total_amount).ok_or(VirtualEconomyError::Overflow)?;
-        env.storage().persistent().set(
-            &DataKey::CurrencyBalance(from.clone()),
-            &new_from_balance,
-        );
+        let new_from_balance = from_balance
+            .checked_sub(total_amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(from.clone()), &new_from_balance);
 
         Ok(BatchResult {
             items_processed: items.len(),
@@ -1335,7 +1336,9 @@ impl VirtualEconomyContract {
             }
             previous = tier.min_volume;
         }
-        env.storage().instance().set(&DataKey::ReferralConfig, &config);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReferralConfig, &config);
         Ok(())
     }
 
@@ -1382,15 +1385,16 @@ impl VirtualEconomyContract {
                 flagged: false,
             },
         );
-        let mut account = Self::referral_account(&env, referrer.clone()).unwrap_or(ReferralAccount {
-            referrer: None,
-            qualifying_volume: 0,
-            pending_rewards: 0,
-            total_rewards: 0,
-            referred_count: 0,
-            last_activity: 0,
-            flagged: false,
-        });
+        let mut account =
+            Self::referral_account(&env, referrer.clone()).unwrap_or(ReferralAccount {
+                referrer: None,
+                qualifying_volume: 0,
+                pending_rewards: 0,
+                total_rewards: 0,
+                referred_count: 0,
+                last_activity: 0,
+                flagged: false,
+            });
         account.referred_count += 1;
         env.storage()
             .persistent()
@@ -1451,10 +1455,9 @@ impl VirtualEconomyContract {
         referee_account.last_activity = now;
         referrer_account.pending_rewards += referrer_reward;
         referrer_account.total_rewards += referrer_reward;
-        env.storage().persistent().set(
-            &DataKey::ReferralAccount(referee),
-            &referee_account,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(referee), &referee_account);
         env.storage()
             .persistent()
             .set(&DataKey::ReferralAccount(referrer), &referrer_account);
@@ -1462,10 +1465,7 @@ impl VirtualEconomyContract {
     }
 
     /// Claim all pending referral rewards for `account`.
-    pub fn claim_referral_rewards(
-        env: Env,
-        account: Address,
-    ) -> Result<i128, VirtualEconomyError> {
+    pub fn claim_referral_rewards(env: Env, account: Address) -> Result<i128, VirtualEconomyError> {
         account.require_auth();
         let mut referral = Self::referral_account(&env, account.clone())
             .ok_or(VirtualEconomyError::ReferralNotFound)?;

@@ -185,8 +185,8 @@ export function TournamentDetailsPageClient() {
                   tournamentId={tournament.id}
                   tournamentInfo={{
                     status: tournament.status,
-                    participantCount: tournament.participants?.length,
-                    startDate: tournament.startDate,
+                    participantCount: tournament.currentParticipants,
+                    startDate: tournament.startTime,
                   }}
                 >
                   <SingleEliminationBracket

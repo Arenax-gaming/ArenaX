@@ -1,7 +1,9 @@
 #![no_std]
 
 use arenax_events::{access_control as events, emergency_pause as ep_events};
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec,
+};
 
 // Role Constants
 pub const ROLE_ADMIN: u32 = 1;
