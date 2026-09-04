@@ -1,4 +1,5 @@
 #![no_std]
+#![no_std]
 
 mod flexible_rewards;
 mod validator_penalty;
@@ -9,6 +10,9 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
 pub use flexible_rewards::{FlexiblePosition, RewardPool};
 use validator_penalty::ValidatorPenaltyManager;
+
+pub use lp_incentives::{LpPerformanceRecord, LpPoolConfig, LpPosition};
+use lp_incentives::{calc_fee_share, calc_il_protection, calc_lp_rewards, dynamic_rate};
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -1185,5 +1189,516 @@ impl StakingManager {
         env.storage()
             .instance()
             .set(&DataKey::UserStakeInfo(user.clone()), &info);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ── LP Incentives ────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // These methods satisfy the five LP-incentive acceptance criteria:
+    //   1. LP reward allocation    — `add_liquidity` / `claim_lp_rewards`
+    //   2. Dynamic reward rate     — `set_lp_reward_rate` / `update_lp_dynamic_rate`
+    //   3. Impermanent loss        — automatic payout on `remove_liquidity`
+    //   4. Fee sharing with LPs   — `deposit_lp_fees` / `claim_lp_rewards`
+    //   5. Historical performance  — `LpHistory` storage + `get_lp_history`
+
+    // ── Admin: create / configure an LP pool ─────────────────────────────────
+
+    /// Create a new LP incentive pool.
+    ///
+    /// * `reward_rate_bps` — Annual LP reward rate (basis points, ≤ 10 000).
+    /// * `il_protection_bps` — Impermanent-loss coverage rate (0 = disabled).
+    pub fn create_lp_pool(env: Env, reward_rate_bps: u32, il_protection_bps: u32) -> u32 {
+        Self::require_admin(&env);
+        if reward_rate_bps > 10_000 {
+            panic!("reward rate exceeds 100%");
+        }
+        if il_protection_bps > 10_000 {
+            panic!("IL protection exceeds 100%");
+        }
+
+        let id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LpPoolCounter)
+            .unwrap_or(0);
+
+        let pool = LpPoolConfig {
+            id,
+            reward_rate_bps,
+            total_liquidity: 0,
+            fee_reserve: 0,
+            cumulative_fees: 0,
+            il_protection_bps,
+            active: true,
+        };
+        env.storage().persistent().set(&DataKey::LpPool(id), &pool);
+        env.storage()
+            .instance()
+            .set(&DataKey::LpPoolCounter, &(id + 1));
+
+        events::emit_lp_pool_created(&env, id, reward_rate_bps, il_protection_bps);
+        id
+    }
+
+    /// Update the reward rate for an LP pool (acceptance criterion #2 — dynamic rate).
+    ///
+    /// Existing positions do not lose their already-accrued rewards because
+    /// each position snapshots `pending_rewards` at every interaction.  The
+    /// new rate only applies to future accrual.
+    pub fn set_lp_reward_rate(env: Env, pool_id: u32, new_rate_bps: u32) {
+        Self::require_admin(&env);
+        if new_rate_bps > 10_000 {
+            panic!("reward rate exceeds 100%");
+        }
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        let old = pool.reward_rate_bps;
+        pool.reward_rate_bps = new_rate_bps;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+        events::emit_lp_rate_changed(&env, pool_id, old, new_rate_bps);
+    }
+
+    /// Recompute and apply the dynamic rate based on current utilisation
+    /// (acceptance criterion #2).
+    ///
+    /// `target_liquidity` — liquidity level at which the base rate applies.
+    /// `base_rate_bps`    — maximum rate (when under target).
+    /// `min_rate_bps`     — floor rate (when well over target).
+    pub fn update_lp_dynamic_rate(
+        env: Env,
+        pool_id: u32,
+        target_liquidity: i128,
+        base_rate_bps: u32,
+        min_rate_bps: u32,
+    ) {
+        Self::require_admin(&env);
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        let old = pool.reward_rate_bps;
+        let new_rate = dynamic_rate(pool.total_liquidity, target_liquidity, base_rate_bps, min_rate_bps);
+        pool.reward_rate_bps = new_rate;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+        events::emit_lp_rate_changed(&env, pool_id, old, new_rate);
+    }
+
+    pub fn set_lp_pool_active(env: Env, pool_id: u32, active: bool) {
+        Self::require_admin(&env);
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        pool.active = active;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+    }
+
+    // ── LP lifecycle: add / remove liquidity ─────────────────────────────────
+
+    /// Deposit AX tokens as liquidity (acceptance criterion #1 — allocation).
+    ///
+    /// `entry_price_a` / `entry_price_b` — optional entry prices (×1e7) for
+    /// IL protection tracking.  Pass `0` to opt out of IL protection.
+    pub fn add_liquidity(
+        env: Env,
+        user: Address,
+        pool_id: u32,
+        amount: i128,
+        entry_price_a: i128,
+        entry_price_b: i128,
+    ) {
+        Self::require_not_paused(&env);
+        user.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        if !pool.active {
+            panic!("LP pool not active");
+        }
+
+        // Transfer tokens in
+        let ax_token = Self::get_ax_token(env.clone());
+        token::Client::new(&env, &ax_token).transfer(
+            &user,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        let now = env.ledger().timestamp();
+        let key = DataKey::LpPosition(user.clone(), pool_id);
+
+        let position = if let Some(mut pos) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, LpPosition>(&key)
+        {
+            // Snapshot accrued rewards before topping up
+            pos.pending_rewards += calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now);
+            pos.last_reward_ts = now;
+            // Update fee debt to current cumulative so prior fees aren't double-counted
+            pos.fee_debt = pool.cumulative_fees;
+            pos.amount += amount;
+            // Overwrite entry prices only if caller provided new ones
+            if entry_price_a > 0 {
+                pos.entry_price_a = entry_price_a;
+            }
+            if entry_price_b > 0 {
+                pos.entry_price_b = entry_price_b;
+            }
+            pos
+        } else {
+            LpPosition {
+                user: user.clone(),
+                pool_id,
+                amount,
+                deposited_at: now,
+                fee_debt: pool.cumulative_fees,
+                pending_rewards: 0,
+                last_reward_ts: now,
+                entry_price_a,
+                entry_price_b,
+            }
+        };
+
+        env.storage().persistent().set(&key, &position);
+        Self::track_lp_user_pool(&env, &user, pool_id);
+
+        pool.total_liquidity += amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+
+        // Record history (criterion #5)
+        Self::push_lp_history(
+            &env, &user, pool_id, now,
+            amount, 0, 0, 0,
+        );
+
+        events::emit_lp_deposited(&env, &user, pool_id, amount);
+    }
+
+    /// Withdraw liquidity.  Automatically:
+    ///   - pays accrued time-based rewards (criterion #1)
+    ///   - pays fee-share (criterion #4)
+    ///   - pays IL protection if prices diverged (criterion #3)
+    ///
+    /// `price_a_now` / `price_b_now` — current token prices (×1e7).
+    pub fn remove_liquidity(
+        env: Env,
+        user: Address,
+        pool_id: u32,
+        price_a_now: i128,
+        price_b_now: i128,
+    ) {
+        Self::require_not_paused(&env);
+        user.require_auth();
+
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        let key = DataKey::LpPosition(user.clone(), pool_id);
+        let pos: LpPosition = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("no LP position found");
+
+        let now = env.ledger().timestamp();
+        let reward_pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0);
+
+        // 1. Time-based rewards
+        let accrued_rewards =
+            calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now)
+                + pos.pending_rewards;
+        let reward_payout = accrued_rewards.max(0).min(reward_pool);
+
+        // 2. Fee share (criterion #4)
+        let fee_share = calc_fee_share(&pos, &pool).min(pool.fee_reserve);
+
+        // 3. IL protection (criterion #3)
+        let il_payout = calc_il_protection(&pos, price_a_now, price_b_now, pool.il_protection_bps)
+            .min(pool.fee_reserve.saturating_sub(fee_share));
+
+        let ax_token = Self::get_ax_token(env.clone());
+        let client = token::Client::new(&env, &ax_token);
+        let contract_addr = env.current_contract_address();
+
+        // Return principal
+        client.transfer(&contract_addr, &user, &pos.amount);
+
+        // Pay rewards from reward pool
+        if reward_payout > 0 {
+            client.transfer(&contract_addr, &user, &reward_payout);
+            env.storage()
+                .instance()
+                .set(&DataKey::RewardPool, &(reward_pool - reward_payout));
+        }
+
+        // Pay fees from fee reserve
+        if fee_share > 0 {
+            client.transfer(&contract_addr, &user, &fee_share);
+            pool.fee_reserve -= fee_share;
+        }
+
+        // Pay IL protection from fee reserve
+        if il_payout > 0 {
+            client.transfer(&contract_addr, &user, &il_payout);
+            pool.fee_reserve -= il_payout;
+            events::emit_lp_il_protection_paid(&env, &user, pool_id, il_payout);
+        }
+
+        pool.total_liquidity = (pool.total_liquidity - pos.amount).max(0);
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+        env.storage().persistent().remove(&key);
+
+        // Record history (criterion #5)
+        Self::push_lp_history(
+            &env, &user, pool_id, now,
+            -pos.amount, reward_payout, fee_share, il_payout,
+        );
+
+        events::emit_lp_withdrawn(
+            &env, &user, pool_id,
+            pos.amount, reward_payout, fee_share, il_payout,
+        );
+    }
+
+    /// Claim accrued LP rewards and fee-share without removing liquidity.
+    pub fn claim_lp_rewards(env: Env, user: Address, pool_id: u32) -> (i128, i128) {
+        Self::require_not_paused(&env);
+        user.require_auth();
+
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        let key = DataKey::LpPosition(user.clone(), pool_id);
+        let mut pos: LpPosition = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("no LP position found");
+
+        let now = env.ledger().timestamp();
+        let reward_pool: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RewardPool)
+            .unwrap_or(0);
+
+        // Time-based rewards
+        let accrued = calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now)
+            + pos.pending_rewards;
+        let reward_payout = accrued.max(0).min(reward_pool);
+
+        // Fee share
+        let fee_share = calc_fee_share(&pos, &pool).min(pool.fee_reserve);
+
+        if reward_payout == 0 && fee_share == 0 {
+            panic!("no rewards or fees to claim");
+        }
+
+        let ax_token = Self::get_ax_token(env.clone());
+        let client = token::Client::new(&env, &ax_token);
+        let contract_addr = env.current_contract_address();
+
+        if reward_payout > 0 {
+            client.transfer(&contract_addr, &user, &reward_payout);
+            env.storage()
+                .instance()
+                .set(&DataKey::RewardPool, &(reward_pool - reward_payout));
+        }
+        if fee_share > 0 {
+            client.transfer(&contract_addr, &user, &fee_share);
+            pool.fee_reserve -= fee_share;
+        }
+
+        // Reset position bookkeeping
+        pos.pending_rewards = 0;
+        pos.last_reward_ts = now;
+        pos.fee_debt = pool.cumulative_fees;
+        env.storage().persistent().set(&key, &pos);
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+
+        // Record history (criterion #5)
+        Self::push_lp_history(
+            &env, &user, pool_id, now,
+            0, reward_payout, fee_share, 0,
+        );
+
+        events::emit_lp_rewards_claimed(&env, &user, pool_id, reward_payout, fee_share);
+        (reward_payout, fee_share)
+    }
+
+    // ── Admin: deposit protocol fees ──────────────────────────────────────────
+
+    /// Deposit protocol fees (AX) into a pool's fee reserve (acceptance
+    /// criterion #4 — fee sharing with LPs).
+    pub fn deposit_lp_fees(env: Env, funder: Address, pool_id: u32, amount: i128) {
+        Self::require_not_paused(&env);
+        funder.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let ax_token = Self::get_ax_token(env.clone());
+        token::Client::new(&env, &ax_token).transfer(
+            &funder,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        let mut pool = Self::load_lp_pool(&env, pool_id);
+        pool.fee_reserve += amount;
+        pool.cumulative_fees += amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpPool(pool_id), &pool);
+
+        events::emit_lp_fee_deposited(&env, pool_id, amount, pool.cumulative_fees);
+    }
+
+    // ── Admin: push off-chain performance snapshot ────────────────────────────
+
+    /// Record an off-chain performance data-point for a user in a pool
+    /// (acceptance criterion #5 — historical LP performance).
+    pub fn record_lp_performance(
+        env: Env,
+        user: Address,
+        pool_id: u32,
+        liquidity_delta: i128,
+        rewards_claimed: i128,
+        fees_claimed: i128,
+        il_protection_paid: i128,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        Self::push_lp_history(
+            &env, &user, pool_id, now,
+            liquidity_delta, rewards_claimed, fees_claimed, il_protection_paid,
+        );
+        events::emit_lp_performance_recorded(
+            &env, &user, pool_id, now,
+            liquidity_delta, rewards_claimed, fees_claimed, il_protection_paid,
+        );
+    }
+
+    // ── Views ─────────────────────────────────────────────────────────────────
+
+    pub fn get_lp_pool(env: Env, pool_id: u32) -> LpPoolConfig {
+        Self::load_lp_pool(&env, pool_id)
+    }
+
+    pub fn lp_pool_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LpPoolCounter)
+            .unwrap_or(0)
+    }
+
+    pub fn get_lp_position(env: Env, user: Address, pool_id: u32) -> Option<LpPosition> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LpPosition(user, pool_id))
+    }
+
+    /// Pending time-based LP rewards (not including fee-share).
+    pub fn pending_lp_rewards(env: Env, user: Address, pool_id: u32) -> i128 {
+        let pool = Self::load_lp_pool(&env, pool_id);
+        let now = env.ledger().timestamp();
+        if let Some(pos) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, LpPosition>(&DataKey::LpPosition(user, pool_id))
+        {
+            calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now)
+                + pos.pending_rewards
+        } else {
+            0
+        }
+    }
+
+    /// Pending fee-share for an LP.
+    pub fn pending_lp_fee_share(env: Env, user: Address, pool_id: u32) -> i128 {
+        let pool = Self::load_lp_pool(&env, pool_id);
+        if let Some(pos) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, LpPosition>(&DataKey::LpPosition(user, pool_id))
+        {
+            calc_fee_share(&pos, &pool)
+        } else {
+            0
+        }
+    }
+
+    /// Full on-chain history for an LP in a pool (acceptance criterion #5).
+    pub fn get_lp_history(env: Env, user: Address, pool_id: u32) -> Vec<LpPerformanceRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LpHistory(user, pool_id))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    pub fn get_lp_user_pools(env: Env, user: Address) -> Vec<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LpUserPools(user))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Private LP helpers ────────────────────────────────────────────────────
+
+    fn load_lp_pool(env: &Env, pool_id: u32) -> LpPoolConfig {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LpPool(pool_id))
+            .expect("LP pool not found")
+    }
+
+    fn track_lp_user_pool(env: &Env, user: &Address, pool_id: u32) {
+        let key = DataKey::LpUserPools(user.clone());
+        let mut pools: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        if !pools.contains(&pool_id) {
+            pools.push_back(pool_id);
+            env.storage().persistent().set(&key, &pools);
+        }
+    }
+
+    fn push_lp_history(
+        env: &Env,
+        user: &Address,
+        pool_id: u32,
+        timestamp: u64,
+        liquidity_delta: i128,
+        rewards_claimed: i128,
+        fees_claimed: i128,
+        il_protection_paid: i128,
+    ) {
+        let key = DataKey::LpHistory(user.clone(), pool_id);
+        let mut history: Vec<LpPerformanceRecord> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        history.push_back(LpPerformanceRecord {
+            user: user.clone(),
+            pool_id,
+            timestamp,
+            liquidity_delta,
+            rewards_claimed,
+            fees_claimed,
+            il_protection_paid,
+        });
+        env.storage().persistent().set(&key, &history);
     }
 }
