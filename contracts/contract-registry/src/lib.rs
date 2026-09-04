@@ -1,6 +1,7 @@
 #![no_std]
 
 use arenax_events::contract_registry as events;
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 #[contracttype]
@@ -885,22 +886,28 @@ impl ContractRegistry {
             .get(&DataKey::ContractList)
             .unwrap_or(Vec::new(&env));
 
-        extern crate alloc;
-        use alloc::string::ToString;
-        let prefix_string = prefix.to_string();
-        let prefix_bytes = prefix_string.into_bytes();
-        let prefix_len = prefix_bytes.len();
+        // Serialize symbols via XDR so we can compare raw name bytes without
+        // heap allocation. XDR layout is [4-byte SCVal discriminant][4-byte
+        // big-endian length][string bytes padded to 4-byte alignment], so the
+        // actual name bytes start at offset 8 and their real length is the
+        // length field.
+        const XDR_HEADER: u32 = 8;
+        let prefix_xdr = prefix.clone().to_xdr(&env);
+        let prefix_len = u32::from_be_bytes([
+            prefix_xdr.get(4).unwrap(),
+            prefix_xdr.get(5).unwrap(),
+            prefix_xdr.get(6).unwrap(),
+            prefix_xdr.get(7).unwrap(),
+        ]);
 
         let mut result = Vec::new(&env);
         for name in contract_list.iter() {
-            let name_string = name.to_string();
-            let name_bytes = name_string.into_bytes();
-            let name_len = name_bytes.len();
-            if name_len >= prefix_len {
+            let name_xdr = name.clone().to_xdr(&env);
+            if name_xdr.len() >= prefix_xdr.len() {
                 let mut matches = true;
-                let mut i = 0;
+                let mut i = 0u32;
                 while i < prefix_len {
-                    if name_bytes[i] != prefix_bytes[i] {
+                    if name_xdr.get(XDR_HEADER + i) != prefix_xdr.get(XDR_HEADER + i) {
                         matches = false;
                         break;
                     }

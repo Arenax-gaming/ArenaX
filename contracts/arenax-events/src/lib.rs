@@ -20,11 +20,14 @@
 
 #![no_std]
 
+pub mod access_control;
 pub mod anti_cheat;
+pub mod anti_cheat_oracle;
 pub mod auth_gateway;
 pub mod ax_token;
 pub mod contract_registry;
 pub mod dispute;
+pub mod emergency_pause;
 pub mod escrow;
 pub mod governance;
 pub mod identity;
@@ -36,10 +39,9 @@ pub mod reputation;
 pub mod reputation_index;
 pub mod slashing;
 pub mod staking;
-pub mod tournament;
-pub mod access_control;
-pub mod emergency_pause;
+pub mod state_change;
 pub mod time_lock;
+pub mod tournament;
+pub mod upgrade_manager;
 pub mod virtual_economy;
 pub mod zk_proof;
-pub mod manager;

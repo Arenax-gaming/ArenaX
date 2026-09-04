@@ -12,6 +12,7 @@ import { BottomNav } from "@/components/ui/BottomNav";
 import { PageTransition } from "@/components/layout/PageTransition";
 import { KeyboardShortcutsHelp } from "@/components/ui/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { SessionTimeoutProvider } from "@/contexts/SessionTimeoutContext";
 // #759: next-intl's Link, not next/link. It prefixes the active locale
 // automatically, so "/about" resolves to "/en/about" and following a footer
 // link never resets the user's language.
@@ -54,21 +55,22 @@ export function AppLayout({ children }: AppLayoutProps) {
     useKeyboardShortcuts(handleShortcutAction);
 
   return (
-    <div className="min-h-screen bg-background font-sans antialiased flex flex-col">
-      <OfflineBanner />
-      <SkipLink targetId="main-content" />
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center justify-between">
-          <Logo className="md:hidden" />
-          <Navbar />
-          <MobileHeaderActions />
-        </div>
-      </header>
-      <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main">
-        <PageTransition>{children}</PageTransition>
-      </main>
-      <ToastContainer />
-      <BottomNav />
+    <SessionTimeoutProvider>
+      <div className="min-h-screen bg-background font-sans antialiased flex flex-col">
+        <OfflineBanner />
+        <SkipLink targetId="main-content" />
+        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container flex h-14 items-center justify-between">
+            <Logo className="md:hidden" />
+            <Navbar />
+            <MobileHeaderActions />
+          </div>
+        </header>
+        <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main">
+          <PageTransition>{children}</PageTransition>
+        </main>
+        <ToastContainer />
+        <BottomNav />
 
       {/* Global keyboard shortcuts help modal */}
       <KeyboardShortcutsHelp
@@ -112,6 +114,10 @@ export function AppLayout({ children }: AppLayoutProps) {
           </p>
         </div>
       </footer>
-    </div>
+      
+      {/* Session timeout warning modal - to be integrated by consumer */}
+      
+      </div>
+    </SessionTimeoutProvider>
   );
 }

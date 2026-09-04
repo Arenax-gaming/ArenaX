@@ -1,7 +1,11 @@
 // Currency management utilities
+//
+// A reusable calculation library not yet wired into the contract's public
+// entry points in lib.rs.
+#![allow(dead_code)]
+
 use crate::error::VirtualEconomyError;
 use crate::storage::*;
-use soroban_sdk::{Address, Env};
 
 pub struct CurrencyManager;
 
@@ -15,10 +19,8 @@ impl CurrencyManager {
         // Simple inflation calculation: (supply * rate * time) / (365 * 24 * 3600 * 10000)
         // Assumes time_elapsed is in seconds and rate is in basis points
         let annual_seconds = 365 * 24 * 3600u64;
-        let inflation_amount =
-            (current_supply * config.inflation_rate as i128 * time_elapsed as i128)
-                / (annual_seconds as i128 * 10000);
-        inflation_amount
+        (current_supply * config.inflation_rate as i128 * time_elapsed as i128)
+            / (annual_seconds as i128 * 10000)
     }
 
     /// Check if minting would exceed supply limits

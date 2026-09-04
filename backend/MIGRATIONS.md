@@ -72,6 +72,26 @@ cd backend
 
 Because application startup also validates migrations, schema drift blocks the backend from serving traffic.
 
+## Rollback Verification (up -> down -> up)
+
+Every down migration is proven to work, not assumed. CI runs the full cycle against a disposable database after applying all migrations:
+
+```bash
+cd backend
+SKIP_BACKUP=1 ./scripts/rollback-verify.sh
+```
+
+The script performs, in order:
+
+1. **Pre-migration backup** (unless `SKIP_BACKUP=1` — acceptable only on disposable databases)
+2. **Snapshot** — records the head migration and public table count
+3. **DOWN** — `sqlx migrate revert` runs the latest `.down.sql`; verifies the migration is no longer recorded as applied
+4. **Health check** — database reachable, no dirty migrations, optional backend `/api/health` probe (`BACKEND_HEALTH_URL`)
+5. **UP** — `sqlx migrate run` re-applies the migration
+6. **Health check** — head migration restored, table count matches the snapshot exactly
+
+A `.down.sql` that drops something its `.up.sql` does not recreate — or that fails silently — fails this cycle. That failure blocks CI.
+
 ## Rollback And Backups
 
 For shared, staging, or production databases, create a backup before reverting migrations:
@@ -91,6 +111,28 @@ cd backend
 ```
 
 Rollback is intentionally interactive. For production incidents, prefer restoring from a verified backup when data-destructive down migrations are involved.
+
+## Disaster Recovery Procedure (migration rollback)
+
+When a migration must be rolled back on shared, staging, or production data, run the full sequence — never a bare `sqlx migrate revert`:
+
+```bash
+cd backend
+
+# 1. PRE-MIGRATION BACKUP — mandatory on any data you care about
+./scripts/backup-database.sh
+
+# 2. ROLLBACK WITH VERIFICATION — backup -> down -> health -> up -> health
+#    (cycles the latest migration; set BACKEND_HEALTH_URL when the backend is live)
+./scripts/rollback-verify.sh
+
+# 3. IF THE DOWN ITSELF FAILED — restore from the backup taken in step 1:
+#    DATABASE_URL=<target> ./scripts/restore-database.sh backups/<the-new-dump>.dump
+```
+
+The recovery chain is: `backup-database.sh` (point-in-time copy) -> `rollback-verify.sh` (verified down/up cycle with health checks) -> `restore-database.sh` (fallback if the down is data-destructive and the cycle cannot complete). `verify-backup.sh` proves any dump restorable before you trust it. Full backup RTO/RPO targets and point-in-time recovery live in [scripts/BACKUP_RECOVERY.md](scripts/BACKUP_RECOVERY.md).
+
+Post-migration health checks: `migrate.sh` now verifies after every apply that the database is reachable and no migration is recorded dirty; `rollback-verify.sh` extends this to the down and re-apply legs, with an optional live-backend probe via `BACKEND_HEALTH_URL`.
 
 ## Other Components
 

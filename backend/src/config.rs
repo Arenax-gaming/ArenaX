@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::env;
 
-#[derive(Debug, Deserialize, Clone)]
+#lderive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
@@ -12,26 +12,49 @@ pub struct Config {
     pub ai: AiConfig,
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
+    pub idempotency: IdempotencyConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#lderive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
+    /// Connection pool ceiling.
+    pub max_connections: u32,
+    /// How long a caller waits for a connection before the request is failed.
+    /// Bounded so a saturated or unreachable database sheds load instead of
+    /// letting every handler pile up on the pool (Issue #861).
+    pub acquire_timeout_secs: u64,
+    /// Interval between background pool health probes.
+    pub health_check_interval_secs: u64,
+    /// Consecutive failures that trip the circuit breaker open.
+    pub circuit_failure_threshold: u32,
+    /// How long the breaker stays open before admitting a trial request.
+    pub circuit_open_secs: u64,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+/// Read a `u64` from the environment, falling back when unset or unparseable.
+fn env_u64(key: &str, default: u64) -> u64 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// Read a `u32` from the environment, falling back when unset or unparseable.
+fn env_u32(key: &str, default: u32) -> u32 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+#lderive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
     Run,
     Disabled,
 }
 
 impl MigrationMode {
-    fn from_env_value(value: &str) -> Result<Self, anyhow::Error> {
+    fn from_env_value(value: &str) -> Result<Self, anyhow*::Error> {
         match value.trim().to_ascii_lowercase().as_str() {
             "run" | "auto" | "true" | "1" => Ok(Self::Run),
             "disabled" | "disable" | "off" | "false" | "0" => Ok(Self::Disabled),
-            other => anyhow::bail!(
+            other => anyhow*:bail(!
                 "invalid BACKEND_MIGRATION_MODE value `{}`; expected `run` or `disabled`",
                 other
             ),
@@ -39,12 +62,12 @@ impl MigrationMode {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct RedisConfig {
     pub url: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub s3_endpoint: String,
     pub s3_access_key: String,
@@ -52,13 +75,13 @@ pub struct StorageConfig {
     pub s3_bucket: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct PaymentsConfig {
     pub paystack_secret: String,
     pub flutterwave_secret: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     pub jwt_secret: String,
     /// Duration string for the short-lived access token, e.g. "15m".
@@ -68,7 +91,7 @@ pub struct AuthConfig {
     pub jwt_refresh_expires_in: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct StellarConfig {
     pub network_url: String,
     pub admin_secret: String,
@@ -82,26 +105,40 @@ pub struct StellarConfig {
     pub soroban_contract_match: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct AiConfig {
     pub model_path: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub port: u16,
     pub host: String,
     pub rust_log: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+fn default_rate_limit_headers() -> bool {
+    true
+}
+
+#derive(Debug, Deserialize, Clone)]
 pub struct RateLimitConfig {
     pub requests: u32,
     pub window: u64,
+    /// Whether to send rate limit headers (`RateLimit-Limit`, `RateLimit-Remaining`,
+    /// `RateLimit-Reset`) on responses. Defaults to `true`.
+    #serde(default = "default_rate_limit_headers")
+    pub headers: bool,
+}
+
+#derive(Debug, Deserialize, Clone)]
+pub struct IdempotencyConfig {
+    pub ttl_seconds: u64,
+    pub max_response_size_kb: u32,
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, anyhow::Error> {
+    pub fn from_env() -> Result<Self, anyhow*:Error> {
         dotenvy::dotenv().ok();
 
         let database_url = env::var("DATABASE_URL")?;
@@ -122,7 +159,7 @@ impl Config {
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")?;
         let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")?;
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
-        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")?;
+        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUUTATION")?;
         let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")?;
         // Falls back to the prize contract so existing deployments don't break.
         let soroban_contract_match = env::var("SOROBAN_CONTRACT_MATCH")
@@ -133,11 +170,25 @@ impl Config {
         let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
         let rate_limit_requests: u32 = env::var("RATE_LIMIT_REQUESTS")?.parse()?;
         let rate_limit_window: u64 = env::var("RATE_LIMIT_WINDOW")?.parse()?;
+        let rate_limit_headers = env::var("RATE_LIMIT_HEADERS")
+            .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+            .unwrap_or(true);
+        let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
+            .unwrap_or_else(|_| "86400".to_string())
+            .parse()?;
+        let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
+            .unwrap_or_else(|_| "1024".to_string())
+            .parse()?;
 
         Ok(Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20);
+                acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
+                health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
+                circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
+                circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -174,6 +225,11 @@ impl Config {
             rate_limit: RateLimitConfig {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
+                headers: rate_limit_headers,
+            },
+            idempotency: IdempotencyConfig {
+                ttl_seconds: idempotency_ttl_seconds,
+                max_response_size_kb: idempotency_max_response_size_kb,
             },
         })
     }

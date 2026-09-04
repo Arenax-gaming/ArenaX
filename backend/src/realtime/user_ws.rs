@@ -11,10 +11,14 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Heartbeat interval (30 seconds).
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Per-user WebSocket actor with heartbeat management and event delivery.
+/// Timeout after 3 missed heartbeats (90 seconds = 3 * 30s).
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Per-user WebSocket actor with heartbeat management, reconnect state restoration,
+/// connection limit enforcement, and event delivery.
 pub struct UserWebSocket {
     session_id: Uuid,
     user_id: Uuid,
@@ -26,6 +30,7 @@ pub struct UserWebSocket {
     /// broadcaster never holds a dangling `Addr` after disconnect.
     address_book: Arc<WsAddressBook>,
     auth: Arc<RealtimeAuth>,
+    reconnect_session_id: Option<Uuid>,
 }
 
 impl UserWebSocket {
@@ -36,6 +41,17 @@ impl UserWebSocket {
         address_book: Arc<WsAddressBook>,
         auth: Arc<RealtimeAuth>,
     ) -> Self {
+        Self::with_reconnect(user_id, claims, registry, address_book, auth, None)
+    }
+
+    pub fn with_reconnect(
+        user_id: Uuid,
+        claims: Claims,
+        registry: Arc<SessionRegistry>,
+        address_book: Arc<WsAddressBook>,
+        auth: Arc<RealtimeAuth>,
+        reconnect_session_id: Option<Uuid>,
+    ) -> Self {
         Self {
             session_id: Uuid::new_v4(),
             user_id,
@@ -44,18 +60,19 @@ impl UserWebSocket {
             registry,
             address_book,
             auth,
+            reconnect_session_id,
         }
     }
 
-    /// Starts a heartbeat that pings the client every HEARTBEAT_INTERVAL
-    /// and disconnects if no response is received within CLIENT_TIMEOUT.
+    /// Starts a heartbeat that pings the client every HEARTBEAT_INTERVAL (30s)
+    /// and disconnects if no response is received within CLIENT_TIMEOUT (90s = 3 missed beats).
     fn start_heartbeat(&self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
             if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
                 warn!(
                     user_id = %act.user_id,
                     session_id = %act.session_id,
-                    "Client heartbeat timeout, disconnecting"
+                    "Client heartbeat timeout (3 missed beats), disconnecting"
                 );
                 ctx.stop();
                 return;
@@ -80,9 +97,42 @@ impl Actor for UserWebSocket {
         info!(
             user_id = %self.user_id,
             session_id = %self.session_id,
-            "WebSocket session started"
+            "WebSocket session starting"
         );
-        self.registry.register(self.user_id, self.session_id);
+
+        let is_reconnected = if let Some(old_id) = self.reconnect_session_id {
+            if let Some(channels) = self.registry.reconnect(self.user_id, old_id, self.session_id) {
+                info!(
+                    user_id = %self.user_id,
+                    old_session_id = %old_id,
+                    new_session_id = %self.session_id,
+                    channels_count = channels.len(),
+                    "WebSocket session successfully reconnected with restored channels"
+                );
+                true
+            } else {
+                warn!(
+                    user_id = %self.user_id,
+                    old_session_id = %old_id,
+                    "Reconnect session invalid or expired, falling back to fresh registration"
+                );
+                if !self.registry.register(self.user_id, self.session_id) {
+                    warn!(user_id = %self.user_id, "Max WebSocket connections reached (5)");
+                    self.send_error(ctx, "Maximum concurrent connections (5) exceeded");
+                    ctx.stop();
+                    return;
+                }
+                false
+            }
+        } else {
+            if !self.registry.register(self.user_id, self.session_id) {
+                warn!(user_id = %self.user_id, "Max WebSocket connections reached (5)");
+                self.send_error(ctx, "Maximum concurrent connections (5) exceeded");
+                ctx.stop();
+                return;
+            }
+            false
+        };
 
         // Register this actor's address so the broadcaster can deliver events.
         self.address_book.insert(self.session_id, ctx.address());
@@ -90,6 +140,14 @@ impl Actor for UserWebSocket {
         // Automatically subscribe to own user channel
         let user_channel = channels::user_channel(self.user_id);
         self.registry.subscribe(self.session_id, user_channel);
+
+        if is_reconnected {
+            let reconnected_msg = serde_json::json!({
+                "type": "reconnected",
+                "session_id": self.session_id.to_string()
+            });
+            ctx.text(reconnected_msg.to_string());
+        }
 
         self.start_heartbeat(ctx);
     }
@@ -101,11 +159,11 @@ impl Actor for UserWebSocket {
             "WebSocket session stopped"
         );
         // Remove from the address book first so the broadcaster stops routing
-        // events to this (now-dead) actor address immediately.
+        // events to this actor address immediately.
         self.address_book.remove(&self.session_id);
 
-        // Unregister from the session registry, which also cleans up all
-        // channel subscriptions for this session.
+        // Unregister from the session registry, which preserves channels for 60s
+        // in case the client reconnects.
         self.registry.unregister(self.user_id, self.session_id);
     }
 }
@@ -129,10 +187,12 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for UserWebSocket {
         match msg {
             ws::Message::Ping(data) => {
                 self.hb = Instant::now();
+                self.registry.record_heartbeat(&self.session_id);
                 ctx.pong(&data);
             }
             ws::Message::Pong(_) => {
                 self.hb = Instant::now();
+                self.registry.record_heartbeat(&self.session_id);
             }
             ws::Message::Text(text) => {
                 debug!(
@@ -143,24 +203,28 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for UserWebSocket {
                 );
                 match serde_json::from_str::<ClientMessage>(&text) {
                     Ok(ClientMessage::Ping) => {
+                        self.hb = Instant::now();
+                        self.registry.record_heartbeat(&self.session_id);
                         let pong = serde_json::json!({"type": "pong"});
                         ctx.text(pong.to_string());
                     }
                     Ok(ClientMessage::Pong) => {
                         self.hb = Instant::now();
+                        self.registry.record_heartbeat(&self.session_id);
                     }
                     Ok(ClientMessage::Subscribe { channel }) => {
                         let auth = self.auth.clone();
                         let claims = self.claims.clone();
                         let session_id = self.session_id;
                         let registry = self.registry.clone();
+                        let target_channel = channel.clone();
 
                         let fut = async move {
-                            auth.authorize_subscription(&claims, &channel).await
+                            auth.authorize_subscription(&claims, &target_channel).await
                         };
 
                         ctx.wait(actix::fut::wrap_future(fut).then(
-                            move |res, _act, ctx| {
+                            move |res, _act, ctx: &mut actix_web_actors::ws::WebsocketContext<UserWebSocket>| {
                                 match res {
                                     Ok(_) => {
                                         registry.subscribe(session_id, channel.clone());
@@ -289,14 +353,30 @@ pub async fn ws_handler(
         actix_web::error::ErrorUnauthorized("Invalid user ID in token")
     })?;
 
-    info!(user_id = %user_id, "WebSocket upgrade request approved via JWT");
+    // Extract optional reconnect_session_id parameter
+    let reconnect_session_id = query_string.split('&').find_map(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        match (parts.next(), parts.next()) {
+            (Some("reconnect_session_id") | Some("session_id"), Some(value)) => {
+                Uuid::parse_str(value).ok()
+            }
+            _ => None,
+        }
+    });
+
+    info!(
+        user_id = %user_id,
+        is_reconnect = reconnect_session_id.is_some(),
+        "WebSocket upgrade request approved via JWT"
+    );
     
-    let ws_actor = UserWebSocket::new(
+    let ws_actor = UserWebSocket::with_reconnect(
         user_id, 
         claims,
         registry.get_ref().clone(),
         address_book.get_ref().clone(),
-        auth_guard.get_ref().clone()
+        auth_guard.get_ref().clone(),
+        reconnect_session_id,
     );
 
     ws::start(ws_actor, &req, stream)

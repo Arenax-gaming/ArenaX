@@ -60,7 +60,7 @@ pub async fn update_achievement_progress(
     let service = AchievementService::new(pool.get_ref().clone());
 
     let unlock_event = service
-        .update_progress(*player_id, achievement_id, body.progress)
+        .update_progress(*player_id.get_ref(), achievement_id, body.progress)
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -92,7 +92,7 @@ pub async fn share_achievement(
 ) -> Result<HttpResponse, ApiError> {
     let service = AchievementService::new(pool.get_ref().clone());
     let (share_url, share_text) = service
-        .generate_share_content(*player_id, *achievement_id)
+        .generate_share_content(*player_id.get_ref(), *achievement_id)
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -112,7 +112,7 @@ pub async fn check_achievements(
 ) -> Result<HttpResponse, ApiError> {
     let service = AchievementService::new(pool.get_ref().clone());
     let unlocked = service
-        .check_achievements(*player_id, &body.event_type, body.event_data.clone())
+        .check_achievements(*player_id.get_ref(), &body.event_type, body.event_data.clone())
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({

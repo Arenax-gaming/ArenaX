@@ -31,6 +31,15 @@ export * from "./tournament";
 export * from "./transaction";
 export * from "./user";
 
+// ─── Ambiguity resolution ───────────────────────────────────────────────────────
+// A few type names are defined in more than one domain file (profile.ts keeps
+// display-oriented variants). Explicit re-exports below take precedence over the
+// star exports above, so importing these names from "@/types" is unambiguous.
+export type { Achievement } from "./achievement";
+export type { MatchWithPlayers, PlayerStats } from "./match";
+export type { PrivacySettings } from "./settings";
+export type { UserProfileUpdate, EloPoint } from "./user";
+
 // ─── Response interceptor types ───────────────────────────────────────────────
 export type {
   StandardResponse,

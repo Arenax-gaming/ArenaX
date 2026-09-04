@@ -4,29 +4,14 @@ version = "0.1.0"
 edition = "2021"
 authors = ["ArenaX Team <dev@arenax.gg>"]
 
+[lib]
+name = "arenax_testing_infrastructure"
+path = "src/lib.rs"
+
 [dependencies]
-soroban-sdk = "23.5.2"
-proptest = "1.4"
-quickcheck = "1.0"
-arbitrary = "1.3"
-match_contract = { path = "../match_contract" }
-staking-manager = { path = "../staking-manager" }
-arenax-events = { path = "../arenax-events" }
-composable-example = { path = "../composable-example" }
-access-control = { path = "../access-control" }
-token-manager = { path = "../token-manager" }
+soroban-sdk = { version = "23.5.2", features = ["testutils"] }
+staking-rewards = { path = "../staking-rewards" }
+virtual-economy = { path = "../virtual-economy", features = ["testutils"] }
 
 [dev-dependencies]
 soroban-sdk = { version = "23.5.2", features = ["testutils"] }
-criterion = "0.5"
-proptest = "1.4"
-quickcheck = "1.0"
-arbitrary = "1.3"
-
-[[bench]]
-name = "gas_benchmarks"
-harness = false
-
-[[bench]]
-name = "performance_benchmarks"
-harness = false

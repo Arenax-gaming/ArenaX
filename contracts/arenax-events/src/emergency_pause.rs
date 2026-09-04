@@ -45,7 +45,13 @@ pub fn emit_unpaused(env: &Env, contract_address: &Address, unpaused_by: &Addres
     .publish(env);
 }
 
-pub fn emit_function_paused(env: &Env, contract_address: &Address, function_name: &Symbol, paused_by: &Address, reason: &Symbol) {
+pub fn emit_function_paused(
+    env: &Env,
+    contract_address: &Address,
+    function_name: &Symbol,
+    paused_by: &Address,
+    reason: &Symbol,
+) {
     FunctionPaused {
         contract_address: contract_address.clone(),
         function_name: function_name.clone(),
@@ -55,7 +61,12 @@ pub fn emit_function_paused(env: &Env, contract_address: &Address, function_name
     .publish(env);
 }
 
-pub fn emit_function_unpaused(env: &Env, contract_address: &Address, function_name: &Symbol, unpaused_by: &Address) {
+pub fn emit_function_unpaused(
+    env: &Env,
+    contract_address: &Address,
+    function_name: &Symbol,
+    unpaused_by: &Address,
+) {
     FunctionUnpaused {
         contract_address: contract_address.clone(),
         function_name: function_name.clone(),

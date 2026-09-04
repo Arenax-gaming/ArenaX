@@ -1,7 +1,12 @@
+// Economy governance and emergency controls
+//
+// A reusable calculation library not yet wired into the contract's public
+// entry points in lib.rs.
+#![allow(dead_code)]
+
 use crate::error::VirtualEconomyError;
 use crate::storage::*;
-/// Economy governance and emergency controls
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Env};
 
 pub struct EconomyGovernance;
 
@@ -19,11 +24,9 @@ impl EconomyGovernance {
         }
 
         // Inflation rate changes should be gradual (max 5% change)
-        let inflation_diff = if new_config.inflation_rate > current_config.inflation_rate {
-            new_config.inflation_rate - current_config.inflation_rate
-        } else {
-            current_config.inflation_rate - new_config.inflation_rate
-        };
+        let inflation_diff = new_config
+            .inflation_rate
+            .abs_diff(current_config.inflation_rate);
 
         if inflation_diff > 500 {
             // 5% in basis points
@@ -31,11 +34,9 @@ impl EconomyGovernance {
         }
 
         // Similar check for deflation rate
-        let deflation_diff = if new_config.deflation_rate > current_config.deflation_rate {
-            new_config.deflation_rate - current_config.deflation_rate
-        } else {
-            current_config.deflation_rate - new_config.deflation_rate
-        };
+        let deflation_diff = new_config
+            .deflation_rate
+            .abs_diff(current_config.deflation_rate);
 
         if deflation_diff > 300 {
             // 3% in basis points

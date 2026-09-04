@@ -222,6 +222,7 @@ fn token_hash(token: &str) -> String {
 }
 
 /// Main JWT Service
+#[derive(Clone)]
 pub struct JwtService {
     config: JwtConfig,
     redis: ConnectionManager,
@@ -876,7 +877,8 @@ impl JwtService {
         Ok(token)
     }
 
-    /// Cleanup expired sessions (garbage collection)    pub async fn cleanup_expired_sessions(&self) -> Result<u32, JwtError> {
+    /// Cleanup expired sessions (garbage collection)
+    pub async fn cleanup_expired_sessions(&self) -> Result<u32, JwtError> {
         let mut conn = self.redis.clone();
         let keys: Vec<String> = conn.keys("session:*").await.unwrap_or_default();
 

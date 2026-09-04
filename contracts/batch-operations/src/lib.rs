@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec, Map, U256};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, BytesN, Env, Vec};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,8 @@ pub enum BatchError {
     VotingEnded = 20,
     /// Insufficient votes
     InsufficientVotes = 21,
+    /// Address is zero or a contract address.
+    InvalidAddress = 22,
 }
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -145,7 +147,7 @@ pub struct QueuedOperation {
     /// Timestamp when queued
     pub queued_at: u64,
     /// Encoded operation data (simplified for storage)
-    pub data: Vec<u8>,
+    pub data: Bytes,
     /// Whether executed
     pub executed: bool,
 }
@@ -211,29 +213,34 @@ pub struct BatchOperations;
 
 #[contractimpl]
 impl BatchOperations {
+    /// Validate that an address is non-zero and not a contract address.
+    fn require_valid_address(env: &Env, address: &Address) -> Result<(), BatchError> {
+        // Reject zero account addresses (all zeros)
+        let zero_account = Address::from_account_id(BytesN::from_array(env, &[0u8; 32]));
+        if *address == zero_account {
+            return Err(BatchError::InvalidAddress);
+        }
+        // Reject contract addresses
+        if address.is_contract() {
+            return Err(BatchError::InvalidAddress);
+        }
+        Ok(())
+    }
+
     // ── Initialization ─────────────────────────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address) -> Result<(), BatchError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(BatchError::AlreadyInitialized);
         }
+        Self::require_valid_address(&env, &admin)?;
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalSupply, &0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::NftCount, &0u32);
+        env.storage().instance().set(&DataKey::TotalSupply, &0i128);
+        env.storage().instance().set(&DataKey::NftCount, &0u32);
         // Initialize analytics
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalBatchOps, &0u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalGasSaved, &0u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::QueueCounter, &0u32);
+        env.storage().instance().set(&DataKey::TotalBatchOps, &0u64);
+        env.storage().instance().set(&DataKey::TotalGasSaved, &0u64);
+        env.storage().instance().set(&DataKey::QueueCounter, &0u32);
         env.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &0u32);
@@ -278,9 +285,7 @@ impl BatchOperations {
     }
 
     pub fn nft_owner(env: Env, token_id: u32) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::NftOwner(token_id))
+        env.storage().instance().get(&DataKey::NftOwner(token_id))
     }
 
     pub fn nft_count(env: Env) -> u32 {
@@ -303,7 +308,7 @@ impl BatchOperations {
             .instance()
             .get(&DataKey::TotalGasSaved)
             .unwrap_or(0u64);
-        
+
         // Calculate average batch size (simplified)
         let avg_batch_size = if total_ops > 0 {
             (gas_saved / total_ops.max(1)) as u32
@@ -333,9 +338,10 @@ impl BatchOperations {
         env: Env,
         submitter: Address,
         op_type: QueueOpType,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<u32, BatchError> {
         Self::require_initialized(&env)?;
+        Self::require_valid_address(&env, &submitter)?;
         submitter.require_auth();
 
         let queue_counter: u32 = env
@@ -495,9 +501,7 @@ impl BatchOperations {
             return Err(BatchError::Unauthorized);
         }
 
-        env.storage()
-            .instance()
-            .set(&vote_key, &true);
+        env.storage().instance().set(&vote_key, &true);
 
         if vote_for {
             proposal.votes_for += 1;
@@ -694,9 +698,7 @@ impl BatchOperations {
         }
 
         // Single write for supply — avoids n storage writes.
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalSupply, &supply);
+        env.storage().instance().set(&DataKey::TotalSupply, &supply);
 
         // Update analytics
         Self::record_analytics(&env, n, 2);
@@ -894,10 +896,7 @@ impl BatchOperations {
     // Gas optimization: NftCount loaded once, incremented in-memory, written once.
     //
     /// Mint NFTs to multiple owners atomically.
-    pub fn batch_mint_nft(
-        env: Env,
-        owners: Vec<Address>,
-    ) -> Result<Vec<u32>, BatchError> {
+    pub fn batch_mint_nft(env: Env, owners: Vec<Address>) -> Result<Vec<u32>, BatchError> {
         Self::require_initialized(&env)?;
         Self::require_admin(&env)?;
 
@@ -928,9 +927,7 @@ impl BatchOperations {
         }
 
         // Single write for the updated count.
-        env.storage()
-            .instance()
-            .set(&DataKey::NftCount, &next_id);
+        env.storage().instance().set(&DataKey::NftCount, &next_id);
 
         // Update analytics
         Self::record_analytics(&env, n, 6);

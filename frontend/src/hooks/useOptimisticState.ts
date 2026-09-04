@@ -93,102 +93,72 @@ export function useOptimisticState<T>(
     async (nextValue: T): Promise<boolean> => {
       // Capture current version for this update
       const updateVersion = ++versionRef.current;
-      
-      // Chain this update to the queue to prevent race conditions
-      const previousUpdate = updateQueueRef.current;
-      
-      const updatePromise = (async (): Promise<boolean> => {
-        // Wait for previous update to complete
-        await previousUpdate;
-        
-        // Check if this update is still valid (not superseded)
+
+      // Apply the optimistic value immediately (zero perceived latency).
+      setValue(nextValue);
+      setError(null);
+      setIsPending(true);
+
+      const previousConfirmed = confirmedValue;
+      const startTime = Date.now();
+
+      trackStateUpdate({
+        hookName: monitorName,
+        timestamp: Date.now(),
+        version: updateVersion,
+        updateType: "optimistic",
+      });
+
+      try {
+        const result = await asyncOperation(nextValue);
+
+        // Double-check version hasn't changed during async operation
         if (versionRef.current !== updateVersion) {
-          return false; // Stale update, skip
+          return false; // Superseded by newer update
         }
-        
-        const previousConfirmed = confirmedValue;
-        const startTime = Date.now();
-        
-        // Acquire lock
-        while (lockRef.current) {
-          await new Promise(resolve => setTimeout(resolve, 10));
+
+        // Use server-returned value if provided, else use what we sent
+        const resolved = result !== undefined && result !== null ? (result as T) : nextValue;
+        setConfirmedValue(resolved);
+        setValue(resolved);
+        setIsPending(false);
+
+        const duration = Date.now() - startTime;
+        trackStateUpdate({
+          hookName: monitorName,
+          timestamp: Date.now(),
+          version: updateVersion,
+          updateType: "confirmed",
+          duration,
+        });
+
+        onSuccess?.(resolved, previousConfirmed);
+        return true;
+      } catch (caught) {
+        const err = caught instanceof Error ? caught : new Error(String(caught));
+        setError(err);
+
+        if (rollbackDelayMs > 0) {
+          await new Promise((r) => setTimeout(r, rollbackDelayMs));
         }
-        lockRef.current = true;
 
-        try {
-          // Optimistic update — apply immediately
-          setValue(nextValue);
-          setError(null);
-          
-          trackStateUpdate({
-            hookName: monitorName,
-            timestamp: Date.now(),
-            version: updateVersion,
-            updateType: "optimistic",
-          });
-          
-          if (pendingCountRef.current === 0) {
-            setIsPending(true);
-          }
-          pendingCountRef.current += 1;
+        // Only rollback if this is still the current version
+        if (versionRef.current === updateVersion) {
+          setValue(previousConfirmed);
 
-          const result = await asyncOperation(nextValue);
-          
-          // Double-check version hasn't changed during async operation
-          if (versionRef.current !== updateVersion) {
-            return false; // Superseded by newer update
-          }
-          
-          // Use server-returned value if provided, else use what we sent
-          const resolved = result !== undefined && result !== null ? (result as T) : nextValue;
-          setConfirmedValue(resolved);
-          setValue(resolved);
-          
           const duration = Date.now() - startTime;
           trackStateUpdate({
             hookName: monitorName,
             timestamp: Date.now(),
             version: updateVersion,
-            updateType: "confirmed",
+            updateType: "rollback",
             duration,
           });
-          
-          onSuccess?.(resolved, previousConfirmed);
-          return true;
-        } catch (caught) {
-          const err = caught instanceof Error ? caught : new Error(String(caught));
-          setError(err);
-
-          if (rollbackDelayMs > 0) {
-            await new Promise((r) => setTimeout(r, rollbackDelayMs));
-          }
-
-          // Only rollback if this is still the current version
-          if (versionRef.current === updateVersion) {
-            setValue(previousConfirmed);
-            
-            const duration = Date.now() - startTime;
-            trackStateUpdate({
-              hookName: monitorName,
-              timestamp: Date.now(),
-              version: updateVersion,
-              updateType: "rollback",
-              duration,
-            });
-          }
-          onError?.(err, nextValue, previousConfirmed);
-          return false;
-        } finally {
-          pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
-          if (pendingCountRef.current === 0) {
-            setIsPending(false);
-          }
-          lockRef.current = false;
         }
-      })();
-      
-      updateQueueRef.current = updatePromise;
-      return updatePromise;
+        setIsPending(false);
+        onError?.(err, nextValue, previousConfirmed);
+        return false;
+      }
     },
     [confirmedValue, asyncOperation, onSuccess, onError, rollbackDelayMs]
   );

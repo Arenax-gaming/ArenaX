@@ -13,7 +13,7 @@ const LoadingSkeleton: React.FC<{ height?: string }> = ({ height = 'h-64' }) => 
 
 // Tournament components
 export const DynamicTournamentBracket = dynamic(
-  () => import('@/components/tournaments/TournamentBracket'),
+  () => import('@/components/tournaments/TournamentBracket').then(m => m.TournamentBracket),
   { 
     loading: () => <LoadingSkeleton height="h-96" />,
     ssr: false 
@@ -21,7 +21,7 @@ export const DynamicTournamentBracket = dynamic(
 );
 
 export const DynamicTournamentParticipants = dynamic(
-  () => import('@/components/tournaments/TournamentParticipants'),
+  () => import('@/components/tournaments/TournamentParticipants').then(m => m.TournamentParticipants),
   { 
     loading: () => <LoadingSkeleton height="h-64" />,
     ssr: false 
@@ -29,7 +29,7 @@ export const DynamicTournamentParticipants = dynamic(
 );
 
 export const DynamicTournamentFilter = dynamic(
-  () => import('@/components/tournaments/TournamentFilter'),
+  () => import('@/components/tournaments/TournamentFilter').then(m => m.TournamentFilter),
   { 
     loading: () => <LoadingSkeleton height="h-48" />,
     ssr: false 
@@ -38,7 +38,7 @@ export const DynamicTournamentFilter = dynamic(
 
 // Chart components
 export const DynamicAnalyticsDashboard = dynamic(
-  () => import('@/components/charts/AnalyticsDashboard'),
+  () => import('@/components/charts/AnalyticsDashboard').then(m => m.AnalyticsDashboard),
   { 
     loading: () => <LoadingSkeleton height="h-96" />,
     ssr: false 
@@ -46,7 +46,7 @@ export const DynamicAnalyticsDashboard = dynamic(
 );
 
 export const DynamicPlayerStatsCharts = dynamic(
-  () => import('@/components/charts/PlayerStatsCharts'),
+  () => import('@/components/charts/PlayerStatsCharts').then(m => m.PlayerStatsCharts),
   { 
     loading: () => <LoadingSkeleton height="h-64" />,
     ssr: false 
@@ -54,7 +54,7 @@ export const DynamicPlayerStatsCharts = dynamic(
 );
 
 export const DynamicTournamentResultsCharts = dynamic(
-  () => import('@/components/charts/TournamentResultsCharts'),
+  () => import('@/components/charts/TournamentResultsCharts').then(m => m.TournamentResultsCharts),
   { 
     loading: () => <LoadingSkeleton height="h-64" />,
     ssr: false 
@@ -63,7 +63,7 @@ export const DynamicTournamentResultsCharts = dynamic(
 
 // Match components
 export const DynamicMatchDetailView = dynamic(
-  () => import('@/components/match/MatchDetailView'),
+  () => import('@/components/match/MatchDetailView').then(m => m.MatchDetailView),
   { 
     loading: () => <LoadingSkeleton height="h-96" />,
     ssr: false 
@@ -72,7 +72,7 @@ export const DynamicMatchDetailView = dynamic(
 
 // Tournament registration
 export const DynamicJoinTournamentButton = dynamic(
-  () => import('@/components/tournaments/JoinTournamentButton'),
+  () => import('@/components/tournaments/JoinTournamentButton').then(m => m.JoinTournamentButton),
   { 
     loading: () => <LoadingSkeleton height="h-12" />,
     ssr: false 
@@ -80,7 +80,7 @@ export const DynamicJoinTournamentButton = dynamic(
 );
 
 export const DynamicQuickJoinModal = dynamic(
-  () => import('@/components/tournaments/QuickJoinModal'),
+  () => import('@/components/tournaments/QuickJoinModal').then(m => m.QuickJoinModal),
   { 
     loading: () => null,
     ssr: false 

@@ -112,9 +112,16 @@ jest.mock("react-window", () => {
   return { FixedSizeList, VariableSizeList, FixedSizeGrid };
 });
 
-// Mock ResizeObserver (not available in jsdom)
+// Mock ResizeObserver (not available in jsdom). Fires the callback with a
+// fixed width so virtual grids measure their container and render items.
 global.ResizeObserver = class {
-  observe() {}
+  private cb: ResizeObserverCallback;
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb;
+  }
+  observe(el: Element) {
+    this.cb([{ contentRect: { width: 800 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+  }
   unobserve() {}
   disconnect() {}
 };
@@ -206,6 +213,7 @@ describe("VirtualList", () => {
   });
 
   it("calls onLoadMore when scrolled near the bottom", () => {
+    jest.useFakeTimers();
     const onLoadMore = jest.fn();
     const items = Array.from({ length: 100 }, (_, i) => i);
     render(
@@ -222,7 +230,12 @@ describe("VirtualList", () => {
     const list = screen.getByTestId("fixed-size-list");
     // Simulate a scroll near the end (offset > total - height - threshold)
     fireEvent.scroll(list, { target: { scrollTop: 3800 } });
+    // Flush the rAF throttle and the 150ms onLoadMore debounce
+    act(() => {
+      jest.runAllTimers();
+    });
     expect(onLoadMore).toHaveBeenCalled();
+    jest.useRealTimers();
   });
 });
 

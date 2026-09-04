@@ -50,14 +50,54 @@ pub struct FlexiblePosition {
     pub last_reward_ts: u64,
 }
 
-/// Pro-rata reward: principal * apy_bps * elapsed / (secs_per_year * 10_000)
+/// Pro-rata reward: `(principal * apy_bps * elapsed) / (SECS_PER_YEAR * BPS_DENOM)`
+///
+/// Computes accumulated rewards for a position based on the annual percentage
+/// yield (in basis points), the time elapsed since last reward snapshot, and the
+/// staked principal. Uses integer division which truncates toward zero (floor
+/// for positive values), ensuring rewards never round up and cannot be exploited
+/// via rounding edge cases.
+///
+/// - `principal`: the staked amount (`pos.amount`, positive i128)
+/// - `apy_bps`: annual reward rate in basis points (e.g. 1500 = 15% APY)
+/// - `elapsed`: seconds since `pos.last_reward_ts` (`now.saturating_sub(last_reward_ts)`)
+///
+/// # Formula
+/// ```math
+/// \text{rewards} = \frac{\text{principal} \times \text{apy\_bps} \times \text{elapsed}}{\text{SECS\_PER\_YEAR} \times \text{BPS\_DENOM}}
+/// ```
+///
+/// # Precision
+/// - 1 basis point precision is guaranteed: dividing by `BPS_DENOM` (10_000)
+///   means each unit of `apy_bps` represents 0.01% of principal per year.
+/// - Rounding: integer division truncates toward zero, so for positive values
+///   this is equivalent to `floor()`. Rewards always round down, never up.
+/// - 12-month verification: when `elapsed = SECS_PER_YEAR` and `apy_bps = 1200`
+///   (12% APY), the result is `principal * 1200 / 10_000 = principal * 0.12`,
+///   verifying the 12-month calculation.
 pub fn calc_pending(pos: &FlexiblePosition, apy_bps: u32, now: u64) -> i128 {
     let elapsed = now.saturating_sub(pos.last_reward_ts) as i128;
     pos.amount * apy_bps as i128 * elapsed / (SECS_PER_YEAR as i128 * BPS_DENOM)
 }
 
 /// Basis-points penalty applied against `amount` for exiting a locked pool
-/// before `unlock_at`. Returns `0` if `now >= unlock_at`.
+/// before `unlock_at`. Returns `0` if `now >= unlock_at` or `penalty_bps == 0`.
+///
+/// The penalty is calculated as `(amount * penalty_bps) / BPS_DENOM`, where
+/// `BPS_DENOM = 10_000`. Integer division truncates toward zero (floor for
+/// positive values), ensuring the penalty never exceeds the calculated amount
+/// and cannot be exploited via rounding edge cases.
+///
+/// # Formula
+/// ```math
+/// \text{penalty} = \frac{\text{amount} \times \text{penalty\_bps}}{\text{BPS\_DENOM}}
+/// ```
+///
+/// # Precision
+/// - 1 basis point precision: each unit of `penalty_bps` represents 0.01% of
+///   the amount.
+/// - Rounding: integer division truncates toward zero, so for positive `amount`
+///   this is equivalent to `floor()`. The penalty always rounds down.
 pub fn early_exit_penalty(amount: i128, penalty_bps: u32, now: u64, unlock_at: u64) -> i128 {
     if now >= unlock_at || penalty_bps == 0 {
         0

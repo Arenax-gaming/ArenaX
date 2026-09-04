@@ -9,12 +9,14 @@ import { TournamentRules } from "@/components/tournaments/TournamentRules";
 import { TournamentParticipants } from "@/components/tournaments/TournamentParticipants";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { SingleEliminationBracket } from "@/components/bracket/SingleEliminationBracket";
+import { BracketErrorBoundary } from "@/components/bracket/BracketErrorBoundary";
 import { generateMockBracket } from "@/data/mockBracket";
 import { ArrowLeft, RadioTower, ShieldAlert, Swords, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
+import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
 
 export function TournamentDetailsPageClient() {
@@ -129,6 +131,7 @@ export function TournamentDetailsPageClient() {
             bannerSizes={TOURNAMENT_DETAIL_BANNER_SIZES}
           />
 
+
           {showBracket && bracketData ? (
             <section className="space-y-4">
               <div className="grid gap-4 md:grid-cols-3">
@@ -177,10 +180,20 @@ export function TournamentDetailsPageClient() {
                   ) : null}
                 </div>
 
-                <SingleEliminationBracket
-                  bracketData={bracketData}
-                  currentUserId={currentUserId}
-                />
+                <BracketErrorBoundary
+                  tournamentName={tournament.name}
+                  tournamentId={tournament.id}
+                  tournamentInfo={{
+                    status: tournament.status,
+                    participantCount: tournament.participants?.length,
+                    startDate: tournament.startDate,
+                  }}
+                >
+                  <SingleEliminationBracket
+                    bracketData={bracketData}
+                    currentUserId={currentUserId}
+                  />
+                </BracketErrorBoundary>
               </div>
             </section>
           ) : null}

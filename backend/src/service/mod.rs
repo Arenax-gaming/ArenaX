@@ -1,6 +1,7 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
 pub mod analytics_service;
+pub mod feature_flags;
 pub mod auth_service;
 pub mod governance_service;
 pub mod idempotency_service;
@@ -8,6 +9,7 @@ pub mod leaderboard_service;
 pub mod match_authority_service;
 pub mod match_service;
 pub mod match_service_background;
+pub mod player_stats_service;
 pub mod reaper_service;
 pub mod matchmaker;
 pub mod reputation_service;
@@ -25,6 +27,7 @@ pub use governance_service::{
     ProposalStatus as GovProposalStatus,
 };
 pub use achievement_service::AchievementService;
+pub use feature_flags::FeatureFlagService;
 pub use idempotency_service::IdempotencyService;
 pub use leaderboard_service::LeaderboardService;
 pub use match_authority_service::MatchAuthorityService;

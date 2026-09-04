@@ -27,6 +27,8 @@ interface FileUploadProps {
   compression?: { maxDimension?: number; quality?: number };
   /** Analytics hook for upload events */
   onUploadAnalytics?: (event: { type: string; payload?: any }) => void;
+  /** Accessible name for the hidden file input (default "File upload"). */
+  label?: string;
 }
 
 export function FileUpload({
@@ -45,6 +47,7 @@ export function FileUpload({
   enableCompression = true,
   compression = { maxDimension: 1280, quality: 0.8 },
   onUploadAnalytics,
+  label = 'File upload',
 }: FileUploadProps) {
   const [rejectionError, setRejectionError] = useState<string | null>(null);
   const [internalUploading, setInternalUploading] = useState(false);
@@ -59,7 +62,12 @@ export function FileUpload({
       setUploadError(null);
       if (fileRejections.length > 0) {
         const error = fileRejections[0].errors[0];
-        setRejectionError(error.message);
+        // Friendlier message than react-dropzone's default byte-count text.
+        const message =
+          error.code === 'file-too-large'
+            ? `File size must not exceed ${maxSize / 1024 / 1024}MB`
+            : error.message;
+        setRejectionError(message);
         if (onFileRejected) {
           onFileRejected(fileRejections);
         }
@@ -187,7 +195,7 @@ export function FileUpload({
             disabled && 'cursor-not-allowed opacity-50'
           )}
         >
-          <input {...inputProps} />
+          <input {...inputProps} aria-label={label} />
           {displayedUploading ? (
             <div className="text-center">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />

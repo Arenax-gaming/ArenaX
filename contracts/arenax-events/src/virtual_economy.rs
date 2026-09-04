@@ -266,7 +266,12 @@ pub fn emit_dutch_auction_created(
     .publish(env);
 }
 
-pub fn emit_dutch_auction_purchased(env: &Env, listing_id: &BytesN<32>, buyer: &Address, price: i128) {
+pub fn emit_dutch_auction_purchased(
+    env: &Env,
+    listing_id: &BytesN<32>,
+    buyer: &Address,
+    price: i128,
+) {
     DutchAuctionPurchased {
         listing_id: listing_id.clone(),
         buyer: buyer.clone(),
@@ -342,6 +347,241 @@ pub fn emit_bonding_curve_drop_updated(env: &Env, drop_id: &BytesN<32>, active: 
     BondingCurveDropUpdated {
         drop_id: drop_id.clone(),
         active,
+    }
+    .publish(env);
+}
+
+// ─── Price Oracle ─────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_CONFIGURED"])]
+pub struct OracleConfigured {
+    pub primary_oracle: Address,
+    pub update_interval: u64,
+    pub max_variance_bps: u32,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_FALLBACK_SET"])]
+pub struct OracleFallbackSet {
+    pub fallback_oracle: Address,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PRICE_UPDATED"])]
+pub struct OraclePriceUpdated {
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+    pub used_fallback: bool,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PRICE_REJECTED"])]
+pub struct OraclePriceRejected {
+    pub asset_pair: BytesN<32>,
+    pub submitted_price: i128,
+    pub last_accepted_price: i128,
+    pub variance_bps: u32,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "ORACLE_PAIR_REGISTERED"])]
+pub struct OraclePairRegistered {
+    pub asset_pair: BytesN<32>,
+    pub update_interval: u64,
+}
+
+pub fn emit_oracle_configured(
+    env: &Env,
+    primary_oracle: &Address,
+    update_interval: u64,
+    max_variance_bps: u32,
+) {
+    OracleConfigured {
+        primary_oracle: primary_oracle.clone(),
+        update_interval,
+        max_variance_bps,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_fallback_set(env: &Env, fallback_oracle: &Address) {
+    OracleFallbackSet {
+        fallback_oracle: fallback_oracle.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_price_updated(
+    env: &Env,
+    asset_pair: &BytesN<32>,
+    price: i128,
+    timestamp: u64,
+    used_fallback: bool,
+) {
+    OraclePriceUpdated {
+        asset_pair: asset_pair.clone(),
+        price,
+        timestamp,
+        used_fallback,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_price_rejected(
+    env: &Env,
+    asset_pair: &BytesN<32>,
+    submitted_price: i128,
+    last_accepted_price: i128,
+    variance_bps: u32,
+) {
+    OraclePriceRejected {
+        asset_pair: asset_pair.clone(),
+        submitted_price,
+        last_accepted_price,
+        variance_bps,
+    }
+    .publish(env);
+}
+
+pub fn emit_oracle_pair_registered(env: &Env, asset_pair: &BytesN<32>, update_interval: u64) {
+    OraclePairRegistered {
+        asset_pair: asset_pair.clone(),
+        update_interval,
+    }
+    .publish(env);
+}
+
+// ─── Fair Launch ──────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "FAIR_LAUNCH_CONFIGURED"])]
+pub struct FairLaunchConfigured {
+    pub whitelist_start: u64,
+    pub public_start: u64,
+    pub total_supply_cap: i128,
+    pub base_price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "FAIR_LAUNCH_PURCHASE"])]
+pub struct FairLaunchPurchase {
+    pub buyer: Address,
+    pub amount: i128,
+    pub phase: u32,
+    pub price: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "WHITELIST_ADDED"])]
+pub struct WhitelistAdded {
+    pub address: Address,
+}
+
+pub fn emit_fair_launch_configured(
+    env: &Env,
+    whitelist_start: u64,
+    public_start: u64,
+    total_supply_cap: i128,
+    base_price: i128,
+) {
+    FairLaunchConfigured {
+        whitelist_start,
+        public_start,
+        total_supply_cap,
+        base_price,
+    }
+    .publish(env);
+}
+
+pub fn emit_fair_launch_purchase(
+    env: &Env,
+    buyer: &Address,
+    amount: i128,
+    phase: u32,
+    price: i128,
+) {
+    FairLaunchPurchase {
+        buyer: buyer.clone(),
+        amount,
+        phase,
+        price,
+    }
+    .publish(env);
+}
+
+pub fn emit_whitelist_added(env: &Env, address: &Address) {
+    WhitelistAdded {
+        address: address.clone(),
+    }
+    .publish(env);
+}
+
+// ─── NFT Staking ──────────────────────────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKING_CONFIGURED"])]
+pub struct NftStakingConfigured {
+    pub reward_rate_bps: u32,
+    pub reward_interval: u64,
+    pub min_lock_period: u64,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKED"])]
+pub struct NftStaked {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub staked_at: u64,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_UNSTAKED"])]
+pub struct NftUnstaked {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub rewards_claimed: i128,
+}
+
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_STAKING_REWARDS_CLAIMED"])]
+pub struct NftStakingRewardsClaimed {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub amount: i128,
+}
+
+pub fn emit_nft_staking_configured(
+    env: &Env,
+    reward_rate_bps: u32,
+    reward_interval: u64,
+    min_lock_period: u64,
+) {
+    NftStakingConfigured {
+        reward_rate_bps,
+        reward_interval,
+        min_lock_period,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_staked(env: &Env, token_id: &BytesN<32>, owner: &Address, staked_at: u64) {
+    NftStaked {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        staked_at,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_unstaked(env: &Env, token_id: &BytesN<32>, owner: &Address, rewards_claimed: i128) {
+    NftUnstaked {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        rewards_claimed,
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_staking_rewards_claimed(
+    env: &Env,
+    token_id: &BytesN<32>,
+    owner: &Address,
+    amount: i128,
+) {
+    NftStakingRewardsClaimed {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        amount,
     }
     .publish(env);
 }

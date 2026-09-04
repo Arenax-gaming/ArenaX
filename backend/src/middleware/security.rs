@@ -6,18 +6,18 @@
 /// - Audit logging of every mutating request
 /// - DDoS heuristics (burst detection, IP blocking)
 /// - Security-event monitoring (emits structured log entries)
+/// - Gradual exponential backoff on repeated violations
+/// - IP whitelist/blacklist enforcement
 use std::{
     future::{ready, Ready},
     rc::Rc,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    http::StatusCode,
-    web, Error, HttpResponse,
+    Error, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use redis::aio::ConnectionManager;
@@ -40,6 +40,15 @@ pub struct SecurityConfig {
     pub burst_threshold: u32,
     /// How long (seconds) a burst-blocked IP stays blocked
     pub block_duration_secs: u64,
+    /// Base delay in seconds for exponential backoff (first violation)
+    pub backoff_base_secs: u64,
+    /// Maximum delay in seconds for exponential backoff (cap)
+    pub backoff_max_secs: u64,
+    /// TTL in seconds for the per-IP backoff counter; violations decay after this
+    pub backoff_window_secs: u64,
+    /// After this many consecutive violations within the backoff window,
+    /// escalate from Retry-After to a temporary block
+    pub backoff_block_threshold: u32,
 }
 
 impl Default for SecurityConfig {
@@ -51,6 +60,10 @@ impl Default for SecurityConfig {
             max_body_bytes: 1_048_576, // 1 MiB
             burst_threshold: 30,
             block_duration_secs: 300,
+            backoff_base_secs: 1,
+            backoff_max_secs: 60,
+            backoff_window_secs: 300,
+            backoff_block_threshold: 5,
         }
     }
 }
@@ -68,6 +81,9 @@ pub struct AuditEntry {
     pub latency_ms: u64,
     pub blocked: bool,
     pub rate_limited: bool,
+    /// Correlation id set by [`crate::middleware::tracing_middleware::RequestTracing`],
+    /// so audit entries can be cross-referenced with the distributed trace.
+    pub correlation_id: Option<String>,
 }
 
 // ─── Transform (factory) ──────────────────────────────────────────────────────
@@ -135,10 +151,16 @@ where
             let ip = extract_ip(&req);
             let path = req.path().to_string();
             let method = req.method().to_string();
-
-            // ── 1. Check if IP is blocked (DDoS) ─────────────────────────────
-            let block_key = format!("sec:block:{}", ip);
+            let correlation_id = crate::middleware::tracing_middleware::correlation_id(&req);
             let mut conn = (*redis).clone();
+
+            // ── 0. Whitelist check — bypass all security ──────────────────────
+            if crate::middleware::ip_list::is_whitelisted(&mut conn, &ip).await {
+                return svc.call(req).await.map(|res| res.map_into_left_body());
+            }
+
+            // ── 1. Check if IP is blocked (DDoS or backoff escalation) ───────
+            let block_key = format!("sec:block:{}", ip);
             let blocked: bool = redis::cmd("EXISTS")
                 .arg(&block_key)
                 .query_async(&mut conn)
@@ -157,9 +179,17 @@ where
                     latency_ms: 0,
                     blocked: true,
                     rate_limited: false,
+                    correlation_id: correlation_id.clone(),
                 });
-                let resp = HttpResponse::TooManyRequests()
-                    .json(serde_json::json!({"error": "blocked", "code": "DDOS_BLOCK"}));
+                let retry_after = redis::cmd("TTL")
+                    .arg(&block_key)
+                    .query_async::<i64>(&mut conn)
+                    .await
+                    .unwrap_or(config.block_duration_secs as i64)
+                    .max(1) as u64;
+                let mut resp = HttpResponse::TooManyRequests()
+                    .json(serde_json::json!({"error": "blocked", "code": "DDOS_BLOCK", "retry_after": retry_after}));
+                insert_header(&mut resp, "Retry-After", retry_after);
                 return Ok(req.into_response(resp).map_into_right_body());
             }
 
@@ -183,9 +213,14 @@ where
                     .query_async(&mut conn)
                     .await
                     .unwrap_or(());
+                // Increment backoff counter
+                let backoff_level = increment_backoff(&mut conn, &ip, &config).await;
                 emit_security_event("BURST_BLOCK", &ip, &path, burst_count);
-                let resp = HttpResponse::TooManyRequests()
-                    .json(serde_json::json!({"error": "rate limited", "code": "BURST_LIMIT"}));
+                let retry_after = calculate_backoff(backoff_level, &config);
+                let mut resp = HttpResponse::TooManyRequests()
+                    .json(serde_json::json!({"error": "rate limited", "code": "BURST_LIMIT", "retry_after": retry_after, "backoff_level": backoff_level}));
+                insert_header(&mut resp, "Retry-After", retry_after);
+                insert_header(&mut resp, "X-Backoff-Level", backoff_level);
                 return Ok(req.into_response(resp).map_into_right_body());
             }
 
@@ -202,6 +237,27 @@ where
 
             if ip_count > config.rate_limit_per_ip {
                 warn!(ip = %ip, count = ip_count, "IP rate limit exceeded");
+                let backoff_level = increment_backoff(&mut conn, &ip, &config).await;
+
+                // Escalate to block if threshold reached
+                if backoff_level >= config.backoff_block_threshold {
+                    warn!(ip = %ip, level = backoff_level, "Backoff threshold reached — escalating to block");
+                    let _: () = redis::cmd("SETEX")
+                        .arg(&block_key)
+                        .arg(config.block_duration_secs)
+                        .arg(1u8)
+                        .query_async(&mut conn)
+                        .await
+                        .unwrap_or(());
+                    emit_security_event("BACKOFF_BLOCK", &ip, &path, backoff_level);
+                    let retry_after = config.block_duration_secs;
+                    let mut resp = HttpResponse::TooManyRequests()
+                        .json(serde_json::json!({"error": "blocked", "code": "BACKOFF_BLOCK", "retry_after": retry_after, "backoff_level": backoff_level}));
+                    insert_header(&mut resp, "Retry-After", retry_after);
+                    insert_header(&mut resp, "X-Backoff-Level", backoff_level);
+                    return Ok(req.into_response(resp).map_into_right_body());
+                }
+
                 emit_audit(AuditEntry {
                     ts: start / 1000,
                     ip: ip.clone(),
@@ -212,9 +268,13 @@ where
                     latency_ms: now_ms() - start,
                     blocked: false,
                     rate_limited: true,
+                    correlation_id: correlation_id.clone(),
                 });
-                let resp = HttpResponse::TooManyRequests()
-                    .json(serde_json::json!({"error": "rate limited", "code": "IP_RATE_LIMIT"}));
+                let retry_after = calculate_backoff(backoff_level, &config);
+                let mut resp = HttpResponse::TooManyRequests()
+                    .json(serde_json::json!({"error": "rate limited", "code": "IP_RATE_LIMIT", "retry_after": retry_after, "backoff_level": backoff_level}));
+                insert_header(&mut resp, "Retry-After", retry_after);
+                insert_header(&mut resp, "X-Backoff-Level", backoff_level);
                 return Ok(req.into_response(resp).map_into_right_body());
             }
 
@@ -244,14 +304,15 @@ where
             if method_is_mutating(&method) || status >= 400 {
                 emit_audit(AuditEntry {
                     ts: start / 1000,
-                    ip,
+                    ip: ip.clone(),
                     method,
-                    path,
+                    path: path.clone(),
                     status,
                     user_id: None, // populated by auth layer if needed
                     latency_ms: latency,
                     blocked: false,
                     rate_limited: false,
+                    correlation_id: correlation_id.clone(),
                 });
             }
 
@@ -279,30 +340,53 @@ where
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-fn extract_ip(req: &ServiceRequest) -> String {
-    // Respect X-Forwarded-For (set by trusted reverse proxy)
-    req.headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            req.connection_info()
-                .realip_remote_addr()
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+use super::{extract_ip, now_ms};
 
 fn method_is_mutating(method: &str) -> bool {
     matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
+}
+
+// ─── Gradual backoff helpers ─────────────────────────────────────────────────
+
+/// Increment the per-IP backoff violation counter.
+///
+/// Returns the new violation level (1-based). The counter auto-decays after
+/// `backoff_window_secs` seconds of clean behaviour.
+async fn increment_backoff(
+    conn: &mut ConnectionManager,
+    ip: &str,
+    config: &SecurityConfig,
+) -> u32 {
+    let key = format!("sec:backoff:{}", ip);
+    let count: u32 = redis::pipe()
+        .atomic()
+        .cmd("INCR").arg(&key)
+        .cmd("EXPIRE").arg(&key).arg(config.backoff_window_secs)
+        .query_async::<Vec<i64>>(conn)
+        .await
+        .map(|v| v.first().copied().unwrap_or(0) as u32)
+        .unwrap_or(0);
+    count
+}
+
+/// Calculate the exponential backoff delay for a given violation level.
+///
+/// `delay = min(base * 2^(level - 1), max)`
+fn calculate_backoff(level: u32, config: &SecurityConfig) -> u64 {
+    if level == 0 {
+        return 0;
+    }
+    let delay = config.backoff_base_secs.saturating_mul(1u64 << (level.saturating_sub(1)));
+    delay.min(config.backoff_max_secs)
+}
+
+/// Insert a header into an `HttpResponse`.
+fn insert_header(response: &mut HttpResponse, name: &'static str, value: impl ToString) {
+    use actix_web::http::header::{HeaderName, HeaderValue};
+    let n = HeaderName::from_static(name);
+    if let Ok(v) = HeaderValue::from_str(&value.to_string()) {
+        response.headers_mut().insert(n, v);
+    }
 }
 
 fn emit_audit(entry: AuditEntry) {

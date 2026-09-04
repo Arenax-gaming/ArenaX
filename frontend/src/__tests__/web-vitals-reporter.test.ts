@@ -38,6 +38,16 @@ describe('evaluateMetric', () => {
 });
 
 describe('createWebVitalsReporter', () => {
+  // The reporter gates shipping on NODE_ENV === 'production' (Jest runs
+  // with NODE_ENV=test), so switch to production for this describe block.
+  beforeAll(() => {
+    process.env.NODE_ENV = 'production';
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = 'test';
+  });
+
   const metric = (overrides: Partial<WebVitalMetric> = {}): WebVitalMetric => ({
     name: 'LCP',
     value: 1000,
@@ -103,6 +113,7 @@ describe('createWebVitalsReporter', () => {
   it('swallows fetch errors so a flaky endpoint cannot crash the app', async () => {
     const fetcher = jest.fn().mockRejectedValue(new Error('network down'));
     const reporter = createWebVitalsReporter({
+      endpoint: '/api/v1/analytics/events',
       bufferSize: 1,
       fetcher: fetcher as unknown as typeof fetch,
     });

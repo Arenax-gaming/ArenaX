@@ -8,7 +8,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
+import { z } from "zod";
+import { loginSchema } from "@/lib/validations/auth";
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import { Button } from "@/components/ui/Button";
@@ -33,7 +34,7 @@ export function LoginForm({ className }: LoginFormProps) {
   const analytics = useFormAnalytics("login");
   const { track } = useAnalytics();
 
-  const form = useForm<LoginFormData>({
+  const form = useForm<z.input<typeof loginSchema>, any, z.output<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: "",
@@ -58,7 +59,7 @@ export function LoginForm({ className }: LoginFormProps) {
     return () => subscription.unsubscribe();
   }, [form, analytics]);
 
-  const onSubmit = async (data: LoginFormData) => {
+  const onSubmit = async (data: z.output<typeof loginSchema>) => {
     await login({ email: data.email, password: data.password, rememberMe: data.rememberMe });
 
     if (!error) {
