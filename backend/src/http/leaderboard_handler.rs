@@ -1,10 +1,11 @@
 use actix_web::{web, HttpResponse, Result};
+use chrono::{Duration, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
-use crate::models::{PaginatedResponse, PaginationParams};
+use crate::models::{EloHistoryQuery, PaginatedResponse, PaginationParams};
 use crate::service::LeaderboardService;
 
 /// GET /api/v1/leaderboards/:category
@@ -80,6 +81,29 @@ pub async fn get_rank_history(
 
     let history = service
         .get_rank_history(player_id, &category, days)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(history))
+}
+
+/// GET /api/v1/leaderboards/:category/player/:player_id/elo-history
+///
+/// Returns daily ELO snapshots, progression chart data, highest/lowest records,
+/// and a volatility metric for the player, scoped to an optional date range
+/// (`start_date` / `end_date` query params, defaulting to the last 30 days).
+pub async fn get_elo_history(
+    pool: web::Data<PgPool>,
+    path: web::Path<(String, Uuid)>,
+    query: web::Query<EloHistoryQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let (category, player_id) = path.into_inner();
+    let service = LeaderboardService::new(pool.get_ref().clone());
+
+    let end_date = query.end_date.unwrap_or_else(Utc::now);
+    let start_date = query.start_date.unwrap_or_else(|| end_date - Duration::days(30));
+
+    let history = service
+        .get_elo_history(player_id, &category, start_date, end_date)
         .await?;
 
     Ok(HttpResponse::Ok().json(history))

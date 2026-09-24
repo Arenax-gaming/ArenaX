@@ -1,9 +1,10 @@
 use crate::api_error::ApiError;
 use crate::models::{
+    EloHistoryResponse, EloProgressionPoint, EloRecord, EloSnapshot, EloVolatility,
     LeaderboardEntry, LeaderboardResponse, PlayerRankResponse, RankHistory, RankHistoryEntry,
     SeasonalLeaderboard, LeaderboardStats,
 };
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, NaiveDate, Utc, Duration};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -396,6 +397,214 @@ impl LeaderboardService {
             median_elo: median_elo.unwrap_or(1200),
             top_player_elo: top_player_elo.unwrap_or(1200),
             last_updated: Utc::now(),
+        })
+    }
+
+    /// Get one end-of-day ELO snapshot per day for a player within a date range.
+    /// Derived from `elo_history` (populated on every rated match) rather than a
+    /// separately maintained table, so snapshots are always consistent with match results.
+    pub async fn get_elo_snapshots(
+        &self,
+        player_id: Uuid,
+        category: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<EloSnapshot>, ApiError> {
+        if start_date > end_date {
+            return Err(ApiError::bad_request("start_date must be before end_date"));
+        }
+
+        let snapshots = sqlx::query_as::<_, (NaiveDate, i32)>(
+            r#"
+            SELECT DISTINCT ON (day) day, rating_after
+            FROM (
+                SELECT (created_at AT TIME ZONE 'UTC')::date AS day, rating_after, created_at
+                FROM elo_history
+                WHERE user_id = $1 AND game = $2 AND created_at BETWEEN $3 AND $4
+            ) daily
+            ORDER BY day, created_at DESC
+            "#
+        )
+        .bind(player_id)
+        .bind(category)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(snapshots
+            .into_iter()
+            .map(|(date, elo_rating)| EloSnapshot { date, elo_rating })
+            .collect())
+    }
+
+    fn build_progression(snapshots: &[EloSnapshot]) -> Vec<EloProgressionPoint> {
+        let mut previous_elo: Option<i32> = None;
+        snapshots
+            .iter()
+            .map(|snapshot| {
+                let change_from_previous = previous_elo
+                    .map(|prev| snapshot.elo_rating - prev)
+                    .unwrap_or(0);
+                previous_elo = Some(snapshot.elo_rating);
+                EloProgressionPoint {
+                    date: snapshot.date,
+                    elo_rating: snapshot.elo_rating,
+                    change_from_previous,
+                }
+            })
+            .collect()
+    }
+
+    /// Get day-by-day ELO progression chart data (with change from the previous day)
+    /// for a player within a date range.
+    pub async fn get_elo_progression(
+        &self,
+        player_id: Uuid,
+        category: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<EloProgressionPoint>, ApiError> {
+        let snapshots = self
+            .get_elo_snapshots(player_id, category, start_date, end_date)
+            .await?;
+
+        Ok(Self::build_progression(&snapshots))
+    }
+
+    /// Get the highest and lowest ELO ratings recorded for a player within a date range.
+    pub async fn get_elo_extremes(
+        &self,
+        player_id: Uuid,
+        category: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<(Option<EloRecord>, Option<EloRecord>), ApiError> {
+        let highest = sqlx::query_as::<_, (i32, DateTime<Utc>, Option<Uuid>)>(
+            r#"
+            SELECT rating_after, created_at, match_id
+            FROM elo_history
+            WHERE user_id = $1 AND game = $2 AND created_at BETWEEN $3 AND $4
+            ORDER BY rating_after DESC, created_at ASC
+            LIMIT 1
+            "#
+        )
+        .bind(player_id)
+        .bind(category)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        let lowest = sqlx::query_as::<_, (i32, DateTime<Utc>, Option<Uuid>)>(
+            r#"
+            SELECT rating_after, created_at, match_id
+            FROM elo_history
+            WHERE user_id = $1 AND game = $2 AND created_at BETWEEN $3 AND $4
+            ORDER BY rating_after ASC, created_at ASC
+            LIMIT 1
+            "#
+        )
+        .bind(player_id)
+        .bind(category)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        let to_record = |row: (i32, DateTime<Utc>, Option<Uuid>)| EloRecord {
+            elo_rating: row.0,
+            recorded_at: row.1,
+            match_id: row.2,
+        };
+
+        Ok((highest.map(to_record), lowest.map(to_record)))
+    }
+
+    /// Get ELO volatility metrics (standard deviation and average magnitude of rating
+    /// changes) for a player within a date range.
+    pub async fn get_elo_volatility(
+        &self,
+        player_id: Uuid,
+        category: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<EloVolatility, ApiError> {
+        let (std_deviation, average_change, max_swing, sample_size) = sqlx::query_as::<
+            _,
+            (Option<f64>, Option<f64>, Option<i32>, i64),
+        >(
+            r#"
+            SELECT
+                STDDEV_POP(rating_change::float8) as std_deviation,
+                AVG(ABS(rating_change))::float8 as average_change,
+                MAX(ABS(rating_change)) as max_swing,
+                COUNT(*) as sample_size
+            FROM elo_history
+            WHERE user_id = $1 AND game = $2 AND created_at BETWEEN $3 AND $4
+            "#
+        )
+        .bind(player_id)
+        .bind(category)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(EloVolatility {
+            std_deviation: std_deviation.unwrap_or(0.0),
+            average_change: average_change.unwrap_or(0.0),
+            max_swing: max_swing.unwrap_or(0),
+            sample_size,
+        })
+    }
+
+    /// Get full historical ELO analytics for a player: daily snapshots, progression
+    /// chart data, highest/lowest records, and volatility — all scoped to a date range.
+    pub async fn get_elo_history(
+        &self,
+        player_id: Uuid,
+        category: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<EloHistoryResponse, ApiError> {
+        if start_date > end_date {
+            return Err(ApiError::bad_request("start_date must be before end_date"));
+        }
+
+        let username = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
+            .bind(player_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::DatabaseError(e))?
+            .ok_or_else(|| ApiError::NotFound)?;
+
+        let snapshots = self
+            .get_elo_snapshots(player_id, category, start_date, end_date)
+            .await?;
+        let progression = Self::build_progression(&snapshots);
+        let (highest, lowest) = self
+            .get_elo_extremes(player_id, category, start_date, end_date)
+            .await?;
+        let volatility = self
+            .get_elo_volatility(player_id, category, start_date, end_date)
+            .await?;
+
+        Ok(EloHistoryResponse {
+            user_id: player_id,
+            username,
+            category: category.to_string(),
+            start_date,
+            end_date,
+            snapshots,
+            progression,
+            highest,
+            lowest,
+            volatility,
         })
     }
 }
