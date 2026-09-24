@@ -18,6 +18,7 @@ import queueRoutes from './queue.routes';
 import accessControlRoutes from './access-control.routes';
 import crossGameAssetRoutes from './cross-game-asset.routes';
 import i18nRoutes from './i18n.routes';
+import paymentWebhookRoutes from './payment-webhook.routes';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';

@@ -10,10 +10,13 @@ import { api } from "@/lib/api";
 
 interface JoinTournamentButtonProps {
   tournament: Tournament;
+  /** When present, registers the whole party (issue #1102). */
+  partyId?: string;
 }
 
 export function JoinTournamentButton({
   tournament,
+  partyId,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
   const { notify, addToast } = useNotifications();
@@ -131,7 +134,7 @@ export function JoinTournamentButton({
     setErrorMessage(null);
 
     try {
-      await api.joinTournament(tournament.id);
+      await api.joinTournament(tournament.id, partyId);
       if (!mountedRef.current) return;
 
       setJoinStatus("success");
@@ -319,7 +322,9 @@ export function JoinTournamentButton({
               {joinStatus === "confirming" && (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Processing your tournament registration...
+                    {partyId
+                      ? "Registering your whole party for this tournament..."
+                      : "Processing your tournament registration..."}
                   </p>
                   <div className="space-y-3">
                     <div className="flex justify-between text-sm">

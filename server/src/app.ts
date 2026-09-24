@@ -96,7 +96,17 @@ export const createApp = (): Express => {
             credentials: true
         })
     );
-    app.use(express.json());
+    // Capture the raw body while parsing JSON so signature-verifying
+    // middleware (e.g. Paystack / Flutterwave webhooks) can recompute HMACs
+    // over the exact bytes the provider signed.
+    app.use(
+        express.json({
+            limit: '1mb',
+            verify: (req: Request, _res, buf: Buffer) => {
+                (req as Request).rawBody = buf;
+            }
+        })
+    );
 
     // OWASP Top 10 Protections
     app.use(xss()); // Prevent XSS attacks

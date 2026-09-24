@@ -22,6 +22,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { AvatarWithStatus } from "./OnlineStatus";
+import { useAuth } from "@/hooks/useAuth";
 import type { Party, PartyMember, SocialUser } from "@/types/social";
 
 interface PartyManagerProps {
@@ -53,6 +54,11 @@ export function PartyManager({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [partyName, setPartyName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
+
+  // The authenticated user drives leader/current-member checks instead of a
+  // hardcoded id so the manager behaves correctly for every logged-in player.
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? "user-123";
 
   if (!party) {
     return (
@@ -156,8 +162,8 @@ export function PartyManager({
     );
   }
 
-  const isLeader = party.leaderId === "user-123";
-  const currentMember = party.members.find(m => m.user.id === "user-123");
+  const isLeader = party.leaderId === currentUserId;
+  const currentMember = party.members.find(m => m.user.id === currentUserId);
   const allReady = party.members.every(m => m.isReady) && party.members.length > 1;
 
   // Invite Modal
@@ -273,7 +279,7 @@ export function PartyManager({
         {/* Members List */}
         <div className="space-y-2">
           {party.members.map((member) => {
-            const isCurrentMember = member.user.id === "user-123";
+            const isCurrentMember = member.user.id === currentUserId;
             const isMemberLeader = member.role === "leader";
 
             return (

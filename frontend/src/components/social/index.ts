@@ -8,4 +8,5 @@ export {
 export { InviteFriends, QuickInviteButton } from "./InviteFriends";
 export { ChatInterface } from "./ChatInterface";
 export { PartyManager, PartyInviteNotification } from "./PartyManager";
+export { PartyChat } from "./PartyChat";
 export { CommunityFeed } from "./CommunityFeed";

@@ -43,6 +43,7 @@ import {
   Message,
   Conversation,
   Party,
+  PartyInvite,
   OnlineStatus,
   FriendsListResponse,
   SocialUser,
@@ -385,10 +386,24 @@ class ApiClient {
     });
   }
 
-  async joinTournament(id: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/tournaments/${id}/register`, {
-      method: "POST",
-    });
+  /**
+   * POST /tournaments/:id/register
+   *
+   * Registers the current user for a tournament. When `partyId` is supplied
+   * the registration is made on behalf of the whole party (party-join
+   * tournament entry, issue #1102).
+   */
+  async joinTournament(
+    id: string,
+    partyId?: string,
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/tournaments/${id}/register`,
+      {
+        method: "POST",
+        body: JSON.stringify(partyId ? { party_id: partyId } : {}),
+      },
+    );
   }
 
   // ── Matches ──────────────────────────────────────────────────────────────────
@@ -625,6 +640,106 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  /**
+   * GET /v1/party/me
+   *
+   * Returns the current user's active party, or `null` when they are not
+   * in one. Swallows failures (e.g. endpoint not yet deployed) so callers
+   * can treat "no party" as a normal state.
+   */
+  async getMyParty(): Promise<Party | null> {
+    try {
+      return await this.request<Party | null>("/v1/party/me");
+    } catch {
+      return null;
+    }
+  }
+
+  /** GET /v1/party/invites — pending party invitations for the current user. */
+  async getPartyInvites(): Promise<PartyInvite[]> {
+    try {
+      return await this.request<PartyInvite[]>("/v1/party/invites");
+    } catch {
+      return [];
+    }
+  }
+
+  /** POST /v1/party/invites/:id/accept — accept a party invitation. */
+  async acceptPartyInvite(inviteId: string): Promise<Party> {
+    return this.request<Party>(`/v1/party/invites/${inviteId}/accept`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /v1/party/invites/:id/decline — decline a party invitation. */
+  async declinePartyInvite(inviteId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/v1/party/invites/${inviteId}/decline`,
+      { method: "POST" },
+    );
+  }
+
+  /** POST /v1/party/:id/invite — invite a user to the party. */
+  async inviteToParty(
+    partyId: string,
+    userId: string,
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/v1/party/${partyId}/invite`,
+      {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId }),
+      },
+    );
+  }
+
+  /** POST /v1/party/:id/kick — kick a member from the party (leader only). */
+  async kickFromParty(
+    partyId: string,
+    userId: string,
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/v1/party/${partyId}/kick`,
+      {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId }),
+      },
+    );
+  }
+
+  /** POST /v1/party/:id/leave — leave the party. */
+  async leaveParty(partyId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/v1/party/${partyId}/leave`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /v1/party/:id/disband — disband the party (leader only). */
+  async disbandParty(partyId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/v1/party/${partyId}/disband`, {
+      method: "POST",
+    });
+  }
+
+  /** POST /v1/party/:id/ready — set the current user's ready state. */
+  async setPartyReady(
+    partyId: string,
+    isReady: boolean,
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/v1/party/${partyId}/ready`, {
+      method: "POST",
+      body: JSON.stringify({ is_ready: isReady }),
+    });
+  }
+
+  /** POST /v1/party/:id/voice-chat — toggle the party voice chat channel. */
+  async togglePartyVoiceChat(partyId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/v1/party/${partyId}/voice-chat`,
+      { method: "POST" },
+    );
   }
 
   async getOnlineStatus(userId: string): Promise<OnlineStatus> {

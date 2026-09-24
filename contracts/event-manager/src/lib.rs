@@ -4,7 +4,7 @@
 //!
 //! Provides on-chain event indexing, filtering, analytics, monitoring, and archiving.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Map, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Error, IntoVal, Map, Symbol, Val, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -34,6 +34,20 @@ pub struct EventAnalytics {
     pub anomaly_alerts_count: u64,
 }
 
+/// A registered topic subscriber (issue #1111).
+///
+/// When an event is dispatched on `topic`, the event-manager invokes
+/// `callback_function` on `callback_contract`, passing the event's
+/// `(contract, player, topic, timestamp, data)` payload.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Subscription {
+    pub subscriber: Address,
+    pub callback_contract: Address,
+    pub callback_function: Symbol,
+    pub registered_at: u64,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -45,6 +59,7 @@ pub enum DataKey {
     RateLimit(Symbol),
     LastEventTimestamp(Symbol),
     Paused,
+    Subscription(Symbol), // topic -> Vec<Subscription>
 }
 
 #[contract]
@@ -272,6 +287,161 @@ impl EventManagerContract {
         }
     }
 
+    // ─── Subscription / callback bus (issue #1111) ────────────────────────
+
+    /// Register a callback for a topic. The subscriber authorizes the
+    /// subscription; callbacks run on the `callback_contract` after the
+    /// emitting contract dispatches.
+    pub fn subscribe(
+        env: Env,
+        subscriber: Address,
+        topic: Symbol,
+        callback_contract: Address,
+        callback_function: Symbol,
+    ) {
+        Self::require_not_paused(&env);
+        subscriber.require_auth();
+
+        let key = DataKey::Subscription(topic.clone());
+        let mut subscriptions: Vec<Subscription> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for sub in subscriptions.iter() {
+            if sub.subscriber == subscriber {
+                panic!("already subscribed");
+            }
+        }
+
+        subscriptions.push_back(Subscription {
+            subscriber: subscriber.clone(),
+            callback_contract: callback_contract.clone(),
+            callback_function: callback_function.clone(),
+            registered_at: env.ledger().timestamp(),
+        });
+        env.storage().persistent().set(&key, &subscriptions);
+
+        arenax_events::event_subscriptions::emit_subscribed(
+            &env,
+            &subscriber,
+            &topic,
+            &callback_contract,
+            &callback_function,
+            env.ledger().timestamp(),
+        );
+    }
+
+    /// Remove a subscriber from a topic.
+    pub fn unsubscribe(env: Env, subscriber: Address, topic: Symbol) {
+        Self::require_not_paused(&env);
+        subscriber.require_auth();
+
+        let key = DataKey::Subscription(topic.clone());
+        let subscriptions: Vec<Subscription> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut updated: Vec<Subscription> = Vec::new(&env);
+        let mut removed = false;
+        for sub in subscriptions.iter() {
+            if sub.subscriber == subscriber {
+                removed = true;
+            } else {
+                updated.push_back(sub);
+            }
+        }
+        if !removed {
+            panic!("not subscribed");
+        }
+        env.storage().persistent().set(&key, &updated);
+
+        arenax_events::event_subscriptions::emit_unsubscribed(
+            &env,
+            &subscriber,
+            &topic,
+            env.ledger().timestamp(),
+        );
+    }
+
+    /// List the subscriptions registered for a topic.
+    pub fn get_subscribers(env: Env, topic: Symbol) -> Vec<Subscription> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Subscription(topic))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Dispatch a stored event to every subscriber of its topic.
+    ///
+    /// Only the emitter contract recorded on the event may dispatch it. Each
+    /// callback is invoked via `try_invoke_contract`, so a single broken
+    /// subscriber cannot revert the whole dispatch; failures are counted as
+    /// non-deliveries. Returns the number of successful deliveries.
+    pub fn dispatch_event(env: Env, caller: Address, topic: Symbol, event_id: u64) -> u32 {
+        Self::require_not_paused(&env);
+
+        let record: EventRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .expect("event not found");
+        if record.topic != topic {
+            panic!("topic mismatch");
+        }
+        if record.contract != caller {
+            panic!("only emitter contract can dispatch event");
+        }
+
+        let subscriptions: Vec<Subscription> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Subscription(topic.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        // Clone the event payload once — the loop below only borrows these.
+        let event_contract = record.contract.clone();
+        let event_player = record.player.clone();
+        let event_topic = record.topic.clone();
+        let event_timestamp = record.timestamp;
+        let event_data = record.data.clone();
+
+        let total = subscriptions.len();
+        let mut delivered: u32 = 0;
+
+        for sub in subscriptions.iter() {
+            let mut payload: Vec<Val> = Vec::new(&env);
+            payload.push_back(event_contract.clone().into_val(&env));
+            payload.push_back(event_player.clone().into_val(&env));
+            payload.push_back(event_topic.clone().into_val(&env));
+            payload.push_back(event_timestamp.into_val(&env));
+            payload.push_back(event_data.clone().into_val(&env));
+
+            let invocation: Result<
+                Result<(), core::convert::Infallible>,
+                Result<Error, soroban_sdk::InvokeError>,
+            > = env.try_invoke_contract(&sub.callback_contract, &sub.callback_function, payload);
+
+            if matches!(invocation, Ok(Ok(()))) {
+                delivered += 1;
+            }
+        }
+
+        arenax_events::event_subscriptions::emit_event_dispatched(
+            &env,
+            &topic,
+            event_id,
+            delivered,
+            total,
+            env.ledger().timestamp(),
+        );
+
+        delivered
+    }
+
     /// Archive events before a certain timestamp to save storage (archives them).
     pub fn archive_events(env: Env, before_timestamp: u64) -> u32 {
         Self::require_not_paused(&env);
@@ -407,9 +577,59 @@ impl EventManagerContract {
 mod tests {
     use super::*;
     use soroban_sdk::{
+        contract, contractimpl,
         testutils::{Address as _, Ledger as _},
         Env,
     };
+
+    #[contract]
+    pub struct MockCallbackSubscriber;
+
+    #[contractimpl]
+    impl MockCallbackSubscriber {
+        pub fn on_event(
+            env: Env,
+            _contract: Address,
+            _player: Address,
+            _topic: Symbol,
+            _timestamp: u64,
+            _data: Bytes,
+        ) {
+            let mut calls: u64 = env
+                .storage()
+                .instance()
+                .get(&Symbol::new(&env, "calls"))
+                .unwrap_or(0);
+            calls += 1;
+            env.storage()
+                .instance()
+                .set(&Symbol::new(&env, "calls"), &calls);
+        }
+
+        pub fn get_calls(env: Env) -> u64 {
+            env.storage()
+                .instance()
+                .get(&Symbol::new(&env, "calls"))
+                .unwrap_or(0)
+        }
+    }
+
+    #[contract]
+    pub struct MockBrokenSubscriber;
+
+    #[contractimpl]
+    impl MockBrokenSubscriber {
+        pub fn on_event(
+            _env: Env,
+            _contract: Address,
+            _player: Address,
+            _topic: Symbol,
+            _timestamp: u64,
+            _data: Bytes,
+        ) {
+            panic!("broken callback");
+        }
+    }
 
     #[test]
     fn test_event_manager_flow() {
@@ -595,5 +815,155 @@ mod tests {
             &Bytes::new(&env),
         );
         assert_eq!(id, 1);
+    }
+
+    // ─── Subscription / callback bus (issue #1111) ────────────────────────
+
+    #[test]
+    fn test_subscribe_and_unsubscribe_flow() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let subscriber = Address::generate(&env);
+        let cb_id = env.register(MockCallbackSubscriber, ());
+        let topic = Symbol::new(&env, "match_win");
+
+        client.subscribe(&subscriber, &topic, &cb_id, &Symbol::new(&env, "on_event"));
+
+        let subs = client.get_subscribers(&topic);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs.get(0).unwrap().subscriber, subscriber);
+        assert_eq!(subs.get(0).unwrap().callback_contract, cb_id);
+        assert_eq!(subs.get(0).unwrap().callback_function, Symbol::new(&env, "on_event"));
+
+        client.unsubscribe(&subscriber, &topic);
+        assert_eq!(client.get_subscribers(&topic).len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "already subscribed")]
+    fn test_duplicate_subscribe_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let subscriber = Address::generate(&env);
+        let cb_id = env.register(MockCallbackSubscriber, ());
+        let topic = Symbol::new(&env, "match_win");
+
+        client.subscribe(&subscriber, &topic, &cb_id, &Symbol::new(&env, "on_event"));
+        client.subscribe(&subscriber, &topic, &cb_id, &Symbol::new(&env, "on_event"));
+    }
+
+    #[test]
+    #[should_panic(expected = "not subscribed")]
+    fn test_unsubscribe_when_not_subscribed_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let subscriber = Address::generate(&env);
+        client.unsubscribe(&subscriber, &Symbol::new(&env, "match_win"));
+    }
+
+    #[test]
+    fn test_dispatch_delivers_to_subscribers() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        let topic = Symbol::new(&env, "match_win");
+
+        // Two subscribers, one broken one that panics on callback.
+        let sub1 = Address::generate(&env);
+        let cb_ok_id = env.register(MockCallbackSubscriber, ());
+        client.subscribe(&sub1, &topic, &cb_ok_id, &Symbol::new(&env, "on_event"));
+
+        let sub2 = Address::generate(&env);
+        let cb_broken_id = env.register(MockBrokenSubscriber, ());
+        client.subscribe(&sub2, &topic, &cb_broken_id, &Symbol::new(&env, "on_event"));
+
+        env.ledger().set_timestamp(100);
+        let id = client.index_event(&caller, &player, &topic, &Bytes::new(&env));
+
+        // A broken callback must not revert the dispatch.
+        let delivered = client.dispatch_event(&caller, &topic, &id);
+        assert_eq!(delivered, 1);
+
+        env.as_contract(&cb_ok_id, || {
+            let calls: u64 = env
+                .storage()
+                .instance()
+                .get(&Symbol::new(&env, "calls"))
+                .unwrap_or(0);
+            assert_eq!(calls, 1);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "topic mismatch")]
+    fn test_dispatch_topic_mismatch_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        let id = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_win"),
+            &Bytes::new(&env),
+        );
+
+        client.dispatch_event(
+            &caller,
+            &Symbol::new(&env, "match_lose"),
+            &id,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "only emitter contract can dispatch event")]
+    fn test_dispatch_only_emitter_allowed() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(EventManagerContract, ());
+        let client = EventManagerContractClient::new(&env, &contract_id);
+        client.initialize(&admin);
+
+        let caller = Address::generate(&env);
+        let player = Address::generate(&env);
+        let topic = Symbol::new(&env, "match_win");
+        let id = client.index_event(&caller, &player, &topic, &Bytes::new(&env));
+
+        // A different address tries to dispatch.
+        let impostor = Address::generate(&env);
+        client.dispatch_event(&impostor, &topic, &id);
     }
 }

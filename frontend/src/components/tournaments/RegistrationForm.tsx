@@ -25,12 +25,15 @@ import { useFormAnalytics } from "@/hooks/useFormAnalytics";
 
 interface RegistrationFormProps {
   tournament: Tournament;
+  /** When present, registers the whole party (issue #1102). */
+  partyId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }
 
 export function RegistrationForm({
   tournament,
+  partyId,
   onSuccess,
   onCancel,
 }: RegistrationFormProps) {
@@ -51,7 +54,7 @@ export function RegistrationForm({
 
   const onSubmit = async (_data: TournamentRegistrationFormData) => {
     try {
-      await api.joinTournament(tournament.id);
+      await api.joinTournament(tournament.id, partyId);
       analytics.trackSubmit({ success: true });
 
       notify({
