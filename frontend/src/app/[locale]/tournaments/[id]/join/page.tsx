@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { RegistrationForm } from "@/components/tournaments/RegistrationForm";
 import { Button } from "@/components/ui/Button";
 import { ArrowLeft, AlertCircle } from "lucide-react";
@@ -16,7 +16,9 @@ import {
 export default function TournamentJoinPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tournamentId = params.id as string;
+  const partyId = searchParams.get("party") ?? undefined;
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -149,6 +151,7 @@ export default function TournamentJoinPage() {
           <div className="rounded-lg border bg-card p-6 shadow-sm">
             <RegistrationForm
               tournament={tournament}
+              partyId={partyId}
               onSuccess={() => router.push(`/tournaments/${tournament.id}`)}
               onCancel={() => router.back()}
             />

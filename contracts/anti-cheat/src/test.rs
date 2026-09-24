@@ -1,12 +1,14 @@
 #![cfg(test)]
 
 use crate::{
-    AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, BehaviorPattern, DataKey,
-    MlModelParams, Sanction, SanctionStatus, SanctionType, SuspiciousActivity,
+    AntiCheatContract, AntiCheatContractClient, AntiCheatParams, Appeal, AttestationSignature,
+    BehaviorPattern, DataKey, MlModelParams, Sanction, SanctionStatus, SanctionType,
+    SuspiciousActivity,
 };
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    Address, Bytes, Env, Map, String, Vec,
+    testutils::{Address as _, Events as _, Ledger as _},
+    Address, Bytes, BytesN, Env, Map, String, Vec,
 };
 
 fn setup_env() -> (Env, Address, Address, Address) {
@@ -940,4 +942,253 @@ fn test_unpause_restores_mutations() {
         &false,
     );
     assert_eq!(report_id, 1);
+}
+
+// ─── Match result attestation (#1110) ─────────────────────────────────────
+
+fn make_signer(env: &Env, seed: u8) -> (SigningKey, BytesN<32>) {
+    let mut secret = [0u8; 32];
+    secret[0] = seed;
+    let key = SigningKey::from_bytes(&secret);
+    let public_key = BytesN::from_array(env, &key.verifying_key().to_bytes());
+    (key, public_key)
+}
+
+fn sign_digest(env: &Env, key: &SigningKey, digest: &BytesN<32>) -> BytesN<64> {
+    let signature = key.sign(&digest.to_array());
+    BytesN::from_array(env, &signature.to_bytes())
+}
+
+fn attestation_signature(env: &Env, key: &SigningKey, pk: &BytesN<32>, digest: &BytesN<32>) -> AttestationSignature {
+    AttestationSignature {
+        public_key: pk.clone(),
+        signature: sign_digest(env, key, digest),
+    }
+}
+
+#[test]
+fn test_attestation_config_management() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (_k1, pk1) = make_signer(&env, 1);
+    let (_, pk2) = make_signer(&env, 2);
+
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1.clone(), true);
+    client.set_attestation_config(&admin, &map, &1);
+
+    let config = client.get_attestation_config();
+    assert_eq!(config.required_signatures, 1);
+    assert!(config.signers.get(pk1.clone()).unwrap());
+
+    // Add a signer
+    client.add_attestation_signer(&admin, &pk2);
+    let config = client.get_attestation_config();
+    assert!(config.signers.get(pk2.clone()).unwrap());
+
+    // Remove a signer
+    client.remove_attestation_signer(&admin, &pk1);
+    let config = client.get_attestation_config();
+    assert!(!config.signers.get(pk1.clone()).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "only admin can set attestation config")]
+fn test_attestation_config_unauthorized() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let signers: Map<BytesN<32>, bool> = Map::new(&env);
+    let attacker = Address::generate(&env);
+    client.set_attestation_config(&attacker, &signers, &1);
+}
+
+#[test]
+#[should_panic(expected = "invalid required signatures")]
+fn test_attestation_config_requires_at_most_signers() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (_, pk1) = make_signer(&env, 1);
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1, true);
+    // threshold (2) > signers (1)
+    client.set_attestation_config(&admin, &map, &2);
+}
+
+#[test]
+fn test_attest_match_result_success() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_contract_id, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (k1, pk1) = make_signer(&env, 1);
+    let (k2, pk2) = make_signer(&env, 2);
+    let (k3, pk3) = make_signer(&env, 3);
+
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1.clone(), true);
+    map.set(pk2.clone(), true);
+    map.set(pk3.clone(), true);
+    client.set_attestation_config(&admin, &map, &3);
+
+    let match_id = 42u64;
+    let winner = Address::generate(&env);
+    let winner_score = 1200i64;
+
+    let digest = client.attestation_digest(&match_id, &winner, &winner_score);
+
+    let mut signatures: Vec<AttestationSignature> = Vec::new(&env);
+    signatures.push_back(attestation_signature(&env, &k1, &pk1, &digest));
+    signatures.push_back(attestation_signature(&env, &k2, &pk2, &digest));
+    signatures.push_back(attestation_signature(&env, &k3, &pk3, &digest));
+
+    let attested = client.attest_match_result(&match_id, &winner, &winner_score, &signatures);
+
+    assert_eq!(attested.match_id, match_id);
+    assert_eq!(attested.winner, winner);
+    assert_eq!(attested.winner_score, winner_score);
+    assert_eq!(attested.result_digest, digest);
+    assert_eq!(attested.signature_count, 3);
+    assert_eq!(attested.required_signatures, 3);
+
+    let stored = client.get_attestation(&match_id).unwrap();
+    assert_eq!(stored.result_digest, digest);
+    assert_eq!(stored.attested_at, env.ledger().timestamp());
+
+    assert_eq!(env.events().all().len(), 1);
+}
+
+#[test]
+#[should_panic(expected = "insufficient valid signatures")]
+fn test_attest_insufficient_signatures() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (k1, pk1) = make_signer(&env, 1);
+    let (k2, pk2) = make_signer(&env, 2);
+    let (k3, pk3) = make_signer(&env, 3);
+
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1.clone(), true);
+    map.set(pk2.clone(), true);
+    map.set(pk3.clone(), true);
+    client.set_attestation_config(&admin, &map, &3);
+
+    let match_id = 42u64;
+    let winner = Address::generate(&env);
+    let winner_score = 1200i64;
+    let digest = client.attestation_digest(&match_id, &winner, &winner_score);
+
+    // Only 2 of the required 3 signatures provided
+    let mut signatures: Vec<AttestationSignature> = Vec::new(&env);
+    signatures.push_back(attestation_signature(&env, &k1, &pk1, &digest));
+    signatures.push_back(attestation_signature(&env, &k2, &pk2, &digest));
+
+    client.attest_match_result(&match_id, &winner, &winner_score, &signatures);
+}
+
+#[test]
+#[should_panic(expected = "signer not registered")]
+fn test_attest_unregistered_signer() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (k1, pk1) = make_signer(&env, 1);
+    let (_, pk2) = make_signer(&env, 2);
+    let (k3, pk3) = make_signer(&env, 3);
+
+    // pk1 + pk2 are registered (threshold 2); pk3 is not in the registry.
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1.clone(), true);
+    map.set(pk2.clone(), true);
+    client.set_attestation_config(&admin, &map, &2);
+
+    let match_id = 42u64;
+    let winner = Address::generate(&env);
+    let winner_score = 1200i64;
+    let digest = client.attestation_digest(&match_id, &winner, &winner_score);
+
+    let mut signatures: Vec<AttestationSignature> = Vec::new(&env);
+    signatures.push_back(attestation_signature(&env, &k1, &pk1, &digest));
+    // Second signature comes from a signer that is NOT in the registry
+    signatures.push_back(attestation_signature(&env, &k3, &pk3, &digest));
+
+    client.attest_match_result(&match_id, &winner, &winner_score, &signatures);
+}
+
+#[test]
+#[should_panic(expected = "duplicate signature")]
+fn test_attest_duplicate_signature() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let (k1, pk1) = make_signer(&env, 1);
+    let (_, pk2) = make_signer(&env, 2);
+
+    // Both pk1 and pk2 are registered so the config accepts threshold 2.
+    let mut map: Map<BytesN<32>, bool> = Map::new(&env);
+    map.set(pk1.clone(), true);
+    map.set(pk2.clone(), true);
+    client.set_attestation_config(&admin, &map, &2);
+
+    let match_id = 42u64;
+    let winner = Address::generate(&env);
+    let winner_score = 1200i64;
+    let digest = client.attestation_digest(&match_id, &winner, &winner_score);
+
+    let mut signatures: Vec<AttestationSignature> = Vec::new(&env);
+    signatures.push_back(attestation_signature(&env, &k1, &pk1, &digest));
+    // Same signer signs twice — must be rejected
+    signatures.push_back(attestation_signature(&env, &k1, &pk1, &digest));
+
+    client.attest_match_result(&match_id, &winner, &winner_score, &signatures);
+}
+
+#[test]
+#[should_panic(expected = "attestation disabled")]
+fn test_attest_disabled_without_config() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+    env.mock_all_auths();
+
+    let match_id = 42u64;
+    let winner = Address::generate(&env);
+    let signatures: Vec<AttestationSignature> = Vec::new(&env);
+
+    // No attestation config set — threshold defaults to 0
+    client.attest_match_result(&match_id, &winner, &1200i64, &signatures);
+}
+
+#[test]
+fn test_attestation_digest_is_deterministic() {
+    let (env, admin, _, reputation_contract) = setup_env();
+    let (_, client) = register_contract(&env);
+    client.initialize(&admin, &reputation_contract);
+
+    let match_id = 7u64;
+    let winner = Address::generate(&env);
+    let winner_score = 200i64;
+
+    let d1 = client.attestation_digest(&match_id, &winner, &winner_score);
+    let d2 = client.attestation_digest(&match_id, &winner, &winner_score);
+    assert_eq!(d1, d2);
+
+    // Changing any input flips the digest
+    let d3 = client.attestation_digest(&match_id, &winner, &winner_score + 1);
+    assert_ne!(d1, d3);
 }

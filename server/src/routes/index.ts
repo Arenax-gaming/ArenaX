@@ -18,6 +18,7 @@ import queueRoutes from './queue.routes';
 import accessControlRoutes from './access-control.routes';
 import crossGameAssetRoutes from './cross-game-asset.routes';
 import i18nRoutes from './i18n.routes';
+import paymentWebhookRoutes from './payment-webhook.routes';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
@@ -76,6 +77,10 @@ router.use('/v1/queue', queueRoutes);
 router.use('/v1/access-control', accessControlRoutes);
 router.use('/v1/assets', crossGameAssetRoutes);
 router.use('/v1/i18n', i18nRoutes);
+
+// Payment provider webhooks — unversioned, signature-verified (see
+// middleware/webhook-signature.middleware.ts).
+router.use('/webhooks', paymentWebhookRoutes);
 
 // Unversioned infrastructure endpoints — not part of the public API surface.
 router.use('/metrics', metricsRoutes);

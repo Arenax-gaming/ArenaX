@@ -12,6 +12,11 @@ import type {
   ValidationError,
   SettingsExport,
 } from "@/types/settings";
+import {
+  encryptSettingsText,
+  decryptSettingsText,
+  isEncryptedSettingsExport,
+} from "@/lib/settingsCrypto";
 import { mockUserSettings, defaultSettings } from "@/data/settings";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
@@ -304,8 +309,9 @@ export function useSettings() {
 
   // ── Import / export ─────────────────────────────────────────────────────────
 
-  const exportSettings = useCallback((): string => {
-    const exportData: SettingsExport = {
+  // Builds the plain SettingsExport JSON that backs both plain and encrypted files.
+  const buildExportData = useCallback((): SettingsExport => {
+    return {
       version: SETTINGS_VERSION,
       exportedAt: new Date().toISOString(),
       settings: {
@@ -315,41 +321,76 @@ export function useSettings() {
         theme: settings.theme,
       },
     };
-    return JSON.stringify(exportData, null, 2);
   }, [settings]);
 
-  const importSettings = useCallback((importData: string): boolean => {
-    try {
-      const parsed = JSON.parse(importData) as SettingsExport;
-      if (parsed.settings) {
-        setSettings((prev) => ({
-          ...prev,
-          game: { ...prev.game, ...parsed.settings.game },
-          notifications: { ...prev.notifications, ...parsed.settings.notifications },
-          accessibility: { ...prev.accessibility, ...parsed.settings.accessibility },
-          theme: { ...prev.theme, ...parsed.settings.theme },
-        }));
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error("Failed to import settings:", error);
-      return false;
-    }
-  }, []);
+  /**
+   * Serialize settings for backup.
+   * - No passphrase: plain JSON (readable anywhere, only back up trusted data).
+   * - Passphrase: encrypted with PBKDF2 + AES-256-GCM via the Web Crypto API.
+   */
+  const exportSettings = useCallback(
+    async (passphrase?: string): Promise<string> => {
+      const exportData = JSON.stringify(buildExportData(), null, 2);
+      if (!passphrase) return exportData;
+      return encryptSettingsText(exportData, passphrase);
+    },
+    [buildExportData],
+  );
 
-  const downloadSettings = useCallback(() => {
-    const exportData = exportSettings();
-    const blob = new Blob([exportData], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `arenax-settings-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [exportSettings]);
+  /**
+   * Restore settings from a backup file.
+   * Throws when the file is encrypted and no passphrase (or a wrong one) is given.
+   */
+  const importSettings = useCallback(
+    async (importData: string, passphrase?: string): Promise<boolean> => {
+      try {
+        let text = importData;
+        if (isEncryptedSettingsExport(importData)) {
+          text = await decryptSettingsText(importData, passphrase ?? "");
+        }
+
+        const parsed = JSON.parse(text) as SettingsExport;
+        if (parsed.settings) {
+          setSettings((prev) => ({
+            ...prev,
+            game: { ...prev.game, ...parsed.settings.game },
+            notifications: { ...prev.notifications, ...parsed.settings.notifications },
+            accessibility: { ...prev.accessibility, ...parsed.settings.accessibility },
+            theme: { ...prev.theme, ...parsed.settings.theme },
+          }));
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("Failed to import settings:", error);
+        return false;
+      }
+    },
+    [],
+  );
+
+  const downloadSettings = useCallback(
+    async (passphrase?: string) => {
+      const exportData = await exportSettings(passphrase);
+      const blob = new Blob([exportData], {
+        type: isEncryptedSettingsExport(exportData)
+          ? "text/plain"
+          : "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().split("T")[0];
+      a.download = isEncryptedSettingsExport(exportData)
+        ? `arenax-settings-${stamp}.arenax`
+        : `arenax-settings-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [exportSettings],
+  );
 
   // ── Error accessor ──────────────────────────────────────────────────────────
 

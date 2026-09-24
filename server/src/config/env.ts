@@ -151,6 +151,11 @@ const envSchema = z.object({
     // ── External Payments ────────────────────────────────────────────────────
     PAYSTACK_SECRET_KEY: z.string().optional(),
     FLUTTERWAVE_SECRET_KEY: z.string().optional(),
+    /**
+     * Secret Flutterwave uses to sign webhooks (the `verif-hash` header).
+     * When unset, FLUTTERWAVE_SECRET_KEY is used instead.
+     */
+    FLUTTERWAVE_WEBHOOK_HASH: z.string().optional(),
 
     // ── CDN / Cache ──────────────────────────────────────────────────────────
     CDN_PROVIDER: z.enum(['cloudflare', 'cloudfront', 'fastly']).optional(),
