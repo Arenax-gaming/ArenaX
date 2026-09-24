@@ -78,6 +78,10 @@ router.use('/v1/access-control', accessControlRoutes);
 router.use('/v1/assets', crossGameAssetRoutes);
 router.use('/v1/i18n', i18nRoutes);
 
+// Payment provider webhooks — unversioned, signature-verified (see
+// middleware/webhook-signature.middleware.ts).
+router.use('/webhooks', paymentWebhookRoutes);
+
 // Unversioned infrastructure endpoints — not part of the public API surface.
 router.use('/metrics', metricsRoutes);
 router.use('/dashboard', dashboardRoutes);
