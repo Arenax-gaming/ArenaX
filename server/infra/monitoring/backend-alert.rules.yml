@@ -25,6 +25,27 @@ groups:
           summary: "arenax-backend 5xx error rate above 5%"
           description: "More than 5% of HTTP responses from arenax-backend have been 5xx over the last 5 minutes."
 
+      - record: route:p99_request_duration_seconds:5m
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="arenax-backend"}[5m])) by (le, route)
+          )
+
+      - record: route:p95_request_duration_seconds:5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="arenax-backend"}[5m])) by (le, route)
+          )
+
+      - record: route:p50_request_duration_seconds:5m
+        expr: |
+          histogram_quantile(
+            0.50,
+            sum(rate(http_request_duration_seconds_bucket{job="arenax-backend"}[5m])) by (le, route)
+          )
+
       - alert: BackendHighHttpLatencyP95
         expr: |
           histogram_quantile(
@@ -38,6 +59,20 @@ groups:
         annotations:
           summary: "arenax-backend p95 HTTP latency above 1s"
           description: "95th percentile request duration on arenax-backend has been above 1 second for 5 minutes."
+
+      - alert: BackendRouteP99AboveThreshold
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="arenax-backend"}[5m])) by (le, route)
+          ) > 0.5
+        for: 2m
+        labels:
+          severity: page
+          service: arenax-backend
+        annotations:
+          summary: "P99 latency above 500ms for route {{ $labels.route }}"
+          description: "The 99th percentile request duration for route {{ $labels.route }} on arenax-backend has been above 500ms for 2 minutes — on-call should investigate (per-route SLO, Issue #1077)."
 
       - alert: BackendDbPoolNearExhaustion
         expr: |

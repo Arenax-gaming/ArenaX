@@ -113,6 +113,22 @@ pub static CIRCUIT_BREAKER_TRIPS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     counter
 });
 
+// Dependency health gauge (Issue #1079)
+pub static DEPENDENCY_HEALTH: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "dependency_health",
+            "Health of downstream dependencies (1=ok, 0=failed) from the readiness probe",
+        ),
+        &["service"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .expect("metric can be registered");
+    gauge
+});
+
 /// Force all lazily-registered metrics to initialize (and therefore
 /// register with the collector registry) at startup, before the first
 /// scrape — otherwise a metric with no observations yet simply wouldn't
@@ -125,6 +141,7 @@ pub fn init_metrics() {
     Lazy::force(&CIRCUIT_BREAKER_STATE);
     Lazy::force(&CIRCUIT_BREAKER_REQUESTS_TOTAL);
     Lazy::force(&CIRCUIT_BREAKER_TRIPS_TOTAL);
+    Lazy::force(&DEPENDENCY_HEALTH);
 
     // Process-level metrics (process_resident_memory_bytes, process_cpu_seconds_total,
     // open fds, ...) — only available on Linux in prometheus crate.
@@ -162,6 +179,14 @@ pub fn record_circuit_breaker_trip(service: &str) {
     CIRCUIT_BREAKER_TRIPS_TOTAL
         .with_label_values(&[service])
         .inc();
+}
+
+/// Update the `dependency_health{service}` gauge (1=ok, 0=failed) from a
+/// readiness check (Issue #1079).
+pub fn record_dependency_health(service: &str, healthy: bool) {
+    DEPENDENCY_HEALTH
+        .with_label_values(&[service])
+        .set(if healthy { 1 } else { 0 });
 }
 
 pub async fn metrics_handler() -> Result<HttpResponse> {

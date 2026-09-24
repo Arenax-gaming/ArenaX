@@ -172,6 +172,31 @@ async fn main() -> io::Result<()> {
     // Initialize BatchService — Issue #952
     let batch_service = Arc::new(BatchService::new(db_pool.clone()));
 
+    // Initialize ApiKeyService — Issue #1080 (zero-downtime key rotation with
+    // overlap, expiry of old keys, and rotation webhooks).
+    let api_key_service = Arc::new(crate::service::api_key_service::ApiKeyService::new(db_pool.clone()));
+
+    // Background job: expire old keys whose rotation overlap window elapsed.
+    {
+        let api_key_service = api_key_service.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                match api_key_service.expire_expired_old_keys().await {
+                    Ok(count) if count > 0 => {
+                        tracing::info!(count, "Expired old API keys after rotation overlap");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to expire old API keys");
+                    }
+                }
+            }
+        });
+    }
+    tracing::info!("API key overlap expiry job started");
+
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
     let session_registry = Arc::new(SessionRegistry::new());
@@ -228,6 +253,11 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
+            .app_data(web::Data::new(api_key_service.clone()))
+            // Soroban RPC base URL for the readiness probe (/api/health/ready).
+            .app_data(web::Data::new(
+                crate::http::health::SorobanRpcUrl(config.stellar.network_url.clone()),
+            ))
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
@@ -247,6 +277,8 @@ async fn main() -> io::Result<()> {
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
+                    .route("/health/live", web::get().to(crate::http::health::liveness_check))
+                    .route("/health/ready", web::get().to(crate::http::health::readiness_check))
                     .route("/csrf-token", web::get().to(csrf_token_handler))
                     // Batch operations endpoints — Issue #952
                     .configure(crate::http::batch_handler::configure_routes)
@@ -262,6 +294,10 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::feature_flag_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)
                     .configure(crate::http::auth_handler::configure_routes)
+                    // User profile + GDPR/NDPR account erasure & data export (Issue #1078)
+                    .configure(crate::http::users::configure_routes)
+                    // API key management incl. zero-downtime rotation (Issue #1080)
+                    .configure(crate::http::api_key::configure_api_key_routes)
                     .route(
                         "/notifications",
                         web::get().to(crate::http::notification_handler::get_notifications),

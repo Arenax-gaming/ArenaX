@@ -6,6 +6,7 @@ pub mod health;
 pub mod idempotency;
 pub mod idempotency_examples;
 pub mod achievement_handler;
+pub mod api_key;
 pub mod docs_handler;
 pub mod ip_list_handler;
 pub mod leaderboard_handler;
@@ -21,6 +22,8 @@ pub mod staking_handler;
 pub mod analytics_handler;
 pub mod batch_handler;
 pub mod tournament_handler;
+pub mod users;
+pub mod wallet;
 pub mod gas_estimation_handler;
 
 // Stellar transaction retry support (issue: backend retry logic)

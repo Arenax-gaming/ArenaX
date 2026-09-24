@@ -147,7 +147,7 @@ impl AuthService {
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE email = $1
             "#,
@@ -157,6 +157,10 @@ impl AuthService {
         .await
         .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::unauthorized("Invalid credentials"))?;
+
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
+        }
 
         if !user.is_active {
             return Err(ApiError::forbidden("Account is deactivated"));
@@ -282,14 +286,14 @@ impl AuthService {
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        sqlx::query_as!(
+        let user = sqlx::query_as!(
             User,
             r#"
             SELECT id, username, email, phone_number, display_name, avatar_url, bio,
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE id = $1
             "#,
@@ -298,7 +302,16 @@ impl AuthService {
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("User not found"))
+        .ok_or_else(|| ApiError::not_found("User not found"))?;
+
+        // Deleted users are not allowed to authenticate any further: their
+        // account is being erased (GDPR/NDPR), so even a still-valid session
+        // must not resolve.
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
+        }
+
+        Ok(user)
     }
 
     /// Change a user's password and immediately revoke all existing sessions.
