@@ -7,7 +7,6 @@ pub mod audit_service;
 pub mod feature_flags;
 pub mod auth_service;
 pub mod dispute_service;
-pub mod feature_flags;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod leaderboard_service;
@@ -36,9 +35,7 @@ pub use governance_service::{
     CreateProposalDto, GovernanceService, GovernanceServiceError, ProposalRecord,
     ProposalStatus as GovProposalStatus,
 };
-pub use achievement_service::AchievementService;
 pub use audit_service::{AuditAction, AuditEntryInput, AuditFilter, AuditService};
-pub use feature_flags::FeatureFlagService;
 pub use idempotency_service::IdempotencyService;
 pub use leaderboard_service::LeaderboardService;
 pub use match_authority_service::MatchAuthorityService;
