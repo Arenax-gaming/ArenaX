@@ -23,7 +23,7 @@ actix-web-actors = "4.3"
 anyhow = "1.0"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std", "json"] }
 tracing-opentelemetry = "0.33"
 opentelemetry = { version = "0.32", features = ["trace"] }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "trace"] }
