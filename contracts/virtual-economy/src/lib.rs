@@ -561,6 +561,11 @@ impl VirtualEconomyContract {
             creator,
             default_royalty_bps,
             item_count: 0,
+            floor_price: 0,
+            last_sale_price: 0,
+            total_volume: 0,
+            sale_count: 0,
+            last_sale_at: 0,
         };
         env.storage()
             .persistent()
@@ -893,6 +898,17 @@ impl VirtualEconomyContract {
         Self::record_trade_volume(&env, &buyer, order.price);
         Self::record_trade_volume(&env, &order.seller, order.price);
 
+        // Update collection floor price / volume metrics (#917).
+        if let MarketplaceAsset::NFT(ref token_id) = order.asset {
+            if let Some(metadata) = env
+                .storage()
+                .persistent()
+                .get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone()))
+            {
+                Self::update_collection_on_sale(&env, &metadata.category, order.price);
+            }
+        }
+
         events::emit_marketplace_trade_executed(
             &env,
             &order_id,
@@ -1151,6 +1167,15 @@ impl VirtualEconomyContract {
         // Accrue trading-rebate volume for both sides of the trade (#916).
         Self::record_trade_volume(&env, &buyer, price);
         Self::record_trade_volume(&env, &listing.seller, price);
+
+        // Update collection floor price / volume metrics (#917).
+        if let Some(metadata) = env
+            .storage()
+            .persistent()
+            .get::<_, NFTMetadata>(&DataKey::NFTMetadata(listing.token_id.clone()))
+        {
+            Self::update_collection_on_sale(&env, &metadata.category, price);
+        }
 
         events::emit_dutch_auction_purchased(&env, &listing_id, &buyer, price);
         Ok(())
@@ -3131,5 +3156,125 @@ impl VirtualEconomyContract {
     /// for the whole window.
     pub fn observe_price(env: Env) -> Result<PriceSnapshot, VirtualEconomyError> {
         AmmManager::observe(&env)
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Floor Price Tracking (#917)
+    // -------------------------------------------------------------------------
+
+    /// Return the current floor price for a collection (#917: floor price per
+    /// collection, query endpoint). Returns 0 if no sales have settled yet.
+    pub fn get_collection_floor_price(
+        env: Env,
+        name: String,
+    ) -> Result<i128, VirtualEconomyError> {
+        let collection: NFTCollection = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collection(name))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+        Ok(collection.floor_price)
+    }
+
+    /// Return the full collection record including floor price, total volume,
+    /// sale count, and last sale timestamp (#917: volume metrics).
+    pub fn get_collection_stats(
+        env: Env,
+        name: String,
+    ) -> Result<NFTCollection, VirtualEconomyError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Collection(name))
+            .ok_or(VirtualEconomyError::TokenNotFound)
+    }
+
+    /// Return the price history ring-buffer for a collection (#917: price
+    /// history tracking). Returns an empty history if no sales have settled.
+    pub fn get_collection_price_history(
+        env: Env,
+        name: String,
+    ) -> Result<CollectionPriceHistory, VirtualEconomyError> {
+        // Validate the collection exists first.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Collection(name.clone()))
+        {
+            return Err(VirtualEconomyError::TokenNotFound);
+        }
+        let history = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CollectionPriceHistory(name))
+            .unwrap_or(CollectionPriceHistory {
+                entries: Vec::new(&env),
+                max_entries: 50,
+            });
+        Ok(history)
+    }
+
+    // ── Private helper ────────────────────────────────────────────────────────
+
+    /// Called after every settled NFT sale. Updates the collection's floor
+    /// price, volume, sale count, and price history ring-buffer (#917).
+    ///
+    /// - Floor price: set to `sale_price` if it is lower than the current floor
+    ///   (or the floor is still 0, meaning no prior sales).
+    /// - `total_volume`: cumulative sum of all settled sale prices.
+    /// - `sale_count`: incremented by 1.
+    /// - `last_sale_price` / `last_sale_at`: overwritten with current values.
+    /// - Price history: appended to ring-buffer (evicts oldest when full).
+    ///
+    /// Silently skips if `category` does not match a registered collection.
+    fn update_collection_on_sale(env: &Env, category: &String, sale_price: i128) {
+        let key = DataKey::Collection(category.clone());
+        let mut collection: NFTCollection = match env.storage().persistent().get(&key) {
+            Some(c) => c,
+            None => return, // unregistered category — skip
+        };
+
+        let now = env.ledger().timestamp();
+
+        // Update floor price (#917: floor price per collection)
+        if collection.floor_price == 0 || sale_price < collection.floor_price {
+            collection.floor_price = sale_price;
+        }
+
+        // Update volume metrics (#917: volume metrics)
+        collection.total_volume += sale_price;
+        collection.sale_count += 1;
+        collection.last_sale_price = sale_price;
+        collection.last_sale_at = now;
+
+        env.storage().persistent().set(&key, &collection);
+
+        // Append to price history ring-buffer (#917: price history tracking)
+        let hist_key = DataKey::CollectionPriceHistory(category.clone());
+        let mut history: CollectionPriceHistory = env
+            .storage()
+            .persistent()
+            .get(&hist_key)
+            .unwrap_or(CollectionPriceHistory {
+                entries: Vec::new(env),
+                max_entries: 50,
+            });
+
+        // Evict oldest entry if at capacity
+        if history.entries.len() >= history.max_entries {
+            let mut trimmed = Vec::new(env);
+            let start = history.entries.len() - history.max_entries + 1;
+            for i in start..history.entries.len() {
+                trimmed.push_back(history.entries.get(i).unwrap());
+            }
+            history.entries = trimmed;
+        }
+
+        history.entries.push_back(CollectionPriceEntry {
+            price: sale_price,
+            floor_after: collection.floor_price,
+            timestamp: now,
+        });
+
+        env.storage().persistent().set(&hist_key, &history);
     }
 }

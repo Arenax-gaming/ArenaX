@@ -7,7 +7,7 @@ mod validator_penalty;
 mod voting_escrow;
 
 use arenax_events::staking as events;
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, String, Vec};
 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
 pub use flexible_rewards::{FlexiblePosition, RewardPool};
@@ -165,12 +165,21 @@ pub struct SlashConfig {
     /// Whether the slashing system is currently active.
     pub enabled: bool,
     /// Ordered list of slash amounts per severity level (index = severity 0-4).
+    /// Severity 0 = lightest infraction; severity 4 = heaviest (e.g. double-sign).
     pub slash_amounts: Vec<i128>,
-    /// Fraction of slashed tokens to burn (rest goes to reward pool).
-    /// Expressed in basis points (5000 = 50 %).
+    /// Fraction of slashed tokens sent to the burn address expressed in basis
+    /// points (5000 = 50 %). The remaining fraction is sent to `treasury_address`.
     pub burn_bps: u32,
-    /// Seconds after a slash during which the validator may appeal.
+    /// Seconds after a slash during which the validator may file an appeal.
+    /// After this window the slash is final. Set to 0 to disable appeals.
     pub appeal_window_seconds: u64,
+    /// AX token contract address — used for the on-chain token transfers that
+    /// move slashed tokens to the treasury and burn address.
+    pub ax_token: Address,
+    /// Treasury contract address that receives the non-burned portion of
+    /// slashed tokens. The DAO can then reallocate these as a reward pool
+    /// top-up, insurance fund, or governance decision.
+    pub treasury_address: Address,
 }
 
 /// Immutable record of a single slash event.
@@ -181,10 +190,14 @@ pub struct SlashRecord {
     pub validator: Address,
     pub amount: i128,
     pub severity: u32,
+    /// Numeric reason code (application-defined enum, stored for indexer filtering).
     pub reason: u32,
+    /// Human-readable rationale logged on-chain for transparency and auditing.
+    pub rationale: String,
     pub slashed_at: u64,
     pub burned_amount: i128,
-    pub pool_amount: i128,
+    /// Amount sent to the treasury contract.
+    pub treasury_amount: i128,
     pub appealed: bool,
     pub appeal_resolved: bool,
     pub appeal_granted: bool,
@@ -196,7 +209,10 @@ pub struct SlashRecord {
 pub struct AppealRecord {
     pub slash_id: BytesN<32>,
     pub appellant: Address,
+    /// Numeric reason code for the appeal (application-defined).
     pub appeal_reason: u32,
+    /// Human-readable appeal justification stored on-chain.
+    pub appeal_rationale: String,
     pub submitted_at: u64,
     pub resolved: bool,
     pub granted: bool,
@@ -1168,23 +1184,37 @@ impl StakingManager {
         ValidatorPenaltyManager::configure_slashing(&env, config);
     }
 
+    /// Return the current slash configuration, or `None` if not yet set.
+    pub fn get_slash_config(env: Env) -> Option<SlashConfig> {
+        ValidatorPenaltyManager::get_slash_config(&env)
+    }
+
     /// Slash a validator at the given `severity` (0 = lightest, 4 = heaviest).
-    /// Returns the unique `slash_id` for the event. Admin-only.
+    /// `reason` is a numeric code; `rationale` is a human-readable description
+    /// logged immutably on-chain. Returns the unique `slash_id`. Admin-only.
     pub fn slash_validator(
         env: Env,
         admin: Address,
         validator: Address,
         severity: u32,
         reason: u32,
+        rationale: String,
     ) -> BytesN<32> {
         Self::require_admin(&env);
-        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason)
+        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason, rationale)
     }
 
     /// Submit an appeal against a slash. Only the slashed validator may call
     /// this, and only within the configured `appeal_window_seconds`.
-    pub fn appeal_slash(env: Env, validator: Address, slash_id: BytesN<32>, reason: u32) {
-        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason);
+    /// `reason` is a numeric code; `appeal_rationale` is stored on-chain.
+    pub fn appeal_slash(
+        env: Env,
+        validator: Address,
+        slash_id: BytesN<32>,
+        reason: u32,
+        appeal_rationale: String,
+    ) {
+        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason, appeal_rationale);
     }
 
     /// Resolve an open appeal. Admin-only.
@@ -1202,6 +1232,11 @@ impl StakingManager {
     /// Return the `SlashRecord` for a given `slash_id`, or `None` if not found.
     pub fn get_slash_record(env: Env, slash_id: BytesN<32>) -> Option<SlashRecord> {
         ValidatorPenaltyManager::get_slash_record(&env, slash_id)
+    }
+
+    /// Return the `AppealRecord` for a given `slash_id`, or `None` if not found.
+    pub fn get_appeal_record(env: Env, slash_id: BytesN<32>) -> Option<AppealRecord> {
+        ValidatorPenaltyManager::get_appeal_record(&env, slash_id)
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
