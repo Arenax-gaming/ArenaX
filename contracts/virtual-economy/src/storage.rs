@@ -431,6 +431,19 @@ pub struct PriceHistory {
     pub update_count: u64,
 }
 
+/// One registered source's latest quote for an asset pair (#1053).
+///
+/// Stored on [`OracleAnalytics`] rather than as its own storage key: `DataKey`
+/// is already at the 50-variant `contracttype` cap.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleSourceQuote {
+    pub source: Address,
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+}
+
 /// Aggregate statistics across all oracle price-feed activity.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -445,6 +458,10 @@ pub struct OracleAnalytics {
     pub stale_rejections: u64,
     /// Total number of distinct asset pairs registered.
     pub registered_pairs: u32,
+    /// Independent oracle sources, at most five (#1053).
+    pub sources: Vec<Address>,
+    /// Latest quote from each registered source, per asset pair (#1053).
+    pub quotes: Vec<OracleSourceQuote>,
 }
 
 // -----------------------------------------------------------------------------

@@ -93,4 +93,12 @@ impl VirtualEconomyError {
     /// metadata, and the contracterror enum cannot grow past 50 variants.
     #[allow(non_upper_case_globals)]
     pub const Reentrancy: Self = Self::InvalidMetadata;
+
+    /// Fewer than two non-stale oracle sources were available (#1053).
+    ///
+    /// Alias of [`Self::OraclePriceStale`] for the same 50-variant cap.
+    /// Legacy primary/fallback resolution still returns `OraclePriceStale`
+    /// when no multi-oracle sources are registered.
+    #[allow(non_upper_case_globals)]
+    pub const OracleInsufficientSources: Self = Self::OraclePriceStale;
 }
