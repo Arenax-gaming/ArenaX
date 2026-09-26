@@ -459,6 +459,8 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::email_handler::configure)
             // Cache hit/miss metrics — Issue #910
             .configure(crate::http::cache_handler::configure)
+            // Audit log endpoints — Issue #863 / #1066
+            .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?
