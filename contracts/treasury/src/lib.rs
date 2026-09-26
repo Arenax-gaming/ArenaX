@@ -5,7 +5,7 @@
 // now that this crate is a workspace member.
 #![allow(deprecated)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -63,6 +63,7 @@ pub struct TreasuryDashboard {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Token,
     Signers,
     Threshold,
     TimeLockDuration,
@@ -90,6 +91,7 @@ impl Treasury {
     pub fn initialize(
         env: Env,
         admin: Address,
+        token: Address,
         signers: Vec<Address>,
         threshold: u32,
         time_lock_duration: u64,
@@ -105,6 +107,7 @@ impl Treasury {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Signers, &signers);
         env.storage()
             .instance()
@@ -135,13 +138,27 @@ impl Treasury {
     // Funding
     // -----------------------------------------------------------------
 
-    /// Record a deposit into the treasury's internal ledger balance.
+    /// Deposit real tokens into the treasury and record the amount in the
+    /// internal ledger balance.
+    ///
+    /// The token transfer is executed *before* the counter is updated. If the
+    /// transfer fails (e.g. insufficient balance or missing trustline), the
+    /// whole invocation reverts, so storage is left untouched and the internal
+    /// balance can never diverge from the tokens the contract actually holds.
     pub fn deposit(env: Env, from: Address, amount: i128) {
         Self::require_not_paused(&env);
         from.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
         }
+
+        let token = Self::token(&env);
+        token::Client::new(&env, &token).transfer(
+            &from,
+            &env.current_contract_address(),
+            &amount,
+        );
+
         let balance = Self::get_balance(env.clone());
         env.storage()
             .instance()
@@ -155,6 +172,11 @@ impl Treasury {
 
     pub fn get_balance(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::Balance).unwrap_or(0)
+    }
+
+    /// Address of the token contract the treasury custodies.
+    pub fn get_token(env: Env) -> Address {
+        Self::token(&env)
     }
 
     // -----------------------------------------------------------------
@@ -417,6 +439,16 @@ impl Treasury {
         if available < proposal.amount {
             panic!("exceeds budget allocation for category");
         }
+
+        // Pay out the custodied tokens. If the contract is underfunded the
+        // transfer panics and the whole execution reverts, leaving the
+        // proposal unexecuted and storage untouched.
+        let token = Self::token(&env);
+        token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &proposal.recipient,
+            &proposal.amount,
+        );
 
         env.storage()
             .instance()
@@ -742,6 +774,13 @@ impl Treasury {
     // -----------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------
+
+    fn token(env: &Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token not set")
+    }
 
     fn require_admin(env: &Env, caller: &Address) {
         let admin: Address = env
