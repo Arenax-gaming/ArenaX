@@ -672,10 +672,40 @@ fn test_supply_cap_enforcement_and_burn() {
     client.mint(&user1, &1500i128);
     assert_eq!(client.total_supply(), 1500);
 
-    // Burn 500 tokens -> cap should decrease by 500 to 1500!
+    // Sequence 0 is treated as a flash-loan collision by FlashLoanGuard.
+    // Advance before the first burn, same as the snapshot-voting tests.
+    env.ledger().set_sequence_number(1);
+
+    // Burn 500 tokens. The cap stays 2000 — cap and supply are independent.
     client.burn(&user1, &500i128);
     assert_eq!(client.total_supply(), 1000);
-    assert_eq!(client.get_supply_cap(), 1500);
+    assert_eq!(client.get_supply_cap(), 2000);
+}
+
+#[test]
+fn test_admin_can_lower_supply_cap() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&2000i128);
+    client.mint(&user1, &500i128);
+
+    client.set_supply_cap(&1000i128);
+    assert_eq!(client.get_supply_cap(), 1000);
+}
+
+#[test]
+#[should_panic(expected = "supply cap cannot be increased by admin")]
+fn test_admin_cannot_raise_supply_cap() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+    client.set_supply_cap(&2000i128);
 }
 
 #[test]
@@ -697,12 +727,14 @@ fn test_adjust_cap_via_governance() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
+    env.ledger().set_sequence_number(1);
     client.set_supply_cap(&1000i128);
     client.mint(&user1, &1000i128);
 
     // Create proposal to increase cap to 5000
     let proposal_desc = String::from_str(&env, "Increase Cap to 5000");
     let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+    env.ledger().set_sequence_number(2);
     client.vote_on_proposal(&user1, &proposal_id, &true);
 
     env.ledger().set_timestamp(3601);

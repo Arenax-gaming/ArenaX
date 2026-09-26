@@ -216,12 +216,9 @@ impl AxToken {
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
 
-        let cap = Self::get_supply_cap(env.clone());
-        if cap > 0 {
-            let new_cap = cap.saturating_sub(amount);
-            env.storage().instance().set(&DataKey::SupplyCap, &new_cap);
-        }
-
+        // The supply cap is independent of total supply. Burning tokens must
+        // not tighten the cap; only `set_supply_cap` (decrease) and
+        // `adjust_cap_via_governance` (increase) change it.
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &from), -amount);
 
         events::emit_burn(env, &from, amount);
@@ -399,10 +396,20 @@ impl AxToken {
     // Advanced Features: Supply Cap Enforcement
     // ---------------------------------------------------------------------------
 
+    /// Tighten the supply cap. Admin-only.
+    ///
+    /// A stored cap of `0` means no cap is set. The first call may introduce a
+    /// finite cap, which is a tightening, not an increase. Once a cap is set,
+    /// this function can only lower it. Raising the cap is governance-only:
+    /// see [`Self::adjust_cap_via_governance`].
     pub fn set_supply_cap(env: Env, cap: i128) {
         Self::require_admin(&env);
         if cap <= 0 {
             panic!("supply cap must be positive");
+        }
+        let current_cap = Self::get_supply_cap(env.clone());
+        if current_cap > 0 && cap >= current_cap {
+            panic!("supply cap cannot be increased by admin");
         }
         let current_supply = Self::total_supply(&env);
         if current_supply > cap {
@@ -418,6 +425,10 @@ impl AxToken {
             .unwrap_or(0)
     }
 
+    /// Change the supply cap through a passed governance proposal.
+    ///
+    /// This is the only path that may raise the cap. `set_supply_cap` is
+    /// admin-only and can only tighten an existing cap.
     pub fn adjust_cap_via_governance(env: Env, proposal_id: u64, new_cap: i128) {
         let mut proposal: Proposal = env
             .storage()
