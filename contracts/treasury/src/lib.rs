@@ -5,7 +5,7 @@
 // now that this crate is a workspace member.
 #![allow(deprecated)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -76,6 +76,7 @@ pub enum DataKey {
     TotalAllocated,
     TotalSpent,
     Paused,
+    Token,
 }
 
 #[contract]
@@ -90,6 +91,7 @@ impl Treasury {
     pub fn initialize(
         env: Env,
         admin: Address,
+        token: Address,
         signers: Vec<Address>,
         threshold: u32,
         time_lock_duration: u64,
@@ -105,6 +107,7 @@ impl Treasury {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Signers, &signers);
         env.storage()
             .instance()
@@ -135,13 +138,25 @@ impl Treasury {
     // Funding
     // -----------------------------------------------------------------
 
-    /// Record a deposit into the treasury's internal ledger balance.
+    /// Transfer `amount` of the treasury token from `from` into the contract
+    /// and record it in the internal ledger balance. The transfer runs first,
+    /// so a failed transfer aborts the call before storage is touched.
     pub fn deposit(env: Env, from: Address, amount: i128) {
         Self::require_not_paused(&env);
         from.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
         }
+        let token_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized");
+        token::Client::new(&env, &token_id).transfer(
+            &from,
+            env.current_contract_address(),
+            &amount,
+        );
         let balance = Self::get_balance(env.clone());
         env.storage()
             .instance()
@@ -151,6 +166,13 @@ impl Treasury {
             (Symbol::new(&env, "Treasury"), Symbol::new(&env, "DEPOSIT")),
             (from, amount),
         );
+    }
+
+    pub fn get_token(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized")
     }
 
     pub fn get_balance(env: Env) -> i128 {
