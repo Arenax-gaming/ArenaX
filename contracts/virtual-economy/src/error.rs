@@ -85,3 +85,12 @@ pub enum VirtualEconomyError {
     // was already at that cap, so new features must reuse existing cases
     // rather than add new ones.
 }
+
+impl VirtualEconomyError {
+    /// Re-entrant marketplace call (#1056).
+    ///
+    /// Alias of [`Self::InvalidMetadata`]. Trades never return that case for
+    /// metadata, and the contracterror enum cannot grow past 50 variants.
+    #[allow(non_upper_case_globals)]
+    pub const Reentrancy: Self = Self::InvalidMetadata;
+}

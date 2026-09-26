@@ -746,14 +746,27 @@ impl VirtualEconomyContract {
         Ok(order_id)
     }
 
-    /// Execute a marketplace trade
+    /// Execute a marketplace trade.
+    ///
+    /// Holds the re-entrancy guard (#1056) for the whole trade, including
+    /// the `transfer_nft` call, and clears it on every exit path.
     pub fn execute_marketplace_trade(
         env: Env,
         buyer: Address,
         order_id: BytesN<32>,
     ) -> Result<(), VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::execute_marketplace_trade_unguarded(env.clone(), buyer, order_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn execute_marketplace_trade_unguarded(
+        env: Env,
+        buyer: Address,
+        order_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
         let mut order: MarketplaceOrder = env
             .storage()
             .persistent()
@@ -1051,13 +1064,25 @@ impl VirtualEconomyContract {
 
     /// Buy the auctioned NFT at its current computed price. Applies the
     /// same marketplace fee and creator royalty rules as fixed-price trades.
+    ///
+    /// Holds the re-entrancy guard (#1056) across the NFT transfer.
     pub fn purchase_dutch_auction(
         env: Env,
         buyer: Address,
         listing_id: BytesN<32>,
     ) -> Result<(), VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::purchase_dutch_auction_unguarded(env.clone(), buyer, listing_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn purchase_dutch_auction_unguarded(
+        env: Env,
+        buyer: Address,
+        listing_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
         let mut listing = Self::get_dutch_auction(env.clone(), listing_id.clone())?;
         if listing.status != OrderStatus::Active {
             return Err(VirtualEconomyError::AuctionNotActive);
@@ -1255,13 +1280,25 @@ impl VirtualEconomyContract {
     /// Mint the next unit from a drop at its current bonding-curve price.
     /// Payment (in the contract's internal currency) goes to the drop's
     /// creator, minus the standard marketplace fee.
+    ///
+    /// Holds the re-entrancy guard (#1056) across the NFT mint.
     pub fn mint_from_drop(
         env: Env,
         buyer: Address,
         drop_id: BytesN<32>,
     ) -> Result<BytesN<32>, VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::mint_from_drop_unguarded(env.clone(), buyer, drop_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn mint_from_drop_unguarded(
+        env: Env,
+        buyer: Address,
+        drop_id: BytesN<32>,
+    ) -> Result<BytesN<32>, VirtualEconomyError> {
         let mut drop = Self::get_bonding_curve_drop(env.clone(), drop_id.clone())?;
         if !drop.active {
             return Err(VirtualEconomyError::DropInactive);
@@ -2773,6 +2810,35 @@ impl VirtualEconomyContract {
     // -------------------------------------------------------------------------
     // Internal Helper Functions
     // -------------------------------------------------------------------------
+
+    /// Acquire the marketplace re-entrancy lock (#1056).
+    ///
+    /// One instance-storage read plus one write. A nested call while the flag
+    /// is set returns [`VirtualEconomyError::Reentrancy`] without clearing the
+    /// outer call's lock.
+    fn enter_reentrancy_guard(env: &Env) -> Result<(), VirtualEconomyError> {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+        if locked {
+            return Err(VirtualEconomyError::Reentrancy);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+        Ok(())
+    }
+
+    /// Release the lock. One instance-storage write of the same bool entry.
+    /// Called on success and on `Err` returns. A re-entrant rejection does
+    /// not call this, so the outer trade keeps the lock.
+    fn exit_reentrancy_guard(env: &Env) {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+    }
 
     fn require_admin(env: &Env) -> Result<(), VirtualEconomyError> {
         let admin: Address = env

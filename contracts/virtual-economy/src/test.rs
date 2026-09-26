@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{Address, BytesN, Env, Vec};
 
 fn setup() -> (Env, Address, VirtualEconomyContractClient<'static>) {
     let env = Env::default();
@@ -208,4 +208,57 @@ fn monthly_rebate_run_rejects_before_the_period_elapses() {
     list_and_sell(&env, &client, &seller, &buyer, 5_000);
     let result = client.try_calculate_monthly_rebates();
     assert!(result.is_err(), "a second run inside the same period must fail");
+}
+
+// --- Re-entrancy guard (#1056) ---
+
+#[test]
+fn nested_trade_is_rejected_while_guard_is_held() {
+    let (env, client, seller, buyer) = setup_with_traders();
+    let metadata = sample_metadata(&env, &seller, "art", 0);
+    let token_id = client.mint_nft(&seller, &metadata, &None);
+    let order_id = client.create_marketplace_order(
+        &seller,
+        &MarketplaceAsset::NFT(token_id.clone()),
+        &10_000i128,
+        &None,
+    );
+
+    // An in-progress trade has already set the flag. A nested call into any
+    // of the three guarded entry points must be rejected, and must not clear
+    // the outer lock.
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+    });
+
+    let fake = BytesN::from_array(&env, &[9u8; 32]);
+    assert_eq!(
+        client.try_execute_marketplace_trade(&buyer, &order_id),
+        Err(Ok(VirtualEconomyError::Reentrancy))
+    );
+    assert_eq!(
+        client.try_purchase_dutch_auction(&buyer, &fake),
+        Err(Ok(VirtualEconomyError::Reentrancy))
+    );
+    assert_eq!(
+        client.try_mint_from_drop(&buyer, &fake),
+        Err(Ok(VirtualEconomyError::Reentrancy))
+    );
+
+    env.as_contract(&client.address, || {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap();
+        assert!(locked);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+    });
+
+    client.execute_marketplace_trade(&buyer, &order_id);
+    assert_eq!(client.get_nft_owner(&token_id), buyer);
 }

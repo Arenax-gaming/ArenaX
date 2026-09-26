@@ -108,6 +108,10 @@ pub enum DataKey {
     /// Rebate payout history for an address (most recent last), for
     /// dashboard visibility.
     RebateHistory(Address),
+
+    /// Set while a marketplace trade, Dutch-auction purchase, or drop mint
+    /// is in progress (#1056). Instance storage, one bool.
+    ReentrancyGuard,
 }
 
 #[contracttype]
