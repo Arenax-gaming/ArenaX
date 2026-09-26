@@ -98,6 +98,12 @@ async fn main() -> io::Result<()> {
     );
     tracing::info!("Tournament orchestrator polling worker started");
 
+    // Spawn the job queue worker for async tournament bracket/prize processing.
+    let _job_worker_handle = crate::orchestrator::TournamentOrchestrator::spawn_job_worker(
+        Arc::new(TournamentService::new(db_pool.clone())),
+    );
+    tracing::info!("Tournament job queue worker started");
+
     // Create Redis connection manager
     let redis_client = redis::Client::open(config.redis.url.clone())
         .expect("Failed to create Redis client");

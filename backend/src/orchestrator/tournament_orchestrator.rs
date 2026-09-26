@@ -2,7 +2,9 @@ use crate::db::DbPool;
 use crate::orchestrator::{
     PayoutSettler, RoundAdvancementWorker, SeedingEngine, TournamentCleanup,
 };
+use crate::service::tournament_service::TournamentService;
 use sqlx::Row;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time;
 
@@ -65,6 +67,44 @@ impl TournamentOrchestrator {
                 let _ = sqlx::query("SELECT pg_advisory_unlock(hashtext('tournament_orchestrator_poll'))")
                     .execute(&db_pool)
                     .await;
+            }
+        })
+    }
+
+    pub fn spawn_job_worker(service: Arc<TournamentService>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(2));
+
+            loop {
+                interval.tick().await;
+
+                let Some(job) = service.job_queue.claim_next_job().await.unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "Failed to claim queued tournament job");
+                    None
+                }) else {
+                    continue;
+                };
+
+                match service.process_job(job.clone()).await {
+                    Ok(result) => {
+                        tracing::info!(job_id = %job.id, result = %result, "Queued job completed");
+                    }
+                    Err(err) => {
+                        tracing::error!(job_id = %job.id, error = %err, "Queued job failed");
+                        if let Err(dlq_err) = service.job_queue
+                            .mark_failed(job.id, job.attempts, job.max_attempts, &err.to_string())
+                            .await
+                        {
+                            tracing::error!(job_id = %job.id, error = %dlq_err, "Failed to update job retry state");
+                        }
+                        if let Err(deadletter_err) = service.job_queue
+                            .record_dead_letter(Some(job.id), job.payload, &err.to_string())
+                            .await
+                        {
+                            tracing::error!(job_id = %job.id, error = %deadletter_err, "Failed to record DLQ entry");
+                        }
+                    }
+                }
             }
         })
     }
