@@ -71,6 +71,7 @@ impl VirtualEconomyContract {
             total_currency_minted: 0,
             total_currency_burned: 0,
             total_nfts_minted: 0,
+            total_nfts_burned: 0,
             total_trades_executed: 0,
             total_trade_volume: 0,
             total_fees_collected: 0,
@@ -645,6 +646,128 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
+    /// Burn an NFT, removing it permanently from circulation.
+    ///
+    /// # Arguments
+    /// * `owner` - The owner of the NFT authorizing the burn
+    /// * `token_id` - The 32-byte identifier of the token to burn
+    ///
+    /// # Errors
+    /// * `TokenNotFound` - If token does not exist
+    /// * `NotOwner` - If caller/owner is not the registered owner
+    /// * `NftCurrentlyStaked` - If the NFT has an active staking position
+    pub fn burn_nft(
+        env: Env,
+        owner: Address,
+        token_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
+        owner.require_auth();
+
+        let current_owner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTOwner(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+
+        if current_owner != owner {
+            return Err(VirtualEconomyError::NotOwner);
+        }
+
+        // Active staking check: burn must be rejected if staked
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::NftStakedPosition(token_id.clone()))
+        {
+            return Err(VirtualEconomyError::NftCurrentlyStaked);
+        }
+
+        // Active marketplace order check: auto-cancel before burn
+        if let Some(order_id) = env
+            .storage()
+            .persistent()
+            .get::<_, BytesN<32>>(&DataKey::NftActiveOrder(token_id.clone()))
+        {
+            if let Some(mut order) = env
+                .storage()
+                .persistent()
+                .get::<_, MarketplaceOrder>(&DataKey::MarketplaceOrder(order_id.clone()))
+            {
+                if order.status == OrderStatus::Active {
+                    order.status = OrderStatus::Cancelled;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+
+                    let mut analytics = Self::get_economy_analytics(env.clone());
+                    analytics.active_orders = analytics.active_orders.saturating_sub(1);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::EconomyAnalytics, &analytics);
+
+                    events::emit_marketplace_order_cancelled(&env, &order_id);
+                }
+            }
+            env.storage()
+                .persistent()
+                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+        }
+
+        // Fetch metadata before removing it
+        let metadata: NFTMetadata = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NFTMetadata(token_id.clone()))
+            .ok_or(VirtualEconomyError::TokenNotFound)?;
+
+        // Remove token from owner's NFT list
+        let owned_nfts: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnedNFTs(owner.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut new_owned_nfts: Vec<BytesN<32>> = Vec::new(&env);
+        for nft in owned_nfts.iter() {
+            if nft != token_id {
+                new_owned_nfts.push_back(nft);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnedNFTs(owner.clone()), &new_owned_nfts);
+
+        // Delete NFTOwner and NFTMetadata storage entries
+        env.storage()
+            .persistent()
+            .remove(&DataKey::NFTOwner(token_id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::NFTMetadata(token_id.clone()));
+
+        // Increment total_nfts_burned counter
+        let mut analytics = Self::get_economy_analytics(env.clone());
+        analytics.total_nfts_burned += 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::EconomyAnalytics, &analytics);
+
+        // Decrement collection item_count if part of a collection
+        if let Some(mut collection) = env
+            .storage()
+            .persistent()
+            .get::<_, NFTCollection>(&DataKey::Collection(metadata.category.clone()))
+        {
+            collection.item_count = collection.item_count.saturating_sub(1);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Collection(metadata.category.clone()), &collection);
+        }
+
+        events::emit_nft_burned(&env, &token_id, &owner, &metadata.name);
+        Ok(())
+    }
+
     /// Get NFT owner
     pub fn get_nft_owner(env: Env, token_id: BytesN<32>) -> Result<Address, VirtualEconomyError> {
         env.storage()
@@ -734,6 +857,12 @@ impl VirtualEconomyContract {
         env.storage()
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+
+        if let MarketplaceAsset::NFT(ref token_id) = asset {
+            env.storage()
+                .persistent()
+                .set(&DataKey::NftActiveOrder(token_id.clone()), &order_id);
+        }
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -879,6 +1008,12 @@ impl VirtualEconomyContract {
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
 
+        if let MarketplaceAsset::NFT(ref token_id) = order.asset {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+        }
+
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
         analytics.active_orders -= 1;
@@ -924,6 +1059,12 @@ impl VirtualEconomyContract {
         env.storage()
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+
+        if let MarketplaceAsset::NFT(ref token_id) = order.asset {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+        }
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -1825,6 +1966,7 @@ impl VirtualEconomyContract {
                 total_currency_minted: 0,
                 total_currency_burned: 0,
                 total_nfts_minted: 0,
+                total_nfts_burned: 0,
                 total_trades_executed: 0,
                 total_trade_volume: 0,
                 total_fees_collected: 0,
@@ -2567,7 +2709,7 @@ impl VirtualEconomyContract {
             .persistent()
             .has(&DataKey::NftStakedPosition(token_id.clone()))
         {
-            return Err(VirtualEconomyError::NftAlreadyStaked);
+            return Err(VirtualEconomyError::NftCurrentlyStaked);
         }
 
         let now = env.ledger().timestamp();

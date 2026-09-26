@@ -940,3 +940,145 @@ fn test_transfer_and_burn_update_voting_power_checkpoints() {
     assert_eq!(client.get_voting_power_at(&user1, &100), 1000);
     assert_eq!(client.get_voting_power_at(&user2, &100), 0);
 }
+
+// ============================================================================
+// PROPOSAL EXPIRY AND CLEANUP (#1054)
+// ============================================================================
+
+#[test]
+fn test_expired_proposal_can_be_cleaned_up() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    let proposal_desc = String::from_str(&env, "Expiring proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    // Vote AGAINST the proposal so it is rejected
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &false);
+
+    // Advance time past the voting period
+    env.ledger().set_timestamp(1_000 + 3601);
+
+    // Expire/cleanup proposal
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}
+
+#[test]
+#[should_panic(expected = "proposal not found")]
+fn test_expired_proposal_cannot_be_voted_on() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    let proposal_desc = String::from_str(&env, "Expiring proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    // Advance past end_time without votes (votes_for = 0, votes_against = 0 => rejected)
+    env.ledger().set_timestamp(1_000 + 3601);
+
+    client.expire_proposal(&proposal_id);
+
+    // Attempting to vote should panic with proposal not found
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+}
+
+#[test]
+fn test_passed_proposal_expires_after_grace_period() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    // Set grace period to 1 hour (3600s)
+    client.set_proposal_grace_period(&3600u64);
+    assert_eq!(client.get_proposal_grace_period(), 3600);
+
+    let proposal_desc = String::from_str(&env, "Passed proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    // Advance past end_time + grace_period (end_time = 4600, grace_period = 3600 => after 8200)
+    env.ledger().set_timestamp(8201);
+
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}
+
+#[test]
+#[should_panic(expected = "proposal within grace period")]
+fn test_passed_proposal_survives_grace_period() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    client.set_proposal_grace_period(&3600u64);
+
+    let proposal_desc = String::from_str(&env, "Passed proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    // Advance past end_time (4600) but within grace period (e.g. 5000 < 4600 + 3600)
+    env.ledger().set_timestamp(5000);
+
+    client.expire_proposal(&proposal_id);
+}
+
+#[test]
+fn test_execute_proposal_hook() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    let proposal_desc = String::from_str(&env, "Exec proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    env.ledger().set_timestamp(4601);
+
+    let target = Address::generate(&env);
+    client.approve_execution_target(&target);
+    assert!(client.is_execution_target_approved(&target));
+
+    let calldata = soroban_sdk::Bytes::new(&env);
+    client.execute_proposal(&proposal_id, &calldata);
+
+    let proposal = client.get_proposal(&proposal_id).unwrap();
+    assert!(proposal.executed);
+
+    // Executed proposal can be expired/cleaned up
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}

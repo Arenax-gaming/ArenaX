@@ -4,7 +4,7 @@ mod flash_loan_protection;
 use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -129,6 +129,9 @@ pub enum DataKey {
     // Voting-power snapshots
     Checkpoints(Address),
     VoteRecords(u64),
+    // Proposal expiry & execution
+    ProposalGracePeriod,
+    ApprovedExecutionTarget(Address),
 }
 
 #[contract]
@@ -861,6 +864,116 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    /// Set the grace period before passed unexecuted proposals can be expired
+    ///
+    /// # Arguments
+    /// * `grace_period` - Grace period duration in seconds (default 7 days = 604,800s)
+    pub fn set_proposal_grace_period(env: Env, grace_period: u64) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalGracePeriod, &grace_period);
+    }
+
+    /// Get the configured proposal grace period (defaults to 7 days = 604,800s)
+    pub fn get_proposal_grace_period(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProposalGracePeriod)
+            .unwrap_or(7 * 24 * 60 * 60)
+    }
+
+    /// Admin approves an execution target contract address
+    pub fn approve_execution_target(env: Env, target: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ApprovedExecutionTarget(target), &true);
+    }
+
+    /// Check if a contract address is an approved execution target
+    pub fn is_execution_target_approved(env: Env, target: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::ApprovedExecutionTarget(target))
+            .unwrap_or(false)
+    }
+
+    /// Expire a proposal and clean it up from storage.
+    ///
+    /// - Rejected proposals (`votes_for <= votes_against`) can be expired immediately after `end_time`.
+    /// - Passed unexecuted proposals can only be expired after `end_time + grace_period`.
+    /// - Executed proposals can be expired/cleaned up immediately after `end_time`.
+    /// Callable by anyone.
+    pub fn expire_proposal(env: Env, proposal_id: u64) {
+        let proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        let now = env.ledger().timestamp();
+        if now < proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        let is_rejected = proposal.votes_for <= proposal.votes_against;
+        if !is_rejected && !proposal.executed {
+            let grace_period = Self::get_proposal_grace_period(env.clone());
+            if now < proposal.end_time + grace_period {
+                panic!("proposal within grace period");
+            }
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::Proposal(proposal_id));
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXPIRED"),
+            ),
+            proposal_id,
+        );
+    }
+
+    /// General execution hook for passed proposals
+    ///
+    /// Marks the proposal as executed and emits the general execution event with calldata.
+    pub fn execute_proposal(env: Env, proposal_id: u64, calldata: Bytes) {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXECUTED"),
+            ),
+            (proposal_id, calldata),
+        );
     }
 
     // ---------------------------------------------------------------------------
