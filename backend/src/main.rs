@@ -411,6 +411,8 @@ async fn main() -> io::Result<()> {
                         web::scope("/gas")
                             .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
                     )
+                    // Async payment webhooks — Paystack + Flutterwave (#1157)
+                    .configure(crate::http::webhook_handler::configure_routes)
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
