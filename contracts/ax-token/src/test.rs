@@ -304,6 +304,10 @@ fn test_full_lifecycle() {
     assert_eq!(client.balance(&user1), 700);
     assert_eq!(client.balance(&user2), 1300);
 
+    // Flash-loan guard: a second protected operation by the same address must
+    // land in a later ledger sequence (this models a separate transaction).
+    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+
     client.burn(&user1, &200i128);
     client.burn(&user2, &400i128);
     assert_eq!(client.balance(&user1), 500);
@@ -610,6 +614,11 @@ fn test_emergency_pause_and_governance_unpause() {
     // Execute unpause via governance
     client.unpause_via_governance(&proposal_id);
     assert!(!client.is_paused());
+
+    // Flash-loan guard: user1 already voted this sequence, so the protected
+    // transfer must happen in a later ledger (this models a separate
+    // transaction) — same convention as the snapshot-voting tests below.
+    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
 
     // Now transfer should succeed
     client.transfer(&user1, &user2, &200i128);
