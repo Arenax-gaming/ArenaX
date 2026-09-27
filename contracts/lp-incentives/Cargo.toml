@@ -1,0 +1,14 @@
+[package]
+name = "lp-incentives"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LP (liquidity provider) incentives: storage types and side-effect-free reward math"
+
+[dependencies]
+soroban-sdk.workspace = true
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

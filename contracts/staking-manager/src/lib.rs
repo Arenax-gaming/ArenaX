@@ -1,8 +1,6 @@
 #![no_std]
-#![no_std]
 
 mod flexible_rewards;
-mod lp_incentives;
 mod validator_penalty;
 mod voting_escrow;
 
