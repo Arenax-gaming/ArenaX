@@ -68,6 +68,15 @@ pub enum DataKey {
     LpHistory(Address, u32),
     // Time-lock voting escrow (#912)
     VotingEscrowLock(Address),
+    // Governance signers for 2-of-N slashing multi-sig (#1061)
+    GovernanceSigners,
+    // Storage TTL config (#1060)
+    TtlMinLedgers,
+    TtlTargetLedgers,
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -170,6 +179,8 @@ pub struct SlashConfig {
     pub burn_bps: u32,
     /// Seconds after a slash during which the validator may appeal.
     pub appeal_window_seconds: u64,
+    /// Minimum time between two slashes of the same validator (#1061).
+    pub min_slash_interval_seconds: u64,
 }
 
 /// Immutable record of a single slash event.
@@ -211,6 +222,18 @@ pub struct ValidatorSlashHistory {
     pub slash_ids: Vec<BytesN<32>>,
     /// `Some(slash_id)` when there is an open appeal pending resolution.
     pub active_appeal: Option<BytesN<32>>,
+    /// Timestamp of the last slash event (#1061).
+    pub last_slash_time: u64,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -606,6 +629,8 @@ impl StakingManager {
             &amount,
         );
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage().persistent().set(
             &stake_key,
             &StakeInfo {
@@ -617,12 +642,15 @@ impl StakingManager {
                 can_withdraw: false,
             },
         );
+        env.storage().persistent().extend_ttl(&stake_key, min_ttl, target_ttl);
+
         let mut updated = info;
         updated.total_staked += amount;
         updated.participant_count += 1;
         env.storage()
             .persistent()
             .set(&DataKey::TournamentInfo(tournament_id.clone()), &updated);
+        env.storage().persistent().extend_ttl(&DataKey::TournamentInfo(tournament_id.clone()), min_ttl, target_ttl);
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
         events::emit_staked(&env, &user, &tournament_id, amount);
     }
@@ -1169,6 +1197,7 @@ impl StakingManager {
     }
 
     /// Slash a validator at the given `severity` (0 = lightest, 4 = heaviest).
+    /// Severity 4 requires 2-of-N multi-sig from registered governance signers (#1061).
     /// Returns the unique `slash_id` for the event. Admin-only.
     pub fn slash_validator(
         env: Env,
@@ -1176,9 +1205,154 @@ impl StakingManager {
         validator: Address,
         severity: u32,
         reason: u32,
+        signers: Option<Vec<Address>>,
     ) -> BytesN<32> {
         Self::require_admin(&env);
-        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason)
+        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason, signers)
+    }
+
+    /// Register governance signers for severity 4 multi-sig slashes (#1061).
+    pub fn set_governance_signers(env: Env, signers: Vec<Address>) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernanceSigners, &signers);
+    }
+
+    /// Return registered governance signers (#1061).
+    pub fn get_governance_signers(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::GovernanceSigners)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
+
+    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlMinLedgers, &min_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlTargetLedgers, &target_ttl);
+    }
+
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn bump_entry_ttl(env: Env, key: DataKey) {
+        Self::require_admin(&env);
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+        env.storage().persistent().extend_ttl(&key, min_ttl, target_ttl);
+    }
+
+    // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
+
+    pub fn schedule_upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        min_compatible_schema: u32,
+        delay_seconds: Option<u64>,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let delay = delay_seconds.unwrap_or(86_400);
+        let scheduled = ScheduledUpgrade {
+            new_wasm_hash,
+            min_compatible_schema,
+            scheduled_at: now,
+            executable_at: now + delay,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::ScheduledUpgrade, &scheduled);
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::require_admin(&env);
+        let scheduled: ScheduledUpgrade = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledUpgrade)
+            .expect("no scheduled upgrade");
+
+        if scheduled.new_wasm_hash != new_wasm_hash {
+            panic!("wasm hash does not match scheduled upgrade");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < scheduled.executable_at {
+            panic!("timelock not elapsed");
+        }
+
+        let current_schema: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1);
+
+        if current_schema < scheduled.min_compatible_schema {
+            panic!("incompatible schema");
+        }
+
+        let current_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
+        env.storage()
+            .instance()
+            .set(&DataKey::PreviousWasmHash, &current_hash);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+
+        if !Self::post_upgrade_check(env.clone()) {
+            Self::rollback_upgrade(env.clone());
+            panic!("post upgrade check failed, reverted");
+        }
+
+        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
+    }
+
+    pub fn rollback_upgrade(env: Env) {
+        Self::require_admin(&env);
+        let prev_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .expect("no prior version for rollback");
+        env.deployer().update_current_contract_wasm(prev_hash);
+    }
+
+    pub fn post_upgrade_check(_env: Env) -> bool {
+        true
+    }
+
+    pub fn get_storage_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1)
+    }
+
+    pub fn set_storage_schema_version(env: Env, version: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &version);
     }
 
     /// Submit an appeal against a slash. Only the slashed validator may call

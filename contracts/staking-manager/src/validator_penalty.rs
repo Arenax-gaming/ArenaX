@@ -46,7 +46,7 @@ impl ValidatorPenaltyManager {
     /// slash amount for that severity. Returns the `slash_id`.
     ///
     /// - Deducts from `UserStakeInfo.total_staked`; if stake is
-    ///   insufficient, slashes what is available.
+    ///   insufficient, slashes what is available (cannot slash to negative).
     /// - Burns `amount * burn_bps / 10_000` (tracked via `DataKey::BurnedSupply`
     ///   counter — no token-burn call because no token client is available here).
     /// - Routes the rest into `DataKey::RewardPool`.
@@ -57,6 +57,7 @@ impl ValidatorPenaltyManager {
         validator: Address,
         severity: u32,
         reason: u32,
+        signers: Option<Vec<Address>>,
     ) -> BytesN<32> {
         admin.require_auth();
 
@@ -71,6 +72,62 @@ impl ValidatorPenaltyManager {
         }
         if severity as usize >= config.slash_amounts.len() as usize {
             panic!("invalid severity level");
+        }
+
+        // Severity 4 (maximum) requires 2-of-N multi-sig from registered governance signers (#1061)
+        if severity == 4 {
+            let multisig_signers = signers.expect("severity 4 requires 2-of-N multisig signers");
+            if multisig_signers.len() < 2 {
+                panic!("severity 4 requires at least 2 signers");
+            }
+
+            let registered: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::GovernanceSigners)
+                .unwrap_or_else(|| Vec::new(env));
+
+            let mut verified_count: u32 = 0;
+            let mut seen: Vec<Address> = Vec::new(env);
+
+            for i in 0..multisig_signers.len() {
+                let signer = multisig_signers.get(i).unwrap();
+                if seen.contains(&signer) {
+                    continue;
+                }
+                seen.push_back(signer.clone());
+
+                if registered.contains(&signer) {
+                    signer.require_auth();
+                    verified_count += 1;
+                }
+            }
+
+            if verified_count < 2 {
+                panic!("severity 4 requires at least 2 registered governance signers");
+            }
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Check slashing cooldown (#1061)
+        let mut history: ValidatorSlashHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ValidatorSlashRecord(validator.clone()))
+            .unwrap_or(ValidatorSlashHistory {
+                validator: validator.clone(),
+                total_slashed: 0,
+                slash_count: 0,
+                slash_ids: Vec::new(env),
+                active_appeal: None,
+                last_slash_time: 0,
+            });
+
+        if history.last_slash_time > 0 && config.min_slash_interval_seconds > 0 {
+            if now < history.last_slash_time + config.min_slash_interval_seconds {
+                panic!("slash cooldown active");
+            }
         }
 
         let requested_amount = config
@@ -98,8 +155,6 @@ impl ValidatorPenaltyManager {
         env.storage()
             .instance()
             .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
-
-        let now = env.ledger().timestamp();
 
         // Split: burn portion tracked via counter; rest added to reward pool
         let burn_amount = actual_amount * config.burn_bps as i128 / 10_000;
@@ -155,28 +210,40 @@ impl ValidatorPenaltyManager {
             appeal_resolved: false,
             appeal_granted: false,
         };
+
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Update the validator's slash history
-        let mut history: ValidatorSlashHistory = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ValidatorSlashRecord(validator.clone()))
-            .unwrap_or(ValidatorSlashHistory {
-                validator: validator.clone(),
-                total_slashed: 0,
-                slash_count: 0,
-                slash_ids: Vec::new(env),
-                active_appeal: None,
-            });
         history.total_slashed += actual_amount;
         history.slash_count += 1;
         history.slash_ids.push_back(slash_id.clone());
+        history.last_slash_time = now;
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorSlashRecord(validator.clone()), &history);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorSlashRecord(validator.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit events
         stake_events::emit_slashed(
@@ -232,11 +299,27 @@ impl ValidatorPenaltyManager {
             panic!("appeal window expired");
         }
 
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
         // Mark the record as appealed
         record.appealed = true;
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Create the appeal record keyed by slash_id
         let appeal = AppealRecord {
@@ -250,6 +333,11 @@ impl ValidatorPenaltyManager {
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppeal(slash_id.clone()), &appeal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppeal(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Update history: mark active appeal
         let mut history: ValidatorSlashHistory = env
@@ -261,6 +349,11 @@ impl ValidatorPenaltyManager {
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorSlashRecord(validator.clone()), &history);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorSlashRecord(validator.clone()),
+            min_ttl,
+            target_ttl,
+        );
     }
 
     // ── Resolve Appeal ───────────────────────────────────────────────────────
@@ -345,6 +438,17 @@ impl ValidatorPenaltyManager {
                     .set(&DataKey::RewardPool, &(pool - record.pool_amount).max(0));
             }
 
+            let min_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlMinLedgers)
+                .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+            let target_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlTargetLedgers)
+                .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
             // Update history totals
             let mut history: ValidatorSlashHistory = env
                 .storage()
@@ -357,7 +461,23 @@ impl ValidatorPenaltyManager {
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 &history,
             );
+            env.storage().persistent().extend_ttl(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                min_ttl,
+                target_ttl,
+            );
         } else {
+            let min_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlMinLedgers)
+                .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+            let target_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlTargetLedgers)
+                .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
             // Denied — clear the active appeal on history
             let mut history: ValidatorSlashHistory = env
                 .storage()
@@ -369,14 +489,40 @@ impl ValidatorPenaltyManager {
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 &history,
             );
+            env.storage().persistent().extend_ttl(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                min_ttl,
+                target_ttl,
+            );
         }
+
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
 
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppeal(slash_id.clone()), &appeal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppeal(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
     }
 
     // ── Views ────────────────────────────────────────────────────────────────
@@ -405,6 +551,7 @@ impl ValidatorPenaltyManager {
                 slash_count: 0,
                 slash_ids: Vec::new(env),
                 active_appeal: None,
+                last_slash_time: 0,
             });
 
         let max_limit = 50u32;
