@@ -411,6 +411,8 @@ async fn main() -> io::Result<()> {
                         web::scope("/gas")
                             .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
                     )
+                    // Async payment webhooks — Paystack + Flutterwave (#1157)
+                    .configure(crate::http::webhook_handler::configure_routes)
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
@@ -447,6 +449,17 @@ async fn main() -> io::Result<()> {
                             .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
+                    )
+                    // Leaderboard endpoints
+                    .service(
+                        web::scope("/leaderboards")
+                            .route("/{category}", web::get().to(crate::http::leaderboard_handler::get_leaderboard))
+                            .route("/{category}/season/{season}", web::get().to(crate::http::leaderboard_handler::get_seasonal_leaderboard))
+                            .route("/{category}/player/{player_id}", web::get().to(crate::http::leaderboard_handler::get_player_rank))
+                            .route("/{category}/player/{player_id}/elo-history", web::get().to(crate::http::leaderboard_handler::get_elo_history))
+                            .route("/{category}/history/{player_id}", web::get().to(crate::http::leaderboard_handler::get_rank_history))
+                            .route("/{category}/refresh", web::post().to(crate::http::leaderboard_handler::refresh_leaderboard))
+                            .route("/{category}/stats", web::get().to(crate::http::leaderboard_handler::get_leaderboard_stats))
                     ),
             )
             // Registered at the app level, not inside the `/api` scope above:
@@ -459,6 +472,8 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::email_handler::configure)
             // Cache hit/miss metrics — Issue #910
             .configure(crate::http::cache_handler::configure)
+            // Audit log endpoints — Issue #863 / #1066
+            .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?

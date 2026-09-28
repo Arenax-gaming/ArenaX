@@ -85,7 +85,7 @@ function MatchHubPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
-  const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
+  const { isConnected, lastUpdate, connectionError, connectionRestored, reconnect } = useMatchWebSocket({
     matchId,
     enabled: match?.status === "in_progress" || match?.status === "disputed",
   });
@@ -336,6 +336,10 @@ function MatchHubPageContent() {
                   <Button variant="ghost" size="sm" onClick={reconnect} className="text-white hover:bg-white/10">
                     <RefreshCw className="h-4 w-4" />
                   </Button>
+                </div>
+              ) : connectionRestored ? (
+                <div role="status" className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                  Connection restored. Live updates resumed.
                 </div>
               ) : null}
 

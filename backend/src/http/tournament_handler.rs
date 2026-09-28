@@ -9,10 +9,15 @@ use crate::models::{
 };
 use crate::service::tournament_service::TournamentService;
 use actix_web::{web, HttpRequest, HttpResponse};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
+
+/// Standard IRS reporting threshold ($600.00, in the smallest currency unit)
+/// used as the default when a tax report request doesn't specify one.
+const DEFAULT_TAX_REPORTING_THRESHOLD: i64 = 60_000;
 
 // ─── Query params ─────────────────────────────────────────────────────────────
 
@@ -30,6 +35,23 @@ pub struct ListTournamentsQuery {
 pub struct TournamentStatisticsQuery {
     pub include_participants: Option<bool>,
     pub include_matches: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaxReportQuery {
+    pub year: i32,
+    /// Currency code winnings are aggregated in, e.g. "NGN" (default: "NGN").
+    pub currency: Option<String>,
+    /// Minimum total winnings (smallest currency unit) that flags a payee as
+    /// needing a 1099. Defaults to the standard $600.00 threshold.
+    pub threshold: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MonthlyRevenueQuery {
+    pub currency: Option<String>,
+    pub start_date: Option<DateTime<Utc>>,
+    pub end_date: Option<DateTime<Utc>>,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -336,6 +358,129 @@ pub async fn get_tournament_statistics(
     Ok(HttpResponse::Ok().json(stats))
 }
 
+// ─── Financial reporting ────────────────────────────────────────────────────
+
+/// GET /api/tournaments/{id}/prize-pool
+///
+/// Total prize pool for the tournament and how much has been awarded/paid.
+/// Admin only.
+pub async fn get_tournament_prize_pool(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    validate_uuid(&tournament_id.to_string())
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    let summary = svc.get_tournament_prize_pool_summary(tournament_id).await?;
+
+    Ok(HttpResponse::Ok().json(summary))
+}
+
+/// GET /api/tournaments/{id}/revenue
+///
+/// Entry-fee revenue breakdown for the tournament. Admin only.
+pub async fn get_tournament_revenue(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    validate_uuid(&tournament_id.to_string())
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    let breakdown = svc.get_tournament_revenue_breakdown(tournament_id).await?;
+
+    Ok(HttpResponse::Ok().json(breakdown))
+}
+
+/// GET /api/tournaments/{id}/prize-distribution
+///
+/// Per-winner prize distribution tracking (paid/pending/failed). Admin only.
+pub async fn get_tournament_prize_distribution(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    validate_uuid(&tournament_id.to_string())
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    let entries = svc.get_prize_distribution_tracking(tournament_id).await?;
+
+    Ok(HttpResponse::Ok().json(entries))
+}
+
+/// GET /api/tournaments/{id}/financial-report
+///
+/// Combined financial report: prize pool summary, revenue breakdown, and
+/// prize distribution tracking in one response. Admin only.
+pub async fn get_tournament_financial_report(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    validate_uuid(&tournament_id.to_string())
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
+    let report = svc.get_tournament_financial_report(tournament_id).await?;
+
+    Ok(HttpResponse::Ok().json(report))
+}
+
+/// GET /api/tournaments/reports/tax
+///
+/// Aggregated tournament winnings per payee for a tax year, flagged for 1099
+/// reporting once they cross the threshold. Admin only.
+pub async fn get_tax_report(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    query: web::Query<TaxReportQuery>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let currency = query.currency.clone().unwrap_or_else(|| "NGN".to_string());
+    let threshold = query.threshold.unwrap_or(DEFAULT_TAX_REPORTING_THRESHOLD);
+
+    info!(tax_year = query.year, currency = %currency, "Generating tax report");
+
+    let report = svc.get_tax_report(query.year, &currency, threshold).await?;
+
+    Ok(HttpResponse::Ok().json(report))
+}
+
+/// GET /api/tournaments/reports/monthly-revenue
+///
+/// Month-by-month entry-fee revenue and prize payouts over a date range
+/// (defaults to the last 12 months). Admin only.
+pub async fn get_monthly_revenue_report(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    query: web::Query<MonthlyRevenueQuery>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let currency = query.currency.clone().unwrap_or_else(|| "NGN".to_string());
+    let end_date = query.end_date.unwrap_or_else(Utc::now);
+    let start_date = query.start_date.unwrap_or_else(|| end_date - Duration::days(365));
+
+    let report = svc
+        .get_monthly_revenue_report(&currency, start_date, end_date)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(report))
+}
+
 // ─── Route configuration ──────────────────────────────────────────────────────
 
 /// Configure all tournament routes under `/tournaments`.
@@ -347,6 +492,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/tournaments")
             .route("", web::post().to(create_tournament))
             .route("", web::get().to(list_tournaments))
+            // Cross-tournament report routes registered ahead of `/{id}` so
+            // "reports" is never captured as a tournament id.
+            .route("/reports/tax", web::get().to(get_tax_report))
+            .route("/reports/monthly-revenue", web::get().to(get_monthly_revenue_report))
             .route("/{id}", web::get().to(get_tournament))
             .route("/{id}", web::delete().to(cancel_tournament))
             .route("/{id}/participants", web::get().to(get_tournament_participants))
@@ -355,7 +504,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}/advance", web::post().to(advance_bracket))
             .route("/{id}/generate-bracket", web::post().to(generate_bracket_job))
             .route("/{id}/distribute-prizes", web::post().to(distribute_prizes))
-            .route("/{id}/statistics", web::get().to(get_tournament_statistics)),
+            .route("/{id}/statistics", web::get().to(get_tournament_statistics))
+            .route("/{id}/prize-pool", web::get().to(get_tournament_prize_pool))
+            .route("/{id}/revenue", web::get().to(get_tournament_revenue))
+            .route("/{id}/prize-distribution", web::get().to(get_tournament_prize_distribution))
+            .route("/{id}/financial-report", web::get().to(get_tournament_financial_report)),
     );
 }
 
