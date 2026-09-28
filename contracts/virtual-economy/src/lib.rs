@@ -493,12 +493,25 @@ impl VirtualEconomyContract {
         };
 
         // Store NFT data
+        let (min_nft_ttl, target_nft_ttl) = Self::get_nft_ttl_config(&env);
+
         env.storage()
             .persistent()
             .set(&DataKey::NFTOwner(final_token_id.clone()), &owner);
+        env.storage().persistent().extend_ttl(
+            &DataKey::NFTOwner(final_token_id.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
+
         env.storage()
             .persistent()
             .set(&DataKey::NFTMetadata(final_token_id.clone()), &metadata);
+        env.storage().persistent().extend_ttl(
+            &DataKey::NFTMetadata(final_token_id.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
 
         // Update owner's NFT list
         let mut owned_nfts: Vec<BytesN<32>> = env
@@ -510,6 +523,11 @@ impl VirtualEconomyContract {
         env.storage()
             .persistent()
             .set(&DataKey::OwnedNFTs(owner.clone()), &owned_nfts);
+        env.storage().persistent().extend_ttl(
+            &DataKey::OwnedNFTs(owner.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
 
         // Update analytics
         let mut analytics = Self::get_economy_analytics(env.clone());
@@ -609,9 +627,16 @@ impl VirtualEconomyContract {
         }
 
         // Update ownership
+        let (min_nft_ttl, target_nft_ttl) = Self::get_nft_ttl_config(&env);
+
         env.storage()
             .persistent()
             .set(&DataKey::NFTOwner(token_id.clone()), &to);
+        env.storage().persistent().extend_ttl(
+            &DataKey::NFTOwner(token_id.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
 
         // Update from's NFT list
         let from_nfts: Vec<BytesN<32>> = env
@@ -630,6 +655,11 @@ impl VirtualEconomyContract {
         env.storage()
             .persistent()
             .set(&DataKey::OwnedNFTs(from.clone()), &new_from_nfts);
+        env.storage().persistent().extend_ttl(
+            &DataKey::OwnedNFTs(from.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
 
         // Add to to's NFT list
         let mut to_nfts: Vec<BytesN<32>> = env
@@ -641,6 +671,11 @@ impl VirtualEconomyContract {
         env.storage()
             .persistent()
             .set(&DataKey::OwnedNFTs(to.clone()), &to_nfts);
+        env.storage().persistent().extend_ttl(
+            &DataKey::OwnedNFTs(to.clone()),
+            min_nft_ttl,
+            target_nft_ttl,
+        );
 
         events::emit_nft_transferred(&env, &token_id, &from, &to);
         Ok(())
@@ -854,9 +889,15 @@ impl VirtualEconomyContract {
             status: OrderStatus::Active,
         };
 
+        let (min_order_ttl, target_order_ttl) = Self::get_order_ttl_config(&env);
         env.storage()
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage().persistent().extend_ttl(
+            &DataKey::MarketplaceOrder(order_id.clone()),
+            min_order_ttl,
+            target_order_ttl,
+        );
 
         if let MarketplaceAsset::NFT(ref token_id) = asset {
             env.storage()
@@ -1003,10 +1044,16 @@ impl VirtualEconomyContract {
         }
 
         // Mark order as completed
+        let (min_order_ttl, target_order_ttl) = Self::get_order_ttl_config(&env);
         order.status = OrderStatus::Completed;
         env.storage()
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage().persistent().extend_ttl(
+            &DataKey::MarketplaceOrder(order_id.clone()),
+            min_order_ttl,
+            target_order_ttl,
+        );
 
         if let MarketplaceAsset::NFT(ref token_id) = order.asset {
             env.storage()
@@ -1055,10 +1102,16 @@ impl VirtualEconomyContract {
             return Err(VirtualEconomyError::OrderNotActive);
         }
 
+        let (min_order_ttl, target_order_ttl) = Self::get_order_ttl_config(&env);
         order.status = OrderStatus::Cancelled;
         env.storage()
             .persistent()
             .set(&DataKey::MarketplaceOrder(order_id.clone()), &order);
+        env.storage().persistent().extend_ttl(
+            &DataKey::MarketplaceOrder(order_id.clone()),
+            min_order_ttl,
+            target_order_ttl,
+        );
 
         if let MarketplaceAsset::NFT(ref token_id) = order.asset {
             env.storage()
@@ -3273,5 +3326,159 @@ impl VirtualEconomyContract {
     /// for the whole window.
     pub fn observe_price(env: Env) -> Result<PriceSnapshot, VirtualEconomyError> {
         AmmManager::observe(&env)
+    }
+
+    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
+
+    pub fn get_nft_ttl_config(env: &Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlNftMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_NFT_OWNERSHIP);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlNftTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_NFT_OWNERSHIP);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn get_order_ttl_config(env: &Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlOrderMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_ORDERS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlOrderTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_ORDERS);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn set_ttl_config(env: Env, order_target_ttl: u32, nft_target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlOrderTargetLedgers, &order_target_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlNftTargetLedgers, &nft_target_ttl);
+    }
+
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let (_, order_target) = Self::get_order_ttl_config(&env);
+        let (_, nft_target) = Self::get_nft_ttl_config(&env);
+        (order_target, nft_target)
+    }
+
+    pub fn bump_entry_ttl(env: Env, key: DataKey) {
+        Self::require_admin(&env);
+        let (min_ttl, target_ttl) = match &key {
+            DataKey::NFTOwner(_) | DataKey::NFTMetadata(_) | DataKey::OwnedNFTs(_) | DataKey::NFTLicense(_) => {
+                Self::get_nft_ttl_config(&env)
+            }
+            DataKey::MarketplaceOrder(_) => Self::get_order_ttl_config(&env),
+            _ => (contract_utils::ttl::MIN_TTL_ORDERS, contract_utils::ttl::TTL_ORDERS),
+        };
+        env.storage().persistent().extend_ttl(&key, min_ttl, target_ttl);
+    }
+
+    // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
+
+    pub fn schedule_upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        min_compatible_schema: u32,
+        delay_seconds: Option<u64>,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let delay = delay_seconds.unwrap_or(86_400);
+        let scheduled = ScheduledUpgrade {
+            new_wasm_hash,
+            min_compatible_schema,
+            scheduled_at: now,
+            executable_at: now + delay,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::ScheduledUpgrade, &scheduled);
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::require_admin(&env);
+        let scheduled: ScheduledUpgrade = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledUpgrade)
+            .expect("no scheduled upgrade");
+
+        if scheduled.new_wasm_hash != new_wasm_hash {
+            panic!("wasm hash does not match scheduled upgrade");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < scheduled.executable_at {
+            panic!("timelock not elapsed");
+        }
+
+        let current_schema: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1);
+
+        if current_schema < scheduled.min_compatible_schema {
+            panic!("incompatible schema");
+        }
+
+        let current_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
+        env.storage()
+            .instance()
+            .set(&DataKey::PreviousWasmHash, &current_hash);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+
+        if !Self::post_upgrade_check(env.clone()) {
+            Self::rollback_upgrade(env.clone());
+            panic!("post upgrade check failed, reverted");
+        }
+
+        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
+    }
+
+    pub fn rollback_upgrade(env: Env) {
+        Self::require_admin(&env);
+        let prev_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .expect("no prior version for rollback");
+        env.deployer().update_current_contract_wasm(prev_hash);
+    }
+
+    pub fn post_upgrade_check(_env: Env) -> bool {
+        true
+    }
+
+    pub fn get_storage_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1)
+    }
+
+    pub fn set_storage_schema_version(env: Env, version: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &version);
     }
 }
