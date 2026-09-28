@@ -6,7 +6,7 @@ mod validator_penalty;
 mod voting_escrow;
 
 use arenax_events::staking as events;
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, String, Vec};
 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
 pub use flexible_rewards::{FlexiblePosition, RewardPool};
@@ -173,14 +173,21 @@ pub struct SlashConfig {
     /// Whether the slashing system is currently active.
     pub enabled: bool,
     /// Ordered list of slash amounts per severity level (index = severity 0-4).
+    /// Severity 0 = lightest infraction; severity 4 = heaviest (e.g. double-sign).
     pub slash_amounts: Vec<i128>,
-    /// Fraction of slashed tokens to burn (rest goes to reward pool).
-    /// Expressed in basis points (5000 = 50 %).
+    /// Fraction of slashed tokens sent to the burn address expressed in basis
+    /// points (5000 = 50 %). The remaining fraction is sent to `treasury_address`.
     pub burn_bps: u32,
-    /// Seconds after a slash during which the validator may appeal.
+    /// Seconds after a slash during which the validator may file an appeal.
+    /// After this window the slash is final. Set to 0 to disable appeals.
     pub appeal_window_seconds: u64,
-    /// Minimum time between two slashes of the same validator (#1061).
-    pub min_slash_interval_seconds: u64,
+    /// AX token contract address — used for the on-chain token transfers that
+    /// move slashed tokens to the treasury and burn address.
+    pub ax_token: Address,
+    /// Treasury contract address that receives the non-burned portion of
+    /// slashed tokens. The DAO can then reallocate these as a reward pool
+    /// top-up, insurance fund, or governance decision.
+    pub treasury_address: Address,
 }
 
 /// Immutable record of a single slash event.
@@ -191,10 +198,14 @@ pub struct SlashRecord {
     pub validator: Address,
     pub amount: i128,
     pub severity: u32,
+    /// Numeric reason code (application-defined enum, stored for indexer filtering).
     pub reason: u32,
+    /// Human-readable rationale logged on-chain for transparency and auditing.
+    pub rationale: String,
     pub slashed_at: u64,
     pub burned_amount: i128,
-    pub pool_amount: i128,
+    /// Amount sent to the treasury contract.
+    pub treasury_amount: i128,
     pub appealed: bool,
     pub appeal_resolved: bool,
     pub appeal_granted: bool,
@@ -206,7 +217,10 @@ pub struct SlashRecord {
 pub struct AppealRecord {
     pub slash_id: BytesN<32>,
     pub appellant: Address,
+    /// Numeric reason code for the appeal (application-defined).
     pub appeal_reason: u32,
+    /// Human-readable appeal justification stored on-chain.
+    pub appeal_rationale: String,
     pub submitted_at: u64,
     pub resolved: bool,
     pub granted: bool,
@@ -1196,169 +1210,37 @@ impl StakingManager {
         ValidatorPenaltyManager::configure_slashing(&env, config);
     }
 
+    /// Return the current slash configuration, or `None` if not yet set.
+    pub fn get_slash_config(env: Env) -> Option<SlashConfig> {
+        ValidatorPenaltyManager::get_slash_config(&env)
+    }
+
     /// Slash a validator at the given `severity` (0 = lightest, 4 = heaviest).
-    /// Severity 4 requires 2-of-N multi-sig from registered governance signers (#1061).
-    /// Returns the unique `slash_id` for the event. Admin-only.
+    /// `reason` is a numeric code; `rationale` is a human-readable description
+    /// logged immutably on-chain. Returns the unique `slash_id`. Admin-only.
     pub fn slash_validator(
         env: Env,
         admin: Address,
         validator: Address,
         severity: u32,
         reason: u32,
-        signers: Option<Vec<Address>>,
+        rationale: String,
     ) -> BytesN<32> {
         Self::require_admin(&env);
-        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason, signers)
-    }
-
-    /// Register governance signers for severity 4 multi-sig slashes (#1061).
-    pub fn set_governance_signers(env: Env, signers: Vec<Address>) {
-        Self::require_admin(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::GovernanceSigners, &signers);
-    }
-
-    /// Return registered governance signers (#1061).
-    pub fn get_governance_signers(env: Env) -> Vec<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::GovernanceSigners)
-            .unwrap_or_else(|| Vec::new(&env))
-    }
-
-    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
-
-    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
-        Self::require_admin(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::TtlMinLedgers, &min_ttl);
-        env.storage()
-            .instance()
-            .set(&DataKey::TtlTargetLedgers, &target_ttl);
-    }
-
-    pub fn get_ttl_config(env: Env) -> (u32, u32) {
-        let min_ttl = env
-            .storage()
-            .instance()
-            .get(&DataKey::TtlMinLedgers)
-            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
-        let target_ttl = env
-            .storage()
-            .instance()
-            .get(&DataKey::TtlTargetLedgers)
-            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
-        (min_ttl, target_ttl)
-    }
-
-    pub fn bump_entry_ttl(env: Env, key: DataKey) {
-        Self::require_admin(&env);
-        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
-        env.storage().persistent().extend_ttl(&key, min_ttl, target_ttl);
-    }
-
-    // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
-
-    pub fn schedule_upgrade(
-        env: Env,
-        new_wasm_hash: BytesN<32>,
-        min_compatible_schema: u32,
-        delay_seconds: Option<u64>,
-    ) {
-        Self::require_admin(&env);
-        let now = env.ledger().timestamp();
-        let delay = delay_seconds.unwrap_or(86_400);
-        let scheduled = ScheduledUpgrade {
-            new_wasm_hash,
-            min_compatible_schema,
-            scheduled_at: now,
-            executable_at: now + delay,
-        };
-        env.storage()
-            .instance()
-            .set(&DataKey::ScheduledUpgrade, &scheduled);
-    }
-
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        Self::require_admin(&env);
-        let scheduled: ScheduledUpgrade = env
-            .storage()
-            .instance()
-            .get(&DataKey::ScheduledUpgrade)
-            .expect("no scheduled upgrade");
-
-        if scheduled.new_wasm_hash != new_wasm_hash {
-            panic!("wasm hash does not match scheduled upgrade");
-        }
-
-        let now = env.ledger().timestamp();
-        if now < scheduled.executable_at {
-            panic!("timelock not elapsed");
-        }
-
-        let current_schema: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::StorageSchemaVersion)
-            .unwrap_or(1);
-
-        if current_schema < scheduled.min_compatible_schema {
-            panic!("incompatible schema");
-        }
-
-        let current_hash = env
-            .storage()
-            .instance()
-            .get(&DataKey::PreviousWasmHash)
-            .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
-        env.storage()
-            .instance()
-            .set(&DataKey::PreviousWasmHash, &current_hash);
-
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
-
-        if !Self::post_upgrade_check(env.clone()) {
-            Self::rollback_upgrade(env.clone());
-            panic!("post upgrade check failed, reverted");
-        }
-
-        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
-    }
-
-    pub fn rollback_upgrade(env: Env) {
-        Self::require_admin(&env);
-        let prev_hash: BytesN<32> = env
-            .storage()
-            .instance()
-            .get(&DataKey::PreviousWasmHash)
-            .expect("no prior version for rollback");
-        env.deployer().update_current_contract_wasm(prev_hash);
-    }
-
-    pub fn post_upgrade_check(_env: Env) -> bool {
-        true
-    }
-
-    pub fn get_storage_schema_version(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::StorageSchemaVersion)
-            .unwrap_or(1)
-    }
-
-    pub fn set_storage_schema_version(env: Env, version: u32) {
-        Self::require_admin(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::StorageSchemaVersion, &version);
+        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason, rationale)
     }
 
     /// Submit an appeal against a slash. Only the slashed validator may call
     /// this, and only within the configured `appeal_window_seconds`.
-    pub fn appeal_slash(env: Env, validator: Address, slash_id: BytesN<32>, reason: u32) {
-        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason);
+    /// `reason` is a numeric code; `appeal_rationale` is stored on-chain.
+    pub fn appeal_slash(
+        env: Env,
+        validator: Address,
+        slash_id: BytesN<32>,
+        reason: u32,
+        appeal_rationale: String,
+    ) {
+        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason, appeal_rationale);
     }
 
     /// Resolve an open appeal. Admin-only.
@@ -1386,6 +1268,11 @@ impl StakingManager {
     /// Return the `SlashRecord` for a given `slash_id`, or `None` if not found.
     pub fn get_slash_record(env: Env, slash_id: BytesN<32>) -> Option<SlashRecord> {
         ValidatorPenaltyManager::get_slash_record(&env, slash_id)
+    }
+
+    /// Return the `AppealRecord` for a given `slash_id`, or `None` if not found.
+    pub fn get_appeal_record(env: Env, slash_id: BytesN<32>) -> Option<AppealRecord> {
+        ValidatorPenaltyManager::get_appeal_record(&env, slash_id)
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────

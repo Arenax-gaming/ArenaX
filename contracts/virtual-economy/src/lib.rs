@@ -580,6 +580,11 @@ impl VirtualEconomyContract {
             creator,
             default_royalty_bps,
             item_count: 0,
+            floor_price: 0,
+            last_sale_price: 0,
+            total_volume: 0,
+            sale_count: 0,
+            last_sale_at: 0,
         };
         env.storage()
             .persistent()
@@ -1088,6 +1093,17 @@ impl VirtualEconomyContract {
         Self::record_trade_volume(&env, &buyer, order.price);
         Self::record_trade_volume(&env, &order.seller, order.price);
 
+        // Update collection floor price / volume metrics (#917).
+        if let MarketplaceAsset::NFT(ref token_id) = order.asset {
+            if let Some(metadata) = env
+                .storage()
+                .persistent()
+                .get::<_, NFTMetadata>(&DataKey::NFTMetadata(token_id.clone()))
+            {
+                Self::update_collection_on_sale(&env, &metadata.category, order.price);
+            }
+        }
+
         events::emit_marketplace_trade_executed(
             &env,
             &order_id,
@@ -1370,6 +1386,15 @@ impl VirtualEconomyContract {
         // Accrue trading-rebate volume for both sides of the trade (#916).
         Self::record_trade_volume(&env, &buyer, price);
         Self::record_trade_volume(&env, &listing.seller, price);
+
+        // Update collection floor price / volume metrics (#917).
+        if let Some(metadata) = env
+            .storage()
+            .persistent()
+            .get::<_, NFTMetadata>(&DataKey::NFTMetadata(listing.token_id.clone()))
+        {
+            Self::update_collection_on_sale(&env, &metadata.category, price);
+        }
 
         events::emit_dutch_auction_purchased(&env, &listing_id, &buyer, price);
         Ok(())
