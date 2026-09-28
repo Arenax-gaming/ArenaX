@@ -224,6 +224,9 @@ pub enum DataKey {
     BehaviorProfile(Address),         // Player behavior profile
     PatternDatabase(u32),             // Pattern detection database
     MlModelParams,
+    // Storage TTL config (#1060)
+    TtlAnalyticsMinLedgers,
+    TtlAnalyticsTargetLedgers,
 }
 
 // Anti-cheat contract
@@ -297,6 +300,38 @@ impl AntiCheatContract {
 
         // Emergency stop starts unpaused
         env.storage().persistent().set(&DataKey::Paused, &false);
+    }
+
+    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
+
+    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsMinLedgers, &min_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsTargetLedgers, &target_ttl);
+    }
+
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_ANALYTICS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_ANALYTICS);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn bump_entry_ttl(env: Env, key: DataKey) {
+        Self::require_admin(&env);
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+        env.storage().persistent().extend_ttl(&key, min_ttl, target_ttl);
     }
 
     // Report suspicious activity
@@ -1162,9 +1197,16 @@ impl AntiCheatContract {
 
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);
@@ -1186,9 +1228,16 @@ impl AntiCheatContract {
             .saturating_sub(10);
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);

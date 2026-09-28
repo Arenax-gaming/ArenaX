@@ -27,6 +27,7 @@ pub enum DataKey {
 
     // Marketplace
     MarketplaceOrder(BytesN<32>),
+    NftActiveOrder(BytesN<32>),
 
     // Royalty & Licensing
     NFTLicense(BytesN<32>),
@@ -111,6 +112,27 @@ pub enum DataKey {
     /// Rebate payout history for an address (most recent last), for
     /// dashboard visibility.
     RebateHistory(Address),
+
+    // Storage TTL config (#1060)
+    TtlOrderMinLedgers,
+    TtlOrderTargetLedgers,
+    TtlNftMinLedgers,
+    TtlNftTargetLedgers,
+
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contracttype]
@@ -238,6 +260,7 @@ pub struct EconomyAnalytics {
     pub total_currency_minted: i128,
     pub total_currency_burned: i128,
     pub total_nfts_minted: u64,
+    pub total_nfts_burned: u64,
     pub total_trades_executed: u64,
     pub total_trade_volume: i128,
     pub total_fees_collected: i128,
@@ -447,6 +470,19 @@ pub struct PriceHistory {
     pub update_count: u64,
 }
 
+/// One registered source's latest quote for an asset pair (#1053).
+///
+/// Stored on [`OracleAnalytics`] rather than as its own storage key: `DataKey`
+/// is already at the 50-variant `contracttype` cap.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleSourceQuote {
+    pub source: Address,
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+}
+
 /// Aggregate statistics across all oracle price-feed activity.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -461,6 +497,10 @@ pub struct OracleAnalytics {
     pub stale_rejections: u64,
     /// Total number of distinct asset pairs registered.
     pub registered_pairs: u32,
+    /// Independent oracle sources, at most five (#1053).
+    pub sources: Vec<Address>,
+    /// Latest quote from each registered source, per asset pair (#1053).
+    pub quotes: Vec<OracleSourceQuote>,
 }
 
 // -----------------------------------------------------------------------------

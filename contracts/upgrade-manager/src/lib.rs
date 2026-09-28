@@ -50,6 +50,22 @@ pub enum DataKey {
     PreviousWasmHash(Symbol),
     History(Symbol),
     Paused,
+    Manifest(u32),
+    ContractManifests(Symbol),
+}
+
+/// Upgrade manifest tracking schema versions and proposal details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeManifest {
+    pub proposal_id: u32,
+    pub contract_name: Symbol,
+    pub new_wasm_hash: BytesN<32>,
+    pub proposed_by: Address,
+    pub proposed_at: u64,
+    pub timelock_end: u64,
+    pub schema_version: u32,
+    pub min_compatible_schema: u32,
 }
 
 #[contracttype]
@@ -187,6 +203,29 @@ impl UpgradeManager {
             .instance()
             .set(&DataKey::NextProposalId, &(proposal_id + 1));
 
+        let manifest = UpgradeManifest {
+            proposal_id,
+            contract_name: contract_name.clone(),
+            new_wasm_hash: new_wasm_hash.clone(),
+            proposed_by: proposer.clone(),
+            proposed_at: now,
+            timelock_end,
+            schema_version: 1,
+            min_compatible_schema: 1,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Manifest(proposal_id), &manifest);
+        let mut list: Vec<UpgradeManifest> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ContractManifests(contract_name.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        list.push_back(manifest);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ContractManifests(contract_name.clone()), &list);
+
         events::emit_upgrade_proposed(
             &env,
             proposal_id,
@@ -196,6 +235,73 @@ impl UpgradeManager {
             timelock_end,
         );
         Ok(proposal_id)
+    }
+
+    /// Propose an upgrade with explicit schema versions recorded in the manifest (#1064).
+    pub fn propose_upgrade_with_manifest(
+        env: Env,
+        proposer: Address,
+        contract_name: Symbol,
+        new_wasm_hash: BytesN<32>,
+        description: String,
+        timelock_seconds: u64,
+        schema_version: u32,
+        min_compatible_schema: u32,
+    ) -> Result<u32, UpgradeError> {
+        let proposal_id = Self::propose_upgrade(
+            env.clone(),
+            proposer.clone(),
+            contract_name.clone(),
+            new_wasm_hash.clone(),
+            description,
+            timelock_seconds,
+        )?;
+
+        let now = env.ledger().timestamp();
+        let manifest = UpgradeManifest {
+            proposal_id,
+            contract_name: contract_name.clone(),
+            new_wasm_hash,
+            proposed_by: proposer,
+            proposed_at: now,
+            timelock_end: now + timelock_seconds,
+            schema_version,
+            min_compatible_schema,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Manifest(proposal_id), &manifest);
+
+        let mut list: Vec<UpgradeManifest> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ContractManifests(contract_name.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        if !list.is_empty() {
+            list.pop_back();
+        }
+        list.push_back(manifest);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ContractManifests(contract_name), &list);
+
+        Ok(proposal_id)
+    }
+
+    /// Retrieve the manifest for a specific proposal ID (#1064).
+    pub fn get_upgrade_manifest(env: Env, proposal_id: u32) -> Option<UpgradeManifest> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Manifest(proposal_id))
+    }
+
+    /// Retrieve all upgrade manifests for a specific contract (#1064).
+    pub fn get_contract_manifests(env: Env, contract_name: Symbol) -> Vec<UpgradeManifest> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ContractManifests(contract_name))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Record an implementation-validation verdict (compatibility check,

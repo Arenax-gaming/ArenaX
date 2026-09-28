@@ -87,3 +87,45 @@ pub struct LeaderboardStats {
     pub top_player_elo: i32,
     pub last_updated: DateTime<Utc>,
 }
+
+// ─── Season close (#1075) ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Season {
+    pub id: Uuid,
+    pub game: String,
+    pub name: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PlayerStatsSnapshot {
+    pub id: Uuid,
+    pub season_id: Uuid,
+    pub user_id: Uuid,
+    pub game: String,
+    pub rank: i32,
+    pub elo_rating: i32,
+    pub matches_played: i32,
+    pub wins: i32,
+    pub losses: i32,
+    pub snapshot_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CloseSeasonRequest {
+    /// How many top players to snapshot into `player_stats_snapshots`.
+    /// Defaults to 100 when omitted.
+    pub top_n: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CloseSeasonResponse {
+    pub closed_season: Season,
+    pub new_season: Season,
+    pub players_snapshotted: usize,
+    pub players_decayed: usize,
+}

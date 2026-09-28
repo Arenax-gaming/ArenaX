@@ -13,7 +13,7 @@ import { PageTransition } from "@/components/layout/PageTransition";
 import { KeyboardShortcutsHelp } from "@/components/ui/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionTimeoutProvider } from "@/contexts/SessionTimeoutContext";
-import { SessionExpiryWarningModal } from "@/components/ui/SessionExpiryWarningModal";
+import { OPEN_CONSENT_MODAL_EVENT } from "@/components/providers/ConsentBanner";
 // #759: next-intl's Link, not next/link. It prefixes the active locale
 // automatically, so "/about" resolves to "/en/about" and following a footer
 // link never resets the user's language.
@@ -94,6 +94,13 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link href="/contact" className="text-muted-foreground hover:text-foreground transition-colors">Contact</Link>
               <Link href="/privacy" className="text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="text-muted-foreground hover:text-foreground transition-colors">Terms of Service</Link>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent(OPEN_CONSENT_MODAL_EVENT))}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Manage cookies
+              </button>
             </nav>
 
             {/* Social links */}

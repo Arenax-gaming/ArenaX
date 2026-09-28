@@ -60,6 +60,12 @@ export function WebVitalsInit() {
       return;
     }
 
+    // Web Vitals are non-essential telemetry — require "performance"
+    // consent before loading web-vitals or reporting anything (#1093).
+    if (!hasConsentedTo('performance')) {
+      return;
+    }
+
     let cancelled = false;
 
     import('web-vitals').then(({ onCLS, onFCP, onLCP, onTTFB, onINP }) => {

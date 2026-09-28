@@ -33,6 +33,7 @@ use crate::middleware::tenant_context::TenantContextMiddleware;
 use crate::middleware::tracing_middleware::RequestTracing;
 use crate::models::idempotency::IdempotencyPolicy;
 use crate::service::batch_service::BatchService;
+use crate::service::evidence_storage::{EvidenceStore, S3EvidenceStore};
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -96,6 +97,12 @@ async fn main() -> io::Result<()> {
         60,
     );
     tracing::info!("Tournament orchestrator polling worker started");
+
+    // Spawn the job queue worker for async tournament bracket/prize processing.
+    let _job_worker_handle = crate::orchestrator::TournamentOrchestrator::spawn_job_worker(
+        Arc::new(TournamentService::new(db_pool.clone())),
+    );
+    tracing::info!("Tournament job queue worker started");
 
     // Create Redis connection manager
     let redis_client = redis::Client::open(config.redis.url.clone())
@@ -247,6 +254,9 @@ async fn main() -> io::Result<()> {
 
     // Snapshot the rate limit config so it can be moved into the HttpServer closure.
     let rate_limit_config = config.rate_limit.clone();
+
+    // Tamper-evident dispute evidence storage (#1081, #1076).
+    let evidence_store: Arc<dyn EvidenceStore> = Arc::new(S3EvidenceStore::new(&config.storage));
 
     let server = HttpServer::new(move || {
         App::new()
@@ -401,6 +411,8 @@ async fn main() -> io::Result<()> {
                         web::scope("/gas")
                             .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
                     )
+                    // Async payment webhooks — Paystack + Flutterwave (#1157)
+                    .configure(crate::http::webhook_handler::configure_routes)
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
@@ -449,6 +461,8 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::email_handler::configure)
             // Cache hit/miss metrics — Issue #910
             .configure(crate::http::cache_handler::configure)
+            // Audit log endpoints — Issue #863 / #1066
+            .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?

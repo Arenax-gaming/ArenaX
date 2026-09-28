@@ -248,9 +248,40 @@ pub async fn advance_bracket(
     })))
 }
 
+/// POST /api/tournaments/{id}/generate-bracket
+///
+/// Enqueue bracket generation in the background so large tournaments do not
+/// block the HTTP request while the worker builds the bracket.
+pub async fn generate_bracket_job(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    let job = svc.enqueue_generate_bracket_job(tournament_id).await?;
+
+    info!(tournament_id = %tournament_id, job_id = %job.id, "Bracket generation queued");
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "job_id": job.id,
+        "status": "pending"
+    })))
+}
+
+/// GET /api/jobs/{job_id}
+pub async fn get_job_status(
+    svc: web::Data<Arc<TournamentService>>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let job = svc.get_job_status(path.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(job))
+}
+
 /// POST /api/tournaments/{id}/distribute-prizes
 ///
-/// Trigger on-chain prize distribution for a completed tournament.  Admin only.
+/// Enqueue on-chain prize distribution for a completed tournament.  Admin only.
 pub async fn distribute_prizes(
     svc: web::Data<Arc<TournamentService>>,
     req: HttpRequest,
@@ -259,14 +290,13 @@ pub async fn distribute_prizes(
     require_admin(&req)?;
 
     let tournament_id = path.into_inner();
+    let job = svc.enqueue_prize_distribution_job(tournament_id).await?;
 
-    info!(tournament_id = %tournament_id, "Triggering prize distribution");
+    info!(tournament_id = %tournament_id, job_id = %job.id, "Prize distribution queued");
 
-    svc.trigger_prize_distribution(tournament_id).await?;
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Prize distribution initiated",
-        "tournament_id": tournament_id,
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "job_id": job.id,
+        "status": "pending"
     })))
 }
 
@@ -323,6 +353,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}/register", web::post().to(register_for_tournament))
             .route("/{id}/start", web::post().to(start_tournament))
             .route("/{id}/advance", web::post().to(advance_bracket))
+            .route("/{id}/generate-bracket", web::post().to(generate_bracket_job))
             .route("/{id}/distribute-prizes", web::post().to(distribute_prizes))
             .route("/{id}/statistics", web::get().to(get_tournament_statistics)),
     );

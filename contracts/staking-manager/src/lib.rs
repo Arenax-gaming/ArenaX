@@ -1,5 +1,4 @@
 #![no_std]
-#![no_std]
 
 mod flexible_rewards;
 mod lp_incentives;
@@ -69,6 +68,15 @@ pub enum DataKey {
     LpHistory(Address, u32),
     // Time-lock voting escrow (#912)
     VotingEscrowLock(Address),
+    // Governance signers for 2-of-N slashing multi-sig (#1061)
+    GovernanceSigners,
+    // Storage TTL config (#1060)
+    TtlMinLedgers,
+    TtlTargetLedgers,
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -225,8 +233,21 @@ pub struct ValidatorSlashHistory {
     pub validator: Address,
     pub total_slashed: i128,
     pub slash_count: u32,
+    pub slash_ids: Vec<BytesN<32>>,
     /// `Some(slash_id)` when there is an open appeal pending resolution.
     pub active_appeal: Option<BytesN<32>>,
+    /// Timestamp of the last slash event (#1061).
+    pub last_slash_time: u64,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -622,6 +643,8 @@ impl StakingManager {
             &amount,
         );
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage().persistent().set(
             &stake_key,
             &StakeInfo {
@@ -633,12 +656,15 @@ impl StakingManager {
                 can_withdraw: false,
             },
         );
+        env.storage().persistent().extend_ttl(&stake_key, min_ttl, target_ttl);
+
         let mut updated = info;
         updated.total_staked += amount;
         updated.participant_count += 1;
         env.storage()
             .persistent()
             .set(&DataKey::TournamentInfo(tournament_id.clone()), &updated);
+        env.storage().persistent().extend_ttl(&DataKey::TournamentInfo(tournament_id.clone()), min_ttl, target_ttl);
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
         events::emit_staked(&env, &user, &tournament_id, amount);
     }
@@ -1227,6 +1253,16 @@ impl StakingManager {
     /// Return the slash history for a validator, or `None` if never slashed.
     pub fn get_slash_history(env: Env, validator: Address) -> Option<ValidatorSlashHistory> {
         ValidatorPenaltyManager::get_slash_history(&env, validator)
+    }
+
+    /// Return slash records for a validator in slash-id order, paginated.
+    pub fn get_slash_records_paginated(
+        env: Env,
+        validator: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<SlashRecord> {
+        ValidatorPenaltyManager::get_slash_records_paginated(&env, validator, offset, limit)
     }
 
     /// Return the `SlashRecord` for a given `slash_id`, or `None` if not found.

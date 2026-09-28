@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "../styles/globals.css";
+import { NONCE_HEADER } from "@/lib/csp";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
@@ -36,15 +38,21 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Set by middleware.ts on every request (#1091) — required for these
+  // inline scripts to run under the nonce-based CSP script-src.
+  const nonce = headers().get(NONCE_HEADER) ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: organizationStructuredData() }}
         />
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: websiteStructuredData() }}
         />
       </head>
