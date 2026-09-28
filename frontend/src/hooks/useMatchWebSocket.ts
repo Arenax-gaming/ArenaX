@@ -27,6 +27,10 @@ interface UseMatchWebSocketReturn {
   isConnected: boolean;
   lastUpdate: MatchUpdate | null;
   connectionError: string | null;
+  /** True while a reconnect attempt is scheduled or in progress. */
+  isReconnecting: boolean;
+  /** True briefly after the connection is restored following a drop. */
+  connectionRestored: boolean;
   reconnect: () => void;
   disconnect: () => void;
 }
@@ -35,8 +39,17 @@ interface UseMatchWebSocketReturn {
 // Constants
 // ---------------------------------------------------------------------------
 
+/** Initial reconnect delay (ms). */
+const INITIAL_RECONNECT_DELAY_MS = 500;
+
 /** Maximum reconnect delay (ms). */
 const MAX_RECONNECT_DELAY_MS = 30_000;
+
+/** Reconnect attempts before surfacing a connection-lost notification. */
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+/** How long the "connection restored" flag stays set (ms). */
+const RESTORED_NOTICE_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // useMatchWebSocket
@@ -47,7 +60,9 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 // cookie with the WebSocket upgrade request (same-origin).  No token is ever
 // embedded in the URL or passed via localStorage.
 //
-// Reconnection: exponential back-off capped at MAX_RECONNECT_DELAY_MS.
+// Reconnection: exponential back-off (500ms → 30s), giving up after
+// MAX_RECONNECT_ATTEMPTS. The last received update is kept while offline so
+// the UI can keep rendering cached state.
 // ---------------------------------------------------------------------------
 
 export function useMatchWebSocket({
@@ -57,10 +72,13 @@ export function useMatchWebSocket({
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<MatchUpdate | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [connectionRestored, setConnectionRestored] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
+  const restoredTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set to true when the cleanup function runs so stale async callbacks
   // don't attempt to reconnect after the component has unmounted.
   const closedRef = useRef(false);
@@ -95,6 +113,7 @@ export function useMatchWebSocket({
       wsRef.current = null;
     }
     setIsConnected(false);
+    setIsReconnecting(false);
     setConnectionError(null);
   }, []);
 
@@ -131,9 +150,19 @@ export function useMatchWebSocket({
         ws.close();
         return;
       }
+      const wasReconnecting = retryCountRef.current > 0;
       retryCountRef.current = 0;
       setIsConnected(true);
+      setIsReconnecting(false);
       setConnectionError(null);
+      if (wasReconnecting) {
+        setConnectionRestored(true);
+        if (restoredTimerRef.current) clearTimeout(restoredTimerRef.current);
+        restoredTimerRef.current = setTimeout(
+          () => setConnectionRestored(false),
+          RESTORED_NOTICE_MS,
+        );
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -177,12 +206,21 @@ export function useMatchWebSocket({
       // Normal closure — no reconnect needed.
       if (event.code === 1000) return;
 
+      if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        setIsReconnecting(false);
+        setConnectionError(
+          "Connection to match feed lost. Showing last known state.",
+        );
+        return;
+      }
+
       // Transient failure — reconnect with exponential back-off.
       const delay = Math.min(
         MAX_RECONNECT_DELAY_MS,
-        1_000 * 2 ** retryCountRef.current,
+        INITIAL_RECONNECT_DELAY_MS * 2 ** retryCountRef.current,
       );
       retryCountRef.current += 1;
+      setIsReconnecting(true);
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
 
@@ -211,6 +249,7 @@ export function useMatchWebSocket({
 
     return () => {
       closedRef.current = true;
+      if (restoredTimerRef.current) clearTimeout(restoredTimerRef.current);
       disconnect();
     };
     // `connect` and `disconnect` are stable callbacks; re-run when the
@@ -242,7 +281,15 @@ export function useMatchWebSocket({
     return () => clearTimeout(timer);
   }, [enabled, isConnected, matchId]);
 
-  return { isConnected, lastUpdate, connectionError, reconnect, disconnect };
+  return {
+    isConnected,
+    lastUpdate,
+    connectionError,
+    isReconnecting,
+    connectionRestored,
+    reconnect,
+    disconnect,
+  };
 }
 
 // ---------------------------------------------------------------------------
