@@ -44,6 +44,22 @@ pub struct SuspiciousActivityReported {
     pub report_id: u64,
 }
 
+#[contractevent(topics = ["ArenaXAC_v1", "VERIFIED"])]
+pub struct ActivityVerified {
+    pub report_id: u64,
+    pub player: Address,
+    pub verified: bool,
+}
+
+pub fn emit_activity_verified(env: &Env, report_id: u64, player: &Address, verified: bool) {
+    ActivityVerified {
+        report_id,
+        player: player.clone(),
+        verified,
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["ArenaXAC_v1", "SANCTION"])]
 pub struct SanctionApplied {
     pub player: Address,
