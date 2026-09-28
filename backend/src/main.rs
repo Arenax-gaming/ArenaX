@@ -449,6 +449,17 @@ async fn main() -> io::Result<()> {
                             .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
+                    )
+                    // Leaderboard endpoints
+                    .service(
+                        web::scope("/leaderboards")
+                            .route("/{category}", web::get().to(crate::http::leaderboard_handler::get_leaderboard))
+                            .route("/{category}/season/{season}", web::get().to(crate::http::leaderboard_handler::get_seasonal_leaderboard))
+                            .route("/{category}/player/{player_id}", web::get().to(crate::http::leaderboard_handler::get_player_rank))
+                            .route("/{category}/player/{player_id}/elo-history", web::get().to(crate::http::leaderboard_handler::get_elo_history))
+                            .route("/{category}/history/{player_id}", web::get().to(crate::http::leaderboard_handler::get_rank_history))
+                            .route("/{category}/refresh", web::post().to(crate::http::leaderboard_handler::refresh_leaderboard))
+                            .route("/{category}/stats", web::get().to(crate::http::leaderboard_handler::get_leaderboard_stats))
                     ),
             )
             // Registered at the app level, not inside the `/api` scope above:
