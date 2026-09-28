@@ -7,6 +7,7 @@ import { Tournament, TournamentStatus } from "@/types/tournament";
 import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
 import { QuickJoinModal } from "./QuickJoinModal";
 import { Users, Trophy, Clock, Zap } from "lucide-react";
 
@@ -60,6 +61,7 @@ export function TournamentCardWithQuickJoin({
   bannerSizes,
 }: TournamentCardProps) {
   const [showQuickJoin, setShowQuickJoin] = useState(false);
+  const { schedule, cancelScheduled } = useTournamentPrefetch();
 
   const status = statusConfig[tournament.status];
   const participantPercentage = Math.round(
@@ -86,7 +88,15 @@ export function TournamentCardWithQuickJoin({
 
   return (
     <>
-      <Link href={cardHref} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg">
+      <Link
+        href={cardHref}
+        className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
+        onMouseEnter={() => schedule(tournament.id)}
+        onMouseLeave={cancelScheduled}
+        onFocus={() => schedule(tournament.id)}
+        onBlur={cancelScheduled}
+        onTouchStart={() => schedule(tournament.id)}
+      >
       <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
         <div className="relative h-36 w-full shrink-0 bg-muted">
           <Image

@@ -1,8 +1,10 @@
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
+use crate::db::DbPool;
 use crate::middleware::security::validate_uuid;
+use crate::middleware::tenant_context::{with_tenant_scope, TenantContext};
 use crate::models::{
-    CreateTournamentRequest, JoinTournamentRequest, PaginatedResponse,
+    CreateTournamentRequest, JoinTournamentRequest, PaginatedResponse, TournamentParticipant,
     TournamentStatus,
 };
 use crate::service::tournament_service::TournamentService;
@@ -162,6 +164,38 @@ pub async fn get_tournament(
     Ok(HttpResponse::Ok().json(tournament))
 }
 
+/// GET /api/tournaments/{id}/participants
+///
+/// Row-level-security-scoped (#1108): runs on a connection with
+/// `app.tournament_id` set to this route's `{id}`, so even a bug in the
+/// query below couldn't leak another tournament's participants — the
+/// database itself won't return rows outside this tenant.
+pub async fn get_tournament_participants(
+    req: HttpRequest,
+    pool: web::Data<DbPool>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let tournament_id = path.into_inner();
+    let ctx = req
+        .extensions()
+        .get::<TenantContext>()
+        .cloned()
+        .unwrap_or_default();
+
+    let participants = with_tenant_scope(pool.get_ref(), &ctx, move |mut conn| async move {
+        sqlx::query_as::<_, TournamentParticipant>(
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 ORDER BY registered_at",
+        )
+        .bind(tournament_id)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(ApiError::DatabaseError)
+    })
+    .await?;
+
+    Ok(HttpResponse::Ok().json(participants))
+}
+
 /// POST /api/tournaments/{id}/register
 ///
 /// Register the authenticated user in the tournament, deducting the entry fee
@@ -236,9 +270,40 @@ pub async fn advance_bracket(
     })))
 }
 
+/// POST /api/tournaments/{id}/generate-bracket
+///
+/// Enqueue bracket generation in the background so large tournaments do not
+/// block the HTTP request while the worker builds the bracket.
+pub async fn generate_bracket_job(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+
+    let tournament_id = path.into_inner();
+    let job = svc.enqueue_generate_bracket_job(tournament_id).await?;
+
+    info!(tournament_id = %tournament_id, job_id = %job.id, "Bracket generation queued");
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "job_id": job.id,
+        "status": "pending"
+    })))
+}
+
+/// GET /api/jobs/{job_id}
+pub async fn get_job_status(
+    svc: web::Data<Arc<TournamentService>>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let job = svc.get_job_status(path.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(job))
+}
+
 /// POST /api/tournaments/{id}/distribute-prizes
 ///
-/// Trigger on-chain prize distribution for a completed tournament.  Admin only.
+/// Enqueue on-chain prize distribution for a completed tournament.  Admin only.
 pub async fn distribute_prizes(
     svc: web::Data<Arc<TournamentService>>,
     req: HttpRequest,
@@ -247,14 +312,13 @@ pub async fn distribute_prizes(
     require_admin(&req)?;
 
     let tournament_id = path.into_inner();
+    let job = svc.enqueue_prize_distribution_job(tournament_id).await?;
 
-    info!(tournament_id = %tournament_id, "Triggering prize distribution");
+    info!(tournament_id = %tournament_id, job_id = %job.id, "Prize distribution queued");
 
-    svc.trigger_prize_distribution(tournament_id).await?;
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Prize distribution initiated",
-        "tournament_id": tournament_id,
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "job_id": job.id,
+        "status": "pending"
     })))
 }
 
@@ -434,9 +498,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/reports/monthly-revenue", web::get().to(get_monthly_revenue_report))
             .route("/{id}", web::get().to(get_tournament))
             .route("/{id}", web::delete().to(cancel_tournament))
+            .route("/{id}/participants", web::get().to(get_tournament_participants))
             .route("/{id}/register", web::post().to(register_for_tournament))
             .route("/{id}/start", web::post().to(start_tournament))
             .route("/{id}/advance", web::post().to(advance_bracket))
+            .route("/{id}/generate-bracket", web::post().to(generate_bracket_job))
             .route("/{id}/distribute-prizes", web::post().to(distribute_prizes))
             .route("/{id}/statistics", web::get().to(get_tournament_statistics))
             .route("/{id}/prize-pool", web::get().to(get_tournament_prize_pool))

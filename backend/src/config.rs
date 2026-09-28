@@ -13,6 +13,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
     pub idempotency: IdempotencyConfig,
+    pub notifications: NotificationsConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -31,6 +32,13 @@ pub struct DatabaseConfig {
     pub circuit_failure_threshold: u32,
     /// How long the breaker stays open before admitting a trial request.
     pub circuit_open_secs: u64,
+    /// PostgreSQL `statement_timeout` applied to every connection (#1084):
+    /// a slow query or deadlock is cancelled instead of holding a pool
+    /// connection indefinitely. `DATABASE_STATEMENT_TIMEOUT_MS`, default 5000.
+    pub statement_timeout_ms: u64,
+    /// Queries slower than this are logged at WARN with their SQL and
+    /// duration (#1084). `DATABASE_SLOW_QUERY_THRESHOLD_MS`, default 200.
+    pub slow_query_threshold_ms: u64,
 }
 
 /// Read a `u64` from the environment, falling back when unset or unparseable.
@@ -137,6 +145,16 @@ pub struct IdempotencyConfig {
     pub max_response_size_kb: u32,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotificationsConfig {
+    /// SendGrid API key for the email fan-out channel (#1107). Empty when
+    /// unset — the email channel then fails fast rather than silently
+    /// no-op'ing, so a misconfigured deployment is visible in the delivery
+    /// audit log instead of just losing emails quietly.
+    pub sendgrid_api_key: String,
+    pub sendgrid_from_email: String,
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
@@ -179,6 +197,9 @@ impl Config {
         let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
             .unwrap_or_else(|_| "1024".to_string())
             .parse()?;
+        let sendgrid_api_key = env::var("SENDGRID_API_KEY").unwrap_or_default();
+        let sendgrid_from_email =
+            env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "no-reply@arenax.gg".to_string());
 
         Ok(Config {
             database: DatabaseConfig {
@@ -189,6 +210,8 @@ impl Config {
                 health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
                 circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
                 circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
+                statement_timeout_ms: env_u64("DATABASE_STATEMENT_TIMEOUT_MS", 5000),
+                slow_query_threshold_ms: env_u64("DATABASE_SLOW_QUERY_THRESHOLD_MS", 200),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -230,6 +253,10 @@ impl Config {
             idempotency: IdempotencyConfig {
                 ttl_seconds: idempotency_ttl_seconds,
                 max_response_size_kb: idempotency_max_response_size_kb,
+            },
+            notifications: NotificationsConfig {
+                sendgrid_api_key,
+                sendgrid_from_email,
             },
         })
     }

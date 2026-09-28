@@ -59,7 +59,7 @@ export function RumProvider({ children }: { children: React.ReactNode }) {
                 site: 'datadoghq.com',
                 service: 'arenax-frontend',
                 env: process.env.NODE_ENV,
-                version: '1.0.0',
+                version: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0',
                 sessionSampleRate: 100,
                 sessionReplaySampleRate: 20,
                 trackUserInteractions: true,

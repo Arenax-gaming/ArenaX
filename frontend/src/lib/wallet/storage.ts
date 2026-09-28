@@ -16,12 +16,16 @@ const isWalletSession = (value: unknown): value is WalletSession => {
   );
 };
 
+// sessionStorage, not localStorage (#1098): a connected wallet's public key
+// should not persist past the tab closing — localStorage would leave it
+// readable by any script in this origin indefinitely, including after the
+// browser restarts.
 export const readWalletSession = (): WalletSession | null => {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const raw = localStorage.getItem(WALLET_SESSION_STORAGE_KEY);
+  const raw = sessionStorage.getItem(WALLET_SESSION_STORAGE_KEY);
   if (!raw) {
     return null;
   }
@@ -40,9 +44,9 @@ export const writeWalletSession = (session: WalletSession | null) => {
   }
 
   if (!session) {
-    localStorage.removeItem(WALLET_SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(WALLET_SESSION_STORAGE_KEY);
     return;
   }
 
-  localStorage.setItem(WALLET_SESSION_STORAGE_KEY, JSON.stringify(session));
+  sessionStorage.setItem(WALLET_SESSION_STORAGE_KEY, JSON.stringify(session));
 };

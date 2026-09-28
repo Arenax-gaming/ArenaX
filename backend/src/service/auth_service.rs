@@ -4,8 +4,13 @@ use crate::db::DbPool;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest, User, UserProfile};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
+use redis::{AsyncCommands, Client as RedisClient};
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+const PROFILE_CACHE_VERSION: &str = "v1";
+const PROFILE_CACHE_TTL_SECONDS: u64 = 60;
 
 /// Active session info returned by `GET /api/auth/sessions`.
 #[derive(Debug, serde::Serialize)]
@@ -33,11 +38,34 @@ impl From<RefreshTokenRecord> for ActiveSession {
 pub struct AuthService {
     pool: DbPool,
     jwt_service: JwtService,
+    redis_client: Option<Arc<RedisClient>>,
 }
 
 impl AuthService {
     pub fn new(pool: DbPool, jwt_service: JwtService) -> Self {
-        Self { pool, jwt_service }
+        Self {
+            pool,
+            jwt_service,
+            redis_client: None,
+        }
+    }
+
+    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
+        self.redis_client = Some(redis_client);
+        self
+    }
+
+    fn profile_cache_key(user_id: Uuid) -> String {
+        format!("profile:{}:{}", PROFILE_CACHE_VERSION, user_id)
+    }
+
+    pub async fn invalidate_profile_cache(&self, user_id: Uuid) {
+        let Some(redis_client) = &self.redis_client else {
+            return;
+        };
+        if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+            let _: Result<(), _> = connection.del(Self::profile_cache_key(user_id)).await;
+        }
     }
 
     // ── Registration & Login ─────────────────────────────────────────────────
@@ -282,7 +310,23 @@ impl AuthService {
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        sqlx::query_as!(
+        let cache_key = Self::profile_cache_key(user_id);
+        if let Some(redis_client) = &self.redis_client {
+            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+                if let Ok(Some(cached)) = connection.get::<_, Option<String>>(&cache_key).await {
+                    if let Ok(user) = serde_json::from_str::<User>(&cached) {
+                        crate::metrics::record_profile_cache_hit();
+                        let _: Result<(), _> = connection
+                            .expire(&cache_key, PROFILE_CACHE_TTL_SECONDS as i64)
+                            .await;
+                        return Ok(user);
+                    }
+                }
+            }
+        }
+        crate::metrics::record_profile_cache_miss();
+
+        let user = sqlx::query_as!(
             User,
             r#"
             SELECT id, username, email, phone_number, display_name, avatar_url, bio,
@@ -298,7 +342,19 @@ impl AuthService {
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("User not found"))
+        .ok_or_else(|| ApiError::not_found("User not found"))?;
+
+        if let Some(redis_client) = &self.redis_client {
+            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+                if let Ok(serialized) = serde_json::to_string(&user) {
+                    let _: Result<(), _> = connection
+                        .set_ex(&cache_key, serialized, PROFILE_CACHE_TTL_SECONDS)
+                        .await;
+                }
+            }
+        }
+
+        Ok(user)
     }
 
     /// Change a user's password and immediately revoke all existing sessions.
@@ -347,5 +403,21 @@ impl AuthService {
 
         info!(user_id = %user_id, "Password changed");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Carried over from the removed auth_service_updated.rs (#1068). The
+    // service hashes with DEFAULT_COST on register/change_password and
+    // checks with `verify` on login; this pins that round trip.
+    #[test]
+    fn bcrypt_hash_round_trips_and_rejects_wrong_password() {
+        let hashed = hash("test_password", DEFAULT_COST).unwrap();
+
+        assert!(verify("test_password", &hashed).unwrap());
+        assert!(!verify("wrong_password", &hashed).unwrap());
     }
 }

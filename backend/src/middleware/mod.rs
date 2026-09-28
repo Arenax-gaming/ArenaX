@@ -1,6 +1,7 @@
 // Middleware module for ArenaX
 
 pub mod anti_bot;
+pub mod cache;
 pub mod authorization;
 pub mod circuit_breaker;
 pub mod csrf;
@@ -10,9 +11,14 @@ pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;
 pub mod security_headers;
+pub mod tenant_context;
 pub mod tracing_middleware;
 
 pub use anti_bot::AntiBotMiddleware;
+pub use cache::{
+    keys as cache_keys, policies as cache_policies, CacheHit, CacheMetricsSnapshot, CachePolicy,
+    CacheStatus, ResponseCache,
+};
 pub use authorization::{
     AccessControlEngine, AuditDecision, AuditLogEntry, AuthorizationMiddleware,
     Permission, PermissionAuditLogger, RoleHierarchy, RoleTemplate, RoleTemplateRegistry,
@@ -27,6 +33,7 @@ pub use metrics_middleware::RequestMetrics;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 pub use security_headers::security_headers;
+pub use tenant_context::{with_tenant_scope, TenantContext};
 pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
 
 use actix_cors::Cors;
@@ -105,7 +112,7 @@ pub(crate) fn extract_ip(req: &ServiceRequest) -> String {
         .map(|s| s.trim().to_string())
         .or_else(|| {
             req.connection_info()
-                .realip_remote_addr()
+                .realip_remote_address()
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())

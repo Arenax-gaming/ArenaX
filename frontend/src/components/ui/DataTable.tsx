@@ -12,6 +12,15 @@ import { exportToCsv, exportToExcel } from '@/lib/export';
 const ROW_HEIGHT = 48;
 const OVERSCAN = 5;
 
+/** Parses a column's `width` (e.g. "140px", "10rem") to a px number, falling back to a default. */
+function widthToPx(width: string | undefined, fallback = 140): number {
+  if (!width) return fallback;
+  const match = /^(\d+(?:\.\d+)?)(px|rem)?$/.exec(width.trim());
+  if (!match) return fallback;
+  const value = parseFloat(match[1]);
+  return match[2] === 'rem' ? value * 16 : value;
+}
+
 function DataTableInner<T extends Record<string, any>>({
   columns,
   data,
@@ -24,6 +33,7 @@ function DataTableInner<T extends Record<string, any>>({
   selectable = false,
   loading = false,
   emptyMessage = 'No data found',
+  pinnedColumns = [],
   onRowClick,
   className,
 }: DataTableProps<T>) {
@@ -44,6 +54,36 @@ function DataTableInner<T extends Record<string, any>>({
   const tableRef = useRef<HTMLDivElement>(null);
 
   const visibleCols = columns.filter(c => state.visibleColumns.includes(c.id));
+
+  // Column pinning (#1094): pinned columns get `position: sticky` and a
+  // cumulative `left` offset so they stack left-to-right without overlapping,
+  // while the rest of the table scrolls horizontally underneath them.
+  const pinnedSet = new Set(pinnedColumns);
+  const pinnedOffsets = new Map<string, number>();
+  {
+    let cumulativeLeft = selectable ? 40 : 0; // matches the w-10 checkbox column
+    for (const col of visibleCols) {
+      if (pinnedSet.has(col.id)) {
+        pinnedOffsets.set(col.id, cumulativeLeft);
+        cumulativeLeft += widthToPx(col.width);
+      }
+    }
+  }
+  const lastPinnedId = pinnedColumns.length > 0
+    ? visibleCols.filter(c => pinnedSet.has(c.id)).slice(-1)[0]?.id
+    : undefined;
+
+  function pinnedCellProps(colId: string) {
+    if (!pinnedOffsets.has(colId)) return {};
+    return {
+      style: { left: pinnedOffsets.get(colId) },
+      className: cn(
+        'sticky z-10 bg-background',
+        colId === lastPinnedId &&
+          'shadow-[4px_0_6px_-2px_rgba(0,0,0,0.15)] dark:shadow-[4px_0_6px_-2px_rgba(0,0,0,0.5)]',
+      ),
+    };
+  }
 
   const handleSort = useCallback((columnId: string) => {
     if (sortable) toggleSort(columnId);
@@ -112,12 +152,12 @@ function DataTableInner<T extends Record<string, any>>({
         />
       )}
 
-      <div className="overflow-x-auto" ref={tableRef}>
+      <div className="overflow-x-auto" ref={tableRef} style={{ touchAction: 'pan-x' }}>
         <table className="w-full">
           <thead>
             <tr className="bg-muted/50 border-b">
               {selectable && (
-                <th className="px-4 py-3 w-10">
+                <th className="sticky left-0 z-10 bg-muted/50 px-4 py-3 w-10">
                   <input
                     type="checkbox"
                     checked={selectedRows.size === pageData.length && pageData.length > 0}
@@ -127,28 +167,34 @@ function DataTableInner<T extends Record<string, any>>({
                   />
                 </th>
               )}
-              {visibleCols.map(col => (
-                <th
-                  key={col.id}
-                  className={cn(
-                    'px-4 py-3 text-sm font-semibold text-foreground/70',
-                    col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left',
-                    sortable && col.sortable !== false && 'cursor-pointer hover:bg-muted select-none'
-                  )}
-                  style={{ width: col.width }}
-                  onClick={() => col.sortable !== false && handleSort(col.id)}
-                  scope="col"
-                  aria-sort={
-                    state.sorts.find(s => s.columnId === col.id)?.direction === 'asc' ? 'ascending' :
-                    state.sorts.find(s => s.columnId === col.id)?.direction === 'desc' ? 'descending' : undefined
-                  }
-                >
-                  <div className={cn('flex items-center gap-2', col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : '')}>
-                    {col.header}
-                    {sortable && col.sortable !== false && getSortIndicator(col.id)}
-                  </div>
-                </th>
-              ))}
+              {visibleCols.map(col => {
+                const pinned = pinnedCellProps(col.id);
+                return (
+                  <th
+                    key={col.id}
+                    role="columnheader"
+                    className={cn(
+                      'px-4 py-3 text-sm font-semibold text-foreground/70',
+                      col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left',
+                      sortable && col.sortable !== false && 'cursor-pointer hover:bg-muted select-none',
+                      pinnedOffsets.has(col.id) && 'bg-muted/50',
+                      pinned.className,
+                    )}
+                    style={{ width: col.width, ...pinned.style }}
+                    onClick={() => col.sortable !== false && handleSort(col.id)}
+                    scope="col"
+                    aria-sort={
+                      state.sorts.find(s => s.columnId === col.id)?.direction === 'asc' ? 'ascending' :
+                      state.sorts.find(s => s.columnId === col.id)?.direction === 'desc' ? 'descending' : undefined
+                    }
+                  >
+                    <div className={cn('flex items-center gap-2', col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : '')}>
+                      {col.header}
+                      {sortable && col.sortable !== false && getSortIndicator(col.id)}
+                    </div>
+                  </th>
+                );
+              })}
               {onRowClick && <th className="px-4 py-3 w-10" />}
             </tr>
           </thead>
@@ -177,7 +223,13 @@ function DataTableInner<T extends Record<string, any>>({
                   onClick={() => onRowClick?.(row)}
                 >
                   {selectable && (
-                    <td className="px-4 py-3 w-10" onClick={e => e.stopPropagation()}>
+                    <td
+                      className={cn(
+                        'sticky left-0 z-10 px-4 py-3 w-10',
+                        rowIndex % 2 === 0 ? 'bg-background' : 'bg-muted/20',
+                      )}
+                      onClick={e => e.stopPropagation()}
+                    >
                       <input
                         type="checkbox"
                         checked={selectedRows.has(rowIndex)}
@@ -187,17 +239,23 @@ function DataTableInner<T extends Record<string, any>>({
                       />
                     </td>
                   )}
-                  {visibleCols.map(col => (
-                    <td
-                      key={col.id}
-                      className={cn(
-                        'px-4 py-3 text-sm',
-                        col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'
-                      )}
-                    >
-                      {getCellValue(row, col)}
-                    </td>
-                  ))}
+                  {visibleCols.map(col => {
+                    const pinned = pinnedCellProps(col.id);
+                    return (
+                      <td
+                        key={col.id}
+                        className={cn(
+                          'px-4 py-3 text-sm',
+                          col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left',
+                          pinnedOffsets.has(col.id) && (rowIndex % 2 === 0 ? 'bg-background' : 'bg-muted/20'),
+                          pinned.className,
+                        )}
+                        style={pinned.style}
+                      >
+                        {getCellValue(row, col)}
+                      </td>
+                    );
+                  })}
                   {onRowClick && (
                     <td className="px-4 py-3 w-10">
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />

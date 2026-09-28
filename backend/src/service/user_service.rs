@@ -1,6 +1,11 @@
 use chrono::{DateTime, Utc};
+use redis::{AsyncCommands, Client as RedisClient};
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
+
+const PROFILE_CACHE_VERSION: &str = "v1";
+const PROFILE_CACHE_TTL_SECONDS: u64 = 60;
 
 use crate::api_error::ApiError;
 use crate::models::match_models::{EloHistory, UserElo};
@@ -9,11 +14,33 @@ use crate::models::user::{User, UserProfile};
 #[derive(Debug, Clone)]
 pub struct UserService {
     pool: PgPool,
+    redis_client: Option<Arc<RedisClient>>,
 }
 
 impl UserService {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            redis_client: None,
+        }
+    }
+
+    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
+        self.redis_client = Some(redis_client);
+        self
+    }
+
+    fn profile_cache_key(user_id: Uuid) -> String {
+        format!("profile:{}:{}", PROFILE_CACHE_VERSION, user_id)
+    }
+
+    pub async fn invalidate_profile_cache(&self, user_id: Uuid) {
+        let Some(redis_client) = &self.redis_client else {
+            return;
+        };
+        if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+            let _: Result<(), _> = connection.del(Self::profile_cache_key(user_id)).await;
+        }
     }
 
     /// Get a user by ID
@@ -39,6 +66,26 @@ impl UserService {
 
     /// Get a user profile by ID (public view)
     pub async fn get_user_profile(&self, user_id: Uuid) -> Result<UserProfile, ApiError> {
+        let cache_key = Self::profile_cache_key(user_id);
+        if let Some(redis_client) = &self.redis_client {
+            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+                match connection.get::<_, Option<String>>(&cache_key).await {
+                    Ok(Some(cached)) => {
+                        if let Ok(profile) = serde_json::from_str::<UserProfile>(&cached) {
+                            crate::metrics::record_profile_cache_hit();
+                            let _: Result<(), _> = connection
+                                .expire(&cache_key, PROFILE_CACHE_TTL_SECONDS as i64)
+                                .await;
+                            return Ok(profile);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => tracing::warn!(%user_id, %error, "Profile cache read failed"),
+                }
+            }
+        }
+        crate::metrics::record_profile_cache_miss();
+
         let user = self.get_user_by_id(user_id).await?;
 
         let profile = UserProfile {
@@ -53,6 +100,16 @@ impl UserService {
             fair_play_score: user.reputation_score,
             is_bad_actor: user.is_banned,
         };
+
+        if let Some(redis_client) = &self.redis_client {
+            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+                if let Ok(serialized) = serde_json::to_string(&profile) {
+                    let _: Result<(), _> = connection
+                        .set_ex(&cache_key, serialized, PROFILE_CACHE_TTL_SECONDS)
+                        .await;
+                }
+            }
+        }
 
         Ok(profile)
     }
@@ -115,6 +172,8 @@ impl UserService {
         let updated_user = query_builder.fetch_one(&self.pool).await.map_err(|e| {
             ApiError::internal_error(format!("Failed to update user: {}", e))
         })?;
+
+        self.invalidate_profile_cache(user_id).await;
 
         Ok(updated_user)
     }

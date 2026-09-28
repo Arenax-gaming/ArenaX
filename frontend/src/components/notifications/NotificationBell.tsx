@@ -2,9 +2,20 @@
 
 import { useRef, useEffect, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Trash2, Loader2, RefreshCw, Settings, BellOff } from "lucide-react";
+import {
+  Bell,
+  CheckCheck,
+  Trash2,
+  Loader2,
+  RefreshCw,
+  Settings,
+  BellOff,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { clearAppBadge } from "@/hooks/useNotificationBadge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PersistentNotification } from "@/types/notification";
@@ -108,6 +119,8 @@ export function NotificationBell({ className, onClose }: NotificationBellProps) 
     unreadCount,
     markAllAsRead,
     refreshNotifications,
+    alertsMuted,
+    toggleAlertsMuted,
   } = useNotifications();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -133,12 +146,24 @@ export function NotificationBell({ className, onClose }: NotificationBellProps) 
         variant="ghost"
         size="sm"
         className="relative h-9 w-9 p-0"
-        onClick={() => setIsOpen((o) => !o)}
+        onClick={() => {
+          setIsOpen((o) => {
+            const next = !o;
+            // Viewing notifications clears the PWA app badge immediately (#1095) —
+            // the tab title badge follows separately once unreadCount drops.
+            if (next) clearAppBadge();
+            return next;
+          });
+        }}
         aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
         aria-expanded={isOpen}
         aria-haspopup="true"
       >
-        <Bell className="h-5 w-5" />
+        {alertsMuted ? (
+          <BellOff className="h-5 w-5" aria-hidden="true" />
+        ) : (
+          <Bell className="h-5 w-5" aria-hidden="true" />
+        )}
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
             {unreadCount > 99 ? "99+" : unreadCount}
@@ -154,6 +179,27 @@ export function NotificationBell({ className, onClose }: NotificationBellProps) 
           <div className="flex items-center justify-between border-b p-3">
             <h3 className="font-semibold">Notifications</h3>
             <div className="flex items-center gap-1">
+              {/* Sound/vibration only — the badge and the list are unaffected,
+                  so muting silences arrivals without hiding them. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={toggleAlertsMuted}
+                aria-label={
+                  alertsMuted
+                    ? "Unmute notification sounds"
+                    : "Mute notification sounds"
+                }
+                aria-pressed={alertsMuted}
+                title={alertsMuted ? "Alerts muted" : "Alerts on"}
+              >
+                {alertsMuted ? (
+                  <VolumeX className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Volume2 className="h-4 w-4" />
+                )}
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"

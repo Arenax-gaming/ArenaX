@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tournament } from "@/types/tournament";
 import { Button } from "@/components/ui/Button";
 import { useRouter } from "next/navigation";
@@ -12,28 +13,92 @@ interface JoinTournamentButtonProps {
   tournament: Tournament;
 }
 
+/** Per-tournament "has this browser joined?" cache entry (#1088). */
+function joinedQueryKey(tournamentId: string) {
+  return ["tournamentJoined", tournamentId] as const;
+}
+
 export function JoinTournamentButton({
   tournament,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
   const { notify, addToast } = useNotifications();
+  const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
-  const [joinStatus, setJoinStatus] = useState<
-    "idle" | "confirming" | "success" | "error"
-  >("idle");
-  const [isJoined, setIsJoined] = useState(false);
-  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinStatus, setJoinStatus] = useState<"idle" | "success" | "error">(
+    "idle",
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Prevents state updates after unmount and guards against duplicate submissions
+  // Prevents state updates after unmount
   const mountedRef = useRef(true);
-  const isRequestInFlight = useRef(false);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
     };
   }, []);
+
+  const { data: isJoined = false } = useQuery({
+    queryKey: joinedQueryKey(tournament.id),
+    queryFn: () =>
+      localStorage.getItem(`tournament-joined-${tournament.id}`) === "true",
+    staleTime: Infinity,
+  });
+
+  const joinMutation = useMutation({
+    mutationFn: () => api.joinTournament(tournament.id),
+    // Optimistic UI (#1088): flip to "joined" the instant the user confirms,
+    // rather than waiting for the round-trip — high-latency mobile networks
+    // would otherwise leave the button spinning for 500ms-2s.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: joinedQueryKey(tournament.id) });
+      const previous = queryClient.getQueryData<boolean>(joinedQueryKey(tournament.id));
+      queryClient.setQueryData(joinedQueryKey(tournament.id), true);
+      return { previous };
+    },
+    onError: (error, _vars, context) => {
+      // Roll back: the join never actually happened.
+      queryClient.setQueryData(joinedQueryKey(tournament.id), context?.previous ?? false);
+      if (!mountedRef.current) return;
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to join tournament. Please try again.";
+      setErrorMessage(message);
+      setJoinStatus("error");
+
+      addToast({
+        type: "error",
+        title: "Failed to Join Tournament",
+        message,
+        duration: 5000,
+      });
+    },
+    onSuccess: () => {
+      localStorage.setItem(`tournament-joined-${tournament.id}`, "true");
+      if (!mountedRef.current) return;
+
+      notify({
+        type: "match",
+        title: "Tournament Joined",
+        message: `You've joined ${tournament.name}. We'll notify you when your match is ready.`,
+        link: `/tournaments/${tournament.id}`,
+        linkLabel: "View Tournament",
+        persistent: true,
+        toast: true,
+        toastDuration: 5000,
+      });
+
+      setTimeout(() => {
+        if (mountedRef.current) {
+          setShowModal(false);
+          setJoinStatus("idle");
+        }
+      }, 2000);
+    },
+  });
 
   // Determine button state
   const isFull = tournament.currentParticipants >= tournament.maxParticipants;
@@ -44,20 +109,15 @@ export function JoinTournamentButton({
     tournament.status === "registration_open" && !isFull && !isJoined;
 
   const getButtonState = () => {
-    if (joinLoading) {
-      return {
-        label: "Joining…",
-        disabled: true,
-        variant: "primary" as const,
-        loading: true,
-      };
-    }
     if (isJoined) {
+      // Optimistic (#1088): flips true the instant the user confirms, before
+      // the server round-trip resolves — a brief spinner marks the window
+      // where the join could still be rolled back on error.
       return {
-        label: "Registered ✓",
+        label: joinMutation.isPending ? "Registered — confirming…" : "Registered ✓",
         disabled: true,
         variant: "secondary" as const,
-        loading: false,
+        loading: joinMutation.isPending,
       };
     }
     if (isFull) {
@@ -102,11 +162,6 @@ export function JoinTournamentButton({
 
   const buttonState = getButtonState();
 
-  useEffect(() => {
-    const joined = localStorage.getItem(`tournament-joined-${tournament.id}`);
-    setIsJoined(joined === "true");
-  }, [tournament.id]);
-
   const handleJoinClick = () => {
     const isAuthenticated = localStorage.getItem("auth_token") !== null;
 
@@ -121,62 +176,15 @@ export function JoinTournamentButton({
     setJoinStatus("idle");
   };
 
-  const handleConfirmJoin = async () => {
-    // Prevent duplicate submissions from rapid clicks
-    if (isRequestInFlight.current) return;
-    isRequestInFlight.current = true;
+  const handleConfirmJoin = () => {
+    // Guard against duplicate submissions from rapid clicks — once mutate()
+    // has been called, isJoined is already optimistically true and the
+    // "Confirm Join" button is no longer rendered (see the modal footer).
+    if (joinMutation.isPending) return;
 
-    setJoinStatus("confirming");
-    setJoinLoading(true);
     setErrorMessage(null);
-
-    try {
-      await api.joinTournament(tournament.id);
-      if (!mountedRef.current) return;
-
-      setJoinStatus("success");
-      setIsJoined(true);
-      setJoinLoading(false);
-      localStorage.setItem(`tournament-joined-${tournament.id}`, "true");
-
-      notify({
-        type: "match",
-        title: "Tournament Joined",
-        message: `You've joined ${tournament.name}. We'll notify you when your match is ready.`,
-        link: `/tournaments/${tournament.id}`,
-        linkLabel: "View Tournament",
-        persistent: true,
-        toast: true,
-        toastDuration: 5000,
-      });
-
-      setTimeout(() => {
-        if (mountedRef.current) {
-          setShowModal(false);
-          setJoinStatus("idle");
-        }
-      }, 2000);
-    } catch (error) {
-      if (!mountedRef.current) return;
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to join tournament. Please try again.";
-
-      setErrorMessage(message);
-      setJoinStatus("error");
-      setJoinLoading(false);
-
-      addToast({
-        type: "error",
-        title: "Failed to Join Tournament",
-        message,
-        duration: 5000,
-      });
-    } finally {
-      isRequestInFlight.current = false;
-    }
+    setJoinStatus("success");
+    joinMutation.mutate();
   };
 
   const handleLoginRedirect = () => {
@@ -272,11 +280,11 @@ export function JoinTournamentButton({
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b">
               <div className="flex items-center gap-3">
-                {joinStatus === "success" && (
-                  <CheckCircle className="h-5 w-5 text-success dark:text-success/80" />
-                )}
-                {joinStatus === "confirming" && (
+                {joinStatus === "success" && joinMutation.isPending && (
                   <Clock className="h-5 w-5 text-primary dark:text-primary/80 animate-spin" />
+                )}
+                {joinStatus === "success" && !joinMutation.isPending && (
+                  <CheckCircle className="h-5 w-5 text-success dark:text-success/80" />
                 )}
                 {joinStatus === "idle" && (
                   <Users className="h-5 w-5 text-primary dark:text-primary/80" />
@@ -315,31 +323,6 @@ export function JoinTournamentButton({
                 </>
               )}
 
-              {/* Confirming State */}
-              {joinStatus === "confirming" && (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Processing your tournament registration...
-                  </p>
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tournament</span>
-                      <span className="font-semibold text-foreground">
-                        {tournament.name}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm border-t pt-3">
-                      <span className="text-muted-foreground">Entry Fee</span>
-                      <span className="font-semibold text-foreground">
-                        {tournament.entryFee === 0
-                          ? "Free"
-                          : `$${tournament.entryFee}`}
-                      </span>
-                    </div>
-                  </div>
-                </>
-              )}
-
               {joinStatus === "error" && (
                 <div className="rounded-lg border border-red-200 bg-destructive/5 p-4 text-sm text-red-900 dark:border-red-900 dark:bg-destructive/10/20 dark:text-destructive-foreground">
                   <p className="font-semibold">Unable to join tournament</p>
@@ -347,12 +330,14 @@ export function JoinTournamentButton({
                 </div>
               )}
 
-              {/* Success State */}
+              {/* Success State — shown immediately (optimistic); the
+                  "confirming" line drops once the server confirms (#1088). */}
               {joinStatus === "success" && (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Congratulations! You have successfully joined the
-                    tournament. Check your email for confirmation details.
+                    {joinMutation.isPending
+                      ? "Confirming your registration with the server…"
+                      : "Congratulations! You have successfully joined the tournament. Check your email for confirmation details."}
                   </p>
                   <div className="bg-success-muted dark:bg-success-muted/20 border border-success/30 dark:border-success/30 rounded-lg p-3">
                     <p className="text-sm text-green-900 dark:text-success-muted-foreground">
@@ -387,12 +372,6 @@ export function JoinTournamentButton({
                     Sign In
                   </Button>
                 </>
-              )}
-
-              {joinStatus === "confirming" && (
-                <Button disabled className="w-full" variant="secondary">
-                  Processing...
-                </Button>
               )}
 
               {joinStatus === "success" && (

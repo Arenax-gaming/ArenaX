@@ -1,11 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { QRCode } from "@/components/wallet/QRCode";
 import { WalletAssetCode } from "@/lib/wallet/types";
 import { useAnalytics } from "@/hooks/useAnalytics";
+
+// Code-split (#1086): the `qrcode` canvas-rendering library only loads once
+// the deposit modal actually opens, not with the rest of the wallet page.
+const QRCode = dynamic(
+  () => import("@/components/wallet/QRCode").then((m) => m.QRCode),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-40 w-40 animate-pulse rounded-md bg-muted" aria-hidden="true" />
+    ),
+  },
+);
 
 interface DepositModalProps {
   open: boolean;
