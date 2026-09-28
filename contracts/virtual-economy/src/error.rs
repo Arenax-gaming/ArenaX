@@ -78,7 +78,6 @@ pub enum VirtualEconomyError {
     InvalidReferral = 113,
     ReferralCooldown = 114,
     NothingToClaim = 115,
-
     // NFT collections (#913) and trading rebates (#916) reuse InvalidConfig
     // and TokenNotFound / ReferralCooldown above — this contracterror enum
     // is capped at 50 cases by the XDR spec (ScSpecUdtErrorEnumV0), and it

@@ -87,7 +87,7 @@ export async function GET(
         </div>
         {playerName && (
           <div style={{ display: "flex", fontSize: "28px", color: "#cbd5e1" }}>
-            Unlocked by {playerName}
+            {`Unlocked by ${playerName}`}
           </div>
         )}
         <div

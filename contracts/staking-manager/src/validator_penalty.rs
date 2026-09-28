@@ -27,7 +27,7 @@ impl ValidatorPenaltyManager {
         if config.burn_bps > 10_000 {
             panic!("burn_bps exceeds 100%");
         }
-        if config.slash_amounts.len() == 0 {
+        if config.slash_amounts.is_empty() {
             panic!("slash_amounts must not be empty");
         }
         env.storage()
@@ -36,6 +36,9 @@ impl ValidatorPenaltyManager {
     }
 
     /// Read the current slash config. Returns `None` if not yet configured.
+    // Kept for upcoming admin query endpoints; not yet wired into the
+    // contract-impl block.
+    #[allow(dead_code)]
     pub fn get_slash_config(env: &Env) -> Option<SlashConfig> {
         env.storage().instance().get(&DataKey::ValidatorSlashConfig)
     }

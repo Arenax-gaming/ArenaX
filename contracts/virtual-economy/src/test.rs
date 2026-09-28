@@ -9,13 +9,16 @@ fn setup() -> (Env, Address, VirtualEconomyContractClient<'static>) {
     env.mock_all_auths();
 
     let admin = Address::generate(&env);
-    let contract_id = Address::generate(&env);
-    env.register_contract(&contract_id, VirtualEconomyContract);
+    let contract_id = env.register(VirtualEconomyContract, ());
     let client = VirtualEconomyContractClient::new(&env, &contract_id);
 
     client.initialize(
         &admin,
-        &CurrencyConfig { max_supply: 1_000_000_000, inflation_rate: 0, deflation_rate: 0 },
+        &CurrencyConfig {
+            max_supply: 1_000_000_000,
+            inflation_rate: 0,
+            deflation_rate: 0,
+        },
         &MarketplaceConfig {
             fee_percentage: 250,
             fee_collector: admin.clone(),
@@ -66,7 +69,10 @@ fn update_royalty_bps_rejects_above_ten_percent() {
     let token_id = client.mint_nft(&admin, &metadata, &None);
 
     let result = client.try_update_royalty_bps(&token_id, &admin, &1500);
-    assert!(result.is_err(), "updating royalty_bps above 1000 must fail (#913)");
+    assert!(
+        result.is_err(),
+        "updating royalty_bps above 1000 must fail (#913)"
+    );
 
     client.update_royalty_bps(&token_id, &admin, &1000);
     assert_eq!(client.get_nft_metadata(&token_id).royalty_bps, 1000);
@@ -80,7 +86,10 @@ fn create_collection_rejects_duplicate_names() {
     client.create_collection(&admin, &name, &500);
 
     let result = client.try_create_collection(&admin, &name, &500);
-    assert!(result.is_err(), "registering the same collection name twice must fail");
+    assert!(
+        result.is_err(),
+        "registering the same collection name twice must fail"
+    );
 }
 
 #[test]
@@ -91,10 +100,18 @@ fn minting_into_a_registered_collection_increments_its_item_count() {
 
     assert_eq!(client.get_collection(&name).item_count, 0);
 
-    client.mint_nft(&admin, &sample_metadata(&env, &admin, "genesis", 200), &None);
+    client.mint_nft(
+        &admin,
+        &sample_metadata(&env, &admin, "genesis", 200),
+        &None,
+    );
     assert_eq!(client.get_collection(&name).item_count, 1);
 
-    client.mint_nft(&admin, &sample_metadata(&env, &admin, "genesis", 200), &None);
+    client.mint_nft(
+        &admin,
+        &sample_metadata(&env, &admin, "genesis", 200),
+        &None,
+    );
     assert_eq!(client.get_collection(&name).item_count, 2);
 }
 
@@ -103,7 +120,11 @@ fn minting_into_an_unregistered_category_does_not_fail_and_touches_no_collection
     let (env, admin, client) = setup();
 
     // No panic/error minting with a category that was never registered.
-    let token_id = client.mint_nft(&admin, &sample_metadata(&env, &admin, "unregistered", 0), &None);
+    let token_id = client.mint_nft(
+        &admin,
+        &sample_metadata(&env, &admin, "unregistered", 0),
+        &None,
+    );
     assert!(client.get_nft_owner(&token_id) == admin);
 }
 
@@ -139,12 +160,8 @@ fn list_and_sell(
 ) {
     let metadata = sample_metadata(env, seller, "art", 0);
     let token_id = client.mint_nft(seller, &metadata, &None);
-    let order_id = client.create_marketplace_order(
-        seller,
-        &MarketplaceAsset::NFT(token_id),
-        &price,
-        &None,
-    );
+    let order_id =
+        client.create_marketplace_order(seller, &MarketplaceAsset::NFT(token_id), &price, &None);
     client.execute_marketplace_trade(buyer, &order_id);
 }
 
@@ -189,7 +206,10 @@ fn monthly_rebate_run_pays_tiered_amount_and_resets_volume() {
     assert_eq!(paid, 2); // both buyer and seller accrued 20_000 volume
 
     let expected_rebate = 20_000 * 200 / 10_000;
-    assert_eq!(client.get_currency_balance(&buyer), balance_before + expected_rebate);
+    assert_eq!(
+        client.get_currency_balance(&buyer),
+        balance_before + expected_rebate
+    );
     assert_eq!(client.get_trader_volume(&buyer), 0);
 
     let history = client.get_rebate_history(&buyer);
@@ -207,5 +227,8 @@ fn monthly_rebate_run_rejects_before_the_period_elapses() {
 
     list_and_sell(&env, &client, &seller, &buyer, 5_000);
     let result = client.try_calculate_monthly_rebates();
-    assert!(result.is_err(), "a second run inside the same period must fail");
+    assert!(
+        result.is_err(),
+        "a second run inside the same period must fail"
+    );
 }

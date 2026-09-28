@@ -17,13 +17,13 @@ import { resetTournamentPrefetchRegistry } from "@/hooks/useTournamentPrefetch";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const prefetchMock = jest.fn();
-const cancelQueriesMock = jest.fn();
+const mockPrefetch = jest.fn();
+const mockCancelQueries = jest.fn();
 
 jest.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
-    prefetchQuery: prefetchMock,
-    cancelQueries: cancelQueriesMock,
+    prefetchQuery: mockPrefetch,
+    cancelQueries: mockCancelQueries,
   }),
 }));
 
@@ -59,9 +59,9 @@ function makeCard(id = baseTournament.id) {
 describe("TournamentCard prefetch on hover", () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    prefetchMock.mockReset();
-    prefetchMock.mockResolvedValue({});
-    cancelQueriesMock.mockClear();
+    mockPrefetch.mockReset();
+    mockPrefetch.mockResolvedValue({});
+    mockCancelQueries.mockClear();
     resetTournamentPrefetchRegistry();
   });
 
@@ -76,10 +76,10 @@ describe("TournamentCard prefetch on hover", () => {
     fireEvent.mouseEnter(card as Element);
     jest.advanceTimersByTime(50);
 
-    expect(prefetchMock).not.toHaveBeenCalled();
+    expect(mockPrefetch).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(100);
-    expect(prefetchMock).toHaveBeenCalledTimes(1);
+    expect(mockPrefetch).toHaveBeenCalledTimes(1);
   });
 
   it("calls prefetchQuery with the tournament detail key and 30s staleTime", () => {
@@ -89,7 +89,7 @@ describe("TournamentCard prefetch on hover", () => {
     fireEvent.mouseEnter(card as Element);
     jest.advanceTimersByTime(200);
 
-    expect(prefetchMock).toHaveBeenCalledWith({
+    expect(mockPrefetch).toHaveBeenCalledWith({
       queryKey: ["tournaments", "t1"],
       queryFn: expect.any(Function),
       staleTime: 30_000,
@@ -104,7 +104,7 @@ describe("TournamentCard prefetch on hover", () => {
     fireEvent.mouseLeave(card as Element);
     jest.advanceTimersByTime(300);
 
-    expect(prefetchMock).not.toHaveBeenCalled();
+    expect(mockPrefetch).not.toHaveBeenCalled();
   });
 
   it("deduplicates rapid re-entries — only a single prefetch for the same card", () => {
@@ -117,7 +117,7 @@ describe("TournamentCard prefetch on hover", () => {
     fireEvent.mouseEnter(card as Element);
     jest.advanceTimersByTime(200);
 
-    expect(prefetchMock).toHaveBeenCalledTimes(1);
+    expect(mockPrefetch).toHaveBeenCalledTimes(1);
   });
 
   it("prefetches on touchstart for touch devices", () => {
@@ -127,15 +127,15 @@ describe("TournamentCard prefetch on hover", () => {
     fireEvent.touchStart(card as Element);
     jest.advanceTimersByTime(200);
 
-    expect(prefetchMock).toHaveBeenCalledTimes(1);
-    expect(prefetchMock).toHaveBeenCalledWith(
+    expect(mockPrefetch).toHaveBeenCalledTimes(1);
+    expect(mockPrefetch).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ["tournaments", "t1"] }),
     );
   });
 
   it("limits concurrent prefetches to 3 and cancels the oldest", () => {
     // Keep prefetches in-flight so the registry stays populated.
-    prefetchMock.mockReturnValue(new Promise(() => {}));
+    mockPrefetch.mockReturnValue(new Promise(() => {}));
 
     const containers = ["t1", "t2", "t3", "t4"].map((id) => makeCard(id));
     containers.forEach((container) => {
@@ -143,9 +143,9 @@ describe("TournamentCard prefetch on hover", () => {
     });
     jest.advanceTimersByTime(400);
 
-    expect(prefetchMock).toHaveBeenCalledTimes(4);
+    expect(mockPrefetch).toHaveBeenCalledTimes(4);
     // The 4th prefetch exceeds the cap and must cancel the oldest (t1).
-    expect(cancelQueriesMock).toHaveBeenCalledWith({
+    expect(mockCancelQueries).toHaveBeenCalledWith({
       queryKey: ["tournaments", "t1"],
     });
   });

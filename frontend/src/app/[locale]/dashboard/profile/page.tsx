@@ -55,7 +55,7 @@ export default function DashboardProfilePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <EloChart data={mockEloHistory} />
+          <EloChart initialData={mockEloHistory} />
           <MatchHistory matches={mockMatchHistory} currentUserId={user.id} />
         </div>
         <div>
