@@ -12,12 +12,43 @@ pub struct Config {
     pub ai: AiConfig,
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
+    pub idempotency: IdempotencyConfig,
+    pub notifications: NotificationsConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
+    /// Connection pool ceiling.
+    pub max_connections: u32,
+    /// How long a caller waits for a connection before the request is failed.
+    /// Bounded so a saturated or unreachable database sheds load instead of
+    /// letting every handler pile up on the pool (Issue #861).
+    pub acquire_timeout_secs: u64,
+    /// Interval between background pool health probes.
+    pub health_check_interval_secs: u64,
+    /// Consecutive failures that trip the circuit breaker open.
+    pub circuit_failure_threshold: u32,
+    /// How long the breaker stays open before admitting a trial request.
+    pub circuit_open_secs: u64,
+    /// PostgreSQL `statement_timeout` applied to every connection (#1084):
+    /// a slow query or deadlock is cancelled instead of holding a pool
+    /// connection indefinitely. `DATABASE_STATEMENT_TIMEOUT_MS`, default 5000.
+    pub statement_timeout_ms: u64,
+    /// Queries slower than this are logged at WARN with their SQL and
+    /// duration (#1084). `DATABASE_SLOW_QUERY_THRESHOLD_MS`, default 200.
+    pub slow_query_threshold_ms: u64,
+}
+
+/// Read a `u64` from the environment, falling back when unset or unparseable.
+fn env_u64(key: &str, default: u64) -> u64 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// Read a `u32` from the environment, falling back when unset or unparseable.
+fn env_u32(key: &str, default: u32) -> u32 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -94,10 +125,34 @@ pub struct ServerConfig {
     pub rust_log: String,
 }
 
+fn default_rate_limit_headers() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct RateLimitConfig {
     pub requests: u32,
     pub window: u64,
+    /// Whether to send rate limit headers (`RateLimit-Limit`, `RateLimit-Remaining`,
+    /// `RateLimit-Reset`) on responses. Defaults to `true`.
+    #[serde(default = "default_rate_limit_headers")]
+    pub headers: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IdempotencyConfig {
+    pub ttl_seconds: u64,
+    pub max_response_size_kb: u32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotificationsConfig {
+    /// SendGrid API key for the email fan-out channel (#1107). Empty when
+    /// unset — the email channel then fails fast rather than silently
+    /// no-op'ing, so a misconfigured deployment is visible in the delivery
+    /// audit log instead of just losing emails quietly.
+    pub sendgrid_api_key: String,
+    pub sendgrid_from_email: String,
 }
 
 impl Config {
@@ -133,11 +188,30 @@ impl Config {
         let rust_log = env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
         let rate_limit_requests: u32 = env::var("RATE_LIMIT_REQUESTS")?.parse()?;
         let rate_limit_window: u64 = env::var("RATE_LIMIT_WINDOW")?.parse()?;
+        let rate_limit_headers = env::var("RATE_LIMIT_HEADERS")
+            .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
+            .unwrap_or(true);
+        let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
+            .unwrap_or_else(|_| "86400".to_string())
+            .parse()?;
+        let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
+            .unwrap_or_else(|_| "1024".to_string())
+            .parse()?;
+        let sendgrid_api_key = env::var("SENDGRID_API_KEY").unwrap_or_default();
+        let sendgrid_from_email =
+            env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "no-reply@arenax.gg".to_string());
 
         Ok(Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20),
+                acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
+                health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
+                circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
+                circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
+                statement_timeout_ms: env_u64("DATABASE_STATEMENT_TIMEOUT_MS", 5000),
+                slow_query_threshold_ms: env_u64("DATABASE_SLOW_QUERY_THRESHOLD_MS", 200),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -174,6 +248,15 @@ impl Config {
             rate_limit: RateLimitConfig {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
+                headers: rate_limit_headers,
+            },
+            idempotency: IdempotencyConfig {
+                ttl_seconds: idempotency_ttl_seconds,
+                max_response_size_kb: idempotency_max_response_size_kb,
+            },
+            notifications: NotificationsConfig {
+                sendgrid_api_key,
+                sendgrid_from_email,
             },
         })
     }

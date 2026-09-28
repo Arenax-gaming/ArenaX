@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Tournament, TournamentFilters } from "@/types/tournament";
 
@@ -30,6 +30,8 @@ function filtersToParams(
 /**
  * Fetches tournaments from the API with optional filters.
  * Every filter change produces a new API call — no client-side filtering.
+ * Previous page results stay visible (`isPlaceholderData`) while the next
+ * page is fetching, so the list can render skeletons below existing cards.
  */
 export function useTournaments(filters: TournamentFilters = {}) {
   return useQuery<Tournament[]>({
@@ -43,6 +45,7 @@ export function useTournaments(filters: TournamentFilters = {}) {
       return (data ?? []) as Tournament[];
     },
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 

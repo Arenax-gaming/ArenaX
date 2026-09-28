@@ -39,7 +39,7 @@ fn test_submit_flag_unauthorized() {
     client.initialize(&admin, &0u32, &0u64, &0u32);
 
     let result = client.try_submit_flag(&unauthorized, &player, &1u64, &2u32);
-    assert_eq!(result, Err(Ok(AntiCheatError::Unauthorized)));
+    assert_eq!(result, Err(Ok(AntiCheatError::OracleNotAuthorized)));
 }
 
 #[test]

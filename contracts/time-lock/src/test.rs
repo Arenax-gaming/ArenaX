@@ -756,3 +756,114 @@ fn test_full_governance_workflow() {
     assert_eq!(client.get_governors().len(), 4);
     assert!(client.is_governor(&new_gov));
 }
+
+// ─── Emergency stop (#877) ─────────────────────────────────────────────────
+
+#[test]
+fn test_pause_round_trip() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _govs) = setup(&env, 100, 3600, 2, 2);
+
+    assert!(!client.is_paused());
+    client.set_paused(&admin, &true);
+    assert!(client.is_paused());
+    client.set_paused(&admin, &false);
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "only admin can perform this action")]
+fn test_pause_by_non_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _govs) = setup(&env, 100, 3600, 2, 2);
+
+    let intruder = Address::generate(&env);
+    client.set_paused(&intruder, &true);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_schedule_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, govs) = setup(&env, 0, 3600, 2, 2);
+
+    client.set_paused(&admin, &true);
+
+    let target = Address::generate(&env);
+    schedule_default(
+        &client,
+        &govs.get(0).unwrap(),
+        &make_id(&env, 1),
+        &target,
+        &env,
+    );
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_execute_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, govs) = setup(&env, 0, 3600, 2, 2);
+
+    let target = Address::generate(&env);
+    let id = make_id(&env, 2);
+    schedule_default(&client, &govs.get(0).unwrap(), &id, &target, &env);
+
+    client.set_paused(&admin, &true);
+    client.execute_operation(&govs.get(0).unwrap(), &id);
+}
+
+#[test]
+#[should_panic(expected = "contract is paused")]
+fn test_vote_accelerate_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, govs) = setup(&env, 0, 3600, 2, 2);
+
+    let target = Address::generate(&env);
+    let id = make_id(&env, 3);
+    schedule_default(&client, &govs.get(0).unwrap(), &id, &target, &env);
+
+    client.set_paused(&admin, &true);
+    client.vote_accelerate(&govs.get(1).unwrap(), &id);
+}
+
+#[test]
+fn test_reads_work_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, govs) = setup(&env, 0, 3600, 2, 2);
+
+    let target = Address::generate(&env);
+    let id = make_id(&env, 4);
+    schedule_default(&client, &govs.get(0).unwrap(), &id, &target, &env);
+
+    client.set_paused(&admin, &true);
+
+    // Read entry points must stay available during an emergency stop.
+    assert!(client.is_paused());
+    let op = client.get_operation(&id).expect("operation must exist");
+    assert_eq!(op.status, STATUS_SCHEDULED);
+    assert_eq!(client.get_active_count(), 1);
+    assert_eq!(client.get_governors().len(), 2);
+    assert_eq!(client.get_analytics().total_scheduled, 1);
+}
+
+#[test]
+fn test_unpause_restores_mutations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, govs) = setup(&env, 0, 3600, 2, 2);
+
+    client.set_paused(&admin, &true);
+    client.set_paused(&admin, &false);
+
+    let target = Address::generate(&env);
+    let id = make_id(&env, 5);
+    schedule_default(&client, &govs.get(0).unwrap(), &id, &target, &env);
+    assert_eq!(client.get_active_count(), 1);
+}

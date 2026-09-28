@@ -1,6 +1,6 @@
 # ArenaX Response Interceptor
 
-Consistent, observable, and governed API response handling for the ArenaX frontend.
+Consistent, observable, and governed API response handling for the ArenaX frontend
 
 ---
 

@@ -132,7 +132,7 @@ export function VirtualDynamicList<T>({
       Object.values(observers).forEach((o) => o.disconnect());
       // Clear the observers reference to prevent memory leaks
       Object.keys(observersRef.current).forEach((key) => {
-        delete observersRef.current[key];
+        delete observersRef.current[Number(key)];
       });
     };
   }, [items]);
@@ -153,8 +153,6 @@ export function VirtualDynamicList<T>({
     [items.length, estimatedItemSize, height, analytics, onLoadMore, loadMoreThreshold]
   );
 
-  if (items.length === 0 && emptyState) return <>{emptyState}</>;
-
   const Row = useCallback(
     ({ index, style }: ListChildComponentProps) => {
       const item = items[index];
@@ -167,6 +165,8 @@ export function VirtualDynamicList<T>({
     },
     [items, renderItem, makeMeasureRef]
   );
+
+  if (items.length === 0 && emptyState) return <>{emptyState}</>;
 
   return (
     <div className={cn("relative", className)} role="list" aria-label={listId}>

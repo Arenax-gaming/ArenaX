@@ -53,28 +53,35 @@ export function Popover({ children, placement = 'bottom', open: openProp, onOpen
 
 export interface PopoverTriggerProps extends React.HTMLAttributes<HTMLSpanElement> {
   children: React.ReactNode;
+  /** Render the trigger behaviour on a child element (Radix Slot pattern). */
+  asChild?: boolean;
 }
 
-export function PopoverTrigger({ children, onClick, ...props }: PopoverTriggerProps) {
+export function PopoverTrigger({ children, onClick, asChild = false, ...props }: PopoverTriggerProps) {
   const { open, setOpen } = usePopoverContext();
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      aria-expanded={open}
-      onClick={(e) => {
+  const triggerProps = {
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-expanded": open,
+    onClick: (e: React.MouseEvent<Element>) => {
+      setOpen(!open);
+      onClick?.(e as React.MouseEvent<HTMLSpanElement>);
+    },
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
         setOpen(!open);
-        onClick?.(e);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          setOpen(!open);
-        }
-        if (e.key === 'Escape') setOpen(false);
-      }}
-      {...props}
-    >
+      }
+    },
+    ...props,
+  };
+
+  if (asChild && React.isValidElement(children)) {
+    return React.cloneElement(children, triggerProps as object);
+  }
+
+  return (
+    <span {...triggerProps}>
       {children}
     </span>
   );

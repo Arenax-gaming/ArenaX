@@ -143,6 +143,7 @@ export function WithdrawModal({
                         type="number"
                         min="0"
                         step="0.0000001"
+                        aria-label="Amount"
                         error={!!form.formState.errors.amount}
                       />
                     </FormControl>
@@ -168,6 +169,7 @@ export function WithdrawModal({
                       <Input
                         {...field}
                         placeholder="G..."
+                        aria-label="Destination Address"
                         error={!!form.formState.errors.destination}
                       />
                     </FormControl>

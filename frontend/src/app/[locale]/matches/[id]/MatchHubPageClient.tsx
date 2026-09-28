@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,10 +12,12 @@ import {
 } from "@/hooks/useMatchWebSocket";
 import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
+import { SpectatorMode } from "@/components/match/SpectatorMode";
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Eye,
   RadioTower,
   RefreshCw,
   ShieldAlert,
@@ -24,7 +26,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { MatchHubDetails } from "@/data/matchHub";
 import { MatchDetail } from "@/types/match";
 import { PageErrorBoundary } from "@/components/common/PageErrorBoundary";
@@ -43,9 +45,13 @@ export function MatchHubPageClient() {
 function MatchHubPageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
+  // #1089: `?spectate=true` forces spectator mode for shared spectator links,
+  // regardless of participant/status detection below.
+  const forceSpectate = searchParams?.get("spectate") === "true";
 
   const { data: matchData, isLoading, error, refetch } = useMatch(matchId);
 
@@ -79,7 +85,7 @@ function MatchHubPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
-  const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
+  const { isConnected, lastUpdate, connectionError, connectionRestored, reconnect } = useMatchWebSocket({
     matchId,
     enabled: match?.status === "in_progress" || match?.status === "disputed",
   });
@@ -104,6 +110,7 @@ function MatchHubPageContent() {
     clearConflict,
   } = useMatchScoreReporting({
     expectedReport: match?.status === "disputed" ? expectedOpponentReport : undefined,
+    matchId,
   });
 
   const isParticipant = useMemo(() => {
@@ -202,7 +209,7 @@ function MatchHubPageContent() {
   }
 
   // Make sure we have the MatchHubDetails shape for the rest of the component
-  if (!("player1" in match) || !("player2" in match)) {
+  if (!match || !("player1" in match) || !("player2" in match)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
@@ -220,6 +227,26 @@ function MatchHubPageContent() {
 
   const isLive = match.status === "in_progress";
   const isDisputed = match.status === "disputed";
+
+  // Non-participants watching a live or completed match enter spectator mode,
+  // and `?spectate=true` opts in explicitly regardless of participant status
+  // (#1089) — e.g. a shared spectator link, or a participant previewing it.
+  // Spectator limit is pulled from the match config if present.
+  if (
+    (forceSpectate || !isParticipant) &&
+    (isLive || isDisputed || match.status === "completed")
+  ) {
+    return (
+      <SpectatorMode
+        match={match as MatchHubDetails}
+        currentUserId={currentUserId}
+        currentUserName={user?.username ?? "Spectator"}
+        spectatorLimit={(match as MatchHubDetails).spectatorLimit}
+        onExit={() => router.back()}
+      />
+    );
+  }
+
   const submissionLocked =
     !isParticipant || (!isLive && !isDisputed) || !player1Score.length || !player2Score.length;
 
@@ -309,6 +336,10 @@ function MatchHubPageContent() {
                   <Button variant="ghost" size="sm" onClick={reconnect} className="text-white hover:bg-white/10">
                     <RefreshCw className="h-4 w-4" />
                   </Button>
+                </div>
+              ) : connectionRestored ? (
+                <div role="status" className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                  Connection restored. Live updates resumed.
                 </div>
               ) : null}
 
@@ -472,8 +503,22 @@ function MatchHubPageContent() {
               </div>
 
               {pendingReport ? (
-                <div className="mt-5 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-900">
-                  Latest submission by {pendingReport.reporterName}: {pendingReport.player1Score} -{" "}
+                <div
+                  className={cn(
+                    "mt-5 rounded-2xl border p-4 text-sm",
+                    isReporting
+                      // Optimistic (#1088): shown the instant the user submits,
+                      // before the round trip confirms it — visually distinct
+                      // (grey/italic) so it reads as provisional.
+                      ? "border-border bg-muted/50 italic text-muted-foreground"
+                      : "border-cyan-200 bg-cyan-50 text-cyan-900",
+                  )}
+                >
+                  <span className="font-medium not-italic">
+                    {isReporting ? "Pending Confirmation" : "Confirmed"}
+                  </span>
+                  {" — "}
+                  submission by {pendingReport.reporterName}: {pendingReport.player1Score} -{" "}
                   {pendingReport.player2Score}
                 </div>
               ) : null}

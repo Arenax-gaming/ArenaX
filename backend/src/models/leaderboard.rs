@@ -88,56 +88,44 @@ pub struct LeaderboardStats {
     pub last_updated: DateTime<Utc>,
 }
 
-/// A single day's end-of-day ELO rating for a player.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EloSnapshot {
-    pub date: NaiveDate,
-    pub elo_rating: i32,
+// ─── Season close (#1075) ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Season {
+    pub id: Uuid,
+    pub game: String,
+    pub name: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
 }
 
-/// A point in an ELO progression chart, including the change since the previous snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EloProgressionPoint {
-    pub date: NaiveDate,
-    pub elo_rating: i32,
-    pub change_from_previous: i32,
-}
-
-/// A single highest/lowest ELO record, with when it happened and the match that caused it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EloRecord {
-    pub elo_rating: i32,
-    pub recorded_at: DateTime<Utc>,
-    pub match_id: Option<Uuid>,
-}
-
-/// Volatility metrics describing how much a player's ELO swings over a period.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EloVolatility {
-    pub std_deviation: f64,
-    pub average_change: f64,
-    pub max_swing: i32,
-    pub sample_size: i64,
-}
-
-/// Full historical ELO analytics for a player over a date range.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EloHistoryResponse {
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PlayerStatsSnapshot {
+    pub id: Uuid,
+    pub season_id: Uuid,
     pub user_id: Uuid,
-    pub username: String,
-    pub category: String,
-    pub start_date: DateTime<Utc>,
-    pub end_date: DateTime<Utc>,
-    pub snapshots: Vec<EloSnapshot>,
-    pub progression: Vec<EloProgressionPoint>,
-    pub highest: Option<EloRecord>,
-    pub lowest: Option<EloRecord>,
-    pub volatility: EloVolatility,
+    pub game: String,
+    pub rank: i32,
+    pub elo_rating: i32,
+    pub matches_played: i32,
+    pub wins: i32,
+    pub losses: i32,
+    pub snapshot_at: DateTime<Utc>,
 }
 
-/// Query params for date-range-scoped ELO history endpoints.
 #[derive(Debug, Clone, Deserialize)]
-pub struct EloHistoryQuery {
-    pub start_date: Option<DateTime<Utc>>,
-    pub end_date: Option<DateTime<Utc>>,
+pub struct CloseSeasonRequest {
+    /// How many top players to snapshot into `player_stats_snapshots`.
+    /// Defaults to 100 when omitted.
+    pub top_n: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CloseSeasonResponse {
+    pub closed_season: Season,
+    pub new_season: Season,
+    pub players_snapshotted: usize,
+    pub players_decayed: usize,
 }

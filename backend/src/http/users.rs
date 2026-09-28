@@ -1,5 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
+use redis::Client as RedisClient;
 use serde::Deserialize;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
@@ -18,9 +20,10 @@ pub struct UpdateProfileRequest {
 /// Get public user profile by ID
 pub async fn get_user_profile(
     pool: web::Data<sqlx::PgPool>,
+    redis: web::Data<Arc<RedisClient>>,
     user_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
-    let service = UserService::new(pool.get_ref().clone());
+    let service = UserService::new(pool.get_ref().clone()).with_redis(redis.get_ref().clone());
     let profile = service.get_user_profile(*user_id).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -33,13 +36,14 @@ pub async fn get_user_profile(
 /// Get authenticated user's own profile
 pub async fn get_current_user_profile(
     pool: web::Data<sqlx::PgPool>,
+    redis: web::Data<Arc<RedisClient>>,
     req: HttpRequest,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = req
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
-    let service = UserService::new(pool.get_ref().clone());
+    let service = UserService::new(pool.get_ref().clone()).with_redis(redis.get_ref().clone());
     let user = service.get_current_user_profile(user_id).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -52,6 +56,7 @@ pub async fn get_current_user_profile(
 /// Update authenticated user's profile
 pub async fn update_user_profile(
     pool: web::Data<sqlx::PgPool>,
+    redis: web::Data<Arc<RedisClient>>,
     req: HttpRequest,
     body: web::Json<UpdateProfileRequest>,
 ) -> Result<HttpResponse, ApiError> {
@@ -59,7 +64,7 @@ pub async fn update_user_profile(
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
-    let service = UserService::new(pool.get_ref().clone());
+    let service = UserService::new(pool.get_ref().clone()).with_redis(redis.get_ref().clone());
     let updated_user = service
         .update_user_profile(
             user_id,
@@ -81,9 +86,10 @@ pub async fn update_user_profile(
 /// Get user stats including win/loss record and Elo history
 pub async fn get_user_stats(
     pool: web::Data<sqlx::PgPool>,
+    redis: web::Data<Arc<RedisClient>>,
     user_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
-    let service = UserService::new(pool.get_ref().clone());
+    let service = UserService::new(pool.get_ref().clone()).with_redis(redis.get_ref().clone());
     let stats = service.get_user_stats(*user_id).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({

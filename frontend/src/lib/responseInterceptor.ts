@@ -256,6 +256,22 @@ export class ResponseInterceptor {
   // ─── Main intercept method ──────────────────────────────────────────────────
 
   /**
+   * Apply the configured payload transforms (casing, dates, nulls) to a raw
+   * value WITHOUT wrapping it in a `StandardResponse` envelope or running
+   * governance/analytics. Used by the API client to return the payload
+   * exactly as the server sent it, so envelope-aware callers such as
+   * `getEnveloped()` can unwrap the envelope themselves.
+   */
+  transform<T>(raw: unknown): T {
+    const transformOptions: TransformerOptions = {
+      normalizeCasing: this.config.normalizeCasing,
+      parseDates: this.config.parseDates,
+      stripNulls: this.config.stripNulls,
+    };
+    return transformValue(raw, transformOptions) as T;
+  }
+
+  /**
    * Process a raw API response through the full pipeline.
    *
    * @param raw     The parsed JSON value returned by the API client.

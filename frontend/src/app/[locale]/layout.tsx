@@ -18,6 +18,7 @@ import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { DragAndDropProvider } from "@/components/providers/DragAndDropProvider";
 import { RumProvider } from "@/components/providers/RumProvider";
 import { RouteChangeMonitor } from "@/components/navigation/RouteChangeMonitor";
+import { ConsentBanner } from "@/components/providers/ConsentBanner";
 
 
 export function generateStaticParams() {

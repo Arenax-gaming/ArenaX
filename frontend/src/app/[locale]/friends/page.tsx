@@ -23,7 +23,7 @@ export default function FriendsPage() {
   const filteredFriends = friends.filter((f) =>
     f.username.toLowerCase().includes(searchQuery.toLowerCase()),
   );
-  const onlineFriends = friends.filter((f) => f.isOnline).length;
+  const onlineFriends = friends.filter((f) => f.status === "online").length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black">
@@ -95,17 +95,21 @@ export default function FriendsPage() {
           {activeTab === "list" && (
             <FriendsList
               friends={filteredFriends}
-              isLoading={friendsLoading}
-              onMessage={(friendId) => {
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onRemoveFriend={() => {}}
+              onSendMessage={(friendId) => {
                 router.push(`/messages?friend=${friendId}`);
               }}
+              onInviteToParty={() => {}}
             />
           )}
 
           {activeTab === "requests" && (
             <FriendRequests
               requests={requestsData || []}
-              isLoading={requestsLoading}
+              onAccept={() => {}}
+              onDecline={() => {}}
             />
           )}
 

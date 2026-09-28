@@ -55,11 +55,12 @@ describe('DataTable', () => {
     render(<DataTable columns={columns} data={testData} />);
 
     const scoreHeader = screen.getByRole('columnheader', { name: 'Score' });
+    // First click sorts ascending — the lowest score (75) moves to the top.
     fireEvent.click(scoreHeader);
 
     const rows = screen.getAllByRole('row');
-    const lastRow = rows[rows.length - 1];
-    expect(within(lastRow).getByText('75')).toBeInTheDocument();
+    const firstDataRow = rows[1]; // rows[0] is the header row
+    expect(within(firstDataRow).getByText('75')).toBeInTheDocument();
   });
 
   it('filters data via search', () => {
@@ -101,5 +102,34 @@ describe('DataTable', () => {
     fireEvent.click(nameCell.closest('tr')!);
 
     expect(handleRowClick).toHaveBeenCalledWith(testData[0]);
+  });
+
+  // ── Column pinning (#1094) ──────────────────────────────────────────────
+
+  it('applies position: sticky to a pinned column', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['name']} />);
+
+    const header = screen.getByRole('columnheader', { name: 'Name' });
+    expect(header).toHaveStyle({ position: 'sticky' });
+
+    const cell = screen.getByText('Alice Johnson').closest('td')!;
+    expect(cell).toHaveStyle({ position: 'sticky' });
+  });
+
+  it('does not pin columns that are not listed in pinnedColumns', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['name']} />);
+
+    const emailHeader = screen.getByRole('columnheader', { name: 'Email' });
+    expect(emailHeader).not.toHaveStyle({ position: 'sticky' });
+  });
+
+  it('gives the last pinned column a shadow to mark the scroll boundary', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['id', 'name']} />);
+
+    const idHeader = screen.getByRole('columnheader', { name: 'ID' });
+    const nameHeader = screen.getByRole('columnheader', { name: 'Name' });
+
+    expect(idHeader.className).not.toMatch(/shadow-/);
+    expect(nameHeader.className).toMatch(/shadow-/);
   });
 });

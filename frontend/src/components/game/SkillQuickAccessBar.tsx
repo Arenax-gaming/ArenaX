@@ -79,6 +79,15 @@ export interface FloatingCombatText {
   y: number;
 }
 
+export interface SkillQuickAccessBarProps {
+  skills?: SkillItem[];
+  keyBindings?: KeyBinding[];
+  onActivateSkill?: (skill: SkillItem) => void;
+  disabled?: boolean;
+  className?: string;
+  mobileCompact?: boolean;
+}
+
 export function SkillQuickAccessBar({
   skills = defaultSkills,
   keyBindings = [],

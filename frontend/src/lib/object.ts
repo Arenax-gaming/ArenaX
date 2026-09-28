@@ -39,7 +39,7 @@ export function deepMerge<T extends Record<string, unknown>>(
   target: T,
   source: DeepPartial<T>
 ): T {
-  const output = { ...target };
+  const output: Record<string, unknown> = { ...target };
 
   for (const key in source) {
     if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
@@ -57,13 +57,13 @@ export function deepMerge<T extends Record<string, unknown>>(
       output[key] = deepMerge(
         tgtVal as Record<string, unknown>,
         srcVal as Record<string, unknown>
-      ) as T[Extract<keyof T, string>];
+      );
     } else {
-      output[key] = srcVal as T[Extract<keyof T, string>];
+      output[key] = srcVal;
     }
   }
 
-  return output;
+  return output as T;
 }
 
 // ---------------------------------------------------------------------------

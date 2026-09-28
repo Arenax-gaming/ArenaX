@@ -320,12 +320,11 @@ export const Field = {
   enum<T extends string>(
     values: readonly [T, ...T[]],
     options: { message?: string } = {},
-  ): z.ZodEnum<[T, ...T[]]> {
-    return z.enum(values, {
-      errorMap: () => ({
-        message: options.message ?? `Must be one of: ${values.join(", ")}`,
-      }),
-    });
+  ): z.ZodEnum<{ [K in T]: K }> {
+    return z.enum(
+      values,
+      options.message ?? `Must be one of: ${values.join(", ")}`,
+    );
   },
 
   // ── Boolean fields ──────────────────────────────────────────────────────────

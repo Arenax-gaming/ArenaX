@@ -70,25 +70,6 @@ export function useCollaborationWebSocket({
       return;
     }
 
-      if (message.type === "ping") {
-        wsRef.current?.send(JSON.stringify({ type: "pong" }));
-        return;
-      }
-      if (message.type === "channel_state") {
-        setChannel(message.channel);
-        return;
-      }
-      setEvents((prev) => appendEvent(prev, message));
-      setChannel((prev) => applyEventToChannel(prev, message));
-    };
-
-    const scheduleReconnect = () => {
-      if (closed) return;
-      const delay = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * 2 ** retry);
-      retry += 1;
-      reconnectTimeoutRef.current = setTimeout(connect, delay);
-    };
-
     // TODO: Replace with real WebSocket URL once the collaboration backend is ready.
     // const wsUrl = `${process.env.NEXT_PUBLIC_WS_BASE_URL}/collaboration/${channelId}`;
     // const ws = new WebSocket(wsUrl);

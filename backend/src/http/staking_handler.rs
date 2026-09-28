@@ -183,12 +183,8 @@ mod tests {
     async fn test_stake_without_auth_returns_401() {
         let app = test::init_service(
             App::new()
-                // No database needed — we never reach the DB call.
                 .app_data(web::Data::new(
-                    // A minimal PgPool cannot be constructed without a live DB,
-                    // so we register a dummy value that satisfies the type.
-                    // The handler will return 401 before touching the pool.
-                    actix_web::web::Data::<sqlx::PgPool>::default(),
+                    sqlx::PgPool::connect_lazy("postgres://localhost/arenax").unwrap(),
                 ))
                 .route(
                     "/staking/stake",
@@ -222,7 +218,9 @@ mod tests {
 
         let app = test::init_service(
             App::new()
-                .app_data(actix_web::web::Data::<sqlx::PgPool>::default())
+                .app_data(web::Data::new(
+                    sqlx::PgPool::connect_lazy("postgres://localhost/arenax").unwrap(),
+                ))
                 .route(
                     "/staking/unstake/{user_id}",
                     web::delete().to(unstake),

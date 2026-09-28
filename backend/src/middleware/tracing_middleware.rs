@@ -141,6 +141,10 @@ where
             correlation_id = field::Empty,
             trace_id = field::Empty,
             latency_ms = field::Empty,
+            // Recorded by `ClaimsExt::claims()` the first time a handler
+            // authenticates the caller — absent on unauthenticated requests.
+            // Slow-query logs (#1084) inherit it from this ambient span.
+            user_id = field::Empty,
         );
         span.set_parent(parent_cx);
 
@@ -199,7 +203,8 @@ where
 }
 
 fn insert_header<B>(res: &mut ServiceResponse<B>, name: &'static str, value: &str) {
-    if let (Ok(name), Ok(value)) = (HeaderName::from_static(name), HeaderValue::from_str(value)) {
+    if let Ok(value) = HeaderValue::from_str(value) {
+        let name = HeaderName::from_static(name);
         res.headers_mut().insert(name, value);
     }
 }

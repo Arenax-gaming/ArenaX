@@ -4,7 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Proposal, VoteChoice } from "@/types/governance";
+import type { Proposal, VoteChoice, CreateProposalDto } from "@/types/governance";
 
 // ---------------------------------------------------------------------------
 // Auth helper
@@ -156,12 +156,12 @@ export function useStartVoting() {
 export function useCreateProposal() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
+    mutationFn: async (data: CreateProposalDto) => {
       if (!isAuthenticated()) {
         throw new Error("Please log in to create a proposal.");
       }
       try {
-        return await (api.createProposal(data) as Promise<unknown>);
+        return await api.createProposal(data);
       } catch (error) {
         rethrowAuthError(error, "Failed to create proposal.");
       }

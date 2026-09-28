@@ -21,13 +21,14 @@ export default function MessagesPage() {
   const selectedConversation = conversations?.find(
     (c) => c.id === selectedConversationId,
   );
+  const selectedParticipant = selectedConversation?.participants[0];
 
   const handleSendMessage = async () => {
     if (!selectedConversation || !messageContent.trim()) return;
 
     try {
       await sendMessageMutation.mutateAsync({
-        toUserId: selectedConversation.participantId,
+        toUserId: selectedConversation.participants[0]?.id ?? "",
         content: messageContent,
       });
       setMessageContent("");
@@ -85,10 +86,10 @@ export default function MessagesPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-white truncate">
-                          {conv.participantUsername}
+                          {conv.participants[0]?.username ?? "Unknown"}
                         </p>
                         <p className="text-sm text-muted-foreground truncate">
-                          {conv.lastMessage}
+                          {conv.lastMessage?.content ?? ""}
                         </p>
                       </div>
                       {conv.unreadCount > 0 && (
@@ -114,7 +115,7 @@ export default function MessagesPage() {
                 {/* Chat Header */}
                 <div className="p-4 border-b border-border">
                   <h3 className="text-lg font-bold text-white">
-                    {selectedConversation.participantUsername}
+                    {selectedParticipant?.username ?? "Unknown"}
                   </h3>
                 </div>
 
@@ -122,7 +123,7 @@ export default function MessagesPage() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="text-center text-muted-foreground text-sm">
                     Start of conversation with{" "}
-                    {selectedConversation.participantUsername}
+                    {selectedParticipant?.username ?? "Unknown"}
                   </div>
                 </div>
 

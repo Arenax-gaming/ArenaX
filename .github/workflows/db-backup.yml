@@ -1,0 +1,47 @@
+name: Database Backup
+
+on:
+  schedule:
+    # 03:00 UTC daily
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    name: Backup and verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Run backup
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          S3_BACKUP_BUCKET: ${{ secrets.DB_BACKUP_S3_BUCKET }}
+        run: ./scripts/backup-database.sh
+
+      - name: Verify backup restores cleanly
+        env:
+          DATABASE_URL: ${{ secrets.DB_BACKUP_VERIFY_DATABASE_URL }}
+          S3_BACKUP_BUCKET: ${{ secrets.DB_BACKUP_S3_BUCKET }}
+        run: ./scripts/verify-backup.sh --latest
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Daily database backup or verification failed — see BACKUP_RECOVERY.md for the manual recovery procedure and escalate per server/infra/monitoring/ONCALL.md."

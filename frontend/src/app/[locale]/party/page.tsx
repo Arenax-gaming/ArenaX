@@ -128,7 +128,19 @@ export default function PartyPage() {
         )}
 
         {/* Party Manager */}
-        <PartyManager friends={friendsData?.friends || []} />
+        <PartyManager
+          party={null}
+          allFriends={friendsData?.friends || []}
+          onCreateParty={(name, isPrivate) => {
+            handleCreateParty();
+          }}
+          onDisbandParty={() => {}}
+          onInviteToParty={() => {}}
+          onKickFromParty={() => {}}
+          onSetReady={() => {}}
+          onToggleVoiceChat={() => {}}
+          onStartQueue={() => {}}
+        />
       </div>
     </div>
   );

@@ -129,8 +129,6 @@ export function VirtualGrid<T>({
     [rowCount, rowHeight, height, columnCount, analytics, onLoadMore, loadMoreThreshold]
   );
 
-  if (items.length === 0 && emptyState) return <>{emptyState}</>;
-
   const Cell = useCallback(
     ({ rowIndex, columnIndex, style }: GridChildComponentProps) => {
       const index = rowIndex * columnCount + columnIndex;
@@ -153,6 +151,8 @@ export function VirtualGrid<T>({
     },
     [items, columnCount, gap, renderItem]
   );
+
+  if (items.length === 0 && emptyState) return <>{emptyState}</>;
 
   return (
     <div ref={containerRef} className={cn("relative w-full", className)}>

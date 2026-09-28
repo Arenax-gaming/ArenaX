@@ -7,6 +7,7 @@ import {
   ShareAchievementResponse,
 } from '@/types/achievement'
 import { API_BASE } from '@/lib/constants'
+import { api } from '@/lib/api'
 
 export const useAchievements = () => {
   return useQuery({

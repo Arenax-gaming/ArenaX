@@ -23,7 +23,8 @@ import type {
   ResponseMonitorSnapshot,
   ResponseAnalyticsEvent,
 } from "@/types/response";
-import type { GovernanceSummary, GovernanceViolation } from "@/lib/responseGovernance";
+import type { GovernanceSummary } from "@/lib/responseGovernance";
+import type { GovernanceViolation } from "@/types/response";
 
 export interface ResponseMonitorData {
   /** Aggregate performance snapshot (latency percentiles, error rates, etc.). */

@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, BytesN, Env, Vec};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,8 @@ pub enum BatchError {
     VotingEnded = 20,
     /// Insufficient votes
     InsufficientVotes = 21,
+    /// Address is zero or a contract address.
+    InvalidAddress = 22,
 }
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -211,12 +213,27 @@ pub struct BatchOperations;
 
 #[contractimpl]
 impl BatchOperations {
+    /// Validate that an address is non-zero and not a contract address.
+    fn require_valid_address(env: &Env, address: &Address) -> Result<(), BatchError> {
+        // Reject zero account addresses (all zeros)
+        let zero_account = Address::from_account_id(BytesN::from_array(env, &[0u8; 32]));
+        if *address == zero_account {
+            return Err(BatchError::InvalidAddress);
+        }
+        // Reject contract addresses
+        if address.is_contract() {
+            return Err(BatchError::InvalidAddress);
+        }
+        Ok(())
+    }
+
     // ── Initialization ─────────────────────────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address) -> Result<(), BatchError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(BatchError::AlreadyInitialized);
         }
+        Self::require_valid_address(&env, &admin)?;
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
         env.storage().instance().set(&DataKey::NftCount, &0u32);
@@ -324,6 +341,7 @@ impl BatchOperations {
         data: Bytes,
     ) -> Result<u32, BatchError> {
         Self::require_initialized(&env)?;
+        Self::require_valid_address(&env, &submitter)?;
         submitter.require_auth();
 
         let queue_counter: u32 = env

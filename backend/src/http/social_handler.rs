@@ -35,7 +35,7 @@ pub async fn get_friends_list(
     user_id: web::Data<Uuid>, // From auth middleware
 ) -> Result<HttpResponse, ApiError> {
     let service = SocialService::new(pool.get_ref().clone());
-    let friends = service.get_friends_list(*user_id).await?;
+    let friends = service.get_friends_list(*user_id.get_ref()).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "success": true,
@@ -51,7 +51,7 @@ pub async fn add_friend(
 ) -> Result<HttpResponse, ApiError> {
     let service = SocialService::new(pool.get_ref().clone());
     let request = service
-        .send_friend_request(*user_id, body.friend_id)
+        .send_friend_request(*user_id.get_ref(), body.friend_id)
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -81,7 +81,7 @@ pub async fn get_pending_requests(
     user_id: web::Data<Uuid>, // From auth middleware
 ) -> Result<HttpResponse, ApiError> {
     let service = SocialService::new(pool.get_ref().clone());
-    let requests = service.get_pending_requests(*user_id).await?;
+    let requests = service.get_pending_requests(*user_id.get_ref()).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "success": true,
@@ -97,7 +97,7 @@ pub async fn send_message(
 ) -> Result<HttpResponse, ApiError> {
     let service = SocialService::new(pool.get_ref().clone());
     let message = service
-        .send_message(*user_id, body.to_user_id, body.content.clone())
+        .send_message(*user_id.get_ref(), body.to_user_id, body.content.clone())
         .await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -113,7 +113,7 @@ pub async fn get_conversations(
     user_id: web::Data<Uuid>, // From auth middleware
 ) -> Result<HttpResponse, ApiError> {
     let service = SocialService::new(pool.get_ref().clone());
-    let conversations = service.get_conversations(*user_id).await?;
+    let conversations = service.get_conversations(*user_id.get_ref()).await?;
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "success": true,
@@ -130,7 +130,7 @@ pub async fn create_party(
     let service = SocialService::new(pool.get_ref().clone());
     let party = service
         .create_party(
-            *user_id,
+            *user_id.get_ref(),
             body.name.clone(),
             body.description.clone(),
             body.max_members.unwrap_or(4),

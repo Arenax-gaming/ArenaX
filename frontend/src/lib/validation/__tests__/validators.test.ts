@@ -10,7 +10,8 @@ describe("STELLAR_PUBLIC_KEY_REGEX", () => {
   it("matches a valid Stellar public key", () => {
     // Valid base32: G + 55 chars from A-Z, 2-7
     expect(STELLAR_PUBLIC_KEY_REGEX.test("G" + "A".repeat(55))).toBe(true);
-    expect(STELLAR_PUBLIC_KEY_REGEX.test("GABC2345DEFG67AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toBe(true);
+    // G + 55 base32 characters (classic Stellar G-key length)
+    expect(STELLAR_PUBLIC_KEY_REGEX.test("GABC2345DEFG67" + "A".repeat(42))).toBe(true);
   });
 
   it("rejects keys not starting with G", () => {

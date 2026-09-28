@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn test_validate_transition() {
         let service = MatchAuthorityService {
-            db_pool: DbPool::default(),
+            db_pool: sqlx::Pool::connect_lazy("postgres://localhost/arenax").unwrap(),
             soroban_service: Arc::new(SorobanService::new(
                 crate::service::soroban_service::NetworkConfig::testnet(),
             )),

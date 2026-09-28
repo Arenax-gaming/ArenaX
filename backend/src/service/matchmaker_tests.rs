@@ -402,8 +402,25 @@ mod tests {
         let size_duration = start_time.elapsed();
         
         assert_eq!(queue_size, 1000);
-        assert!(size_duration.as_millis() < 100); // Should be very fast
+        assert!(size_duration.as_millis() < 100);
         println!("Retrieved queue size in {:?}", size_duration);
+    }
+
+    #[test]
+    fn test_calculate_wait_time_percentiles() {
+        use crate::service::matchmaker::calculate_percentiles;
+
+        let empty: Vec<f64> = vec![];
+        let res_empty = calculate_percentiles(empty);
+        assert_eq!(res_empty.p50, 0.0);
+        assert_eq!(res_empty.p95, 0.0);
+        assert_eq!(res_empty.p99, 0.0);
+
+        let samples = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0];
+        let res = calculate_percentiles(samples);
+        assert!(res.p50 >= 40.0 && res.p50 <= 60.0);
+        assert!(res.p95 >= 90.0);
+        assert!(res.p99 >= 90.0);
     }
 }
 
@@ -437,6 +454,7 @@ mod integration_tests {
                         .route("/leave", web::post().to(leave_queue))
                         .route("/status/{game}/{game_mode}", web::get().to(get_queue_status))
                         .route("/stats", web::get().to(get_matchmaking_stats))
+                        .route("/metrics", web::get().to(get_matchmaking_metrics_dashboard))
                 )
         ).await
     }
@@ -493,5 +511,21 @@ mod integration_tests {
         let response: MatchmakingStatsResponse = test::read_body_json(resp).await;
         assert_eq!(response.total_players_in_queue, 0); // Should be empty initially
         assert!(response.games.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_matchmaking_metrics_dashboard_endpoint() {
+        let app = setup_test_app().await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/matchmaking/metrics")
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let response: crate::models::matchmaker::MatchmakingMetricsDashboard = test::read_body_json(resp).await;
+        assert_eq!(response.total_queue_depth, 0);
+        assert_eq!(response.hourly_aggregates.len(), 24);
     }
 }

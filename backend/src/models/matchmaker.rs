@@ -121,6 +121,51 @@ pub struct MatchmakingStats {
     pub average_wait_time: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct WaitTimePercentiles {
+    pub p50: f64,
+    pub p95: f64,
+    pub p99: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerGameMetrics {
+    pub game: String,
+    pub queue_depth: usize,
+    pub avg_match_quality: f64,
+    pub wait_time_percentiles: WaitTimePercentiles,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HourlyAggregate {
+    pub hour_timestamp: i64,
+    pub total_matches_created: i64,
+    pub avg_queue_depth: f64,
+    pub avg_match_quality: f64,
+    pub wait_time_p50: f64,
+    pub wait_time_p95: f64,
+    pub wait_time_p99: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchmakingAlert {
+    pub alert_type: String,
+    pub game: Option<String>,
+    pub game_mode: Option<String>,
+    pub queue_depth: usize,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchmakingMetricsDashboard {
+    pub per_game_metrics: Vec<PerGameMetrics>,
+    pub global_wait_time_percentiles: WaitTimePercentiles,
+    pub total_queue_depth: usize,
+    pub hourly_aggregates: Vec<HourlyAggregate>,
+    pub alerts: Vec<MatchmakingAlert>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameQueueStats {
     pub game: String,

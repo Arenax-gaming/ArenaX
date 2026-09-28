@@ -1,6 +1,7 @@
 #![no_std]
 
 use arenax_events::contract_registry as events;
+use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 #[contracttype]
@@ -8,6 +9,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Ve
 pub enum DataKey {
     Admin,
     Contract(Symbol),
+    ContractByAddress(Address),
     ContractList,
     Paused,
     ContractVersion(Symbol, u32),
@@ -26,6 +28,10 @@ pub struct ContractInfo {
     pub registered_at: u64,
     pub updated_at: Option<u64>,
     pub registered_by: Address,
+    pub version: u32,
+    pub deprecated: bool,
+    pub deprecated_at: u64,
+    pub successor: Option<Address>,
 }
 
 #[contracttype]
@@ -104,11 +110,18 @@ impl ContractRegistry {
             registered_at: env.ledger().timestamp(),
             updated_at: None,
             registered_by: env.current_contract_address(),
+            version: 1,
+            deprecated: false,
+            deprecated_at: 0,
+            successor: None,
         };
 
         env.storage()
             .instance()
             .set(&DataKey::Contract(name.clone()), &contract_info);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractByAddress(address.clone()), &contract_info);
 
         let mut contract_list: Vec<Symbol> = env
             .storage()
@@ -156,6 +169,12 @@ impl ContractRegistry {
         env.storage()
             .instance()
             .set(&DataKey::Contract(name.clone()), &contract_info);
+        env.storage()
+            .instance()
+            .remove(&DataKey::ContractByAddress(old_address.clone()));
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractByAddress(new_address.clone()), &contract_info);
 
         events::emit_contract_updated(
             &env,
@@ -190,6 +209,9 @@ impl ContractRegistry {
         env.storage()
             .instance()
             .remove(&DataKey::Contract(name.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::ContractByAddress(address.clone()));
 
         let mut contract_list: Vec<Symbol> = env
             .storage()
@@ -242,6 +264,151 @@ impl ContractRegistry {
             .instance()
             .get(&DataKey::Contract(name))
             .expect("contract not registered")
+    }
+
+    /// Deprecate a contract and optionally link to a successor
+    ///
+    /// # Arguments
+    /// * `address` - The address of the contract to deprecate
+    /// * `successor` - Optional address of the replacement contract
+    ///
+    /// # Panics
+    /// * If contract is paused
+    /// * If caller is not admin
+    /// * If contract is not found
+    pub fn deprecate_contract(env: Env, address: Address, successor: Option<Address>) {
+        Self::require_admin(&env);
+        Self::require_not_paused(&env);
+
+        let mut entry = if let Some(info) = env
+            .storage()
+            .instance()
+            .get::<DataKey, ContractInfo>(&DataKey::ContractByAddress(address.clone()))
+        {
+            info
+        } else {
+            let contract_list: Vec<Symbol> = env
+                .storage()
+                .instance()
+                .get(&DataKey::ContractList)
+                .unwrap_or(Vec::new(&env));
+            let mut found: Option<ContractInfo> = None;
+            for name in contract_list.iter() {
+                if let Some(info) = env
+                    .storage()
+                    .instance()
+                    .get::<DataKey, ContractInfo>(&DataKey::Contract(name))
+                {
+                    if info.address == address {
+                        found = Some(info);
+                        break;
+                    }
+                }
+            }
+            found.expect("contract not registered")
+        };
+
+        entry.deprecated = true;
+        entry.deprecated_at = env.ledger().timestamp();
+        entry.successor = successor.clone();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractByAddress(address.clone()), &entry);
+
+        if let Some(ref succ_addr) = successor {
+            let succ_info = if let Some(existing) = env
+                .storage()
+                .instance()
+                .get::<DataKey, ContractInfo>(&DataKey::ContractByAddress(succ_addr.clone()))
+            {
+                existing
+            } else {
+                let new_info = ContractInfo {
+                    address: succ_addr.clone(),
+                    name: entry.name.clone(),
+                    registered_at: env.ledger().timestamp(),
+                    updated_at: None,
+                    registered_by: env.current_contract_address(),
+                    version: entry.version + 1,
+                    deprecated: false,
+                    deprecated_at: 0,
+                    successor: None,
+                };
+                env.storage()
+                    .instance()
+                    .set(&DataKey::ContractByAddress(succ_addr.clone()), &new_info);
+                events::emit_contract_registered(
+                    &env,
+                    entry.name.clone(),
+                    succ_addr,
+                    &env.current_contract_address(),
+                );
+                new_info
+            };
+
+            env.storage()
+                .instance()
+                .set(&DataKey::Contract(entry.name.clone()), &succ_info);
+
+            events::emit_contract_deprecated(&env, &address, &successor);
+            events::emit_successor_linked(&env, &address, succ_addr);
+        } else {
+            if let Some(current) = env
+                .storage()
+                .instance()
+                .get::<DataKey, ContractInfo>(&DataKey::Contract(entry.name.clone()))
+            {
+                if current.address == address {
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::Contract(entry.name.clone()), &entry);
+                }
+            }
+            events::emit_contract_deprecated(&env, &address, &None);
+        }
+    }
+
+    /// Get the current non-deprecated entry for a contract name
+    ///
+    /// # Arguments
+    /// * `name` - The contract name to look up
+    ///
+    /// # Returns
+    /// The non-deprecated ContractInfo
+    ///
+    /// # Panics
+    /// * If contract is not registered
+    /// * If all entries for the contract are deprecated
+    pub fn get_current(env: Env, name: Symbol) -> ContractInfo {
+        let mut current: ContractInfo = env
+            .storage()
+            .instance()
+            .get(&DataKey::Contract(name.clone()))
+            .expect("contract not registered");
+
+        let mut visited = 0u32;
+        while current.deprecated {
+            if let Some(ref succ_addr) = current.successor {
+                if let Some(succ_info) = env
+                    .storage()
+                    .instance()
+                    .get::<DataKey, ContractInfo>(&DataKey::ContractByAddress(succ_addr.clone()))
+                {
+                    current = succ_info;
+                    visited += 1;
+                    if visited > 50 {
+                        panic!("all entries for contract are deprecated");
+                    }
+                } else {
+                    panic!("all entries for contract are deprecated");
+                }
+            } else {
+                panic!("all entries for contract are deprecated");
+            }
+        }
+
+        current
     }
 
     /// Check if a contract name is registered
@@ -424,11 +591,18 @@ impl ContractRegistry {
                 registered_at: env.ledger().timestamp(),
                 updated_at: None,
                 registered_by: env.current_contract_address(),
+                version: 1,
+                deprecated: false,
+                deprecated_at: 0,
+                successor: None,
             };
 
             env.storage()
                 .instance()
                 .set(&DataKey::Contract(name.clone()), &contract_info);
+            env.storage()
+                .instance()
+                .set(&DataKey::ContractByAddress(address.clone()), &contract_info);
 
             events::emit_contract_registered(
                 &env,
@@ -885,22 +1059,28 @@ impl ContractRegistry {
             .get(&DataKey::ContractList)
             .unwrap_or(Vec::new(&env));
 
-        extern crate alloc;
-        use alloc::string::ToString;
-        let prefix_string = prefix.to_string();
-        let prefix_bytes = prefix_string.into_bytes();
-        let prefix_len = prefix_bytes.len();
+        // Serialize symbols via XDR so we can compare raw name bytes without
+        // heap allocation. XDR layout is [4-byte SCVal discriminant][4-byte
+        // big-endian length][string bytes padded to 4-byte alignment], so the
+        // actual name bytes start at offset 8 and their real length is the
+        // length field.
+        const XDR_HEADER: u32 = 8;
+        let prefix_xdr = prefix.clone().to_xdr(&env);
+        let prefix_len = u32::from_be_bytes([
+            prefix_xdr.get(4).unwrap(),
+            prefix_xdr.get(5).unwrap(),
+            prefix_xdr.get(6).unwrap(),
+            prefix_xdr.get(7).unwrap(),
+        ]);
 
         let mut result = Vec::new(&env);
         for name in contract_list.iter() {
-            let name_string = name.to_string();
-            let name_bytes = name_string.into_bytes();
-            let name_len = name_bytes.len();
-            if name_len >= prefix_len {
+            let name_xdr = name.clone().to_xdr(&env);
+            if name_xdr.len() >= prefix_xdr.len() {
                 let mut matches = true;
-                let mut i = 0;
+                let mut i = 0u32;
                 while i < prefix_len {
-                    if name_bytes[i] != prefix_bytes[i] {
+                    if name_xdr.get(XDR_HEADER + i) != prefix_xdr.get(XDR_HEADER + i) {
                         matches = false;
                         break;
                     }

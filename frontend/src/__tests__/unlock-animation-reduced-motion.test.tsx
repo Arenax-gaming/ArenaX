@@ -21,6 +21,12 @@ jest.mock('framer-motion', () => ({
   useReducedMotion: () => mockReducedMotion,
 }));
 
+// UnlockAnimation calls useAnalytics, which needs an AnalyticsProvider in the
+// tree — stub the hook for these unit tests.
+jest.mock('@/hooks/useAnalytics', () => ({
+  useAnalytics: () => ({ track: jest.fn() }),
+}));
+
 // ── Sample achievement fixtures ───────────────────────────────────────────────
 const legendaryAchievement: AchievementFull = {
   id: 'a1',

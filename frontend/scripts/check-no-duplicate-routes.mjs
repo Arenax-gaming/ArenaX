@@ -20,8 +20,9 @@
 
 import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const APP_DIR = new URL("../src/app", import.meta.url).pathname;
+const APP_DIR = fileURLToPath(new URL("../src/app", import.meta.url));
 
 const ALLOWED_TOP_LEVEL_DIRS = new Set(["[locale]", "api"]);
 const ALLOWED_TOP_LEVEL_FILES = new Set([

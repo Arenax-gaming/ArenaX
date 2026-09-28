@@ -1,0 +1,21 @@
+name: Deploy Rollback
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  rollback:
+    name: Roll back to previous slot
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Run rollback on the deploy host
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            cd /opt/arenax
+            ./scripts/deploy/rollback.sh

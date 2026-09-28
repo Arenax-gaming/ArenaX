@@ -1,10 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { MatchDetail, MatchRound, PlayerStats } from "@/types/match";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { AriaLiveRegion } from "@/components/common/AriaLiveRegion";
 import {
   Trophy,
   TrendingUp,
@@ -51,8 +53,83 @@ export function MatchDetailView({
   const replayUrl = match.replayUrl?.trim() ?? "";
   const hasReplay = replayUrl.length > 0 && isValidHttpUrl(replayUrl);
 
+  // ARIA live announcements for real-time match changes (#1087). Score
+  // updates are "polite" and debounced/coalesced (a rapid burst of score
+  // ticks announces once, 500ms after the last one); status transitions to
+  // "completed" or "disputed" are "assertive" and announced immediately,
+  // deduplicated so the same transition never announces twice.
+  const t = useTranslations("match");
+  const [politeMessage, setPoliteMessage] = useState("");
+  const [assertiveMessage, setAssertiveMessage] = useState("");
+  const prevSnapshotRef = useRef<{
+    status: string;
+    scorePlayer1?: number;
+    scorePlayer2?: number;
+  } | null>(null);
+  const scoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAnnouncedStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const prev = prevSnapshotRef.current;
+    prevSnapshotRef.current = {
+      status: match.status,
+      scorePlayer1: match.scorePlayer1,
+      scorePlayer2: match.scorePlayer2,
+    };
+
+    // Don't announce anything on first mount — only on genuine changes.
+    if (!prev) return;
+
+    const statusChanged = prev.status !== match.status;
+    const scoreChanged =
+      prev.scorePlayer1 !== match.scorePlayer1 || prev.scorePlayer2 !== match.scorePlayer2;
+
+    if (statusChanged && lastAnnouncedStatusRef.current !== match.status) {
+      lastAnnouncedStatusRef.current = match.status;
+
+      if (match.status === "completed") {
+        const winnerName =
+          match.winnerId === match.player1Id
+            ? match.player1Username
+            : match.player2Username;
+        setAssertiveMessage(
+          t("completed", {
+            winner: winnerName,
+            scoreA: match.scorePlayer1 ?? 0,
+            scoreB: match.scorePlayer2 ?? 0,
+          }),
+        );
+      } else if (match.status === "disputed") {
+        setAssertiveMessage(t("disputed"));
+      } else {
+        setAssertiveMessage(t("statusChanged", { status: match.status }));
+      }
+    } else if (scoreChanged) {
+      if (scoreDebounceRef.current) clearTimeout(scoreDebounceRef.current);
+      scoreDebounceRef.current = setTimeout(() => {
+        setPoliteMessage(
+          t("scoreUpdated", {
+            player1: match.player1Username,
+            scoreA: match.scorePlayer1 ?? 0,
+            player2: match.player2Username,
+            scoreB: match.scorePlayer2 ?? 0,
+          }),
+        );
+      }, 500);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.status, match.scorePlayer1, match.scorePlayer2]);
+
+  useEffect(() => {
+    return () => {
+      if (scoreDebounceRef.current) clearTimeout(scoreDebounceRef.current);
+    };
+  }, []);
+
   return (
     <div className="space-y-6">
+      <AriaLiveRegion message={politeMessage} ariaLive="polite" />
+      <AriaLiveRegion message={assertiveMessage} ariaLive="assertive" />
       {isDisputed && (
         <div className="flex flex-col gap-2 rounded-lg border border-warning/50 bg-warning/10 p-4">
           <div className="flex items-center gap-2 text-warning font-semibold text-lg">

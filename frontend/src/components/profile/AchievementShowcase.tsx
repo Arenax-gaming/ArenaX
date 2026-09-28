@@ -42,8 +42,9 @@ const RARITY_TEXT_COLORS: Record<AchievementRarity, string> = {
   legendary: "text-yellow-600 dark:text-yellow-400",
 };
 
-// Enhanced Achievement interface (extending the base type)
-interface EnhancedAchievement extends Achievement {
+// Enhanced Achievement interface (kept separate so the wider 'all' category
+// option doesn't conflict with the base Achievement.category type)
+interface EnhancedAchievement extends Omit<Achievement, 'category' | 'rarity'> {
   category?: AchievementCategory;
   rarity?: AchievementRarity;
   points?: number;

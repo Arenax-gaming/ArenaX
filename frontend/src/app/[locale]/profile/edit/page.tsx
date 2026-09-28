@@ -10,7 +10,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useUsernameAvailability } from "@/hooks/useUsernameAvailability";
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
 import { validateAvatarFile } from "@/lib/profile-utils";
-import { profileEditSchema, type ProfileEditFormData } from "@/lib/validations/profile";
+import {
+  MAX_BIO_LENGTH,
+  profileEditSchema,
+  type ProfileEditFormData,
+} from "@/lib/validations/profile";
 import type { UserProfileUpdate } from "@/types/user";
 import type { ProfileCustomization } from "@/types/profile";
 import { FileUpload } from "@/components/ui/FileUpload";
@@ -76,6 +80,12 @@ function ProfileEditContent() {
   const watchedUsername = form.watch("username");
   const watchedBio = form.watch("bio") ?? "";
   const usernameStatus = useUsernameAvailability(watchedUsername);
+  // Synchronous bio length validation so the inline error and the disabled
+  // submit button update immediately while typing.
+  const bioError =
+    watchedBio.length > MAX_BIO_LENGTH
+      ? `Bio must be ${MAX_BIO_LENGTH} characters or less`
+      : undefined;
 
   // Surface async username check into RHF
   useEffect(() => {
@@ -204,6 +214,7 @@ function ProfileEditContent() {
                 uploadProgress={uploadProgress}
                 accept={{ "image/jpeg": [], "image/png": [], "image/webp": [] }}
                 maxSize={5 * 1024 * 1024}
+                label="Avatar"
                 disabled={form.formState.isSubmitting}
               />
               {avatarError && (
@@ -266,6 +277,7 @@ function ProfileEditContent() {
                     <FormControl>
                       <textarea
                         {...field}
+                        aria-label="Bio"
                         rows={4}
                         className={cn(
                           "w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring",
@@ -285,7 +297,11 @@ function ProfileEditContent() {
                     >
                       {watchedBio.length} / 280
                     </p>
-                    <FormMessage />
+                    {bioError && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {bioError}
+                      </p>
+                    )}
                   </FormItem>
                 )}
               />
@@ -416,7 +432,8 @@ function ProfileEditContent() {
               disabled={
                 form.formState.isSubmitting ||
                 usernameStatus === "checking" ||
-                usernameStatus === "unavailable"
+                usernameStatus === "unavailable" ||
+                !!bioError
               }
               className="flex-1"
             >

@@ -1,9 +1,12 @@
+"use client";
+
 import React from "react";
 import Image from "next/image";
 import { Tournament, TournamentStatus } from "@/types/tournament";
 import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Trophy, Users, Calendar, Zap } from "lucide-react";
+import { TournamentShareButton } from "@/components/tournaments/TournamentShareButton";
 
 interface TournamentHeaderProps {
   tournament: Tournament;
@@ -84,12 +87,19 @@ export function TournamentHeader({ tournament, bannerSizes }: TournamentHeaderPr
       <div className="border-b p-6 md:p-8">
         <div className="space-y-4">
           {/* Status Badge */}
-          <div>
+          <div className="flex items-center gap-3">
             <span
               className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ${status.bgColor} ${status.color}`}
             >
               {status.label}
             </span>
+            {/* Share win button — only shown for completed tournaments (#897) */}
+            {tournament.status === "completed" && (
+              <TournamentShareButton
+                tournament={tournament}
+                variant="icon"
+              />
+            )}
           </div>
 
           {/* Title and Game Type */}

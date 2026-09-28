@@ -17,6 +17,9 @@ export const profileBioSchema = z.object({
     .string()
     .max(MAX_BIO_LENGTH, `Bio must be ${MAX_BIO_LENGTH} characters or less`)
     .optional(),
+  twitter: z.string().max(100).optional(),
+  discord: z.string().max(100).optional(),
+  twitch: z.string().max(100).optional(),
 });
 
 export type ProfileBioFormData = z.infer<typeof profileBioSchema>;

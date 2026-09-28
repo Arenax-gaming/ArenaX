@@ -28,8 +28,14 @@ interface WalletContextValue {
   error: string | null;
   connectFreighterWallet: () => Promise<void>;
   connectAlbedoWallet: () => Promise<void>;
+  /** Auto-detects a provider — Freighter if its extension is present, Albedo otherwise (#1098). */
+  connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   clearError: () => void;
+}
+
+function hasFreighterExtension(): boolean {
+  return typeof window !== "undefined" && typeof (window as { freighter?: unknown }).freighter !== "undefined";
 }
 
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
@@ -100,6 +106,14 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
+  const connectWallet = useCallback(async () => {
+    if (hasFreighterExtension()) {
+      await connectFreighterWallet();
+    } else {
+      await connectAlbedoWallet();
+    }
+  }, [connectFreighterWallet, connectAlbedoWallet]);
+
   const disconnectWallet = useCallback(() => {
     disconnect();
     setSession(null);
@@ -121,6 +135,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       error,
       connectFreighterWallet,
       connectAlbedoWallet,
+      connectWallet,
       disconnectWallet,
       clearError,
     }),
@@ -130,6 +145,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       error,
       connectFreighterWallet,
       connectAlbedoWallet,
+      connectWallet,
       disconnectWallet,
       clearError,
     ],

@@ -113,10 +113,11 @@ describe('Tooltip', () => {
     it('dismisses tooltip with Escape key without moving focus', async () => {
       jest.useFakeTimers();
       renderTooltip();
-      const triggerSpan = screen.getByRole('button', { name: 'Trigger' }).parentElement!;
+      const button = screen.getByRole('button', { name: 'Trigger' });
 
-      // Show via focus
-      fireEvent.focus(triggerSpan);
+      // Real focus lands on the button; the focus event bubbles up to the
+      // trigger span (React focuses via focusin delegation), opening the tooltip.
+      button.focus();
       jest.runAllTimers();
       await waitFor(() => expect(screen.getByRole('tooltip')).toBeInTheDocument());
 
@@ -125,7 +126,7 @@ describe('Tooltip', () => {
       await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
 
       // Focus must remain on the trigger element (not moved away)
-      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toBe(button);
       jest.useRealTimers();
     });
 

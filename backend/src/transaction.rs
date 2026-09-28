@@ -41,27 +41,30 @@ impl Default for TransactionConfig {
 }
 
 /// Execute a transaction with automatic retry on serialization failures
-pub async fn execute_transaction<F, R>(
+pub async fn execute_transaction<F, R, E>(
     pool: &PgPool,
     config: &TransactionConfig,
     f: F,
-) -> Result<R, ApiError>
+) -> Result<R, E>
 where
-    F: Fn(&mut Transaction<'_, Postgres>) -> futures::future::BoxFuture<'_, Result<R, ApiError>>,
+    F: for<'c> Fn(&'c mut Transaction<'_, Postgres>) -> futures::future::BoxFuture<'c, Result<R, E>>,
+    E: From<sqlx::Error> + std::fmt::Display,
 {
     let mut last_error = None;
     
     for attempt in 0..=config.max_retries {
-        let mut tx = begin_transaction(pool, config.isolation_level).await?;
+        let mut tx = begin_transaction_raw(pool, config.isolation_level).await.map_err(E::from)?;
         
         match f(&mut tx).await {
             Ok(result) => {
-                tx.commit().await.map_err(|e| ApiError::database_error(e))?;
+                tx.commit().await.map_err(E::from)?;
                 return Ok(result);
             }
             Err(e) => {
+                let err_str = e.to_string();
+                let is_serialization = err_str.contains("40001") || err_str.contains("serialization failure");
                 // Check if this is a serialization error that can be retried
-                if is_serialization_error(&e) && attempt < config.max_retries {
+                if is_serialization && attempt < config.max_retries {
                     warn!(
                         attempt = attempt + 1,
                         max_retries = config.max_retries,
@@ -87,8 +90,28 @@ where
     }
     
     Err(last_error.unwrap_or_else(|| {
-        ApiError::internal_error("Transaction failed after max retries")
+        E::from(sqlx::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Transaction failed after max retries",
+        )))
     }))
+}
+
+/// Begin a transaction with specified isolation level (raw sqlx error)
+pub async fn begin_transaction_raw(
+    pool: &PgPool,
+    isolation_level: IsolationLevel,
+) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    
+    // Set isolation level
+    sqlx::query(&format!("SET TRANSACTION ISOLATION LEVEL {}", isolation_level.as_str()))
+        .execute(&mut *tx)
+        .await?;
+    
+    debug!(isolation_level = %isolation_level.as_str(), "Transaction started");
+    
+    Ok(tx)
 }
 
 /// Begin a transaction with specified isolation level
@@ -96,17 +119,7 @@ pub async fn begin_transaction(
     pool: &PgPool,
     isolation_level: IsolationLevel,
 ) -> Result<Transaction<'_, Postgres>, ApiError> {
-    let mut tx = pool.begin().await.map_err(|e| ApiError::database_error(e))?;
-    
-    // Set isolation level
-    sqlx::query(&format!("SET TRANSACTION ISOLATION LEVEL {}", isolation_level.as_str()))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-    
-    debug!(isolation_level = %isolation_level.as_str(), "Transaction started");
-    
-    Ok(tx)
+    begin_transaction_raw(pool, isolation_level).await.map_err(ApiError::database_error)
 }
 
 /// Check if an error is a serialization failure that can be retried
@@ -144,7 +157,7 @@ pub async fn lock_for_update_where(
     tx: &mut Transaction<'_, Postgres>,
     table: &str,
     where_clause: &str,
-    params: Vec<sqlx::postgres::PgValue>,
+    params: Vec<String>,
 ) -> Result<(), ApiError> {
     let query_str = format!(
         "SELECT 1 FROM {} WHERE {} FOR UPDATE",

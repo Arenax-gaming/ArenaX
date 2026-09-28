@@ -91,6 +91,23 @@ impl WsBroadcaster {
             .await;
         }));
 
+        // Spawn leaderboard channel subscriber (Issue #900). Delta events are
+        // routed by explicit subscription, exactly like match channels — a
+        // client only receives the boards it asked for.
+        let redis_url = self.redis_url.clone();
+        let registry = self.registry.clone();
+        let address_book = self.address_book.clone();
+        handles.push(tokio::spawn(async move {
+            Self::subscribe_loop(
+                &redis_url,
+                channels::LEADERBOARD_CHANNEL_PATTERN,
+                &registry,
+                &address_book,
+                Self::route_match_event,
+            )
+            .await;
+        }));
+
         info!("WsBroadcaster started — listening to Redis Pub/Sub");
         handles
     }

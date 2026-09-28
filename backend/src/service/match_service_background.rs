@@ -148,13 +148,27 @@ impl crate::service::match_service::MatchService {
 
                     // Notify players via WebSocket if event bus is available
                     if let Some(bus) = event_bus {
-                        let _ = bus.publish(serde_json::json!({
-                            "type": "match_created",
-                            "match_id": match_record.id,
-                            "player1_id": player1.user_id,
-                            "player2_id": player2.user_id,
-                            "game_mode": game_mode,
-                        })).await;
+                        let now_str = Utc::now().to_rfc3339();
+                        bus.publish_to_user(
+                            player1.user_id,
+                            &crate::realtime::events::RealtimeEvent::MatchFound {
+                                match_id: match_record.id,
+                                opponent_id: player2.user_id,
+                                opponent_name: "Opponent".to_string(),
+                                game_mode: game_mode.to_string(),
+                                timestamp: now_str.clone(),
+                            },
+                        ).await;
+                        bus.publish_to_user(
+                            player2.user_id,
+                            &crate::realtime::events::RealtimeEvent::MatchFound {
+                                match_id: match_record.id,
+                                opponent_id: player1.user_id,
+                                opponent_name: "Opponent".to_string(),
+                                game_mode: game_mode.to_string(),
+                                timestamp: now_str,
+                            },
+                        ).await;
                     }
 
                     tracing::info!(

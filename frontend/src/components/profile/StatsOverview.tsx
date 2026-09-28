@@ -9,6 +9,8 @@ import { EloPoint } from "@/types/user";
 interface StatsOverviewProps {
   stats: PlayerStats;
   eloHistory: EloPoint[];
+  /** Games this player has ELO history for, populating EloChart's game filter (#1096). */
+  games?: string[];
 }
 
 interface StatCardProps {
@@ -50,7 +52,7 @@ function StatCard({ label, value, icon, accent, trend, description }: StatCardPr
   );
 }
 
-export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
+export function StatsOverview({ stats, eloHistory, games = [] }: StatsOverviewProps) {
   const { elo, globalRank, winRate, wins, losses, currentStreak } = stats;
   
   // Calculate additional stats
@@ -60,7 +62,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
     : 0;
   
   // Calculate rank change (mock data for demo)
-  const rankChange = -15; // Improved by 15 positions
+  const rankChange: number = -15; // Improved by 15 positions
   
   // Get performance rating
   const getPerformanceRating = (winRate: number) => {
@@ -192,7 +194,7 @@ export function StatsOverview({ stats, eloHistory }: StatsOverviewProps) {
         </Card>
       ) : (
         <div>
-          <EloChart data={eloHistory} />
+          <EloChart games={games} initialData={eloHistory} />
         </div>
       )}
 

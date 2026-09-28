@@ -1,7 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
-import { Button } from './Button';
+import { Button } from '../ui/Button';
 
 interface DataTablePaginationProps {
   page: number;

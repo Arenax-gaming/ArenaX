@@ -8,11 +8,12 @@ repository.workspace = true
 description = "ArenaX Token (AX) - Native governance and utility token"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk.workspace = true
 arenax-events = { path = "../arenax-events" }
+contract-utils = { path = "../contract-utils" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

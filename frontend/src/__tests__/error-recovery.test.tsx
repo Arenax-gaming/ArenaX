@@ -75,8 +75,9 @@ describe("useErrorRecovery", () => {
     let returnValue: string | undefined;
     await act(async () => {
       const promise = result.current.execute(action);
-      // Advance through retry delays
-      jest.runAllTimers();
+      // Advance through retry delays, flushing microtasks so the async
+      // retry loop can schedule each back-off timer as it goes.
+      await jest.runAllTimersAsync();
       returnValue = await promise;
     });
 
@@ -92,7 +93,7 @@ describe("useErrorRecovery", () => {
 
     await act(async () => {
       const promise = result.current.execute(makeAlwaysFail(new NetworkError("down")));
-      jest.runAllTimers();
+      await jest.runAllTimersAsync();
       await promise;
     });
 
@@ -131,7 +132,7 @@ describe("useErrorRecovery", () => {
 
     await act(async () => {
       const promise = result.current.execute(action);
-      jest.runAllTimers();
+      await jest.runAllTimersAsync();
       await promise;
     });
 
@@ -142,7 +143,9 @@ describe("useErrorRecovery", () => {
     const { result } = renderHook(() => useErrorRecovery());
 
     await act(async () => {
-      await result.current.execute(makeAlwaysFail(new NetworkError("x")));
+      const promise = result.current.execute(makeAlwaysFail(new NetworkError("x")));
+      await jest.runAllTimersAsync();
+      await promise;
     });
 
     expect(result.current.status).toBe("failed");

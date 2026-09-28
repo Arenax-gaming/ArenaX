@@ -1,0 +1,74 @@
+# Blue/green deployment stack for #972.
+#
+# Two independent slots per service ("blue" and "green"). Exactly one
+# slot is "active" (receiving 100% of production traffic) at any time;
+# the other is either idle or serving a ramping canary weight during a
+# rollout. scripts/deploy/blue-green-deploy.sh drives which slot is
+# active by rewriting deploy/nginx/upstream.conf and reloading nginx —
+# a graceful reload, so in-flight connections finish on the old
+# upstream while new connections go to the new one: no dropped requests,
+# no downtime window.
+#
+# Usage: see scripts/deploy/blue-green-deploy.sh and
+# docs/DEPLOYMENT.md.
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/upstream.conf:/etc/nginx/conf.d/upstream.conf:ro
+    networks:
+      - deploy-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend-blue:
+    image: ${BACKEND_IMAGE:-arenax-backend}:${IMAGE_TAG:-latest}
+    profiles: ["blue"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      STELLAR_NETWORK_URL: ${STELLAR_NETWORK_URL:-https://horizon-testnet.stellar.org}
+      PORT: "8080"
+    networks:
+      - deploy-network
+
+  backend-green:
+    image: ${BACKEND_IMAGE:-arenax-backend}:${IMAGE_TAG:-latest}
+    profiles: ["green"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      STELLAR_NETWORK_URL: ${STELLAR_NETWORK_URL:-https://horizon-testnet.stellar.org}
+      PORT: "8080"
+    networks:
+      - deploy-network
+
+  frontend-blue:
+    image: ${FRONTEND_IMAGE:-arenax-frontend}:${IMAGE_TAG:-latest}
+    profiles: ["blue"]
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    networks:
+      - deploy-network
+
+  frontend-green:
+    image: ${FRONTEND_IMAGE:-arenax-frontend}:${IMAGE_TAG:-latest}
+    profiles: ["green"]
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    networks:
+      - deploy-network
+
+networks:
+  deploy-network:
+    driver: bridge

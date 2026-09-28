@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   BracketData,
@@ -24,6 +24,16 @@ import { cn } from "@/lib/utils";
 interface SingleEliminationBracketProps {
   bracketData: BracketData;
   currentUserId?: string;
+  /**
+   * A match id to visually highlight and auto-scroll into view — driven by
+   * the `?match=` deep-link query param (#1089).
+   */
+  highlightedMatchId?: string | null;
+}
+
+/** DOM id for a bracket match card, used to scroll a deep-linked match into view. */
+export function bracketMatchDomId(matchId: string): string {
+  return `bracket-match-${matchId}`;
 }
 
 const ROUND_WIDTH = 280;
@@ -35,8 +45,16 @@ const COLUMN_HEADER_HEIGHT = 56;
 export function SingleEliminationBracket({
   bracketData,
   currentUserId,
+  highlightedMatchId,
 }: SingleEliminationBracketProps) {
   const [selectedMatch, setSelectedMatch] = useState<BracketMatch | null>(null);
+
+  // Deep link (#1089): scroll the shared match into view once its card exists.
+  useEffect(() => {
+    if (!highlightedMatchId) return;
+    const el = document.getElementById(bracketMatchDomId(highlightedMatchId));
+    el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  }, [highlightedMatchId]);
 
   const processedBracketData = useMemo(() => {
     const markPlayer = (player: BracketMatch["player1"]) =>
@@ -90,6 +108,7 @@ export function SingleEliminationBracket({
                 section={section}
                 activeMatchIds={processedBracketData.activeMatchIds ?? []}
                 onMatchClick={setSelectedMatch}
+                highlightedMatchId={highlightedMatchId ?? null}
               />
             ))}
           </div>
@@ -171,10 +190,12 @@ function BracketSectionBoard({
   section,
   activeMatchIds,
   onMatchClick,
+  highlightedMatchId,
 }: {
   section: BracketSection;
   activeMatchIds: string[];
   onMatchClick: (match: BracketMatch) => void;
+  highlightedMatchId?: string | null;
 }) {
   const maxMatches = Math.max(...section.rounds.map((round) => round.matches.length));
   const boardHeight = maxMatches * MATCH_HEIGHT + (maxMatches - 1) * VERTICAL_GAP;
@@ -278,6 +299,7 @@ function BracketSectionBoard({
                     match={match}
                     isActive={activeMatchIds.includes(match.id)}
                     onClick={() => onMatchClick(match)}
+                    isHighlighted={match.id === highlightedMatchId}
                   />
                 </div>
               ))}
@@ -293,15 +315,17 @@ function MatchCard({
   match,
   isActive,
   onClick,
+  isHighlighted = false,
 }: {
   match: BracketMatch;
   isActive: boolean;
   onClick: () => void;
+  isHighlighted?: boolean;
 }) {
   const isCurrentUserMatch = Boolean(match.player1?.isCurrentUser || match.player2?.isCurrentUser);
 
   return (
-    <div className="group relative">
+    <div id={bracketMatchDomId(match.id)} className="group relative">
       <button
         type="button"
         onClick={onClick}
@@ -312,6 +336,7 @@ function MatchCard({
           isActive && "border-emerald-400/70 bg-emerald-400/10 shadow-[0_20px_50px_-35px_rgba(52,211,153,0.8)]",
           match.status === "disputed" && "border-rose-400/70 bg-rose-500/10",
           !isCurrentUserMatch && !isActive && match.status !== "disputed" && "border-white/10 hover:border-white/25 hover:bg-white/10",
+          isHighlighted && "ring-4 ring-amber-400 ring-offset-2 ring-offset-slate-950 animate-pulse",
         )}
       >
         <div className="mb-3 flex items-center justify-between gap-3">

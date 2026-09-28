@@ -105,7 +105,7 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
             }
           `}
         >
-          <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-border h-full flex flex-col">
+          <div className="bg-gradient-to-br from-card to-muted border border-border h-full flex flex-col">
             {/* Image container with reserved space */}
             <div className="relative w-full aspect-video bg-muted/20">
               {!imageErrors.has(mode.id) ? (
@@ -127,7 +127,7 @@ export default function GameModeSelector({ onSelect, selectedMode }: GameModeSel
 
             {/* Content */}
             <div className="p-6 flex-1 flex flex-col">
-              <h3 className="text-2xl font-bold text-white mb-2">{mode.name}</h3>
+              <h3 className="text-2xl font-bold text-foreground mb-2">{mode.name}</h3>
               <p className="text-muted-foreground mb-4 flex-1">{mode.description}</p>
               
               <div className="flex items-center justify-between text-sm">

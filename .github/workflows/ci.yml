@@ -82,7 +82,6 @@ jobs:
   backend-migrations:
     name: Backend Migrations
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:14
@@ -130,6 +129,13 @@ jobs:
 
     - name: Apply migrations
       run: ./scripts/migrate.sh
+
+    - name: Rollback verification (up -> down -> up, #871)
+      env:
+        SKIP_BACKUP: "1"  # CI database is disposable; never skip the backup on shared data
+      run: |
+        chmod +x ./scripts/rollback-verify.sh
+        ./scripts/rollback-verify.sh
 
   # Contracts CI (Rust)
   contracts:

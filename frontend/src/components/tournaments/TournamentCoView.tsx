@@ -125,7 +125,7 @@ export function TournamentCoView({
             <div className="space-y-1">
               <p className="text-sm font-medium">Invite friends to watch together</p>
               <p className="text-xs text-muted-foreground">
-                You're the only one here right now. Share this tournament link so
+                You&apos;re the only one here right now. Share this tournament link so
                 friends can join your viewing party.
               </p>
             </div>

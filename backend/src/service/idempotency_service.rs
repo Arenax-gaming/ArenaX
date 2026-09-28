@@ -2,6 +2,7 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::idempotency::*;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use sqlx;
 use uuid::Uuid;
 

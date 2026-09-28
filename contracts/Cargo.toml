@@ -19,6 +19,12 @@ members = [
     "access-control",
     "time-lock",
     "zk-proof",
+    "airdrop",
+    "event-manager",
+    "treasury",
+    "upgrade-manager",
+    "upgrade-system",
+    "testing-infrastructure",
 ]
 resolver = "2"
 

@@ -231,7 +231,7 @@ impl AnalyticsService {
         game_id: i32,
     ) -> Result<Option<PlayerInsightsResponse>, ApiError> {
         if requesting_user_id != target_user_id && !is_admin {
-            return Err(ApiError::Forbidden("not authorised to view this data".into()));
+            return Err(ApiError::forbidden("not authorised to view this data"));
         }
 
         let row = sqlx::query_as!(

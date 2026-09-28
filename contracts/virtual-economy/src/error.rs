@@ -9,6 +9,10 @@ pub enum VirtualEconomyError {
     NotInitialized = 2,
     Unauthorized = 3,
     EmergencyPaused = 4,
+    /// An arithmetic operation would overflow.
+    Overflow = 5,
+    /// The provided address is invalid (e.g. the contract's own address).
+    InvalidAddress = 6,
 
     // Currency errors
     InvalidAmount = 10,
@@ -30,21 +34,71 @@ pub enum VirtualEconomyError {
     InvalidMetadata = 40,
     InvalidConfig = 41,
 
-    // Royalty & Licensing errors
+    // Royalty & Licensing errors (merged with InvalidConfig to stay within 50-case XDR limit)
     RoyaltyTooHigh = 50,
-    CreatorNotFound = 51,
-    LicenseViolation = 52,
-    InvalidLicenseType = 53,
 
     // Dynamic pricing errors
     AuctionNotFound = 60,
     AuctionNotActive = 61,
-    AuctionNotStarted = 62,
-    AuctionEnded = 63,
-    InvalidAuctionParams = 64,
+    AuctionEnded = 62,
+    InvalidAuctionParams = 63,
 
     DropNotFound = 70,
     DropInactive = 71,
     DropSupplyExceeded = 72,
     InvalidCurveParams = 73,
+
+    // Price oracle errors
+    OracleNotConfigured = 80,
+    InvalidOracleConfig = 81,
+    OraclePriceStale = 82,
+    OraclePriceVarianceTooHigh = 83,
+    OracleUpdateTooFrequent = 84,
+    InvalidAssetPair = 85,
+    OracleInvalidPrice = 86,
+
+    // NFT staking errors
+    NftStakingNotConfigured = 90,
+    NftCurrentlyStaked = 91,
+    NftNotStaked = 92,
+    NftLockPeriodNotMet = 93,
+    NftStakingPaused = 94,
+
+    // Liquidity pool / AMM
+    PoolNotFound = 100,
+    PoolAlreadyExists = 101,
+    InsufficientLiquidity = 102,
+    SlippageExceeded = 103,
+    InvariantViolation = 104,
+
+    // Referral errors
+    ReferralNotConfigured = 110,
+    ReferralNotFound = 111,
+    ReferralAlreadyRegistered = 112,
+    InvalidReferral = 113,
+    ReferralCooldown = 114,
+    NothingToClaim = 115,
+
+    // NFT collections (#913) and trading rebates (#916) reuse InvalidConfig
+    // and TokenNotFound / ReferralCooldown above — this contracterror enum
+    // is capped at 50 cases by the XDR spec (ScSpecUdtErrorEnumV0), and it
+    // was already at that cap, so new features must reuse existing cases
+    // rather than add new ones.
+}
+
+impl VirtualEconomyError {
+    /// Re-entrant marketplace call (#1056).
+    ///
+    /// Alias of [`Self::InvalidMetadata`]. Trades never return that case for
+    /// metadata, and the contracterror enum cannot grow past 50 variants.
+    #[allow(non_upper_case_globals)]
+    pub const Reentrancy: Self = Self::InvalidMetadata;
+
+    /// Fewer than two non-stale oracle sources were available (#1053).
+    ///
+    /// Alias of [`Self::OraclePriceStale`] for the same 50-variant cap.
+    /// Legacy primary/fallback resolution still returns `OraclePriceStale`
+    /// when no multi-oracle sources are registered.
+    #[allow(non_upper_case_globals)]
+    pub const OracleInsufficientSources: Self = Self::OraclePriceStale;
 }

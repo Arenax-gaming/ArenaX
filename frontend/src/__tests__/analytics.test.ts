@@ -6,6 +6,7 @@ import { AnalyticsService } from "@/lib/analytics";
 import { ABTestingService } from "@/lib/abTesting";
 import type { AnalyticsAdapter, AnalyticsPayload } from "@/types/analytics";
 import { isValidEventName, validatePayload, shouldSample, configureSampling } from "@/lib/analyticsGovernance";
+import { getAnalyticsService } from "@/lib/analytics";
 import { trackFunnelStep, trackFunnelStepByName, FUNNELS } from "@/lib/funnelTracker";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,12 +85,9 @@ describe("AnalyticsService", () => {
     expect(adapter.events[0].userId).toBe("user-42");
   });
 
-  it("persists consent to localStorage", () => {
+  it("persists consent to the analytics cookie", () => {
     service.setConsent("granted");
-    const raw = localStorage.getItem("arenax:analytics:consent");
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!);
-    expect(parsed.analytics).toBe("granted");
+    expect(document.cookie).toContain("arenax_consent_analytics=granted");
   });
 
   it("does not register the same adapter twice", () => {
@@ -265,10 +263,17 @@ describe("Funnel Tracker", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
-    service = new AnalyticsService();
+    // trackFunnelStep* go through the shared singleton, so register the
+    // adapter and consent there rather than on a throwaway instance.
+    service = getAnalyticsService();
     service.setConsent("granted");
+    // The singleton de-dupes by adapter name; clear existing events and use
+    // the already-registered adapter if present so later tests still observe
+    // events emitted through the singleton.
     adapter = makeAdapter();
     service.registerAdapter(adapter);
+    (service as unknown as { adapters: ReturnType<typeof makeAdapter>[] }).adapters = [adapter];
+    adapter.events.length = 0;
   });
 
   it("tracks funnel_step with correct payload", () => {

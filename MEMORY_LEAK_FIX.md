@@ -4,6 +4,7 @@
 
 This document describes the memory leak fixes implemented in the ArenaX frontend application to prevent memory accumulation when components are removed from the DOM.
 
+
 ## Issues Identified
 
 ### 1. **useKeyboardShortcuts - Chord Timer Leak**
@@ -256,15 +257,6 @@ useEffect(() => {
 }, []);
 ```
 
-### 6. **Close WebSockets**
-Always close WebSocket connections:
-
-```typescript
-useEffect(() => {
-  const ws = new WebSocket(url);
-  return () => ws.close();
-}, []);
-```
 
 ## Monitoring
 

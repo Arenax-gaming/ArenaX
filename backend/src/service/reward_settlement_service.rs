@@ -151,7 +151,7 @@ mod tests {
     use super::*;
 
     fn create_test_service() -> RewardSettlementService {
-        RewardSettlementService::new(DbPool)
+        RewardSettlementService::new(sqlx::Pool::connect_lazy("postgres://localhost/arenax").unwrap())
     }
 
     #[test]

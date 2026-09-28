@@ -56,7 +56,7 @@ export interface NamedSchema<
   /** Convenience: validate and return typed data or throw ZodError. */
   parse(data: unknown): z.infer<TSchema>;
   /** Convenience: validate and return { success, data } without throwing. */
-  safeParse(data: unknown): z.SafeParseReturnType<z.input<TSchema>, z.infer<TSchema>>;
+  safeParse(data: unknown): z.ZodSafeParseResult<z.infer<TSchema>>;
 }
 
 // ─── defineSchema ─────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ export function defineSchemaWithRefinements<
   shape: TShape,
   refine: (schema: z.ZodObject<TShape>) => TRefined,
   meta: Omit<SchemaMetadata, "name"> = {},
-): { schema: TRefined; meta: SchemaMetadata; parse: (data: unknown) => z.infer<TRefined>; safeParse: (data: unknown) => z.SafeParseReturnType<z.input<TRefined>, z.infer<TRefined>> } {
+): { schema: TRefined; meta: SchemaMetadata; parse: (data: unknown) => z.infer<TRefined>; safeParse: (data: unknown) => z.ZodSafeParseResult<z.infer<TRefined>> } {
   const base = z.object(shape);
   const refined = refine(base);
   const fullMeta: SchemaMetadata = { name, version: 1, ...meta };

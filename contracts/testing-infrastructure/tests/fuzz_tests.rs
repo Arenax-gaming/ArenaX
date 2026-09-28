@@ -17,6 +17,43 @@ impl MockIdentityContract {
     pub fn get_role(_env: Env, _user: Address) -> u32 { 2 }
 }
 
+// Input validation error codes and helpers for fuzz tests.
+const ERR_INVALID_AMOUNT: u32 = 100;
+const ERR_INVALID_ADDRESS: u32 = 101;
+const ERR_INVALID_STATE: u32 = 102;
+const MAX_MATCH_STATE: u32 = 5;
+
+fn validate_amount(amount: i128) -> Result<(), u32> {
+    if amount > 0 {
+        Ok(())
+    } else {
+        Err(ERR_INVALID_AMOUNT)
+    }
+}
+
+fn validate_checked_add(left: i128, right: i128) -> Result<i128, u32> {
+    if left <= 0 || right <= 0 {
+        return Err(ERR_INVALID_AMOUNT);
+    }
+    left.checked_add(right).ok_or(ERR_INVALID_AMOUNT)
+}
+
+fn validate_state(state: u32) -> Result<(), u32> {
+    if state <= MAX_MATCH_STATE {
+        Ok(())
+    } else {
+        Err(ERR_INVALID_STATE)
+    }
+}
+
+fn validate_address(address: &Address) -> Result<(), u32> {
+    if !address.is_contract() {
+        Ok(())
+    } else {
+        Err(ERR_INVALID_ADDRESS)
+    }
+}
+
 // Property: Match state transitions are always valid
 proptest! {
     #[test]
@@ -238,6 +275,51 @@ proptest! {
         let total = initial_stake + additional_stake;
         prop_assert!(total >= initial_stake);
         prop_assert!(total >= additional_stake);
+    }
+}
+
+// Property: Input validation rejects invalid amounts, enum states, and addresses
+proptest! {
+    #[test]
+    fn prop_input_validation(
+        amount in i128::MIN..i128::MAX,
+        state in 0u32..64u32,
+        use_account in any::<bool>(),
+    ) {
+        if amount > 0 {
+            prop_assert_eq!(validate_amount(amount), Ok(()));
+        } else {
+            prop_assert_eq!(validate_amount(amount), Err(ERR_INVALID_AMOUNT));
+        }
+
+        if state <= MAX_MATCH_STATE {
+            prop_assert_eq!(validate_state(state), Ok(()));
+        } else {
+            prop_assert_eq!(validate_state(state), Err(ERR_INVALID_STATE));
+        }
+
+        let env = Env::default();
+        let address = if use_account {
+            Address::generate(&env)
+        } else {
+            Address::from_contract_id(&env, &BytesN::random(&env))
+        };
+        if use_account {
+            prop_assert_eq!(validate_address(&address), Ok(()));
+        } else {
+            prop_assert_eq!(validate_address(&address), Err(ERR_INVALID_ADDRESS));
+        }
+    }
+
+    #[test]
+    fn prop_checked_add_amounts(
+        left in 1i128..i128::MAX,
+        right in 1i128..i128::MAX,
+    ) {
+        match left.checked_add(right) {
+            Some(sum) => prop_assert_eq!(validate_checked_add(left, right), Ok(sum)),
+            None => prop_assert_eq!(validate_checked_add(left, right), Err(ERR_INVALID_AMOUNT)),
+        }
     }
 }
 

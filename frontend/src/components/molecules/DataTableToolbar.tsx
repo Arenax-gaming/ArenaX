@@ -1,8 +1,8 @@
 'use client';
 
 import { Search, X, Download, Columns } from 'lucide-react';
-import { Input } from './Input';
-import { Button } from './Button';
+import { Input } from '../ui/Input';
+import { Button } from '../ui/Button';
 import { Column } from '@/types/table';
 
 interface DataTableToolbarProps<T> {

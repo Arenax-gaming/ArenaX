@@ -77,6 +77,7 @@ export const matchHubDetails: Record<string, MatchHubDetails> = {
       },
     ],
     canDisputeUntil: "2026-03-25T23:15:00Z",
+    spectatorLimit: 500,
   },
   "2-match-10": {
     id: "2-match-10",
@@ -153,5 +154,6 @@ export const matchHubDetails: Record<string, MatchHubDetails> = {
       },
     ],
     canDisputeUntil: "2026-03-25T20:00:00Z",
+    spectatorLimit: 1000,
   },
 };

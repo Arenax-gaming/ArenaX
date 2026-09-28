@@ -169,10 +169,6 @@ function VirtualListInner<T>(
     [items.length, itemHeight, height, analytics, onLoadMore, loadMoreThreshold]
   );
 
-  if (items.length === 0 && emptyState) {
-    return <>{emptyState}</>;
-  }
-
   // react-window row renderer — must be a stable reference
   // Use React.memo to prevent unnecessary re-renders
   const Row = useCallback(
@@ -183,6 +179,10 @@ function VirtualListInner<T>(
     },
     [items, renderItem]
   );
+
+  if (items.length === 0 && emptyState) {
+    return <>{emptyState}</>;
+  }
 
   return (
     <div className={cn("relative", className)} role="list" aria-label={listId}>
@@ -213,9 +213,11 @@ function VirtualListInner<T>(
 
 // Helper to pass a className to react-window's outer container
 function OuterElement(className: string) {
-  return forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  const Outer = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
     (props, ref) => <div ref={ref} {...props} className={cn(props.className, className)} />
   );
+  Outer.displayName = "OuterElement";
+  return Outer;
 }
 
 export const VirtualList = forwardRef(VirtualListInner) as <T>(

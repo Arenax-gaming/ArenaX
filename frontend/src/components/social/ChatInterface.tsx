@@ -14,11 +14,72 @@ import {
   Clock,
   ArrowLeft,
   Users,
+  Flag,
+  MicOff,
+  Ban,
+  History,
+  Undo2,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { AvatarWithStatus } from "./OnlineStatus";
 import type { Conversation, Message, SocialUser } from "@/types/social";
+
+/** Mute presets (hours) required by the acceptance criteria. */
+export const MUTE_DURATIONS = [1, 24, 72] as const;
+export type MuteDuration = (typeof MUTE_DURATIONS)[number];
+
+/**
+ * Optional admin moderation surface for the chat (issue #890). When omitted the
+ * chat renders exactly as before, so existing (non-admin) call sites are
+ * unaffected. Reporting is available to everyone unless `canReport` is false;
+ * mute/ban/history are gated behind `isAdmin`.
+ */
+export interface ChatModerationConfig {
+  /** Unlocks mute / ban / message-history actions. */
+  isAdmin?: boolean;
+  /** Allow reporting messages. Defaults to true. */
+  canReport?: boolean;
+  /** How long a moderation action can be undone. Defaults to 5 minutes. */
+  undoWindowMs?: number;
+  /** Users currently muted / banned — used to reflect state in the menu. */
+  mutedUserIds?: string[];
+  bannedUserIds?: string[];
+  onReportMessage?: (
+    messageId: string,
+    meta: { senderId: string; content: string }
+  ) => void;
+  onMuteUser?: (userId: string, durationHours: MuteDuration) => void;
+  onBanUser?: (userId: string) => void;
+  /** Inverse operations, invoked when an action is undone within the window. */
+  onUnmuteUser?: (userId: string) => void;
+  onUnbanUser?: (userId: string) => void;
+  onUndoReport?: (messageId: string) => void;
+  /** Optional server-side history fetch; falls back to the loaded messages. */
+  onViewUserHistory?: (userId: string) => void;
+}
+
+// The chat's runtime message/conversation shape is looser than the exported
+// type (it carries senderId/senderName/timestamp); read those fields defensively
+// so moderation works regardless of which shape a caller passes.
+const getSenderId = (m: Message): string =>
+  (m as any).senderId ?? (m as any).fromUserId ?? "";
+const getSenderName = (m: Message): string =>
+  (m as any).senderName ??
+  (m as any).fromUsername ??
+  "User";
+const getTimestamp = (m: Message): string =>
+  (m as any).timestamp ?? (m as any).createdAt ?? "";
+
+interface UndoEntry {
+  id: string;
+  kind: "report" | "mute" | "ban";
+  label: string;
+  userId?: string;
+  messageId?: string;
+}
 
 interface ChatInterfaceProps {
   conversations: Conversation[];
@@ -29,6 +90,8 @@ interface ChatInterfaceProps {
   onSelectConversation: (conversation: Conversation) => void;
   onSendMessage: (content: string) => void;
   onSearchConversations?: (query: string) => void;
+  /** Admin moderation configuration (issue #890). Omit for a normal chat. */
+  moderation?: ChatModerationConfig;
 }
 
 export function ChatInterface({
@@ -40,10 +103,113 @@ export function ChatInterface({
   onSelectConversation,
   onSendMessage,
   onSearchConversations,
+  moderation,
 }: ChatInterfaceProps) {
   const [messageInput, setMessageInput] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Moderation state (issue #890) ──
+  const moderationEnabled = !!moderation;
+  const isAdmin = !!moderation?.isAdmin;
+  const canReport = moderation?.canReport !== false;
+  const undoWindowMs = moderation?.undoWindowMs ?? 5 * 60 * 1000;
+  const mutedUserIds = moderation?.mutedUserIds ?? [];
+  const bannedUserIds = moderation?.bannedUserIds ?? [];
+  // Nothing to show if the viewer can neither report nor administrate.
+  const canModerate = canReport || isAdmin;
+
+  const [openMenuMessageId, setOpenMenuMessageId] = useState<string | null>(null);
+  const [historyUser, setHistoryUser] = useState<{ id: string; name: string } | null>(
+    null
+  );
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const undoTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const undoSeq = useRef(0);
+
+  // Clear any pending undo timers on unmount.
+  useEffect(() => {
+    const timers = undoTimers.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, []);
+
+  const registerUndo = (entry: Omit<UndoEntry, "id">) => {
+    const id = `undo-${(undoSeq.current += 1)}`;
+    setUndoStack((prev) => [...prev, { ...entry, id }]);
+    undoTimers.current[id] = setTimeout(() => {
+      setUndoStack((prev) => prev.filter((e) => e.id !== id));
+      delete undoTimers.current[id];
+    }, undoWindowMs);
+  };
+
+  const dismissUndo = (id: string) => {
+    if (undoTimers.current[id]) {
+      clearTimeout(undoTimers.current[id]);
+      delete undoTimers.current[id];
+    }
+    setUndoStack((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const handleUndo = (entry: UndoEntry) => {
+    switch (entry.kind) {
+      case "mute":
+        if (entry.userId) moderation?.onUnmuteUser?.(entry.userId);
+        break;
+      case "ban":
+        if (entry.userId) moderation?.onUnbanUser?.(entry.userId);
+        break;
+      case "report":
+        if (entry.messageId) moderation?.onUndoReport?.(entry.messageId);
+        break;
+    }
+    dismissUndo(entry.id);
+  };
+
+  const handleReport = (message: Message) => {
+    setOpenMenuMessageId(null);
+    moderation?.onReportMessage?.(message.id, {
+      senderId: getSenderId(message),
+      content: message.content,
+    });
+    registerUndo({
+      kind: "report",
+      messageId: message.id,
+      label: "Message reported",
+    });
+  };
+
+  const handleMute = (message: Message, hours: MuteDuration) => {
+    setOpenMenuMessageId(null);
+    const userId = getSenderId(message);
+    moderation?.onMuteUser?.(userId, hours);
+    registerUndo({
+      kind: "mute",
+      userId,
+      label: `Muted ${getSenderName(message)} for ${
+        hours === 1 ? "1 hour" : `${hours} hours`
+      }`,
+    });
+  };
+
+  const handleBan = (message: Message) => {
+    setOpenMenuMessageId(null);
+    const userId = getSenderId(message);
+    moderation?.onBanUser?.(userId);
+    registerUndo({
+      kind: "ban",
+      userId,
+      label: `Banned ${getSenderName(message)}`,
+    });
+  };
+
+  const handleViewHistory = (message: Message) => {
+    setOpenMenuMessageId(null);
+    const userId = getSenderId(message);
+    moderation?.onViewUserHistory?.(userId);
+    setHistoryUser({ id: userId, name: getSenderName(message) });
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -52,6 +218,19 @@ export function ChatInterface({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Escape closes the moderation menu / history dialog (issue #890).
+  useEffect(() => {
+    if (!openMenuMessageId && !historyUser) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenMenuMessageId(null);
+        setHistoryUser(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openMenuMessageId, historyUser]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,7 +445,9 @@ export function ChatInterface({
                       </div>
                     )}
                     <div
-                      className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
+                      className={`group flex items-start gap-1 ${
+                        isOwn ? "justify-end" : "justify-start"
+                      }`}
                     >
                       <div
                         className={`max-w-[70%] min-w-0 ${
@@ -283,6 +464,19 @@ export function ChatInterface({
                             {(message as any).senderName || (message as any).fromUsername || (activeConversation.type === "party" ? "Party Member" : getConversationName(activeConversation))}
                           </span>
                         )}
+                        {!isOwn &&
+                          moderationEnabled &&
+                          (bannedUserIds.includes(getSenderId(message)) ||
+                            mutedUserIds.includes(getSenderId(message))) && (
+                            <span
+                              className="mb-1 inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
+                              data-testid="moderation-status"
+                            >
+                              {bannedUserIds.includes(getSenderId(message))
+                                ? "Banned"
+                                : "Muted"}
+                            </span>
+                          )}
                         <p className="text-sm break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{message.content}</p>
                         <div
                           className={`flex items-center justify-end gap-1 mt-1 ${
@@ -295,6 +489,98 @@ export function ChatInterface({
                           {isOwn && getMessageStatus(message)}
                         </div>
                       </div>
+
+                      {/* Admin moderation menu (issue #890) */}
+                      {moderationEnabled && !isOwn && canModerate && (
+                        <div className="relative shrink-0 self-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenMenuMessageId((cur) =>
+                                cur === message.id ? null : message.id
+                              )
+                            }
+                            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary group-hover:opacity-100"
+                            aria-label={`Moderate message from ${getSenderName(message)}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuMessageId === message.id}
+                          >
+                            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                          </button>
+
+                          {openMenuMessageId === message.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-20"
+                                aria-hidden="true"
+                                onClick={() => setOpenMenuMessageId(null)}
+                              />
+                              <ul
+                                role="menu"
+                                aria-label={`Moderation actions for ${getSenderName(message)}`}
+                                className="absolute right-0 z-30 mt-1 w-52 overflow-hidden rounded-md border bg-popover p-1 shadow-lg"
+                              >
+                                {canReport && (
+                                  <li role="none">
+                                    <button
+                                      role="menuitem"
+                                      type="button"
+                                      onClick={() => handleReport(message)}
+                                      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+                                    >
+                                      <Flag className="h-4 w-4" aria-hidden="true" />
+                                      Report message
+                                    </button>
+                                  </li>
+                                )}
+                                {isAdmin && (
+                                  <>
+                                    <li role="none">
+                                      <button
+                                        role="menuitem"
+                                        type="button"
+                                        onClick={() => handleViewHistory(message)}
+                                        className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+                                      >
+                                        <History className="h-4 w-4" aria-hidden="true" />
+                                        View message history
+                                      </button>
+                                    </li>
+                                    <li
+                                      role="separator"
+                                      className="my-1 border-t"
+                                    />
+                                    {MUTE_DURATIONS.map((h) => (
+                                      <li role="none" key={h}>
+                                        <button
+                                          role="menuitem"
+                                          type="button"
+                                          onClick={() => handleMute(message, h)}
+                                          className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+                                        >
+                                          <MicOff className="h-4 w-4" aria-hidden="true" />
+                                          Mute for {h === 1 ? "1 hour" : `${h} hours`}
+                                        </button>
+                                      </li>
+                                    ))}
+                                    <li role="none">
+                                      <button
+                                        role="menuitem"
+                                        type="button"
+                                        onClick={() => handleBan(message)}
+                                        className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                                      >
+                                        <Ban className="h-4 w-4" aria-hidden="true" />
+                                        Ban user
+                                      </button>
+                                    </li>
+                                  </>
+                                )}
+                              </ul>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -369,6 +655,94 @@ export function ChatInterface({
           </div>
         )}
       </div>
+
+      {/* Message history dialog (issue #890) */}
+      {historyUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Message history for ${historyUser.name}`}
+        >
+          <div
+            className="absolute inset-0 bg-black/50"
+            aria-hidden="true"
+            onClick={() => setHistoryUser(null)}
+          />
+          <div className="relative z-10 flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-lg border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <h3 className="font-semibold">
+                Message history · {historyUser.name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setHistoryUser(null)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close message history"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-auto p-4">
+              {(() => {
+                const history = messages.filter(
+                  (m) => getSenderId(m) === historyUser.id
+                );
+                if (history.length === 0) {
+                  return (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                      No messages from this user in the current conversation.
+                    </p>
+                  );
+                }
+                return history.map((m) => (
+                  <div
+                    key={m.id}
+                    className="rounded-md border bg-muted/30 p-2"
+                    data-testid="history-message"
+                  >
+                    <p className="text-sm [overflow-wrap:anywhere]">{m.content}</p>
+                    <span className="text-[10px] text-muted-foreground">
+                      {getTimestamp(m) ? formatTime(getTimestamp(m)) : ""}
+                    </span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Undo toasts — moderation actions are reversible within the window */}
+      {undoStack.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col gap-2">
+          {undoStack.map((entry) => (
+            <div
+              key={entry.id}
+              role="status"
+              className="flex items-center gap-3 rounded-lg border bg-background px-4 py-2 shadow-lg"
+            >
+              <span className="text-sm">{entry.label}</span>
+              <button
+                type="button"
+                onClick={() => handleUndo(entry)}
+                className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+              >
+                <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Undo
+              </button>
+              <button
+                type="button"
+                onClick={() => dismissUndo(entry.id)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

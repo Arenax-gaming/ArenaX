@@ -102,6 +102,10 @@ export function useErrorRecovery<T = unknown>(
       setLoggedError(null);
 
       let attempt = 0;
+      // Track the logged error locally for the duration of this run — the
+      // state variable would be stale inside this closure (it isn't a
+      // dependency of the memoized `execute`).
+      let logged: LoggedError | null = null;
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -109,8 +113,8 @@ export function useErrorRecovery<T = unknown>(
           const result = await action();
 
           // Succeeded — record recovery if this was a retry
-          if (attempt > 0 && loggedError) {
-            errorLogger.recordRecoveryAttempt(loggedError.id, true);
+          if (attempt > 0 && logged) {
+            errorLogger.recordRecoveryAttempt(logged.id, true);
             options.onRecovered?.(attempt);
           }
 
@@ -125,7 +129,6 @@ export function useErrorRecovery<T = unknown>(
           const retryable = isRetryableError(err);
 
           // Log on first failure
-          let logged = loggedError;
           if (attempt === 0) {
             logged = errorLogger.logError(err, {
               source: "useErrorRecovery",
