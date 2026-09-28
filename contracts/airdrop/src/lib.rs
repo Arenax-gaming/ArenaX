@@ -51,6 +51,8 @@ pub enum DataKey {
     Claimed(Address),
     /// Airdrop metadata
     AirdropId,
+    /// Uniform token amount each eligible address may claim (#1059).
+    TokenAmountPerAddress,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -139,13 +141,60 @@ impl AirdropContract {
             .publish((symbol_short!("INIT"), &admin), (total_amount, expires_at));
     }
 
+    // ── Eligibility snapshot (#1059) ──────────────────────────────────────────
+
+    /// Store the eligibility snapshot.
+    ///
+    /// Admin-only, and the contract must already be initialized (token,
+    /// recovery address, and accounting total come from `initialize`).
+    ///
+    /// - `merkle_root` — root of a sorted-pair tree of `sha256(address || amount)`
+    /// - `token_amount_per_address` — the only amount a proof may claim
+    /// - `expiry` — ledger timestamp after which claims are rejected and the
+    ///   admin may call `recover_unclaimed`
+    pub fn configure_airdrop(
+        env: Env,
+        merkle_root: BytesN<32>,
+        token_amount_per_address: i128,
+        expiry: u64,
+    ) {
+        Self::require_admin(&env);
+        if token_amount_per_address <= 0 {
+            panic!("token_amount_per_address must be positive");
+        }
+        if expiry <= env.ledger().timestamp() {
+            panic!("expiry must be in the future");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MerkleRoot, &merkle_root);
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenAmountPerAddress, &token_amount_per_address);
+        env.storage().instance().set(&DataKey::ExpiresAt, &expiry);
+
+        env.events().publish(
+            (symbol_short!("AIR_CFG"),),
+            (merkle_root, token_amount_per_address, expiry),
+        );
+    }
+
     // ── Claiming ──────────────────────────────────────────────────────────────
 
-    /// Claim tokens for `claimant`.
+    /// Claim tokens for `claimant` with a directed Merkle proof.
     ///
     /// `proof`  — Merkle inclusion proof (ordered from leaf sibling to root)
     /// `amount` — token amount the claimant is entitled to (part of the leaf)
-    pub fn claim(env: Env, claimant: Address, proof: Vec<ProofNode>, amount: i128) -> ClaimResult {
+    ///
+    /// Snapshot drops configured by `configure_airdrop` use [`Self::claim`],
+    /// whose proof is a sorted-pair sibling list.
+    pub fn claim_with_proof_nodes(
+        env: Env,
+        claimant: Address,
+        proof: Vec<ProofNode>,
+        amount: i128,
+    ) -> ClaimResult {
         claimant.require_auth();
         Self::require_not_paused(&env);
         Self::require_not_expired(&env);
@@ -153,6 +202,7 @@ impl AirdropContract {
         if amount <= 0 {
             panic!("amount must be positive");
         }
+        Self::require_snapshot_amount(&env, amount);
 
         // Check nullifier — prevent double-claiming
         if env
@@ -164,7 +214,7 @@ impl AirdropContract {
             panic!("already claimed");
         }
 
-        // Verify Merkle proof
+        // Verify the directed Merkle proof.
         let root: BytesN<32> = env.storage().instance().get(&DataKey::MerkleRoot).unwrap();
         let leaf = compute_leaf(&env, &claimant, amount);
         if !verify_merkle_proof(&env, leaf, &proof, &root) {
@@ -193,6 +243,88 @@ impl AirdropContract {
             .set(&DataKey::ClaimedAmount, &(claimed + amount));
 
         // Transfer tokens
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let contract_addr = env.current_contract_address();
+        token::Client::new(&env, &token).transfer(&contract_addr, &claimant, &amount);
+
+        let now = env.ledger().timestamp();
+        env.events()
+            .publish((symbol_short!("CLAIMED"), &claimant), (amount, now));
+
+        ClaimResult {
+            claimant,
+            amount,
+            claimed_at: now,
+        }
+    }
+
+    /// Claim against the snapshot root from [`Self::configure_airdrop`].
+    ///
+    /// Issue #1059 specifies `claim(proof, amount)`. Soroban has no implicit
+    /// caller, so `claimant` is authenticated with `require_auth` and is the
+    /// address mixed into the leaf `sha256(address || amount)`. `proof` is the
+    /// sibling path of a sorted-pair Merkle tree (depth 20 is supported).
+    ///
+    /// Claimed addresses are stored in persistent storage. A second claim by
+    /// the same address panics. Claims at or after `expiry` panic. After
+    /// expiry the admin recovers the remainder with `recover_unclaimed`.
+    ///
+    /// Depth-20 claim cost, measured with `cargo test -p airdrop --lib
+    /// depth_20_claim_is_measured` on soroban-sdk 23. This is the native test
+    /// host's invocation meter for the whole `claim` call (proof walk, claim
+    /// record, and token transfer), not a wasm CPU trace:
+    /// `instructions = 2_012_264`, `memory_read_entries = 7`,
+    /// `write_entries = 5`, `write_bytes = 1_296`.
+    pub fn claim(
+        env: Env,
+        claimant: Address,
+        proof: Vec<BytesN<32>>,
+        amount: i128,
+    ) -> ClaimResult {
+        claimant.require_auth();
+        Self::require_not_paused(&env);
+        Self::require_not_expired(&env);
+
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        if proof.len() > 32 {
+            panic!("merkle proof too deep");
+        }
+        Self::require_snapshot_amount(&env, amount);
+
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&DataKey::Claimed(claimant.clone()))
+            .unwrap_or(false)
+        {
+            panic!("already claimed");
+        }
+
+        let root: BytesN<32> = env.storage().instance().get(&DataKey::MerkleRoot).unwrap();
+        let leaf = compute_leaf(&env, &claimant, amount);
+        if !verify_sorted_merkle_proof(&env, leaf, &proof, &root) {
+            panic!("invalid merkle proof");
+        }
+
+        let claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedAmount)
+            .unwrap_or(0);
+        let total: i128 = env.storage().instance().get(&DataKey::TotalAmount).unwrap();
+        if claimed + amount > total {
+            panic!("insufficient airdrop balance");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Claimed(claimant.clone()), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::ClaimedAmount, &(claimed + amount));
+
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let contract_addr = env.current_contract_address();
         token::Client::new(&env, &token).transfer(&contract_addr, &claimant, &amount);
@@ -467,6 +599,18 @@ impl AirdropContract {
         }
     }
 
+    fn require_snapshot_amount(env: &Env, amount: i128) {
+        if let Some(expected) = env
+            .storage()
+            .instance()
+            .get::<DataKey, i128>(&DataKey::TokenAmountPerAddress)
+        {
+            if amount != expected {
+                panic!("amount does not match snapshot");
+            }
+        }
+    }
+
     fn require_not_expired(env: &Env) {
         let expires_at: u64 = env
             .storage()
@@ -478,6 +622,9 @@ impl AirdropContract {
         }
     }
 }
+
+#[cfg(test)]
+mod test;
 
 // ─── Merkle helpers ───────────────────────────────────────────────────────────
 
@@ -539,4 +686,41 @@ fn verify_merkle_proof(
     }
 
     current == *expected_root
+}
+
+/// Sorted-pair Merkle step. Sibling order is derived by comparing the raw
+/// hashes, so a proof is only `Vec<BytesN<32>>` (#1059).
+fn hash_sorted_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
+    let left_bytes = left.to_array();
+    let right_bytes = right.to_array();
+    let (first, second) = if left_bytes <= right_bytes {
+        (left_bytes, right_bytes)
+    } else {
+        (right_bytes, left_bytes)
+    };
+
+    let mut buf = Bytes::new(env);
+    for byte in first.iter() {
+        buf.push_back(*byte);
+    }
+    for byte in second.iter() {
+        buf.push_back(*byte);
+    }
+    env.crypto().sha256(&buf).into()
+}
+
+fn verify_sorted_merkle_proof(
+    env: &Env,
+    leaf: BytesN<32>,
+    proof: &Vec<BytesN<32>>,
+    expected_root: &BytesN<32>,
+) -> bool {
+    let mut current = leaf;
+    let mut i = 0u32;
+    while i < proof.len() {
+        let sibling = proof.get(i).unwrap();
+        current = hash_sorted_pair(env, &current, &sibling);
+        i += 1;
+    }
+    &current == expected_root
 }

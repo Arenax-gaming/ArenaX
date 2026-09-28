@@ -160,3 +160,25 @@ fn test_batch_role_check() {
     assert!(results.get(0).unwrap());
     assert!(!results.get(1).unwrap());
 }
+
+#[test]
+fn test_role_constants_are_unique() {
+    let roles = [
+        ROLE_ADMIN,
+        ROLE_GOVERNANCE,
+        ROLE_OPERATOR,
+        ROLE_WHITELIST,
+        ROLE_MODERATOR,
+        ROLE_TOURNAMENT_ORGANIZER,
+        ROLE_GAME_DEVELOPER,
+        ROLE_ANALYTICS_VIEWER,
+        ROLE_ANALYST,
+        ROLE_STAKING_MANAGER,
+        ROLE_CROSS_GAME_ADMIN,
+    ];
+    for i in 0..roles.len() {
+        for j in (i + 1)..roles.len() {
+            assert_ne!(roles[i], roles[j], "role constants at {i} and {j} collide");
+        }
+    }
+}
