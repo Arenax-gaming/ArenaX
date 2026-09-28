@@ -28,6 +28,7 @@ pub mod analytics_handler;
 pub mod batch_handler;
 pub mod tournament_handler;
 pub mod gas_estimation_handler;
+pub mod webhook_handler;
 
 // TODO: Add more Channel modules as implemented:
 // pub mod auth;
