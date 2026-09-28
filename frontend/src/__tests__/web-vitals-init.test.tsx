@@ -41,6 +41,7 @@ jest.mock('@/hooks/useAuth', () => ({
 import * as webVitalsLib from 'web-vitals';
 import { WebVitalsInit } from '@/components/providers/WebVitalsInit';
 import { defaultWebVitalsReporter, hashUserId } from '@/lib/webVitalsReporter';
+import { CONSENT_STORAGE_KEY } from '@/lib/consentPreferences';
 
 describe('WebVitalsInit', () => {
   // WebVitalsInit only wires up listeners in production (Jest runs with
@@ -57,6 +58,16 @@ describe('WebVitalsInit', () => {
     mockUser = null;
     (defaultWebVitalsReporter.record as jest.Mock).mockClear();
     (webVitalsLib.onLCP as jest.Mock).mockClear();
+    // Web vitals are non-essential telemetry (#1093): reporting only starts
+    // once the user has granted the `performance` consent category.
+    localStorage.setItem(
+      CONSENT_STORAGE_KEY,
+      JSON.stringify({
+        hasDecided: true,
+        choices: { performance: true, analytics: true, personalisation: true },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
   });
 
   it('enriches a reported metric with route, device, and connection (#1114)', async () => {

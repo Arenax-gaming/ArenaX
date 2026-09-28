@@ -13,6 +13,8 @@ import { PageTransition } from "@/components/layout/PageTransition";
 import { KeyboardShortcutsHelp } from "@/components/ui/KeyboardShortcutsHelp";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionTimeoutProvider } from "@/contexts/SessionTimeoutContext";
+import { NotificationBadgeEffect } from "@/hooks/useNotificationBadge";
+import { SessionExpiryWarningModal } from "@/components/ui/SessionExpiryWarningModal";
 import { OPEN_CONSENT_MODAL_EVENT } from "@/components/providers/ConsentBanner";
 // #759: next-intl's Link, not next/link. It prefixes the active locale
 // automatically, so "/about" resolves to "/en/about" and following a footer

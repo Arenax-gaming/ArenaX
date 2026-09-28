@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { defaultWebVitalsReporter, hashUserId } from '@/lib/webVitalsReporter';
 import type { DeviceCategory, WebVitalMetric } from '@/lib/webVitalsReporter';
 import { useAuth } from '@/hooks/useAuth';
+import { hasConsentedTo } from '@/lib/consentPreferences';
 
 interface NavigatorConnection {
   effectiveType?: string;

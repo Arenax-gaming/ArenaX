@@ -3,15 +3,26 @@ name = "arenax-testing-infrastructure"
 version = "0.1.0"
 edition = "2021"
 authors = ["ArenaX Team <dev@arenax.gg>"]
+# benches/gas_benchmarks.rs depends on crates that do not exist in this
+# workspace (match-contract, criterion), so bench auto-discovery is off until
+# it is rewritten against real contracts.
+autobenches = false
 
 [lib]
 name = "arenax_testing_infrastructure"
 path = "src/lib.rs"
 
-[dependencies]
+# NOTE: the crate library is a stub, so soroban-sdk and the contracts it
+# wires up are dev-dependencies only. Keeping `testutils` out of [dependencies]
+# is what allows `cargo build --target wasm32-unknown-unknown` to succeed:
+# the testutils feature does not compile for wasm and feature unification
+# would otherwise enable it for every contract in the workspace.
+[dev-dependencies]
 soroban-sdk = { version = "23.5.2", features = ["testutils"] }
 staking-rewards = { path = "../staking-rewards" }
 virtual-economy = { path = "../virtual-economy", features = ["testutils"] }
-
-[dev-dependencies]
-soroban-sdk = { version = "23.5.2", features = ["testutils"] }
+proptest = "1"
+quickcheck = "1"
+composable-example = { path = "../composable-example" }
+access-control = { path = "../access-control" }
+contract-standards = { path = "../contract-standards" }

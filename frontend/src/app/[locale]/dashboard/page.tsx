@@ -147,6 +147,7 @@ export default function DashboardPage() {
           <FriendsList compact />
           <LeaderboardPreview />
         </div>
+        </div>
       </div>
     </div>
     </RouteGuard>

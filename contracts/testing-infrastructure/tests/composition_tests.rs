@@ -1,7 +1,7 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Address, Env};
 use composable_example::{ComposableExample, ComposableExampleClient};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
 fn test_composable_contract() {
@@ -31,7 +31,7 @@ fn test_composable_contract() {
     assert!(client.is_paused());
 
     // Test pause blocks operations
-    let result = std::panic::catch_unwind(|| client.increment());
+    let result = client.try_increment();
     assert!(result.is_err());
 
     // Test unpause
@@ -67,6 +67,6 @@ fn test_contract_composition_with_access_control() {
     example_client.initialize(&owner);
 
     // Verify composition works (both contracts deployed independently)
-    assert_eq!(access_client.has_role(&operator, &3), true);
+    assert!(access_client.has_role(&operator, &3));
     assert_eq!(example_client.get_counter(), 0);
 }

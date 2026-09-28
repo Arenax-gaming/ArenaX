@@ -333,11 +333,7 @@ impl AxToken {
                     return false;
                 }
                 let current_time = env.ledger().timestamp();
-                if current_time >= info.paused_at.saturating_add(info.timeout) {
-                    false
-                } else {
-                    true
-                }
+                current_time < info.paused_at.saturating_add(info.timeout)
             }
             None => false,
         }

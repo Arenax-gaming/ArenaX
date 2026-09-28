@@ -17,7 +17,7 @@ fn create_test_env() -> (Env, Address, Address, Address, Address) {
 
 fn initialize_contract(env: &Env, admin: &Address) -> Address {
     let contract_id = Address::generate(env);
-    env.register_contract(&contract_id, AuthGateway);
+    env.register_at(&contract_id, AuthGateway, ());
     let client = AuthGatewayClient::new(env, &contract_id);
     
     env.mock_all_auths();

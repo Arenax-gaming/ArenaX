@@ -101,25 +101,21 @@ pub struct LpPerformanceRecord {
 
 /// Pro-rata time-based LP reward.
 ///
-/// Accrued = (position.amount / pool.total_liquidity) * reward_rate_bps * elapsed
-///         / (SECS_PER_YEAR * BPS_DENOM)
+/// Accrued = position.amount * reward_rate_bps * elapsed / (SECS_PER_YEAR * BPS_DENOM)
 ///
-/// Uses a simplified formula that avoids division by zero when total_liquidity
-/// == 0 (returns 0 in that case).
+/// Each LP earns the pool's annual rate (in basis points) on their own deposit,
+/// prorated by elapsed time. The pool's `total_liquidity` is only used as a
+/// sanity guard so accrual stops for an empty pool.
 pub fn calc_lp_rewards(pos: &LpPosition, rate_bps: u32, total_liquidity: i128, now: u64) -> i128 {
     if total_liquidity <= 0 || pos.amount <= 0 {
         return 0;
     }
     let elapsed = now.saturating_sub(pos.last_reward_ts) as i128;
-    // Scale up to avoid integer truncation: compute numerator first.
-    // reward = pos.amount * rate_bps * elapsed / (total_liquidity * SECS_PER_YEAR * BPS_DENOM)
+    // Compute the full numerator before dividing so small deposits over short
+    // windows are not truncated to zero prematurely.
     let numerator = pos.amount * rate_bps as i128 * elapsed;
-    let denominator = total_liquidity * SECS_PER_YEAR as i128 * BPS_DENOM;
-    if denominator == 0 {
-        0
-    } else {
-        numerator / denominator
-    }
+    let denominator = SECS_PER_YEAR as i128 * BPS_DENOM;
+    numerator / denominator
 }
 
 /// LP's share of fees accrued since their last snapshot.
@@ -269,6 +265,7 @@ pub fn dynamic_rate(
 #[cfg(test)]
 mod math_tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::Env;
 
     fn dummy_pos(env: &Env, amount: i128, last_ts: u64) -> LpPosition {
@@ -288,11 +285,11 @@ mod math_tests {
     #[test]
     fn test_calc_lp_rewards_basic() {
         let env = Env::default();
-        // 10 % APY, depositor owns 50 % of pool, elapsed 1 year → 5 % of deposit
+        // 10 % APY on a 1,000,000 deposit, elapsed exactly one year → 10 % of deposit
         let pos = dummy_pos(&env, 1_000_000, 0);
         let reward = calc_lp_rewards(&pos, 1_000, 2_000_000, SECS_PER_YEAR);
-        // expected: 1_000_000 * 1_000 * 31_536_000 / (2_000_000 * 31_536_000 * 10_000) = 50
-        assert_eq!(reward, 50);
+        // expected: 1_000_000 * 1_000 * 31_536_000 / (31_536_000 * 10_000) = 100_000
+        assert_eq!(reward, 100_000);
     }
 
     #[test]

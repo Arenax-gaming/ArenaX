@@ -5,13 +5,15 @@ extern crate std;
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    Address, Env, String, Vec,
+    Address, Env, String,
 };
 
 // ============================================================================
 // TEST HELPERS
 // ============================================================================
 
+// Kept for future test suites that build on these scenarios.
+#[allow(dead_code)]
 fn setup_env() -> Env {
     Env::default()
 }
@@ -31,28 +33,33 @@ fn initialize_contract(env: &Env, admin: &Address) -> Address {
     contract_id
 }
 
+#[allow(dead_code)]
 fn create_token(env: &Env) -> (Address, Address) {
     let admin = Address::generate(env);
     let contract_id = initialize_contract(env, &admin);
     (contract_id, admin)
 }
 
+#[allow(dead_code)]
 fn mint_tokens(env: &Env, contract: &Address, to: &Address, amount: i128) {
     let client = AxTokenClient::new(env, contract);
     env.mock_all_auths();
     client.mint(to, &amount);
 }
 
+#[allow(dead_code)]
 fn get_balance(env: &Env, contract: &Address, of: &Address) -> i128 {
     let client = AxTokenClient::new(env, contract);
     client.balance(of)
 }
 
+#[allow(dead_code)]
 fn get_total_supply(env: &Env, contract: &Address) -> i128 {
     let client = AxTokenClient::new(env, contract);
     client.total_supply()
 }
 
+#[allow(dead_code)]
 fn assert_supply_equals_balances(env: &Env, contract: &Address, holders: &[Address]) {
     let client = AxTokenClient::new(env, contract);
     let total_supply = client.total_supply();
@@ -306,7 +313,8 @@ fn test_full_lifecycle() {
 
     // Flash-loan guard: a second protected operation by the same address must
     // land in a later ledger sequence (this models a separate transaction).
-    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 1);
 
     client.burn(&user1, &200i128);
     client.burn(&user2, &400i128);
@@ -618,7 +626,8 @@ fn test_emergency_pause_and_governance_unpause() {
     // Flash-loan guard: user1 already voted this sequence, so the protected
     // transfer must happen in a later ledger (this models a separate
     // transaction) — same convention as the snapshot-voting tests below.
-    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 1);
 
     // Now transfer should succeed
     client.transfer(&user1, &user2, &200i128);

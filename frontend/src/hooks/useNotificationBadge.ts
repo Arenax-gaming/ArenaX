@@ -29,7 +29,7 @@ export function withBadgePrefix(title: string, count: number): string {
   return count > 0 ? `(${count}) ${base}` : base;
 }
 
-interface NavigatorWithBadging extends Navigator {
+interface NavigatorWithBadging {
   setAppBadge?: (contents?: number) => Promise<void>;
   clearAppBadge?: () => Promise<void>;
 }
@@ -45,13 +45,11 @@ export function clearAppBadge(): void {
 
 export function useNotificationBadge(): void {
   const { unreadCount } = useNotifications();
-  const applyingRef = useRef(false);
 
   const applyTitleBadge = useCallback((count: number) => {
     if (typeof document === "undefined") return;
     const next = withBadgePrefix(document.title, count);
     if (next !== document.title) {
-      applyingRef.current = true;
       document.title = next;
     }
   }, []);
@@ -68,11 +66,10 @@ export function useNotificationBadge(): void {
     if (!titleEl) return;
 
     const observer = new MutationObserver(() => {
-      if (applyingRef.current) {
-        // This mutation is the one we just made ourselves — ignore it.
-        applyingRef.current = false;
-        return;
-      }
+      // applyTitleBadge is idempotent (it no-ops when the prefix is already
+      // present), so our own writes can't loop — but an external overwrite
+      // (e.g. Next.js resetting document.title on navigation) gets the badge
+      // re-applied even when it lands in the same mutation batch as ours.
       applyTitleBadge(unreadCount);
     });
     observer.observe(titleEl, { childList: true, characterData: true, subtree: true });
