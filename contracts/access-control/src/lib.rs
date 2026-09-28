@@ -12,7 +12,10 @@ pub const ROLE_MODERATOR: u32 = 5;
 pub const ROLE_TOURNAMENT_ORGANIZER: u32 = 6;
 pub const ROLE_GAME_DEVELOPER: u32 = 7;
 pub const ROLE_ANALYTICS_VIEWER: u32 = 8;
-pub const ROLE_ANALYST: u32 = 8; // Central RBAC Analyst role
+// Migration note: ROLE_ANALYST previously shared id 8 with ROLE_ANALYTICS_VIEWER.
+// Existing grants stored under id 8 now resolve to ROLE_ANALYTICS_VIEWER only;
+// deployed contracts must re-grant ROLE_ANALYST (id 11) to intended analysts.
+pub const ROLE_ANALYST: u32 = 11; // Central RBAC Analyst role
 pub const ROLE_STAKING_MANAGER: u32 = 9;
 pub const ROLE_CROSS_GAME_ADMIN: u32 = 10;
 
