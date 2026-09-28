@@ -10,27 +10,11 @@ try {
   console.warn("[next.config] next-pwa unavailable, running without PWA");
 }
 
-/**
- * Content Security Policy
- * Restricts resource loading to authorized origins.
- * 'unsafe-inline' and 'unsafe-eval' are required by Next.js 14 for inline styles
- * and script evaluation. Tighten with nonces when upgrading to App Router RSC fully.
- */
-const ContentSecurityPolicy = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
-  // Stellar network endpoints + WebSocket for real-time features
-  "connect-src 'self' https://horizon-testnet.stellar.org https://horizon.stellar.org https://*.stellar.org wss: ws:",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-]
-  .join("; ")
-  .concat(";");
+// Content-Security-Policy is no longer set here (#1091): a static policy
+// can't carry a per-request nonce, so it had to allow 'unsafe-inline'
+// 'unsafe-eval' in script-src — defeating CSP's script protection entirely.
+// `middleware.ts` now generates a nonce per request and sets the CSP header
+// itself (see `src/lib/csp.ts`).
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -163,10 +147,8 @@ const nextConfig = {
         source: "/:path*",
         headers: [
           // ── Security headers ───────────────────────────────────────────
-          {
-            key: "Content-Security-Policy",
-            value: ContentSecurityPolicy,
-          },
+          // Content-Security-Policy is set per-request by middleware.ts,
+          // which needs a fresh nonce for every response (#1091).
           {
             // Prevent the page from being embedded in a frame (clickjacking)
             key: "X-Frame-Options",

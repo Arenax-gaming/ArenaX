@@ -13,8 +13,203 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct JobRecord {
+    pub id: Uuid,
+    pub job_type: String,
+    pub payload: serde_json::Value,
+    pub status: String,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub next_run_at: DateTime<Utc>,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone)]
+pub struct JobQueue {
+    db_pool: DbPool,
+}
+
+impl JobQueue {
+    pub fn new(db_pool: DbPool) -> Self {
+        Self { db_pool }
+    }
+
+    pub async fn enqueue(
+        &self,
+        job_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<JobRecord, ApiError> {
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+
+        sqlx::query!(
+            r#"
+            INSERT INTO jobs (id, job_type, payload, status, attempts, max_attempts, next_run_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+            id,
+            job_type,
+            payload,
+            "pending",
+            0i32,
+            3i32,
+            now,
+            now,
+            now
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        self.get_by_id(id).await
+    }
+
+    pub async fn get_by_id(&self, job_id: Uuid) -> Result<JobRecord, ApiError> {
+        let job: JobRecord = sqlx::query_as(
+            r#"
+            SELECT id, job_type, payload, status, attempts, max_attempts, next_run_at, result, error, created_at, updated_at, started_at, completed_at
+            FROM jobs
+            WHERE id = $1
+            "#,
+        )
+        .bind(job_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(job)
+    }
+
+    pub async fn claim_next_job(&self) -> Result<Option<JobRecord>, ApiError> {
+        let job: Option<JobRecord> = sqlx::query_as(
+            r#"
+            SELECT id, job_type, payload, status, attempts, max_attempts, next_run_at, result, error, created_at, updated_at, started_at, completed_at
+            FROM jobs
+            WHERE status = 'pending'
+              AND attempts < max_attempts
+              AND next_run_at <= NOW()
+            ORDER BY next_run_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            "#,
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if let Some(job) = job.clone() {
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'running', started_at = NOW(), updated_at = NOW(), attempts = attempts + 1
+                WHERE id = $1
+                "#,
+                job.id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        }
+
+        Ok(job)
+    }
+
+    pub async fn mark_done(
+        &self,
+        job_id: Uuid,
+        result: serde_json::Value,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE jobs
+            SET status = 'done', result = $2, error = NULL, updated_at = NOW(), completed_at = NOW()
+            WHERE id = $1
+            "#,
+            job_id,
+            result
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+
+    pub async fn mark_failed(
+        &self,
+        job_id: Uuid,
+        attempts: i32,
+        max_attempts: i32,
+        error: &str,
+    ) -> Result<(), ApiError> {
+        let should_retry = attempts < max_attempts;
+        if should_retry {
+            let backoff_secs = 30_i64 * (1_i64 << attempts.min(3));
+            let next_run_at = Utc::now() + chrono::Duration::seconds(backoff_secs);
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'pending', error = $2, updated_at = NOW(), next_run_at = $3
+                WHERE id = $1
+                "#,
+                job_id,
+                error,
+                next_run_at
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        } else {
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'failed', error = $2, updated_at = NOW(), completed_at = NOW()
+                WHERE id = $1
+                "#,
+                job_id,
+                error
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn record_dead_letter(
+        &self,
+        job_id: Option<Uuid>,
+        payload: serde_json::Value,
+        error: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO job_dead_letters (id, job_id, payload, error, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            "#,
+            Uuid::new_v4(),
+            job_id,
+            payload,
+            error
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+}
+
 pub struct TournamentService {
     db_pool: DbPool,
+    pub job_queue: Arc<JobQueue>,
     redis_client: Option<Arc<RedisClient>>,
     soroban_service: Option<Arc<SorobanService>>,
     prize_contract_id: Option<String>,
@@ -24,7 +219,8 @@ pub struct TournamentService {
 impl TournamentService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
-            db_pool,
+            db_pool: db_pool.clone(),
+            job_queue: Arc::new(JobQueue::new(db_pool)),
             redis_client: None,
             soroban_service: None,
             prize_contract_id: None,
@@ -49,6 +245,59 @@ impl TournamentService {
         self.prize_contract_id = Some(prize_contract_id);
         self.admin_secret = Some(admin_secret);
         self
+    }
+
+    pub async fn enqueue_generate_bracket_job(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<JobRecord, ApiError> {
+        self.job_queue
+            .enqueue(
+                "generate_bracket",
+                serde_json::json!({ "tournament_id": tournament_id }),
+            )
+            .await
+    }
+
+    pub async fn enqueue_prize_distribution_job(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<JobRecord, ApiError> {
+        self.job_queue
+            .enqueue(
+                "distribute_prizes",
+                serde_json::json!({ "tournament_id": tournament_id }),
+            )
+            .await
+    }
+
+    pub async fn get_job_status(&self, job_id: Uuid) -> Result<JobRecord, ApiError> {
+        self.job_queue.get_by_id(job_id).await
+    }
+
+    pub async fn process_job(&self, job: JobRecord) -> Result<serde_json::Value, ApiError> {
+        let tournament_id: Uuid = serde_json::from_value(
+            job.payload
+                .get("tournament_id")
+                .cloned()
+                .ok_or_else(|| ApiError::bad_request("Missing tournament_id in job payload"))?,
+        )
+        .map_err(|_| ApiError::bad_request("Invalid tournament_id in job payload"))?;
+
+        let result = match job.job_type.as_str() {
+            "generate_bracket" => {
+                self.generate_tournament_bracket(tournament_id).await?;
+                serde_json::json!({ "tournament_id": tournament_id, "status": "done" })
+            }
+            "distribute_prizes" => {
+                self.trigger_prize_distribution(tournament_id).await?;
+                serde_json::json!({ "tournament_id": tournament_id, "status": "done" })
+            }
+            _ => return Err(ApiError::bad_request(format!("Unknown job type: {}", job.job_type))),
+        };
+
+        self.job_queue.mark_done(job.id, result.clone()).await?;
+        Ok(result)
     }
 
     /// Create a new tournament

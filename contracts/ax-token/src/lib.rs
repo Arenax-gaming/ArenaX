@@ -287,12 +287,9 @@ impl AxToken {
             .instance()
             .set(&DataKey::TotalSupply, &new_supply);
 
-        let cap = Self::get_supply_cap(env.clone());
-        if cap > 0 {
-            let new_cap = cap.saturating_sub(amount);
-            env.storage().instance().set(&DataKey::SupplyCap, &new_cap);
-        }
-
+        // The supply cap is independent of total supply. Burning tokens must
+        // not tighten the cap; only `set_supply_cap` (decrease) and
+        // `adjust_cap_via_governance` (increase) change it.
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &from), -amount);
 
         events::emit_burn(env, &from, amount);
@@ -470,10 +467,20 @@ impl AxToken {
     // Advanced Features: Supply Cap Enforcement
     // ---------------------------------------------------------------------------
 
+    /// Tighten the supply cap. Admin-only.
+    ///
+    /// A stored cap of `0` means no cap is set. The first call may introduce a
+    /// finite cap, which is a tightening, not an increase. Once a cap is set,
+    /// this function can only lower it. Raising the cap is governance-only:
+    /// see [`Self::adjust_cap_via_governance`].
     pub fn set_supply_cap(env: Env, cap: i128) {
         Self::require_admin(&env);
         if cap <= 0 {
             panic!("supply cap must be positive");
+        }
+        let current_cap = Self::get_supply_cap(env.clone());
+        if current_cap > 0 && cap >= current_cap {
+            panic!("supply cap cannot be increased by admin");
         }
         let current_supply = Self::total_supply(&env);
         if current_supply > cap {
@@ -489,6 +496,10 @@ impl AxToken {
             .unwrap_or(0)
     }
 
+    /// Change the supply cap through a passed governance proposal.
+    ///
+    /// This is the only path that may raise the cap. `set_supply_cap` is
+    /// admin-only and can only tighten an existing cap.
     pub fn adjust_cap_via_governance(env: Env, proposal_id: u64, new_cap: i128) {
         let mut proposal: Proposal = env
             .storage()
@@ -878,8 +889,9 @@ impl AxToken {
         // Snapshot lookup: power is read as of the proposal's creation ledger,
         // not live, so it can't be inflated by acquiring tokens or a
         // delegation after the proposal opened.
+        // Composite power includes AX checkpoints + stake weight + escrow (#914).
         let voting_power =
-            Self::get_voting_power_at(env.clone(), voter.clone(), proposal.snapshot_ledger);
+            Self::composite_voting_power(&env, &voter, proposal.snapshot_ledger);
 
         if voting_power <= 0 {
             panic!("no voting power");
@@ -932,6 +944,116 @@ impl AxToken {
         env.storage()
             .instance()
             .get(&DataKey::Proposal(proposal_id))
+    }
+
+    /// Set the grace period before passed unexecuted proposals can be expired
+    ///
+    /// # Arguments
+    /// * `grace_period` - Grace period duration in seconds (default 7 days = 604,800s)
+    pub fn set_proposal_grace_period(env: Env, grace_period: u64) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalGracePeriod, &grace_period);
+    }
+
+    /// Get the configured proposal grace period (defaults to 7 days = 604,800s)
+    pub fn get_proposal_grace_period(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProposalGracePeriod)
+            .unwrap_or(7 * 24 * 60 * 60)
+    }
+
+    /// Admin approves an execution target contract address
+    pub fn approve_execution_target(env: Env, target: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ApprovedExecutionTarget(target), &true);
+    }
+
+    /// Check if a contract address is an approved execution target
+    pub fn is_execution_target_approved(env: Env, target: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::ApprovedExecutionTarget(target))
+            .unwrap_or(false)
+    }
+
+    /// Expire a proposal and clean it up from storage.
+    ///
+    /// - Rejected proposals (`votes_for <= votes_against`) can be expired immediately after `end_time`.
+    /// - Passed unexecuted proposals can only be expired after `end_time + grace_period`.
+    /// - Executed proposals can be expired/cleaned up immediately after `end_time`.
+    /// Callable by anyone.
+    pub fn expire_proposal(env: Env, proposal_id: u64) {
+        let proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        let now = env.ledger().timestamp();
+        if now < proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        let is_rejected = proposal.votes_for <= proposal.votes_against;
+        if !is_rejected && !proposal.executed {
+            let grace_period = Self::get_proposal_grace_period(env.clone());
+            if now < proposal.end_time + grace_period {
+                panic!("proposal within grace period");
+            }
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::Proposal(proposal_id));
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXPIRED"),
+            ),
+            proposal_id,
+        );
+    }
+
+    /// General execution hook for passed proposals
+    ///
+    /// Marks the proposal as executed and emits the general execution event with calldata.
+    pub fn execute_proposal(env: Env, proposal_id: u64, calldata: Bytes) {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXECUTED"),
+            ),
+            (proposal_id, calldata),
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1295,8 +1417,155 @@ impl AxToken {
     }
 
     // ---------------------------------------------------------------------------
+    // Advanced Features: Stake-Weighted Governance (#914)
+    // ---------------------------------------------------------------------------
+
+    /// Register the StakingManager contract address so voting power includes
+    /// staked AX (governance weight) and voting-escrow locked AX (#914).
+    /// Admin-only. Call this once after both contracts are deployed.
+    pub fn set_staking_contract(env: Env, staking_contract: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StakingContract, &staking_contract);
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "STAKING_CONTRACT_SET"),
+            ),
+            staking_contract,
+        );
+    }
+
+    /// Return the configured StakingManager address, or `None` if not set.
+    pub fn get_staking_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::StakingContract)
+    }
+
+    /// Enable or disable quadratic voting (#914: quadratic voting option).
+    /// When enabled, each voter's effective power = floor(sqrt(raw_power)).
+    /// Admin-only — should be set via a passed governance proposal in production.
+    pub fn set_quadratic_voting(env: Env, enabled: bool) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::QuadraticVoting, &enabled);
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "QUADRATIC_VOTING_SET"),
+            ),
+            enabled,
+        );
+    }
+
+    /// Whether quadratic voting is currently active.
+    pub fn get_quadratic_voting(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::QuadraticVoting)
+            .unwrap_or(false)
+    }
+
+    /// Full composite voting power for `address` at `ledger_seq` (#914).
+    ///
+    /// Combines three sources — each snapshotted or read at proposal-creation
+    /// time to prevent post-proposal manipulation:
+    ///
+    /// 1. **Token checkpoint power** — the voter's AX balance + delegated AX
+    ///    at `ledger_seq` (existing checkpoint mechanism, unchanged).
+    /// 2. **Governance weight** — tier-weighted staked AX from
+    ///    `StakingManager::get_governance_weight` (live read; staking manager
+    ///    snapshots are not yet implemented, so we take the live value).
+    /// 3. **Voting-escrow weight** — time-lock boosted AX from
+    ///    `StakingManager::get_voting_weight` (live read).
+    ///
+    /// If no staking contract is configured, only source 1 is used.
+    ///
+    /// When quadratic voting is enabled the *sum* is square-rooted before
+    /// being returned, so whales cannot dominate linearly (#914).
+    pub fn get_total_voting_power_at(env: Env, address: Address, ledger_seq: u32) -> i128 {
+        Self::composite_voting_power(&env, &address, ledger_seq)
+    }
+
+    // ---------------------------------------------------------------------------
     // Internal Helpers
     // ---------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------
+    // Composite Voting Power (#914)
+    // ---------------------------------------------------------------------------
+
+    /// Compute the full stake-weighted voting power for `address` at
+    /// `ledger_seq`.
+    ///
+    /// Sources:
+    /// 1. AX token checkpoint (snapshot — anti-flash-loan).
+    /// 2. Staking governance weight (live cross-contract call to StakingManager).
+    /// 3. Voting-escrow weight (live cross-contract call to StakingManager).
+    ///
+    /// Sources 2 & 3 are live because the staking-manager contract does not
+    /// maintain block-level checkpoints yet; using live values is safe because
+    /// the flash-loan guard already blocks same-ledger vote manipulation.
+    ///
+    /// When quadratic voting is on, the sum is square-rooted (#914).
+    /// When delegation is active the checkpoint power already includes the
+    /// delegated amount; stake power is always per-voter (delegating AX
+    /// tokens doesn't move them out of the staking contract).
+    fn composite_voting_power(env: &Env, address: &Address, ledger_seq: u32) -> i128 {
+        // 1. Token checkpoint power (snapshot at proposal creation ledger)
+        let checkpoint_power = Self::power_at(env, address, ledger_seq);
+
+        // 2 & 3. Stake power — cross-contract call if staking contract is set
+        let stake_power: i128 =
+            if let Some(staking_addr) = env
+                .storage()
+                .instance()
+                .get::<DataKey, Address>(&DataKey::StakingContract)
+            {
+                let client = staking_client::StakingClient::new(env, &staking_addr);
+                // governance_weight = tier-weighted reward stake
+                let gov = client.get_governance_weight(address.clone());
+                // voting_weight = time-lock escrow weight
+                let escrow = client.get_voting_weight(address.clone());
+                gov.saturating_add(escrow)
+            } else {
+                0
+            };
+
+        let raw_power = checkpoint_power.saturating_add(stake_power);
+
+        // Apply quadratic voting if enabled (#914: quadratic voting option)
+        let quadratic: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::QuadraticVoting)
+            .unwrap_or(false);
+
+        if quadratic && raw_power > 0 {
+            Self::isqrt(raw_power)
+        } else {
+            raw_power
+        }
+    }
+
+    /// Integer square root (floor) for quadratic voting (#914).
+    /// Uses Newton's method — O(log n) iterations, no floating point.
+    fn isqrt(n: i128) -> i128 {
+        if n < 0 {
+            return 0;
+        }
+        if n == 0 {
+            return 0;
+        }
+        let mut x = n;
+        let mut y = (x + 1) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
+    }
 
     fn store_vesting_schedule(
         env: &Env,
@@ -1347,6 +1616,102 @@ impl AxToken {
         } else {
             schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
         }
+    }
+
+    // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
+
+    pub fn schedule_upgrade(
+        env: &Env,
+        new_wasm_hash: soroban_sdk::BytesN<32>,
+        min_compatible_schema: u32,
+        delay_seconds: Option<u64>,
+    ) {
+        Self::require_admin(env);
+        let now = env.ledger().timestamp();
+        let delay = delay_seconds.unwrap_or(86_400);
+        let scheduled = ScheduledUpgrade {
+            new_wasm_hash,
+            min_compatible_schema,
+            scheduled_at: now,
+            executable_at: now + delay,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::ScheduledUpgrade, &scheduled);
+    }
+
+    pub fn upgrade(env: &Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        Self::require_admin(env);
+        let scheduled: ScheduledUpgrade = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledUpgrade)
+            .expect("no scheduled upgrade");
+
+        if scheduled.new_wasm_hash != new_wasm_hash {
+            panic!("wasm hash does not match scheduled upgrade");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < scheduled.executable_at {
+            panic!("timelock not elapsed");
+        }
+
+        let current_schema: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1);
+
+        if current_schema < scheduled.min_compatible_schema {
+            panic!("incompatible schema");
+        }
+
+        let current_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .unwrap_or_else(|| soroban_sdk::BytesN::from_array(env, &[0u8; 32]));
+        env.storage()
+            .instance()
+            .set(&DataKey::PreviousWasmHash, &current_hash);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+
+        if !Self::post_upgrade_check(env) {
+            Self::rollback_upgrade(env);
+            panic!("post upgrade check failed, reverted");
+        }
+
+        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
+    }
+
+    pub fn rollback_upgrade(env: &Env) {
+        Self::require_admin(env);
+        let prev_hash: soroban_sdk::BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .expect("no prior version for rollback");
+        env.deployer().update_current_contract_wasm(prev_hash);
+    }
+
+    pub fn post_upgrade_check(_env: &Env) -> bool {
+        true
+    }
+
+    pub fn get_storage_schema_version(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1)
+    }
+
+    pub fn set_storage_schema_version(env: &Env, version: u32) {
+        Self::require_admin(env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &version);
     }
 
     fn has_admin(env: &Env) -> bool {

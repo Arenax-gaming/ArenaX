@@ -8,14 +8,17 @@
 //!    for a specific user. Expired overrides are ignored.
 //! 3. **Percentage rollout** — deterministic SHA-256 bucket so the same user
 //!    always lands in the same 0–99 bucket for a given flag.
-//! 4. **A/B test assignment** — weighted variants with sticky per-user
+//! 4. **Segment targeting** (#1082) — restrict a flag to users matching at
+//!    least one of `target_segments` (e.g. `country:NG`, `stake_tier:gold`,
+//!    `beta_tester:true`). An empty list matches everyone.
+//! 5. **A/B test assignment** — weighted variants with sticky per-user
 //!    assignments so changing weights does not reshuffle existing users.
-//! 5. **Flag analytics** — evaluation + conversion events with aggregated
+//! 6. **Flag analytics** — evaluation + conversion events with aggregated
 //!    counts, unique users, and breakdowns by reason and variant.
 //!
 //! Evaluation priority:
 //! override (if not expired) → kill switch (`enabled = false`) →
-//! percentage rollout → sticky/new A/B assignment → boolean on.
+//! percentage rollout → segment match → sticky/new A/B assignment → boolean on.
 
 use crate::api_error::ApiError;
 use chrono::{DateTime, Utc};
@@ -40,9 +43,18 @@ pub struct FeatureFlag {
     pub variants: serde_json::Value,
     pub default_variant: Option<String>,
     pub metadata: serde_json::Value,
+    pub target_segments: serde_json::Value,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Segment attributes of a user relevant to feature flag targeting (#1082).
+#[derive(Debug, Clone, Default)]
+pub struct UserSegmentProfile {
+    pub country_code: Option<String>,
+    pub stake_tier: Option<String>,
+    pub is_beta_tester: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -70,6 +82,7 @@ pub struct CreateFlagRequest {
     pub variants: Option<BTreeMap<String, i32>>,
     pub default_variant: Option<String>,
     pub metadata: Option<serde_json::Value>,
+    pub target_segments: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -81,6 +94,7 @@ pub struct UpdateFlagRequest {
     pub variants: Option<BTreeMap<String, i32>>,
     pub default_variant: Option<String>,
     pub metadata: Option<serde_json::Value>,
+    pub target_segments: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +117,7 @@ pub enum EvaluationReason {
     Override,
     Disabled,
     NotInRollout,
+    SegmentMismatch,
     AbTest,
     Percentage,
 }
@@ -113,6 +128,7 @@ impl EvaluationReason {
             Self::Override => "override",
             Self::Disabled => "disabled",
             Self::NotInRollout => "not_in_rollout",
+            Self::SegmentMismatch => "segment_mismatch",
             Self::AbTest => "ab_test",
             Self::Percentage => "percentage",
         }
@@ -207,6 +223,63 @@ pub fn parse_variants(value: &serde_json::Value) -> BTreeMap<String, i32> {
     }
 }
 
+pub fn parse_segments(value: &serde_json::Value) -> Vec<String> {
+    match value.as_array() {
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn segments_json(segments: &[String]) -> serde_json::Value {
+    serde_json::to_value(segments).unwrap_or_else(|_| serde_json::json!([]))
+}
+
+/// Does `segment` (e.g. `"country:NG"`, `"stake_tier:gold"`, `"beta_tester:true"`)
+/// match this user's profile? Unknown prefixes never match.
+pub fn matches_segment(segment: &str, profile: &UserSegmentProfile) -> bool {
+    if let Some(value) = segment.strip_prefix("country:") {
+        return profile
+            .country_code
+            .as_deref()
+            .is_some_and(|c| c.eq_ignore_ascii_case(value));
+    }
+    if let Some(value) = segment.strip_prefix("stake_tier:") {
+        return profile
+            .stake_tier
+            .as_deref()
+            .is_some_and(|t| t.eq_ignore_ascii_case(value));
+    }
+    if let Some(value) = segment.strip_prefix("beta_tester:") {
+        let wants_beta = value.eq_ignore_ascii_case("true");
+        return profile.is_beta_tester == wants_beta;
+    }
+    false
+}
+
+/// A user matches when `segments` is empty (no targeting configured) or when
+/// they match at least one listed segment.
+pub fn matches_any_segment(segments: &[String], profile: &UserSegmentProfile) -> bool {
+    segments.is_empty() || segments.iter().any(|s| matches_segment(s, profile))
+}
+
+fn validate_segments(segments: &[String]) -> Result<(), ApiError> {
+    for segment in segments {
+        let known_prefix = ["country:", "stake_tier:", "beta_tester:"]
+            .iter()
+            .any(|p| segment.starts_with(p));
+        let (_, value) = segment.split_once(':').unwrap_or(("", ""));
+        if !known_prefix || value.is_empty() {
+            return Err(ApiError::bad_request(format!(
+                "Unsupported segment '{segment}': expected country:<CODE>, stake_tier:<tier>, or beta_tester:<true|false>"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Resolve a flag for one user. Returns the evaluation plus an optional new
 /// A/B variant that the caller should persist as a sticky assignment.
 pub fn resolve_evaluation(
@@ -215,6 +288,7 @@ pub fn resolve_evaluation(
     user_override: Option<&FlagOverride>,
     existing_assignment: Option<&str>,
     now: DateTime<Utc>,
+    profile: &UserSegmentProfile,
 ) -> (EvaluationResult, Option<String>) {
     let bucket = rollout_bucket(user_id, &flag.flag_key);
     let variants = parse_variants(&flag.variants);
@@ -255,6 +329,20 @@ pub fn resolve_evaluation(
                 enabled: false,
                 variant: flag.default_variant.clone(),
                 reason: EvaluationReason::NotInRollout,
+                bucket,
+            },
+            None,
+        );
+    }
+
+    let segments = parse_segments(&flag.target_segments);
+    if !matches_any_segment(&segments, profile) {
+        return (
+            EvaluationResult {
+                key: flag.flag_key.clone(),
+                enabled: false,
+                variant: flag.default_variant.clone(),
+                reason: EvaluationReason::SegmentMismatch,
                 bucket,
             },
             None,
@@ -398,15 +486,19 @@ impl FeatureFlagService {
         validate_variants(&variants)?;
         let variants_value = variants_json(&variants);
         let metadata = req.metadata.unwrap_or_else(|| serde_json::json!({}));
+        let segments = req.target_segments.unwrap_or_default();
+        validate_segments(&segments)?;
+        let segments_value = segments_json(&segments);
 
         let flag = sqlx::query_as::<_, FeatureFlag>(
             r#"
             INSERT INTO feature_flags
                 (flag_key, name, description, enabled, rollout_percentage,
-                 variants, default_variant, metadata, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 variants, default_variant, metadata, target_segments, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, flag_key, name, description, enabled, rollout_percentage,
-                      variants, default_variant, metadata, created_by, created_at, updated_at
+                      variants, default_variant, metadata, target_segments,
+                      created_by, created_at, updated_at
             "#,
         )
         .bind(&req.key)
@@ -417,6 +509,7 @@ impl FeatureFlagService {
         .bind(&variants_value)
         .bind(&req.default_variant)
         .bind(&metadata)
+        .bind(&segments_value)
         .bind(created_by)
         .fetch_one(&self.db)
         .await
@@ -442,6 +535,9 @@ impl FeatureFlagService {
         if let Some(ref variants) = req.variants {
             validate_variants(variants)?;
         }
+        if let Some(ref segments) = req.target_segments {
+            validate_segments(segments)?;
+        }
 
         let name = req.name.unwrap_or(existing.name);
         let description = req.description.or(existing.description);
@@ -457,6 +553,10 @@ impl FeatureFlagService {
             None => existing.default_variant,
         };
         let metadata = req.metadata.unwrap_or(existing.metadata);
+        let target_segments = req
+            .target_segments
+            .map(|s| segments_json(&s))
+            .unwrap_or(existing.target_segments);
 
         let flag = sqlx::query_as::<_, FeatureFlag>(
             r#"
@@ -467,10 +567,12 @@ impl FeatureFlagService {
                 rollout_percentage = $5,
                 variants = $6,
                 default_variant = $7,
-                metadata = $8
+                metadata = $8,
+                target_segments = $9
             WHERE flag_key = $1
             RETURNING id, flag_key, name, description, enabled, rollout_percentage,
-                      variants, default_variant, metadata, created_by, created_at, updated_at
+                      variants, default_variant, metadata, target_segments,
+                      created_by, created_at, updated_at
             "#,
         )
         .bind(key)
@@ -481,6 +583,7 @@ impl FeatureFlagService {
         .bind(&variants)
         .bind(&default_variant)
         .bind(&metadata)
+        .bind(&target_segments)
         .fetch_optional(&self.db)
         .await
         .map_err(ApiError::DatabaseError)?
@@ -494,7 +597,8 @@ impl FeatureFlagService {
         sqlx::query_as::<_, FeatureFlag>(
             r#"
             SELECT id, flag_key, name, description, enabled, rollout_percentage,
-                   variants, default_variant, metadata, created_by, created_at, updated_at
+                   variants, default_variant, metadata, target_segments,
+                   created_by, created_at, updated_at
             FROM feature_flags
             WHERE flag_key = $1
             "#,
@@ -510,7 +614,8 @@ impl FeatureFlagService {
         sqlx::query_as::<_, FeatureFlag>(
             r#"
             SELECT id, flag_key, name, description, enabled, rollout_percentage,
-                   variants, default_variant, metadata, created_by, created_at, updated_at
+                   variants, default_variant, metadata, target_segments,
+                   created_by, created_at, updated_at
             FROM feature_flags
             ORDER BY flag_key
             "#,
@@ -611,6 +716,37 @@ impl FeatureFlagService {
 
     // ── Evaluation ────────────────────────────────────────────────────────
 
+    /// Load the segment attributes (`country:`, `stake_tier:`, `beta_tester:`)
+    /// used to evaluate `target_segments` for `user_id`.
+    async fn get_segment_profile(&self, user_id: Uuid) -> Result<UserSegmentProfile, ApiError> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            country_code: Option<String>,
+            tier: Option<String>,
+            is_beta_tester: bool,
+        }
+
+        let row = sqlx::query_as::<_, Row>(
+            r#"
+            SELECT u.country_code, sp.tier, u.is_beta_tester
+            FROM users u
+            LEFT JOIN staking_positions sp ON sp.user_id = u.id
+            WHERE u.id = $1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(ApiError::DatabaseError)?
+        .ok_or_else(|| ApiError::not_found("User not found"))?;
+
+        Ok(UserSegmentProfile {
+            country_code: row.country_code,
+            stake_tier: row.tier,
+            is_beta_tester: row.is_beta_tester,
+        })
+    }
+
     pub async fn evaluate(
         &self,
         key: &str,
@@ -666,6 +802,7 @@ impl FeatureFlagService {
             overrides.into_iter().map(|o| (o.flag_id, o)).collect();
         let assignment_by_flag: HashMap<Uuid, String> =
             assignments.into_iter().map(|a| (a.flag_id, a.variant)).collect();
+        let profile = self.get_segment_profile(user_id).await?;
 
         let mut results = Vec::with_capacity(flags.len());
         for flag in flags {
@@ -675,6 +812,7 @@ impl FeatureFlagService {
                 override_by_flag.get(&flag.id),
                 assignment_by_flag.get(&flag.id).map(String::as_str),
                 Utc::now(),
+                &profile,
             );
             self.record_evaluation(&flag, user_id, &result).await;
             if let Some(variant) = new_assignment {
@@ -718,12 +856,15 @@ impl FeatureFlagService {
         .await
         .map_err(ApiError::DatabaseError)?;
 
+        let profile = self.get_segment_profile(user_id).await?;
+
         Ok(resolve_evaluation(
             flag,
             user_id,
             user_override.as_ref(),
             existing_assignment.as_deref(),
             Utc::now(),
+            &profile,
         ))
     }
 
@@ -894,6 +1035,7 @@ impl FeatureFlag {
             variants: parse_variants(&self.variants),
             default_variant: self.default_variant.clone(),
             metadata: self.metadata.clone(),
+            target_segments: parse_segments(&self.target_segments),
             created_by: self.created_by,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -912,6 +1054,7 @@ pub struct FeatureFlagResponse {
     pub variants: BTreeMap<String, i32>,
     pub default_variant: Option<String>,
     pub metadata: serde_json::Value,
+    pub target_segments: Vec<String>,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -922,6 +1065,16 @@ mod tests {
     use super::*;
 
     fn sample_flag(key: &str, enabled: bool, rollout: i32, variants: serde_json::Value) -> FeatureFlag {
+        sample_flag_with_segments(key, enabled, rollout, variants, serde_json::json!([]))
+    }
+
+    fn sample_flag_with_segments(
+        key: &str,
+        enabled: bool,
+        rollout: i32,
+        variants: serde_json::Value,
+        target_segments: serde_json::Value,
+    ) -> FeatureFlag {
         FeatureFlag {
             id: Uuid::nil(),
             flag_key: key.to_string(),
@@ -932,10 +1085,15 @@ mod tests {
             variants,
             default_variant: Some("control".to_string()),
             metadata: serde_json::json!({}),
+            target_segments,
             created_by: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
+    }
+
+    fn no_segments() -> UserSegmentProfile {
+        UserSegmentProfile::default()
     }
 
     fn sample_override(enabled: bool, variant: Option<&str>, expires_at: Option<DateTime<Utc>>) -> FlagOverride {
@@ -1001,7 +1159,7 @@ mod tests {
     fn disabled_flag_returns_disabled_without_override() {
         let flag = sample_flag("dark_mode", false, 100, serde_json::json!({}));
         let user = Uuid::new_v4();
-        let (result, assign) = resolve_evaluation(&flag, user, None, None, Utc::now());
+        let (result, assign) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
         assert!(!result.enabled);
         assert_eq!(result.reason, EvaluationReason::Disabled);
         assert!(assign.is_none());
@@ -1012,7 +1170,7 @@ mod tests {
         let flag = sample_flag("dark_mode", false, 0, serde_json::json!({}));
         let user = Uuid::new_v4();
         let over = sample_override(true, Some("on"), None);
-        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now());
+        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now(), &no_segments());
         assert!(result.enabled);
         assert_eq!(result.reason, EvaluationReason::Override);
         assert_eq!(result.variant.as_deref(), Some("on"));
@@ -1023,7 +1181,7 @@ mod tests {
         let flag = sample_flag("full_rollout", true, 100, serde_json::json!({}));
         let user = Uuid::new_v4();
         let over = sample_override(false, None, None);
-        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now());
+        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now(), &no_segments());
         assert!(!result.enabled);
         assert_eq!(result.reason, EvaluationReason::Override);
     }
@@ -1033,7 +1191,7 @@ mod tests {
         let flag = sample_flag("dark_mode", false, 100, serde_json::json!({}));
         let user = Uuid::new_v4();
         let over = sample_override(true, Some("on"), Some(Utc::now() - chrono::Duration::hours(1)));
-        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now());
+        let (result, _) = resolve_evaluation(&flag, user, Some(&over), None, Utc::now(), &no_segments());
         assert!(!result.enabled);
         assert_eq!(result.reason, EvaluationReason::Disabled);
     }
@@ -1046,7 +1204,7 @@ mod tests {
             .map(Uuid::from_u128)
             .find(|u| rollout_bucket(*u, "partial") >= 1)
             .expect("need a user outside 1% rollout");
-        let (result, _) = resolve_evaluation(&flag, user, None, None, Utc::now());
+        let (result, _) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
         assert!(!result.enabled);
         assert_eq!(result.reason, EvaluationReason::NotInRollout);
     }
@@ -1055,7 +1213,7 @@ mod tests {
     fn percentage_rollout_enables_boolean_flag() {
         let flag = sample_flag("full_rollout", true, 100, serde_json::json!({}));
         let user = Uuid::new_v4();
-        let (result, assign) = resolve_evaluation(&flag, user, None, None, Utc::now());
+        let (result, assign) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
         assert!(result.enabled);
         assert_eq!(result.reason, EvaluationReason::Percentage);
         assert_eq!(result.variant.as_deref(), Some("control"));
@@ -1072,7 +1230,7 @@ mod tests {
         );
         let user = Uuid::new_v4();
         let (result, assign) =
-            resolve_evaluation(&flag, user, None, Some("treatment"), Utc::now());
+            resolve_evaluation(&flag, user, None, Some("treatment"), Utc::now(), &no_segments());
         assert!(result.enabled);
         assert_eq!(result.reason, EvaluationReason::AbTest);
         assert_eq!(result.variant.as_deref(), Some("treatment"));
@@ -1088,8 +1246,8 @@ mod tests {
             serde_json::json!({"control": 50, "treatment": 50}),
         );
         let user = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
-        let (first, assign_a) = resolve_evaluation(&flag, user, None, None, Utc::now());
-        let (second, assign_b) = resolve_evaluation(&flag, user, None, None, Utc::now());
+        let (first, assign_a) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
+        let (second, assign_b) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
         assert_eq!(first.variant, second.variant);
         assert_eq!(first.reason, EvaluationReason::AbTest);
         assert!(assign_a.is_some());
@@ -1114,5 +1272,88 @@ mod tests {
         assert!(validate_flag_key("BadFlag").is_err());
         assert!(validate_flag_key("-leading").is_err());
         assert!(validate_flag_key("has space").is_err());
+    }
+
+    // ── Segment targeting (#1082) ─────────────────────────────────────────
+
+    #[test]
+    fn ten_percent_rollout_enables_roughly_one_tenth_of_users() {
+        let flag = sample_flag("gradual", true, 10, serde_json::json!({}));
+        let mut enabled_count = 0u32;
+        for i in 0..1000u128 {
+            let user = Uuid::from_u128(i + 1);
+            let (result, _) = resolve_evaluation(&flag, user, None, None, Utc::now(), &no_segments());
+            if result.enabled {
+                enabled_count += 1;
+            }
+        }
+        // 1000 users at 10% rollout: expect ~100, allow +/- 2% (20 users).
+        assert!(
+            (80..=120).contains(&enabled_count),
+            "expected ~100 enabled users out of 1000, got {enabled_count}"
+        );
+    }
+
+    #[test]
+    fn full_rollout_with_gold_segment_only_enables_gold_tier_users() {
+        let flag = sample_flag_with_segments(
+            "gold_perk",
+            true,
+            100,
+            serde_json::json!({}),
+            serde_json::json!(["stake_tier:gold"]),
+        );
+
+        let gold = UserSegmentProfile {
+            country_code: None,
+            stake_tier: Some("Gold".to_string()),
+            is_beta_tester: false,
+        };
+        let silver = UserSegmentProfile {
+            country_code: None,
+            stake_tier: Some("Silver".to_string()),
+            is_beta_tester: false,
+        };
+        let none = UserSegmentProfile::default();
+
+        for i in 0..50u128 {
+            let user = Uuid::from_u128(i + 1);
+            let (gold_result, _) = resolve_evaluation(&flag, user, None, None, Utc::now(), &gold);
+            let (silver_result, _) = resolve_evaluation(&flag, user, None, None, Utc::now(), &silver);
+            let (none_result, _) = resolve_evaluation(&flag, user, None, None, Utc::now(), &none);
+            assert!(gold_result.enabled, "gold-tier user {i} should be enabled");
+            assert!(!silver_result.enabled, "silver-tier user {i} should not be enabled");
+            assert_eq!(silver_result.reason, EvaluationReason::SegmentMismatch);
+            assert!(!none_result.enabled, "user {i} with no tier should not be enabled");
+        }
+    }
+
+    #[test]
+    fn matches_segment_checks_country_and_beta_tester() {
+        let profile = UserSegmentProfile {
+            country_code: Some("NG".to_string()),
+            stake_tier: None,
+            is_beta_tester: true,
+        };
+        assert!(matches_segment("country:NG", &profile));
+        assert!(matches_segment("country:ng", &profile));
+        assert!(!matches_segment("country:US", &profile));
+        assert!(matches_segment("beta_tester:true", &profile));
+        assert!(!matches_segment("beta_tester:false", &profile));
+        assert!(!matches_segment("unknown:x", &profile));
+    }
+
+    #[test]
+    fn empty_segment_list_matches_everyone() {
+        assert!(matches_any_segment(&[], &no_segments()));
+    }
+
+    #[test]
+    fn validate_segments_rejects_unknown_prefix() {
+        assert!(validate_segments(&["country:NG".to_string()]).is_ok());
+        assert!(validate_segments(&["stake_tier:gold".to_string()]).is_ok());
+        assert!(validate_segments(&["beta_tester:true".to_string()]).is_ok());
+        assert!(validate_segments(&["region:west".to_string()]).is_err());
+        assert!(validate_segments(&["country:".to_string()]).is_err());
     }
 }

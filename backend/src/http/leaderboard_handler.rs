@@ -1,4 +1,4 @@
-use actix_web::{web, HttpResponse, Result};
+use actix_web::{web, HttpRequest, HttpResponse, Result};
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -141,4 +141,50 @@ pub async fn get_leaderboard_stats(
     let stats = service.get_leaderboard_stats(&category).await?;
 
     Ok(HttpResponse::Ok().json(stats))
+}
+
+// ─── Season close (#1075) ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct SeasonHistoryQuery {
+    pub season_id: Uuid,
+}
+
+/// POST /api/admin/seasons/{id}/close — admin-only (ROLE_ADMIN).
+pub async fn close_season(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    path: web::Path<Uuid>,
+    body: Option<web::Json<CloseSeasonRequest>>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let season_id = path.into_inner();
+    let top_n = body.and_then(|b| b.top_n).unwrap_or(100);
+
+    let service = LeaderboardService::new(pool.get_ref().clone());
+    let result = service.close_season(season_id, top_n).await?;
+
+    Ok(HttpResponse::Ok().json(result))
+}
+
+/// GET /api/leaderboard/history?season_id=X
+pub async fn get_season_history(
+    pool: web::Data<PgPool>,
+    query: web::Query<SeasonHistoryQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let service = LeaderboardService::new(pool.get_ref().clone());
+    let snapshots = service.get_season_history(query.season_id).await?;
+
+    Ok(HttpResponse::Ok().json(snapshots))
+}
+
+/// Registers this module's season-close endpoints. Call inside the `/api`
+/// scope alongside the other `.configure(...)` handlers.
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/admin/seasons").route("/{id}/close", web::post().to(close_season)),
+    )
+    .service(
+        web::scope("/leaderboard").route("/history", web::get().to(get_season_history)),
+    );
 }

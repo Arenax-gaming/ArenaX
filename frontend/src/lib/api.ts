@@ -391,6 +391,17 @@ class ApiClient {
     });
   }
 
+  /** Saves the admin-arranged bracket seed order (#1092). */
+  async saveTournamentSeeding(
+    id: string,
+    seeding: { playerId: string; seed: number }[],
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/tournaments/${id}/seeding`, {
+      method: "PUT",
+      body: JSON.stringify({ seeding }),
+    });
+  }
+
   // ── Matches ──────────────────────────────────────────────────────────────────
 
   async getMatches(params?: MatchFilters): Promise<Match[]> {
