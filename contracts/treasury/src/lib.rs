@@ -145,20 +145,7 @@ pub enum DataKey {
     TotalAllocated,
     TotalSpent,
     Paused,
-    // Upgrade and state migration (#1064)
-    StorageSchemaVersion,
-    ScheduledUpgrade,
-    PreviousWasmHash,
-}
-
-/// Scheduled upgrade details (#1064).
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScheduledUpgrade {
-    pub new_wasm_hash: soroban_sdk::BytesN<32>,
-    pub min_compatible_schema: u32,
-    pub scheduled_at: u64,
-    pub executable_at: u64,
+    Token,
 }
 
 #[contract]
@@ -173,6 +160,7 @@ impl Treasury {
     pub fn initialize(
         env: Env,
         admin: Address,
+        token: Address,
         signers: Vec<Address>,
         threshold: u32,
         time_lock_duration: u64,
@@ -189,6 +177,7 @@ impl Treasury {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Signers, &signers);
         env.storage()
             .instance()
@@ -247,28 +236,25 @@ impl Treasury {
     // Funding
     // -----------------------------------------------------------------
 
-    /// Record a deposit into the treasury. If a token address is configured,
-    /// the tokens are transferred on-chain from `from` to this contract (#918).
+    /// Transfer `amount` of the treasury token from `from` into the contract
+    /// and record it in the internal ledger balance. The transfer runs first,
+    /// so a failed transfer aborts the call before storage is touched.
     pub fn deposit(env: Env, from: Address, amount: i128) {
         Self::require_not_paused(&env);
         from.require_auth();
         if amount <= 0 {
             panic!("amount must be positive");
         }
-
-        // Real on-chain token transfer when token address is configured (#918)
-        if let Some(token_addr) = env
+        let token_id: Address = env
             .storage()
             .instance()
-            .get::<DataKey, Address>(&DataKey::TokenAddress)
-        {
-            token::Client::new(&env, &token_addr).transfer(
-                &from,
-                &env.current_contract_address(),
-                &amount,
-            );
-        }
-
+            .get(&DataKey::Token)
+            .expect("not initialized");
+        token::Client::new(&env, &token_id).transfer(
+            &from,
+            env.current_contract_address(),
+            &amount,
+        );
         let balance = Self::get_balance(env.clone());
         env.storage()
             .instance()
@@ -278,6 +264,13 @@ impl Treasury {
             (Symbol::new(&env, "Treasury"), Symbol::new(&env, "DEPOSIT")),
             (from, amount),
         );
+    }
+
+    pub fn get_token(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized")
     }
 
     pub fn get_balance(env: Env) -> i128 {

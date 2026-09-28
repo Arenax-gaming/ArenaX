@@ -1025,3 +1025,65 @@ fn test_execute_proposal_hook() {
     client.expire_proposal(&proposal_id);
     assert!(client.get_proposal(&proposal_id).is_none());
 }
+
+// ============================================================================
+// DATAKEY STORAGE ROUND-TRIP
+// ============================================================================
+
+#[test]
+fn test_datakey_variants_storage_round_trip() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = env.register(AxToken, ());
+
+    env.as_contract(&contract_id, || {
+        let store = env.storage().instance();
+
+        store.set(&DataKey::SupplyCap, &1_000_000i128);
+        assert_eq!(store.get::<_, i128>(&DataKey::SupplyCap), Some(1_000_000));
+
+        store.set(&DataKey::Paused, &true);
+        assert_eq!(store.get::<_, bool>(&DataKey::Paused), Some(true));
+
+        store.set(&DataKey::PauseTimeout, &3_600u64);
+        assert_eq!(store.get::<_, u64>(&DataKey::PauseTimeout), Some(3_600));
+
+        let info = PauseInfo {
+            paused: true,
+            paused_at: 42,
+            paused_by: admin.clone(),
+            timeout: 3_600,
+            reason: Symbol::new(&env, "audit"),
+        };
+        store.set(&DataKey::PauseInfo, &info);
+        let got: PauseInfo = store.get(&DataKey::PauseInfo).unwrap();
+        assert_eq!(got.paused_at, 42);
+        assert_eq!(got.paused_by, admin);
+
+        store.set(&DataKey::Delegate(user1.clone()), &user2);
+        assert_eq!(
+            store.get::<_, Address>(&DataKey::Delegate(user1.clone())),
+            Some(user2.clone())
+        );
+
+        let mut delegators = Vec::new(&env);
+        delegators.push_back(user1.clone());
+        store.set(&DataKey::Delegators(user2.clone()), &delegators);
+        assert_eq!(
+            store.get::<_, Vec<Address>>(&DataKey::Delegators(user2.clone())),
+            Some(delegators)
+        );
+
+        let mut history = Vec::new(&env);
+        history.push_back(DelegationRecord {
+            delegatee: user2.clone(),
+            timestamp: 7,
+            revoked: false,
+        });
+        store.set(&DataKey::DelegationHistory(user1.clone()), &history);
+        let got: Vec<DelegationRecord> = store
+            .get(&DataKey::DelegationHistory(user1.clone()))
+            .unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got.get(0).unwrap().delegatee, user2);
+    });
+}
