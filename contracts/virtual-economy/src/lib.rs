@@ -23,7 +23,7 @@ use arenax_events::virtual_economy as events;
 use batch::{BatchManager, BatchResult, BatchTransferItem, MAX_BATCH_SIZE};
 use marketplace::MarketplaceManager;
 use nft_staking::NftStakingManager;
-use oracle::OracleManager;
+use oracle::{OracleManager, MAX_ORACLE_SOURCES};
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 
 pub use amm::{
@@ -916,14 +916,27 @@ impl VirtualEconomyContract {
         Ok(order_id)
     }
 
-    /// Execute a marketplace trade
+    /// Execute a marketplace trade.
+    ///
+    /// Holds the re-entrancy guard (#1056) for the whole trade, including
+    /// the `transfer_nft` call, and clears it on every exit path.
     pub fn execute_marketplace_trade(
         env: Env,
         buyer: Address,
         order_id: BytesN<32>,
     ) -> Result<(), VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::execute_marketplace_trade_unguarded(env.clone(), buyer, order_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn execute_marketplace_trade_unguarded(
+        env: Env,
+        buyer: Address,
+        order_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
         let mut order: MarketplaceOrder = env
             .storage()
             .persistent()
@@ -1245,13 +1258,25 @@ impl VirtualEconomyContract {
 
     /// Buy the auctioned NFT at its current computed price. Applies the
     /// same marketplace fee and creator royalty rules as fixed-price trades.
+    ///
+    /// Holds the re-entrancy guard (#1056) across the NFT transfer.
     pub fn purchase_dutch_auction(
         env: Env,
         buyer: Address,
         listing_id: BytesN<32>,
     ) -> Result<(), VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::purchase_dutch_auction_unguarded(env.clone(), buyer, listing_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn purchase_dutch_auction_unguarded(
+        env: Env,
+        buyer: Address,
+        listing_id: BytesN<32>,
+    ) -> Result<(), VirtualEconomyError> {
         let mut listing = Self::get_dutch_auction(env.clone(), listing_id.clone())?;
         if listing.status != OrderStatus::Active {
             return Err(VirtualEconomyError::AuctionNotActive);
@@ -1449,13 +1474,25 @@ impl VirtualEconomyContract {
     /// Mint the next unit from a drop at its current bonding-curve price.
     /// Payment (in the contract's internal currency) goes to the drop's
     /// creator, minus the standard marketplace fee.
+    ///
+    /// Holds the re-entrancy guard (#1056) across the NFT mint.
     pub fn mint_from_drop(
         env: Env,
         buyer: Address,
         drop_id: BytesN<32>,
     ) -> Result<BytesN<32>, VirtualEconomyError> {
         buyer.require_auth();
+        Self::enter_reentrancy_guard(&env)?;
+        let result = Self::mint_from_drop_unguarded(env.clone(), buyer, drop_id);
+        Self::exit_reentrancy_guard(&env);
+        result
+    }
 
+    fn mint_from_drop_unguarded(
+        env: Env,
+        buyer: Address,
+        drop_id: BytesN<32>,
+    ) -> Result<BytesN<32>, VirtualEconomyError> {
         let mut drop = Self::get_bonding_curve_drop(env.clone(), drop_id.clone())?;
         if !drop.active {
             return Err(VirtualEconomyError::DropInactive);
@@ -2092,6 +2129,8 @@ impl VirtualEconomyContract {
                 variance_rejections: 0,
                 stale_rejections: 0,
                 registered_pairs: 0,
+                sources: Vec::new(&env),
+                quotes: Vec::new(&env),
             };
             env.storage()
                 .instance()
@@ -2321,8 +2360,94 @@ impl VirtualEconomyContract {
         Ok(())
     }
 
+    /// Register an independent oracle source. Admin only, at most five (#1053).
+    pub fn register_oracle_source(env: Env, source: Address) -> Result<(), VirtualEconomyError> {
+        Self::require_admin(&env)?;
+        Self::validate_address(&env, &source)?;
+
+        let mut analytics = Self::get_oracle_analytics(env.clone());
+        if analytics.sources.len() >= MAX_ORACLE_SOURCES {
+            return Err(VirtualEconomyError::InvalidOracleConfig);
+        }
+        for i in 0..analytics.sources.len() {
+            if analytics.sources.get(i).unwrap() == source {
+                return Err(VirtualEconomyError::InvalidOracleConfig);
+            }
+        }
+        analytics.sources.push_back(source);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAnalytics, &analytics);
+        Ok(())
+    }
+
+    /// Store a quote from a registered oracle source (#1053).
+    ///
+    /// `source` must be registered and must authorize the call. Outliers are
+    /// accepted here; [`Self::resolve_oracle_price`] drops them via the median.
+    /// `submit_primary_price` and `submit_fallback_price` are unchanged.
+    pub fn submit_price(
+        env: Env,
+        source: Address,
+        asset_pair: BytesN<32>,
+        price: i128,
+    ) -> Result<(), VirtualEconomyError> {
+        source.require_auth();
+        if price <= 0 {
+            return Err(VirtualEconomyError::OracleInvalidPrice);
+        }
+
+        let mut analytics = Self::get_oracle_analytics(env.clone());
+        let mut registered = false;
+        for i in 0..analytics.sources.len() {
+            if analytics.sources.get(i).unwrap() == source {
+                registered = true;
+                break;
+            }
+        }
+        if !registered {
+            return Err(VirtualEconomyError::Unauthorized);
+        }
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::OraclePriceHistory(asset_pair.clone()))
+        {
+            return Err(VirtualEconomyError::InvalidAssetPair);
+        }
+
+        let now = env.ledger().timestamp();
+        let mut replaced = false;
+        for i in 0..analytics.quotes.len() {
+            let mut quote = analytics.quotes.get(i).unwrap();
+            if quote.source == source && quote.asset_pair == asset_pair {
+                quote.price = price;
+                quote.timestamp = now;
+                analytics.quotes.set(i, quote);
+                replaced = true;
+                break;
+            }
+        }
+        if !replaced {
+            analytics.quotes.push_back(OracleSourceQuote {
+                source,
+                asset_pair: asset_pair.clone(),
+                price,
+                timestamp: now,
+            });
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAnalytics, &analytics);
+        events::emit_oracle_price_updated(&env, &asset_pair, price, now, false);
+        Ok(())
+    }
+
     /// Resolve the best available price for an asset pair.
     ///
+    /// When independent sources are registered (#1053), this returns the
+    /// median of every non-stale source quote and requires at least two.
+    /// Otherwise the legacy primary/fallback path is unchanged:
     /// 1. Loads the last primary and fallback raw prices.
     /// 2. Delegates to [`OracleManager::resolve_price`] which applies
     ///    freshness and variance checks.
@@ -2333,6 +2458,11 @@ impl VirtualEconomyContract {
         env: Env,
         asset_pair: BytesN<32>,
     ) -> Result<i128, VirtualEconomyError> {
+        let sources = Self::get_oracle_analytics(env.clone()).sources;
+        if !sources.is_empty() {
+            return Self::resolve_median_oracle_price(env, asset_pair, sources);
+        }
+
         let config = Self::get_pair_config(&env, &asset_pair)?;
         let now = env.ledger().timestamp();
 
@@ -2457,6 +2587,8 @@ impl VirtualEconomyContract {
                 variance_rejections: 0,
                 stale_rejections: 0,
                 registered_pairs: 0,
+                sources: Vec::new(&env),
+                quotes: Vec::new(&env),
             })
     }
 
@@ -2969,6 +3101,35 @@ impl VirtualEconomyContract {
     // Internal Helper Functions
     // -------------------------------------------------------------------------
 
+    /// Acquire the marketplace re-entrancy lock (#1056).
+    ///
+    /// One instance-storage read plus one write. A nested call while the flag
+    /// is set returns [`VirtualEconomyError::Reentrancy`] without clearing the
+    /// outer call's lock.
+    fn enter_reentrancy_guard(env: &Env) -> Result<(), VirtualEconomyError> {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyGuard)
+            .unwrap_or(false);
+        if locked {
+            return Err(VirtualEconomyError::Reentrancy);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &true);
+        Ok(())
+    }
+
+    /// Release the lock. One instance-storage write of the same bool entry.
+    /// Called on success and on `Err` returns. A re-entrant rejection does
+    /// not call this, so the outer trade keeps the lock.
+    fn exit_reentrancy_guard(env: &Env) {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyGuard, &false);
+    }
+
     fn require_admin(env: &Env) -> Result<(), VirtualEconomyError> {
         let admin: Address = env
             .storage()
@@ -3175,6 +3336,42 @@ impl VirtualEconomyContract {
     // -------------------------------------------------------------------------
     // Private Oracle Helpers
     // -------------------------------------------------------------------------
+
+    /// Median of non-stale quotes from the registered sources (#1053).
+    fn resolve_median_oracle_price(
+        env: Env,
+        asset_pair: BytesN<32>,
+        sources: Vec<Address>,
+    ) -> Result<i128, VirtualEconomyError> {
+        let config = Self::get_pair_config(&env, &asset_pair)?;
+        let now = env.ledger().timestamp();
+        let multiplier = if config.stale_multiplier == 0 {
+            3
+        } else {
+            config.stale_multiplier
+        };
+        let max_age = OracleManager::max_staleness(config.update_interval, multiplier);
+        let quotes = Self::get_oracle_analytics(env.clone()).quotes;
+
+        let mut fresh = [0i128; MAX_ORACLE_SOURCES as usize];
+        let mut count = 0usize;
+        for i in 0..sources.len() {
+            let source = sources.get(i).unwrap();
+            for q in 0..quotes.len() {
+                let quote = quotes.get(q).unwrap();
+                if quote.source == source
+                    && quote.asset_pair == asset_pair
+                    && quote.price > 0
+                    && OracleManager::is_fresh(now, quote.timestamp, max_age)
+                {
+                    fresh[count] = quote.price;
+                    count += 1;
+                    break;
+                }
+            }
+        }
+        OracleManager::median_price(&mut fresh[..count])
+    }
 
     fn get_oracle_config(env: &Env) -> Result<OracleConfig, VirtualEconomyError> {
         env.storage()

@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::{Address, BytesN, Env, Vec};
 
 fn setup() -> (Env, Address, VirtualEconomyContractClient<'static>) {
     let env = Env::default();
