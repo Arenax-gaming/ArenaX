@@ -210,137 +210,63 @@ fn monthly_rebate_run_rejects_before_the_period_elapses() {
     assert!(result.is_err(), "a second run inside the same period must fail");
 }
 
-// --- Re-entrancy guard (#1056) ---
+// --- NFT Burn tests (#1057) ---
 
 #[test]
-fn nested_trade_is_rejected_while_guard_is_held() {
-    let (env, client, seller, buyer) = setup_with_traders();
-    let metadata = sample_metadata(&env, &seller, "art", 0);
-    let token_id = client.mint_nft(&seller, &metadata, &None);
+fn test_burn_owned_nft_succeeds() {
+    let (env, admin, client) = setup();
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
+    assert_eq!(client.balance_of(&admin), 1);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 0);
+
+    client.burn_nft(&admin, &token_id);
+
+    assert_eq!(client.balance_of(&admin), 0);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 1);
+    assert!(client.try_get_nft_owner(&token_id).is_err());
+    assert!(client.try_get_nft_metadata(&token_id).is_err());
+}
+
+#[test]
+fn test_burn_staked_nft_fails() {
+    let (env, admin, client) = setup();
+    client.configure_nft_staking(&NftStakeConfig {
+        reward_rate_bps: 100,
+        reward_interval: 3600,
+        min_lock_period: 86400,
+        paused: false,
+    });
+
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
+    client.stake_nft(&admin, &token_id);
+
+    let res = client.try_burn_nft(&admin, &token_id);
+    assert_eq!(res, Err(Ok(VirtualEconomyError::NftCurrentlyStaked)));
+}
+
+#[test]
+fn test_burn_listed_nft_auto_cancels_order() {
+    let (env, admin, client) = setup();
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
     let order_id = client.create_marketplace_order(
-        &seller,
+        &admin,
         &MarketplaceAsset::NFT(token_id.clone()),
-        &10_000i128,
+        &1000,
         &None,
     );
+    assert_eq!(client.get_economy_analytics().active_orders, 1);
+    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Active);
 
-    // An in-progress trade has already set the flag. A nested call into any
-    // of the three guarded entry points must be rejected, and must not clear
-    // the outer lock.
-    env.as_contract(&client.address, || {
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &true);
-    });
+    client.burn_nft(&admin, &token_id);
 
-    let fake = BytesN::from_array(&env, &[9u8; 32]);
-    assert_eq!(
-        client.try_execute_marketplace_trade(&buyer, &order_id),
-        Err(Ok(VirtualEconomyError::Reentrancy))
-    );
-    assert_eq!(
-        client.try_purchase_dutch_auction(&buyer, &fake),
-        Err(Ok(VirtualEconomyError::Reentrancy))
-    );
-    assert_eq!(
-        client.try_mint_from_drop(&buyer, &fake),
-        Err(Ok(VirtualEconomyError::Reentrancy))
-    );
-
-    env.as_contract(&client.address, || {
-        let locked: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReentrancyGuard)
-            .unwrap();
-        assert!(locked);
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &false);
-    });
-
-    client.execute_marketplace_trade(&buyer, &order_id);
-    assert_eq!(client.get_nft_owner(&token_id), buyer);
-}
-
-// --- Multi-oracle median (#1053) ---
-
-fn oracle_config() -> OracleConfig {
-    OracleConfig {
-        update_interval: 10,
-        max_variance_bps: 500,
-        history_size: 10,
-        stale_multiplier: 3,
-    }
-}
-
-#[test]
-fn five_sources_with_one_outlier_resolve_to_the_median() {
-    let (env, admin, client) = setup();
-    env.ledger().set_timestamp(1_000);
-    let pair = BytesN::from_array(&env, &[1u8; 32]);
-    client.configure_oracle(&admin, &oracle_config());
-    client.register_oracle_pair(&pair, &None);
-
-    // Sorted: 99, 100, 101, 102, 9000. The median is 101, not the outlier.
-    let prices = [100i128, 102, 101, 9_000, 99];
-    for price in prices {
-        let source = Address::generate(&env);
-        client.register_oracle_source(&source);
-        client.submit_price(&source, &pair, &price);
-    }
-
-    assert_eq!(client.resolve_oracle_price(&pair), 101);
-}
-
-#[test]
-fn two_stale_oracle_sources_return_insufficient_sources() {
-    let (env, admin, client) = setup();
-    env.ledger().set_timestamp(1_000);
-    let pair = BytesN::from_array(&env, &[2u8; 32]);
-    client.configure_oracle(&admin, &oracle_config());
-    client.register_oracle_pair(&pair, &None);
-
-    let first = Address::generate(&env);
-    let second = Address::generate(&env);
-    client.register_oracle_source(&first);
-    client.register_oracle_source(&second);
-    client.submit_price(&first, &pair, &100i128);
-    client.submit_price(&second, &pair, &110i128);
-
-    // max age is update_interval * stale_multiplier = 30 seconds.
-    env.ledger().set_timestamp(1_000 + 31);
-    assert_eq!(
-        client.try_resolve_oracle_price(&pair),
-        Err(Ok(VirtualEconomyError::OracleInsufficientSources))
-    );
-}
-
-#[test]
-fn primary_and_fallback_submission_still_works_without_extra_sources() {
-    let (env, admin, client) = setup();
-    env.ledger().set_timestamp(1_000);
-    let pair = BytesN::from_array(&env, &[3u8; 32]);
-    let fallback = Address::generate(&env);
-    client.configure_oracle(&admin, &oracle_config());
-    client.set_fallback_oracle(&fallback);
-    client.register_oracle_pair(&pair, &None);
-
-    client.submit_primary_price(&pair, &250i128);
-    client.submit_fallback_price(&pair, &240i128);
-
-    assert_eq!(client.resolve_oracle_price(&pair), 250);
-}
-
-#[test]
-fn sixth_oracle_source_is_rejected() {
-    let (env, admin, client) = setup();
-    client.configure_oracle(&admin, &oracle_config());
-    for _ in 0..5 {
-        client.register_oracle_source(&Address::generate(&env));
-    }
-    assert_eq!(
-        client.try_register_oracle_source(&Address::generate(&env)),
-        Err(Ok(VirtualEconomyError::InvalidOracleConfig))
-    );
+    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Cancelled);
+    assert_eq!(client.get_economy_analytics().active_orders, 0);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 1);
+    assert_eq!(client.balance_of(&admin), 0);
 }

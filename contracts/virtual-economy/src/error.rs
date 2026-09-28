@@ -59,7 +59,7 @@ pub enum VirtualEconomyError {
 
     // NFT staking errors
     NftStakingNotConfigured = 90,
-    NftAlreadyStaked = 91,
+    NftCurrentlyStaked = 91,
     NftNotStaked = 92,
     NftLockPeriodNotMet = 93,
     NftStakingPaused = 94,

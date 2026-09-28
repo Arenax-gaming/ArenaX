@@ -404,6 +404,7 @@ dependencies = [
  "hex",
  "jsonschema",
  "jsonwebtoken",
+ "log",
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",

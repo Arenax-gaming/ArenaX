@@ -27,6 +27,7 @@ pub enum DataKey {
 
     // Marketplace
     MarketplaceOrder(BytesN<32>),
+    NftActiveOrder(BytesN<32>),
 
     // Royalty & Licensing
     NFTLicense(BytesN<32>),
@@ -109,9 +110,26 @@ pub enum DataKey {
     /// dashboard visibility.
     RebateHistory(Address),
 
-    /// Set while a marketplace trade, Dutch-auction purchase, or drop mint
-    /// is in progress (#1056). Instance storage, one bool.
-    ReentrancyGuard,
+    // Storage TTL config (#1060)
+    TtlOrderMinLedgers,
+    TtlOrderTargetLedgers,
+    TtlNftMinLedgers,
+    TtlNftTargetLedgers,
+
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contracttype]
@@ -222,6 +240,7 @@ pub struct EconomyAnalytics {
     pub total_currency_minted: i128,
     pub total_currency_burned: i128,
     pub total_nfts_minted: u64,
+    pub total_nfts_burned: u64,
     pub total_trades_executed: u64,
     pub total_trade_volume: i128,
     pub total_fees_collected: i128,

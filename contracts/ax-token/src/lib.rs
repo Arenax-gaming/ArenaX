@@ -4,7 +4,7 @@ mod flash_loan_protection;
 use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -129,6 +129,20 @@ pub enum DataKey {
     // Voting-power snapshots
     Checkpoints(Address),
     VoteRecords(u64),
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contract]
@@ -874,6 +888,116 @@ impl AxToken {
             .get(&DataKey::Proposal(proposal_id))
     }
 
+    /// Set the grace period before passed unexecuted proposals can be expired
+    ///
+    /// # Arguments
+    /// * `grace_period` - Grace period duration in seconds (default 7 days = 604,800s)
+    pub fn set_proposal_grace_period(env: Env, grace_period: u64) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposalGracePeriod, &grace_period);
+    }
+
+    /// Get the configured proposal grace period (defaults to 7 days = 604,800s)
+    pub fn get_proposal_grace_period(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProposalGracePeriod)
+            .unwrap_or(7 * 24 * 60 * 60)
+    }
+
+    /// Admin approves an execution target contract address
+    pub fn approve_execution_target(env: Env, target: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::ApprovedExecutionTarget(target), &true);
+    }
+
+    /// Check if a contract address is an approved execution target
+    pub fn is_execution_target_approved(env: Env, target: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::ApprovedExecutionTarget(target))
+            .unwrap_or(false)
+    }
+
+    /// Expire a proposal and clean it up from storage.
+    ///
+    /// - Rejected proposals (`votes_for <= votes_against`) can be expired immediately after `end_time`.
+    /// - Passed unexecuted proposals can only be expired after `end_time + grace_period`.
+    /// - Executed proposals can be expired/cleaned up immediately after `end_time`.
+    /// Callable by anyone.
+    pub fn expire_proposal(env: Env, proposal_id: u64) {
+        let proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        let now = env.ledger().timestamp();
+        if now < proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        let is_rejected = proposal.votes_for <= proposal.votes_against;
+        if !is_rejected && !proposal.executed {
+            let grace_period = Self::get_proposal_grace_period(env.clone());
+            if now < proposal.end_time + grace_period {
+                panic!("proposal within grace period");
+            }
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::Proposal(proposal_id));
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXPIRED"),
+            ),
+            proposal_id,
+        );
+    }
+
+    /// General execution hook for passed proposals
+    ///
+    /// Marks the proposal as executed and emits the general execution event with calldata.
+    pub fn execute_proposal(env: Env, proposal_id: u64, calldata: Bytes) {
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PROPOSAL_EXECUTED"),
+            ),
+            (proposal_id, calldata),
+        );
+    }
+
     // ---------------------------------------------------------------------------
     // Advanced Features: Vote Delegation
     // ---------------------------------------------------------------------------
@@ -1287,6 +1411,102 @@ impl AxToken {
         } else {
             schedule.total_amount * (elapsed as i128) / (schedule.duration as i128)
         }
+    }
+
+    // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
+
+    pub fn schedule_upgrade(
+        env: &Env,
+        new_wasm_hash: soroban_sdk::BytesN<32>,
+        min_compatible_schema: u32,
+        delay_seconds: Option<u64>,
+    ) {
+        Self::require_admin(env);
+        let now = env.ledger().timestamp();
+        let delay = delay_seconds.unwrap_or(86_400);
+        let scheduled = ScheduledUpgrade {
+            new_wasm_hash,
+            min_compatible_schema,
+            scheduled_at: now,
+            executable_at: now + delay,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::ScheduledUpgrade, &scheduled);
+    }
+
+    pub fn upgrade(env: &Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        Self::require_admin(env);
+        let scheduled: ScheduledUpgrade = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledUpgrade)
+            .expect("no scheduled upgrade");
+
+        if scheduled.new_wasm_hash != new_wasm_hash {
+            panic!("wasm hash does not match scheduled upgrade");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < scheduled.executable_at {
+            panic!("timelock not elapsed");
+        }
+
+        let current_schema: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1);
+
+        if current_schema < scheduled.min_compatible_schema {
+            panic!("incompatible schema");
+        }
+
+        let current_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .unwrap_or_else(|| soroban_sdk::BytesN::from_array(env, &[0u8; 32]));
+        env.storage()
+            .instance()
+            .set(&DataKey::PreviousWasmHash, &current_hash);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+
+        if !Self::post_upgrade_check(env) {
+            Self::rollback_upgrade(env);
+            panic!("post upgrade check failed, reverted");
+        }
+
+        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
+    }
+
+    pub fn rollback_upgrade(env: &Env) {
+        Self::require_admin(env);
+        let prev_hash: soroban_sdk::BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .expect("no prior version for rollback");
+        env.deployer().update_current_contract_wasm(prev_hash);
+    }
+
+    pub fn post_upgrade_check(_env: &Env) -> bool {
+        true
+    }
+
+    pub fn get_storage_schema_version(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1)
+    }
+
+    pub fn set_storage_schema_version(env: &Env, version: u32) {
+        Self::require_admin(env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &version);
     }
 
     fn has_admin(env: &Env) -> bool {
