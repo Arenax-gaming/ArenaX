@@ -4,33 +4,7 @@ mod flash_loan_protection;
 use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, String, Symbol, Vec};
-
-// ---------------------------------------------------------------------------
-// Cross-contract client for StakingManager (#914: governance voting by stake)
-// ---------------------------------------------------------------------------
-//
-// We declare a minimal client interface that only exposes the two read-only
-// methods we need: `get_governance_weight` (tier-weighted reward stake) and
-// `get_voting_weight` (time-lock voting escrow weight).  Both return i128 and
-// take a single `Address` argument.  The actual staking-manager contract
-// address is stored under `DataKey::StakingContract` and must be set by the
-// admin via `set_staking_contract` before stake-weighted voting is active.
-//
-// If no staking contract is configured the governance system still works —
-// voting power falls back to the AX token checkpoint value alone.
-
-mod staking_client {
-    use soroban_sdk::{contractclient, Address, Env};
-
-    #[contractclient(name = "StakingClient")]
-    pub trait StakingInterface {
-        /// Tier-weighted governance power from reward staking positions.
-        fn get_governance_weight(env: Env, user: Address) -> i128;
-        /// Voting-escrow weight from time-locked AX positions.
-        fn get_voting_weight(env: Env, user: Address) -> i128;
-    }
-}
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -152,16 +126,6 @@ pub enum DataKey {
     Delegate(Address),
     Delegators(Address),
     DelegationHistory(Address),
-    // Voting-power snapshots
-    Checkpoints(Address),
-    VoteRecords(u64),
-    // Stake-weighted governance (#914)
-    /// Address of the StakingManager contract used to include staked AX and
-    /// voting-escrow positions in governance voting power.
-    StakingContract,
-    /// When `true`, voting power is square-rooted before tallying (quadratic
-    /// voting option, #914).  Defaults to `false` (linear).
-    QuadraticVoting,
 }
 
 #[contract]
@@ -219,6 +183,80 @@ impl AxToken {
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &to), amount);
 
         events::emit_mint(env, &to, amount);
+    }
+
+    /// Mint to many recipients in a single transaction.
+    ///
+    /// `recipients[i]` receives `amounts[i]`. All checks (length match,
+    /// positive amounts, supply cap) are evaluated before any storage is
+    /// written; if any of them fail, or an amount/total overflows, the
+    /// whole call panics and — as with any Soroban contract invocation —
+    /// every storage write already made in this call is rolled back, so
+    /// the batch is atomic: either every recipient gets minted or none do.
+    ///
+    /// Gas: repeated recipients in the input are merged in memory first, so
+    /// each unique address gets exactly one balance read and one write no
+    /// matter how many times it appears in the batch, and `TotalSupply` is
+    /// written once for the whole batch rather than once per entry. One
+    /// mint event is still emitted per input entry, matching what calling
+    /// `mint` that many times would have emitted.
+    pub fn batch_mint(env: &Env, recipients: Vec<Address>, amounts: Vec<i128>) {
+        Self::require_admin(env);
+
+        if recipients.len() != amounts.len() {
+            panic!("recipients and amounts length mismatch");
+        }
+        if recipients.is_empty() {
+            panic!("batch must not be empty");
+        }
+
+        let mut per_recipient_delta: Map<Address, i128> = Map::new(env);
+        let mut total: i128 = 0;
+
+        for i in 0..recipients.len() {
+            let to = recipients.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+
+            if amount <= 0 {
+                panic!("amount must be positive");
+            }
+
+            total = total.checked_add(amount).expect("batch total overflow");
+
+            let existing = per_recipient_delta.get(to.clone()).unwrap_or(0);
+            per_recipient_delta.set(
+                to,
+                existing.checked_add(amount).expect("batch total overflow"),
+            );
+        }
+
+        let current_supply = Self::total_supply(env);
+        let new_supply = current_supply.checked_add(total).expect("supply overflow");
+
+        let cap = Self::get_supply_cap(env.clone());
+        if cap > 0 && new_supply > cap {
+            panic!("supply cap exceeded");
+        }
+
+        for (to, delta) in per_recipient_delta.iter() {
+            let current_balance = Self::balance(env, to.clone());
+            let new_balance = current_balance
+                .checked_add(delta)
+                .expect("balance overflow");
+            env.storage()
+                .instance()
+                .set(&DataKey::Balance(to), &new_balance);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalSupply, &new_supply);
+
+        for i in 0..recipients.len() {
+            let to = recipients.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            events::emit_mint(env, &to, amount);
+        }
     }
 
     pub fn burn(env: &Env, from: Address, amount: i128) {
