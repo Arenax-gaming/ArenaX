@@ -209,3 +209,64 @@ fn monthly_rebate_run_rejects_before_the_period_elapses() {
     let result = client.try_calculate_monthly_rebates();
     assert!(result.is_err(), "a second run inside the same period must fail");
 }
+
+// --- NFT Burn tests (#1057) ---
+
+#[test]
+fn test_burn_owned_nft_succeeds() {
+    let (env, admin, client) = setup();
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
+    assert_eq!(client.balance_of(&admin), 1);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 0);
+
+    client.burn_nft(&admin, &token_id);
+
+    assert_eq!(client.balance_of(&admin), 0);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 1);
+    assert!(client.try_get_nft_owner(&token_id).is_err());
+    assert!(client.try_get_nft_metadata(&token_id).is_err());
+}
+
+#[test]
+fn test_burn_staked_nft_fails() {
+    let (env, admin, client) = setup();
+    client.configure_nft_staking(&NftStakeConfig {
+        reward_rate_bps: 100,
+        reward_interval: 3600,
+        min_lock_period: 86400,
+        paused: false,
+    });
+
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
+    client.stake_nft(&admin, &token_id);
+
+    let res = client.try_burn_nft(&admin, &token_id);
+    assert_eq!(res, Err(Ok(VirtualEconomyError::NftCurrentlyStaked)));
+}
+
+#[test]
+fn test_burn_listed_nft_auto_cancels_order() {
+    let (env, admin, client) = setup();
+    let metadata = sample_metadata(&env, &admin, "art", 100);
+    let token_id = client.mint_nft(&admin, &metadata, &None);
+
+    let order_id = client.create_marketplace_order(
+        &admin,
+        &MarketplaceAsset::NFT(token_id.clone()),
+        &1000,
+        &None,
+    );
+    assert_eq!(client.get_economy_analytics().active_orders, 1);
+    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Active);
+
+    client.burn_nft(&admin, &token_id);
+
+    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Cancelled);
+    assert_eq!(client.get_economy_analytics().active_orders, 0);
+    assert_eq!(client.get_economy_analytics().total_nfts_burned, 1);
+    assert_eq!(client.balance_of(&admin), 0);
+}
