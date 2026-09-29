@@ -137,6 +137,95 @@ jobs:
         chmod +x ./scripts/rollback-verify.sh
         ./scripts/rollback-verify.sh
 
+  # Backend (Rust) build & test
+  #
+  # Before this job the Rust backend was never compiled in CI — the
+  # `backend-migrations` job above only applies migrations — so `backend/` could
+  # rot without any check noticing.
+  #
+  # `continue-on-error` is deliberately true for now: `main` does not currently
+  # compile, so a blocking job would fail every unrelated PR. Once the backend
+  # builds green, delete `continue-on-error` and make this a required check.
+  backend-build:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: arenax
+          POSTGRES_PASSWORD: arenax
+          POSTGRES_DB: arenax_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arenax -d arenax_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # The realtime/session tests connect to Redis at 127.0.0.1:6379.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # `sqlx::query!` macros type-check against a live, migrated database, so
+      # DATABASE_URL must be reachable at compile time, not just at runtime.
+      DATABASE_URL: postgres://arenax:arenax@localhost:5432/arenax_ci
+      REDIS_URL: redis://localhost:6379
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # Same key as `backend-migrations` so the compiled-in sqlx-cli binary is
+    # shared between the two jobs instead of installed twice.
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin/sqlx
+        key: ${{ runner.os }}-cargo-sqlx-cli-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Cache backend target
+      uses: actions/cache@v3
+      with:
+        path: backend/target
+        key: ${{ runner.os }}-cargo-target-${{ hashFiles('backend/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-target-
+
+    - name: Install SQLx CLI
+      run: |
+        if ! command -v sqlx >/dev/null 2>&1; then
+          cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,postgres --locked
+        fi
+
+    - name: Apply migrations
+      run: ./scripts/migrate.sh
+
+    - name: Type check
+      run: cargo check --all-targets --locked
+
+    - name: Run tests
+      run: cargo test --all-targets --locked
+
   # Contracts CI (Rust)
   contracts:
     name: Contracts

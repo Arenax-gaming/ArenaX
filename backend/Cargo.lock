@@ -402,6 +402,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hex",
+ "hmac",
  "jsonschema",
  "jsonwebtoken",
  "log",
