@@ -5,6 +5,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
+import { reportErrorToDatadog } from "@/lib/monitoring";
 import { cn } from "@/lib/utils";
 
 // ─── Props / State ────────────────────────────────────────────────────────────
@@ -84,6 +85,17 @@ export class BracketErrorBoundary extends Component<
       tournamentId: this.props.tournamentId,
       tournamentName: this.props.tournamentName,
       errorId: this.state.errorId,
+      componentStack: info.componentStack,
+      retryCount: this.state.retryCount,
+    });
+
+    // Forward to Datadog RUM with tournament context (Issue #1100).
+    // PII is stripped from the error message and context before sending.
+    reportErrorToDatadog(error, {
+      source: "BracketErrorBoundary",
+      tournamentId: this.props.tournamentId,
+      tournamentName: this.props.tournamentName,
+      errorId: this.state.errorId ?? undefined,
       componentStack: info.componentStack,
       retryCount: this.state.retryCount,
     });

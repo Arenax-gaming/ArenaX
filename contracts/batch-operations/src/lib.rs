@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Bytes, Env, Vec};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -215,13 +215,18 @@ pub struct BatchOperations;
 impl BatchOperations {
     /// Validate that an address is non-zero and not a contract address.
     fn require_valid_address(env: &Env, address: &Address) -> Result<(), BatchError> {
-        // Reject zero account addresses (all zeros)
-        let zero_account = Address::from_account_id(BytesN::from_array(env, &[0u8; 32]));
-        if *address == zero_account {
+        // Account addresses stringify to `G...`, contract addresses to `C...`.
+        let strkey = address.to_string().to_bytes();
+        // Reject contract addresses
+        if strkey.get(0) != Some(b'G') {
             return Err(BatchError::InvalidAddress);
         }
-        // Reject contract addresses
-        if address.is_contract() {
+        // Reject zero account addresses (all-zero ed25519 public key)
+        let zero_account = Bytes::from_slice(
+            env,
+            b"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZKY",
+        );
+        if strkey == zero_account {
             return Err(BatchError::InvalidAddress);
         }
         Ok(())

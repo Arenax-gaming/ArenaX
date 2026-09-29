@@ -14,7 +14,7 @@
  */
 "use client";
 
-import React, { lazy, Suspense } from "react";
+import React, { lazy, memo, Suspense, useMemo } from "react";
 import {
   PieChart,
   Pie,
@@ -59,14 +59,32 @@ interface PlayerStatsChartsProps {
   stats: PlayerStatsData;
 }
 
-/* ── Win/Loss Pie ───────────────────────────────────────────────────────── */
+/* ── Data selectors ─────────────────────────────────────────────────────── */
 
-function WinLossPie({ wins, losses }: { wins: number; losses: number }) {
-  const data = [
+/**
+ * Above this many points, entry animations are skipped — animating long
+ * histories (12+ months) is the main source of re-render lag on mobile.
+ */
+const ANIMATION_POINT_LIMIT = 60;
+
+const WIN_LOSS_COLORS = [CHART_COLORS.success, CHART_COLORS.destructive];
+
+export function selectWinLossData(wins: number, losses: number) {
+  return [
     { name: "Wins", value: wins },
     { name: "Losses", value: losses },
   ];
-  const colors = [CHART_COLORS.success, CHART_COLORS.destructive];
+}
+
+export function selectAnimationDuration(points: number, duration: number) {
+  return points > ANIMATION_POINT_LIMIT ? 0 : duration;
+}
+
+/* ── Win/Loss Pie ───────────────────────────────────────────────────────── */
+
+const WinLossPie = memo(function WinLossPie({ wins, losses }: { wins: number; losses: number }) {
+  const data = useMemo(() => selectWinLossData(wins, losses), [wins, losses]);
+  const colors = WIN_LOSS_COLORS;
   const total = wins + losses;
 
   return (
@@ -109,11 +127,12 @@ function WinLossPie({ wins, losses }: { wins: number; losses: number }) {
       </ResponsiveContainer>
     </ChartCard>
   );
-}
+});
 
 /* ── KDA Line Chart ─────────────────────────────────────────────────────── */
 
-function KDAChart({ data }: { data: KDAPoint[] }) {
+const KDAChart = memo(function KDAChart({ data }: { data: KDAPoint[] }) {
+  const animationDuration = selectAnimationDuration(data.length, 900);
   return (
     <ChartCard
       title="KDA Over Time"
@@ -139,7 +158,7 @@ function KDAChart({ data }: { data: KDAPoint[] }) {
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 5 }}
-            animationDuration={900}
+            animationDuration={animationDuration}
           />
           <Line
             type="monotone"
@@ -148,7 +167,7 @@ function KDAChart({ data }: { data: KDAPoint[] }) {
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 5 }}
-            animationDuration={900}
+            animationDuration={animationDuration}
           />
           <Line
             type="monotone"
@@ -157,17 +176,18 @@ function KDAChart({ data }: { data: KDAPoint[] }) {
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 5 }}
-            animationDuration={900}
+            animationDuration={animationDuration}
           />
         </LineChart>
       </ResponsiveContainer>
     </ChartCard>
   );
-}
+});
 
 /* ── XP Area Chart ──────────────────────────────────────────────────────── */
 
-function XPProgressChart({ data }: { data: XPPoint[] }) {
+const XPProgressChart = memo(function XPProgressChart({ data }: { data: XPPoint[] }) {
+  const animationDuration = selectAnimationDuration(data.length, 900);
   return (
     <ChartCard
       title="XP Progression"
@@ -192,17 +212,17 @@ function XPProgressChart({ data }: { data: XPPoint[] }) {
             stroke={CHART_COLORS.primary}
             strokeWidth={2}
             fill="url(#xpGradient)"
-            animationDuration={900}
+            animationDuration={animationDuration}
           />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>
   );
-}
+});
 
 /* ── Composed export ────────────────────────────────────────────────────── */
 
-export function PlayerStatsCharts({ stats }: PlayerStatsChartsProps) {
+export const PlayerStatsCharts = memo(function PlayerStatsCharts({ stats }: PlayerStatsChartsProps) {
   return (
     <section aria-label="Player Performance Charts">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -214,4 +234,4 @@ export function PlayerStatsCharts({ stats }: PlayerStatsChartsProps) {
       </div>
     </section>
   );
-}
+});

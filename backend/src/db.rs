@@ -26,7 +26,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::api_error::ApiError;
 use crate::config::{Config, DatabaseConfig, MigrationMode};
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    ConnectOptions, PgPool,
+};
+use std::str::FromStr;
 use tracing::{info, warn};
 
 pub type DbPool = PgPool;
@@ -198,16 +202,53 @@ impl GuardedPool {
 }
 
 pub async fn create_pool(config: &Config) -> Result<DbPool, sqlx::Error> {
+    // `statement_timeout` (#1084) cancels a query server-side instead of
+    // letting a slow query or deadlock hold a pool connection indefinitely,
+    // which would otherwise eventually exhaust the whole pool. Set via a
+    // Postgres startup option so it applies to every connection the pool
+    // opens, not just the first.
+    let mut connect_options = PgConnectOptions::from_str(&config.database.url)?
+        .options([(
+            "statement_timeout",
+            config.database.statement_timeout_ms.to_string(),
+        )]);
+
+    // Slow-query logging (#1084): sqlx logs the SQL text and duration for
+    // any query slower than the threshold, at WARN. This covers every query
+    // executed through the pool without touching each call site; see
+    // `metrics::time_query` for the complementary per-named-query
+    // Prometheus histogram.
+    connect_options = connect_options.log_slow_statements(
+        log::LevelFilter::Warn,
+        Duration::from_millis(config.database.slow_query_threshold_ms),
+    );
+    // Routine query logging at DEBUG (not WARN) so normal traffic doesn't
+    // spam logs at the level ops actually watches.
+    connect_options = connect_options.log_statements(log::LevelFilter::Debug);
+
     let pool = PgPoolOptions::new()
         .max_connections(config.database.max_connections)
         .acquire_timeout(Duration::from_secs(config.database.acquire_timeout_secs))
         .test_before_acquire(true)
-        .connect(&config.database.url)
+        .connect_with(connect_options)
         .await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     Ok(pool)
+}
+
+/// Postgres SQLSTATE for a statement cancelled by the connection's
+/// `statement_timeout` (#1084).
+pub const STATEMENT_TIMEOUT_SQLSTATE: &str = "57014";
+
+/// True when `err` is a query cancelled by `statement_timeout` rather than
+/// some other database error.
+pub fn is_query_timeout(err: &sqlx::Error) -> bool {
+    matches!(
+        err,
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some(STATEMENT_TIMEOUT_SQLSTATE)
+    )
 }
 
 /// Build a pool with its circuit breaker attached.
@@ -287,6 +328,8 @@ mod tests {
             health_check_interval_secs: 10,
             circuit_failure_threshold: threshold,
             circuit_open_secs: open_secs,
+            statement_timeout_ms: 5000,
+            slow_query_threshold_ms: 200,
         }
     }
 
@@ -407,5 +450,48 @@ mod tests {
         assert_eq!(breaker.state(), CircuitState::Closed);
         breaker.record_failure();
         assert_eq!(breaker.state(), CircuitState::Open);
+    }
+
+    #[test]
+    fn is_query_timeout_ignores_non_database_errors() {
+        assert!(!is_query_timeout(&sqlx::Error::RowNotFound));
+    }
+}
+
+/// Requires a live Postgres (set `TEST_DATABASE_URL`, e.g.
+/// `postgresql://test:test@localhost/arenax_test`), same convention as
+/// `service::idempotency_tests` — CI provides one; this is a no-op locally
+/// without it.
+#[cfg(test)]
+mod statement_timeout_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_query_past_statement_timeout_is_cancelled_with_query_timeout() {
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgresql://test:test@localhost/arenax_test".to_string());
+
+        let connect_options = match PgConnectOptions::from_str(&database_url) {
+            Ok(opts) => opts.options([("statement_timeout", "100")]),
+            Err(_) => return, // no test database configured — skip
+        };
+
+        let pool = match PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(connect_options)
+            .await
+        {
+            Ok(pool) => pool,
+            Err(_) => return, // no test database reachable — skip
+        };
+
+        // 200ms sleep against a 100ms statement_timeout must be cancelled.
+        let result = sqlx::query("SELECT pg_sleep(0.2)").execute(&pool).await;
+
+        let err = result.expect_err("query exceeding statement_timeout must return an error");
+        assert!(
+            is_query_timeout(&err),
+            "expected a statement_timeout (SQLSTATE 57014) error, got: {err:?}"
+        );
     }
 }

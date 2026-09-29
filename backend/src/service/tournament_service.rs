@@ -3,18 +3,213 @@ use crate::db::DbPool;
 use crate::models::*;
 use crate::service::soroban_service::{SorobanService, TxStatus};
 use crate::service::stellar_service::stellar_strkey_encode;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use redis::Client as RedisClient;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct JobRecord {
+    pub id: Uuid,
+    pub job_type: String,
+    pub payload: serde_json::Value,
+    pub status: String,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub next_run_at: DateTime<Utc>,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone)]
+pub struct JobQueue {
+    db_pool: DbPool,
+}
+
+impl JobQueue {
+    pub fn new(db_pool: DbPool) -> Self {
+        Self { db_pool }
+    }
+
+    pub async fn enqueue(
+        &self,
+        job_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<JobRecord, ApiError> {
+        let id = Uuid::new_v4();
+        let now = Utc::now();
+
+        sqlx::query!(
+            r#"
+            INSERT INTO jobs (id, job_type, payload, status, attempts, max_attempts, next_run_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+            id,
+            job_type,
+            payload,
+            "pending",
+            0i32,
+            3i32,
+            now,
+            now,
+            now
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        self.get_by_id(id).await
+    }
+
+    pub async fn get_by_id(&self, job_id: Uuid) -> Result<JobRecord, ApiError> {
+        let job: JobRecord = sqlx::query_as(
+            r#"
+            SELECT id, job_type, payload, status, attempts, max_attempts, next_run_at, result, error, created_at, updated_at, started_at, completed_at
+            FROM jobs
+            WHERE id = $1
+            "#,
+        )
+        .bind(job_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(job)
+    }
+
+    pub async fn claim_next_job(&self) -> Result<Option<JobRecord>, ApiError> {
+        let job: Option<JobRecord> = sqlx::query_as(
+            r#"
+            SELECT id, job_type, payload, status, attempts, max_attempts, next_run_at, result, error, created_at, updated_at, started_at, completed_at
+            FROM jobs
+            WHERE status = 'pending'
+              AND attempts < max_attempts
+              AND next_run_at <= NOW()
+            ORDER BY next_run_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            "#,
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if let Some(job) = job.clone() {
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'running', started_at = NOW(), updated_at = NOW(), attempts = attempts + 1
+                WHERE id = $1
+                "#,
+                job.id
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        }
+
+        Ok(job)
+    }
+
+    pub async fn mark_done(
+        &self,
+        job_id: Uuid,
+        result: serde_json::Value,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE jobs
+            SET status = 'done', result = $2, error = NULL, updated_at = NOW(), completed_at = NOW()
+            WHERE id = $1
+            "#,
+            job_id,
+            result
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+
+    pub async fn mark_failed(
+        &self,
+        job_id: Uuid,
+        attempts: i32,
+        max_attempts: i32,
+        error: &str,
+    ) -> Result<(), ApiError> {
+        let should_retry = attempts < max_attempts;
+        if should_retry {
+            let backoff_secs = 30_i64 * (1_i64 << attempts.min(3));
+            let next_run_at = Utc::now() + chrono::Duration::seconds(backoff_secs);
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'pending', error = $2, updated_at = NOW(), next_run_at = $3
+                WHERE id = $1
+                "#,
+                job_id,
+                error,
+                next_run_at
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        } else {
+            sqlx::query!(
+                r#"
+                UPDATE jobs
+                SET status = 'failed', error = $2, updated_at = NOW(), completed_at = NOW()
+                WHERE id = $1
+                "#,
+                job_id,
+                error
+            )
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn record_dead_letter(
+        &self,
+        job_id: Option<Uuid>,
+        payload: serde_json::Value,
+        error: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO job_dead_letters (id, job_id, payload, error, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            "#,
+            Uuid::new_v4(),
+            job_id,
+            payload,
+            error
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(())
+    }
+}
+
 pub struct TournamentService {
     db_pool: DbPool,
+    pub job_queue: Arc<JobQueue>,
     redis_client: Option<Arc<RedisClient>>,
     soroban_service: Option<Arc<SorobanService>>,
     prize_contract_id: Option<String>,
@@ -24,7 +219,8 @@ pub struct TournamentService {
 impl TournamentService {
     pub fn new(db_pool: DbPool) -> Self {
         Self {
-            db_pool,
+            db_pool: db_pool.clone(),
+            job_queue: Arc::new(JobQueue::new(db_pool)),
             redis_client: None,
             soroban_service: None,
             prize_contract_id: None,
@@ -49,6 +245,59 @@ impl TournamentService {
         self.prize_contract_id = Some(prize_contract_id);
         self.admin_secret = Some(admin_secret);
         self
+    }
+
+    pub async fn enqueue_generate_bracket_job(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<JobRecord, ApiError> {
+        self.job_queue
+            .enqueue(
+                "generate_bracket",
+                serde_json::json!({ "tournament_id": tournament_id }),
+            )
+            .await
+    }
+
+    pub async fn enqueue_prize_distribution_job(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<JobRecord, ApiError> {
+        self.job_queue
+            .enqueue(
+                "distribute_prizes",
+                serde_json::json!({ "tournament_id": tournament_id }),
+            )
+            .await
+    }
+
+    pub async fn get_job_status(&self, job_id: Uuid) -> Result<JobRecord, ApiError> {
+        self.job_queue.get_by_id(job_id).await
+    }
+
+    pub async fn process_job(&self, job: JobRecord) -> Result<serde_json::Value, ApiError> {
+        let tournament_id: Uuid = serde_json::from_value(
+            job.payload
+                .get("tournament_id")
+                .cloned()
+                .ok_or_else(|| ApiError::bad_request("Missing tournament_id in job payload"))?,
+        )
+        .map_err(|_| ApiError::bad_request("Invalid tournament_id in job payload"))?;
+
+        let result = match job.job_type.as_str() {
+            "generate_bracket" => {
+                self.generate_tournament_bracket(tournament_id).await?;
+                serde_json::json!({ "tournament_id": tournament_id, "status": "done" })
+            }
+            "distribute_prizes" => {
+                self.trigger_prize_distribution(tournament_id).await?;
+                serde_json::json!({ "tournament_id": tournament_id, "status": "done" })
+            }
+            _ => return Err(ApiError::bad_request(format!("Unknown job type: {}", job.job_type))),
+        };
+
+        self.job_queue.mark_done(job.id, result.clone()).await?;
+        Ok(result)
     }
 
     /// Create a new tournament
@@ -2837,6 +3086,398 @@ impl TournamentService {
         Ok(TournamentBracketResponse {
             tournament_id,
             rounds: bracket_rounds,
+        })
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Financial reporting
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Total prize pool for a tournament and how much of it has been awarded
+    /// to winners vs. actually confirmed paid on-chain.
+    pub async fn get_tournament_prize_pool_summary(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentPrizePoolSummary, ApiError> {
+        let (total_amount, currency) = sqlx::query_as::<_, (i64, String)>(
+            "SELECT total_amount, currency FROM prize_pools WHERE tournament_id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or_else(|| ApiError::not_found("Prize pool not found"))?;
+
+        let (distributed_amount, paid_amount, winner_count) = sqlx::query_as::<_, (i64, i64, i64)>(
+            r#"
+            SELECT
+                COALESCE(SUM(prize_amount), 0) as distributed_amount,
+                COALESCE(SUM(prize_amount) FILTER (WHERE prize_tx_hash IS NOT NULL), 0) as paid_amount,
+                COUNT(*) FILTER (WHERE prize_amount IS NOT NULL) as winner_count
+            FROM tournament_participants
+            WHERE tournament_id = $1
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(TournamentPrizePoolSummary {
+            tournament_id,
+            currency,
+            total_amount,
+            distributed_amount,
+            paid_amount,
+            pending_amount: distributed_amount - paid_amount,
+            remaining_amount: total_amount - distributed_amount,
+            winner_count,
+        })
+    }
+
+    /// Entry-fee revenue collected for a tournament vs. how much of it was
+    /// funded into the prize pool.
+    pub async fn get_tournament_revenue_breakdown(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentRevenueBreakdown, ApiError> {
+        let (entry_fee, entry_fee_currency) = sqlx::query_as::<_, (i64, String)>(
+            "SELECT entry_fee, entry_fee_currency FROM tournaments WHERE id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+
+        let (total_participants, paid_participants) = sqlx::query_as::<_, (i64, i64)>(
+            r#"
+            SELECT
+                COUNT(*) as total_participants,
+                COUNT(*) FILTER (WHERE entry_fee_paid) as paid_participants
+            FROM tournament_participants
+            WHERE tournament_id = $1
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // The prize pool row is always created alongside the tournament (see
+        // `create_prize_pool`), but this stays a soft lookup so a revenue
+        // report can never fail solely because that join is missing.
+        let prize_pool_funded = sqlx::query_as::<_, (i64,)>(
+            "SELECT total_amount FROM prize_pools WHERE tournament_id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .map(|(amount,)| amount)
+        .unwrap_or(0);
+
+        let gross_entry_fee_revenue = paid_participants * entry_fee;
+
+        Ok(TournamentRevenueBreakdown {
+            tournament_id,
+            entry_fee,
+            entry_fee_currency,
+            total_participants,
+            paid_participants,
+            unpaid_participants: total_participants - paid_participants,
+            gross_entry_fee_revenue,
+            prize_pool_funded,
+            platform_revenue: gross_entry_fee_revenue - prize_pool_funded,
+        })
+    }
+
+    /// Per-winner prize distribution tracking for a tournament: what was
+    /// awarded, whether it was paid out on-chain, and any failures recorded
+    /// in `prize_distribution_failures`.
+    pub async fn get_prize_distribution_tracking(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Vec<PrizeDistributionEntry>, ApiError> {
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                String,
+                Option<i32>,
+                i64,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<i32>,
+            ),
+        >(
+            r#"
+            SELECT
+                tp.user_id, u.username, tp.final_rank, tp.prize_amount, tp.prize_currency,
+                tp.prize_tx_hash, pdf.reason, pdf.retry_count
+            FROM tournament_participants tp
+            JOIN users u ON tp.user_id = u.id
+            LEFT JOIN prize_distribution_failures pdf
+                ON pdf.tournament_id = tp.tournament_id AND pdf.user_id = tp.user_id
+            WHERE tp.tournament_id = $1 AND tp.prize_amount IS NOT NULL
+            ORDER BY tp.final_rank ASC NULLS LAST
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    user_id,
+                    username,
+                    final_rank,
+                    prize_amount,
+                    prize_currency,
+                    prize_tx_hash,
+                    failure_reason,
+                    retry_count,
+                )| {
+                    let status = if prize_tx_hash.is_some() {
+                        PrizeDistributionStatus::Paid
+                    } else if failure_reason.is_some() {
+                        PrizeDistributionStatus::Failed
+                    } else {
+                        PrizeDistributionStatus::Pending
+                    };
+
+                    PrizeDistributionEntry {
+                        user_id,
+                        username,
+                        final_rank: final_rank.unwrap_or(0),
+                        prize_amount,
+                        prize_currency: prize_currency.unwrap_or_else(|| "UNKNOWN".to_string()),
+                        status,
+                        prize_tx_hash,
+                        failure_reason,
+                        retry_count,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// Full financial report for a single tournament: prize pool summary,
+    /// entry-fee revenue breakdown, and per-winner distribution tracking.
+    pub async fn get_tournament_financial_report(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentFinancialReport, ApiError> {
+        let tournament_name = sqlx::query_as::<_, (String,)>(
+            "SELECT name FROM tournaments WHERE id = $1",
+        )
+        .bind(tournament_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .map(|(name,)| name)
+        .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+
+        let prize_pool = self.get_tournament_prize_pool_summary(tournament_id).await?;
+        let revenue = self.get_tournament_revenue_breakdown(tournament_id).await?;
+        let prize_distribution = self.get_prize_distribution_tracking(tournament_id).await?;
+
+        Ok(TournamentFinancialReport {
+            tournament_id,
+            tournament_name,
+            generated_at: Utc::now(),
+            prize_pool,
+            revenue,
+            prize_distribution,
+        })
+    }
+
+    /// Tax report of aggregated tournament winnings per payee for a given
+    /// calendar year and currency, flagging payees who cross
+    /// `reporting_threshold` (the standard 1099 threshold is 60000, i.e.
+    /// $600.00 in cents) as needing a 1099.
+    ///
+    /// This aggregates winnings already recorded in `tournament_participants`;
+    /// it does not collect or validate TIN/SSN or mailing address, so treat
+    /// `requires_1099` as a worklist for finance to cross-reference against
+    /// KYC records before filing.
+    pub async fn get_tax_report(
+        &self,
+        tax_year: i32,
+        currency: &str,
+        reporting_threshold: i64,
+    ) -> Result<TaxReport, ApiError> {
+        let year_start = Utc
+            .with_ymd_and_hms(tax_year, 1, 1, 0, 0, 0)
+            .single()
+            .ok_or_else(|| ApiError::bad_request("invalid tax_year"))?;
+        let year_end = Utc
+            .with_ymd_and_hms(tax_year + 1, 1, 1, 0, 0, 0)
+            .single()
+            .ok_or_else(|| ApiError::bad_request("invalid tax_year"))?;
+
+        let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, i64, i64)>(
+            r#"
+            SELECT
+                tp.user_id,
+                u.username,
+                u.email,
+                u.display_name,
+                SUM(tp.prize_amount) as total_winnings,
+                COUNT(DISTINCT tp.tournament_id) as tournaments_won
+            FROM tournament_participants tp
+            JOIN users u ON tp.user_id = u.id
+            WHERE tp.prize_amount IS NOT NULL
+              AND tp.prize_currency = $1
+              AND tp.updated_at >= $2 AND tp.updated_at < $3
+            GROUP BY tp.user_id, u.username, u.email, u.display_name
+            ORDER BY total_winnings DESC
+            "#,
+        )
+        .bind(currency)
+        .bind(year_start)
+        .bind(year_end)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let entries: Vec<TaxReportEntry> = rows
+            .into_iter()
+            .map(
+                |(user_id, username, email, display_name, total_winnings, tournaments_won)| {
+                    TaxReportEntry {
+                        user_id,
+                        username,
+                        email,
+                        display_name,
+                        tax_year,
+                        total_winnings,
+                        currency: currency.to_string(),
+                        tournaments_won,
+                        requires_1099: total_winnings >= reporting_threshold,
+                    }
+                },
+            )
+            .collect();
+
+        let total_reportable_winnings = entries
+            .iter()
+            .filter(|e| e.requires_1099)
+            .map(|e| e.total_winnings)
+            .sum();
+        let payees_requiring_1099 = entries.iter().filter(|e| e.requires_1099).count() as i64;
+
+        Ok(TaxReport {
+            tax_year,
+            currency: currency.to_string(),
+            reporting_threshold,
+            entries,
+            total_reportable_winnings,
+            payees_requiring_1099,
+        })
+    }
+
+    /// Month-by-month entry-fee revenue and prize payouts over a date range,
+    /// for a single currency.
+    pub async fn get_monthly_revenue_report(
+        &self,
+        currency: &str,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<MonthlyRevenueReport, ApiError> {
+        if start_date > end_date {
+            return Err(ApiError::bad_request("start_date must be before end_date"));
+        }
+
+        let revenue_rows = sqlx::query_as::<_, (NaiveDate, i64, i64)>(
+            r#"
+            SELECT
+                date_trunc('month', tp.registered_at)::date as month,
+                COUNT(DISTINCT tp.tournament_id) as tournaments_count,
+                SUM(t.entry_fee) as revenue
+            FROM tournament_participants tp
+            JOIN tournaments t ON tp.tournament_id = t.id
+            WHERE tp.entry_fee_paid = TRUE
+              AND t.entry_fee_currency = $1
+              AND tp.registered_at >= $2 AND tp.registered_at < $3
+            GROUP BY month
+            ORDER BY month
+            "#,
+        )
+        .bind(currency)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let distributed_rows = sqlx::query_as::<_, (NaiveDate, i64)>(
+            r#"
+            SELECT
+                date_trunc('month', tp.updated_at)::date as month,
+                SUM(tp.prize_amount) as distributed
+            FROM tournament_participants tp
+            WHERE tp.prize_amount IS NOT NULL
+              AND tp.prize_currency = $1
+              AND tp.updated_at >= $2 AND tp.updated_at < $3
+            GROUP BY month
+            ORDER BY month
+            "#,
+        )
+        .bind(currency)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let mut by_month: BTreeMap<NaiveDate, MonthlyRevenueEntry> = BTreeMap::new();
+
+        for (month, tournaments_count, revenue) in revenue_rows {
+            let entry = by_month.entry(month).or_insert_with(|| MonthlyRevenueEntry {
+                month,
+                tournaments_count: 0,
+                total_entry_fee_revenue: 0,
+                total_prize_distributed: 0,
+                net_revenue: 0,
+            });
+            entry.tournaments_count = tournaments_count;
+            entry.total_entry_fee_revenue = revenue;
+        }
+
+        for (month, distributed) in distributed_rows {
+            let entry = by_month.entry(month).or_insert_with(|| MonthlyRevenueEntry {
+                month,
+                tournaments_count: 0,
+                total_entry_fee_revenue: 0,
+                total_prize_distributed: 0,
+                net_revenue: 0,
+            });
+            entry.total_prize_distributed = distributed;
+        }
+
+        let months: Vec<MonthlyRevenueEntry> = by_month
+            .into_values()
+            .map(|mut entry| {
+                entry.net_revenue = entry.total_entry_fee_revenue - entry.total_prize_distributed;
+                entry
+            })
+            .collect();
+
+        let total_entry_fee_revenue = months.iter().map(|m| m.total_entry_fee_revenue).sum();
+        let total_prize_distributed = months.iter().map(|m| m.total_prize_distributed).sum();
+
+        Ok(MonthlyRevenueReport {
+            currency: currency.to_string(),
+            start_date,
+            end_date,
+            months,
+            total_entry_fee_revenue,
+            total_prize_distributed,
         })
     }
 }

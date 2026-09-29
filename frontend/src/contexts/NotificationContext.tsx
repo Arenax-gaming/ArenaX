@@ -18,9 +18,21 @@ import {
 } from "@/types/notification";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { alertUser } from "@/lib/notificationAlerts";
 
 const PERSISTENT_STORAGE_KEY = "arenax_notifications";
 const PREFERENCES_STORAGE_KEY = "arenax_notification_preferences";
+const MUTE_STORAGE_KEY = "arenax_notification_muted";
+
+/**
+ * Channel other tabs of this origin listen on (Issue #886).
+ *
+ * Only one tab holds the notification WebSocket at a time in practice, so a
+ * badge that updates only in that tab leaves every other tab stale until it is
+ * refreshed. Rebroadcasting each arrival keeps the count identical everywhere
+ * without opening a socket per tab.
+ */
+const SYNC_CHANNEL = "arenax:notifications";
 const MAX_LOCAL_NOTIFICATIONS = 50;
 const MAX_TOASTS = 4;
 const NOTIFICATIONS_PAGE_SIZE = 20;
@@ -75,6 +87,10 @@ interface NotificationContextType {
   preferences: NotificationPreferences;
   updatePreference: (type: NotificationType, enabled: boolean) => void;
   setAllPreferences: (enabled: boolean) => void;
+
+  /** Sound and vibration alerts silenced for this browser (Issue #886). */
+  alertsMuted: boolean;
+  toggleAlertsMuted: () => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(
@@ -128,6 +144,33 @@ function savePreferences(preferences: NotificationPreferences) {
   }
 }
 
+/**
+ * Sound/vibration mute, per browser profile.
+ *
+ * Stored separately from `NotificationPreferences`, which decides *whether a
+ * notification is shown at all*. Muting is about how loudly an arrival is
+ * announced — a user who wants match alerts but not a chime in an open-plan
+ * office is making a different choice, and folding the two together would
+ * force them to turn off the notification to silence it.
+ */
+function loadMuted(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(MUTE_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveMuted(muted: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(MUTE_STORAGE_KEY, String(muted));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function generateId() {
   return `notif_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -142,6 +185,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     loadPreferences
   );
   const toastTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const [alertsMuted, setAlertsMuted] = useState(loadMuted);
+  const alertsMutedRef = useRef(alertsMuted);
+  const syncChannelRef = useRef<BroadcastChannel | null>(null);
   const preferencesRef = useRef(preferences);
   const notificationsCountRef = useRef(persistentNotifications.length);
   const [hasMoreNotifications, setHasMoreNotifications] = useState(true);
@@ -149,6 +195,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     preferencesRef.current = preferences;
   }, [preferences]);
+
+  useEffect(() => {
+    alertsMutedRef.current = alertsMuted;
+  }, [alertsMuted]);
+
+  const toggleAlertsMuted = useCallback(() => {
+    setAlertsMuted((current) => {
+      const next = !current;
+      saveMuted(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     notificationsCountRef.current = persistentNotifications.length;
@@ -205,8 +263,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return () => clearInterval(interval);
   }, [refreshNotifications]);
 
+  /** Tell sibling tabs about a local change. Never throws. */
+  const broadcast = useCallback((message: Record<string, unknown>) => {
+    try {
+      syncChannelRef.current?.postMessage(message);
+    } catch {
+      // A closed channel is not a reason to fail the local update.
+    }
+  }, []);
+
   const markAsRead = useCallback(
     (id: string) => {
+      broadcast({ kind: "read", id });
       setPersistentNotifications((prev) => {
         const updated = prev.map((n) =>
           n.id === id ? { ...n, read: true } : n
@@ -218,10 +286,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         return updated;
       });
     },
-    [user?.id]
+    [broadcast, user?.id]
   );
 
   const markAllAsRead = useCallback(() => {
+    broadcast({ kind: "read_all" });
     setPersistentNotifications((prev) => {
       const updated = prev.map((n) => ({ ...n, read: true }));
       if (user?.id) {
@@ -230,10 +299,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       saveLocalNotifications(updated);
       return updated;
     });
-  }, [user?.id]);
+  }, [broadcast, user?.id]);
 
   const removeNotification = useCallback(
     (id: string) => {
+      broadcast({ kind: "removed", id });
       setPersistentNotifications((prev) => {
         const updated = prev.filter((n) => n.id !== id);
         if (user?.id) {
@@ -243,7 +313,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         return updated;
       });
     },
-    [user?.id]
+    [broadcast, user?.id]
   );
 
   const addToast = useCallback(
@@ -378,11 +448,19 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     savePreferences(next);
   }, []);
 
-  const handleIncomingNotification = useCallback(
+  /**
+   * Apply an arrival to local state.
+   *
+   * Split out from `handleIncomingNotification` so a notification relayed from
+   * another tab lands in the badge without re-broadcasting it — which would
+   * otherwise bounce between tabs forever — and without a second chime on
+   * every open tab.
+   */
+  const applyIncomingNotification = useCallback(
     (notification: PersistentNotification) => {
-      if (!preferencesRef.current[notification.type]) return;
-
       setPersistentNotifications((prev) => {
+        // De-duplicated by id: the same notification can arrive from the
+        // socket and from a sibling tab's broadcast.
         const next = [
           notification,
           ...prev.filter((existing) => existing.id !== notification.id),
@@ -393,6 +471,32 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         }
         return next;
       });
+    },
+    [user?.id]
+  );
+
+  const handleIncomingNotification = useCallback(
+    (notification: PersistentNotification) => {
+      if (!preferencesRef.current[notification.type]) return;
+
+      applyIncomingNotification(notification);
+
+      // Other tabs of this origin update their badge from here. Only the tab
+      // holding the socket broadcasts, so exactly one copy is sent.
+      try {
+        syncChannelRef.current?.postMessage({
+          kind: "notification",
+          notification,
+        });
+      } catch {
+        // A closed channel must not stop the notification being shown.
+      }
+
+      // Alerts fire only for notifications that actually arrived here — never
+      // for ones replayed from storage on mount, and never when muted.
+      if (!alertsMutedRef.current && !notification.read) {
+        void alertUser();
+      }
 
       const allowToast = notification.metadata?.toast !== false;
       if (allowToast) {
@@ -404,8 +508,61 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         });
       }
     },
-    [addToast, user?.id]
+    [addToast, applyIncomingNotification]
   );
+
+  /**
+   * Keep the badge identical across tabs (Issue #886).
+   *
+   * Read state is broadcast too: marking everything read in one tab and
+   * finding the other still showing "7 unread" is the same staleness the
+   * issue is about, seen from the other direction.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+      return;
+    }
+
+    const channel = new BroadcastChannel(SYNC_CHANNEL);
+    syncChannelRef.current = channel;
+
+    channel.onmessage = (event: MessageEvent) => {
+      const data = event.data as
+        | { kind: "notification"; notification: PersistentNotification }
+        | { kind: "read"; id: string }
+        | { kind: "read_all" }
+        | { kind: "removed"; id: string }
+        | undefined;
+
+      if (!data) return;
+
+      switch (data.kind) {
+        case "notification":
+          applyIncomingNotification(data.notification);
+          break;
+        case "read":
+          setPersistentNotifications((prev) =>
+            prev.map((n) => (n.id === data.id ? { ...n, read: true } : n))
+          );
+          break;
+        case "read_all":
+          setPersistentNotifications((prev) =>
+            prev.map((n) => ({ ...n, read: true }))
+          );
+          break;
+        case "removed":
+          setPersistentNotifications((prev) =>
+            prev.filter((n) => n.id !== data.id)
+          );
+          break;
+      }
+    };
+
+    return () => {
+      syncChannelRef.current = null;
+      channel.close();
+    };
+  }, [applyIncomingNotification]);
 
   useEffect(() => {
     if (!user?.id || typeof window === "undefined") return;
@@ -542,6 +699,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [handleIncomingNotification, user?.id]);
 
   const value: NotificationContextType = {
+    alertsMuted,
+    toggleAlertsMuted,
     persistentNotifications,
     unreadCount,
     markAsRead,

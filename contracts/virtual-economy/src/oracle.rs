@@ -24,6 +24,9 @@ pub const MAX_VARIANCE_BPS: u32 = 10_000;
 /// Hard cap on stored history entries (ring-buffer size).
 pub const MAX_HISTORY: u32 = 100;
 
+/// Maximum number of independent oracle sources that can be registered (#1053).
+pub const MAX_ORACLE_SOURCES: u32 = 5;
+
 pub struct OracleManager;
 
 impl OracleManager {
@@ -240,6 +243,27 @@ impl OracleManager {
             }
         }
         (min_price, max_price)
+    }
+
+    /// Median of `prices`. Requires at least two values.
+    ///
+    /// Odd counts take the middle element, so a single outlier cannot become
+    /// the result. Even counts take the integer average of the two middle
+    /// elements.
+    pub fn median_price(prices: &mut [i128]) -> Result<i128, VirtualEconomyError> {
+        let n = prices.len();
+        if n < 2 {
+            return Err(VirtualEconomyError::OracleInsufficientSources);
+        }
+        prices.sort_unstable();
+        let mid = n / 2;
+        if n % 2 == 1 {
+            Ok(prices[mid])
+        } else {
+            let left = prices[mid - 1];
+            let right = prices[mid];
+            Ok(left.saturating_add(right) / 2)
+        }
     }
 
     /// Derive the ledger-time maximum age for a freshness check from the

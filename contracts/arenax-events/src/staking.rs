@@ -241,6 +241,51 @@ pub fn emit_flexible_unstaked(
     .publish(env);
 }
 
+// ─── Time-Lock Voting Escrow (#912) ──────────────────────────────────────────
+
+#[contractevent(topics = ["ArenaXStake_v1", "VE_LOCKED"])]
+pub struct VotingEscrowLocked {
+    pub user: Address,
+    pub amount: i128,
+    pub duration: u64,
+    pub unlock_at: u64,
+    pub voting_weight: i128,
+}
+
+#[contractevent(topics = ["ArenaXStake_v1", "VE_WITHDRAWN"])]
+pub struct VotingEscrowWithdrawn {
+    pub user: Address,
+    pub amount: i128,
+    pub penalty: i128,
+}
+
+pub fn emit_voting_escrow_locked(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+    duration: u64,
+    unlock_at: u64,
+    voting_weight: i128,
+) {
+    VotingEscrowLocked {
+        user: user.clone(),
+        amount,
+        duration,
+        unlock_at,
+        voting_weight,
+    }
+    .publish(env);
+}
+
+pub fn emit_voting_escrow_withdrawn(env: &Env, user: &Address, amount: i128, penalty: i128) {
+    VotingEscrowWithdrawn {
+        user: user.clone(),
+        amount,
+        penalty,
+    }
+    .publish(env);
+}
+
 // ─── LP Incentive Events ─────────────────────────────────────────────────────
 
 #[contractevent(topics = ["ArenaXStake_v1", "LP_POOL_CREATED"])]

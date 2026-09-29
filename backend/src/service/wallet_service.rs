@@ -1,6 +1,7 @@
 use crate::models::{
     Transaction, TransactionResponse, TransactionStatus, TransactionType, Wallet, WalletResponse,
 };
+use crate::service::payment_provider::{DepositInitiation, PaymentProvider, PaymentProviderKind};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use anyhow::Result;
 use chrono::Utc;
@@ -35,14 +36,41 @@ pub type DbPool = Arc<PgPool>;
 pub struct WalletService {
     db_pool: DbPool,
     event_bus: Option<crate::realtime::event_bus::EventBus>,
+    /// Payment gateway, chosen by `PAYMENT_PROVIDER` (#1069). The wallet
+    /// service only talks to gateways through this trait object.
+    payment_provider: Arc<dyn PaymentProvider>,
 }
 
 impl WalletService {
+    /// Build a wallet service using the gateway selected by `PAYMENT_PROVIDER`.
+    ///
+    /// `main.rs` rejects an invalid `PAYMENT_PROVIDER` at startup, so the
+    /// fallback below only matters if the variable changes at runtime.
     pub fn new(db_pool: DbPool, event_bus: Option<crate::realtime::event_bus::EventBus>) -> Self {
+        let provider = PaymentProviderKind::from_env().unwrap_or_else(|e| {
+            tracing::error!(error = %e, "invalid PAYMENT_PROVIDER, falling back to paystack");
+            PaymentProviderKind::Paystack
+        });
+        Self::with_provider(db_pool, event_bus, provider.build())
+    }
+
+    /// Build a wallet service with an explicit gateway (used by tests and by
+    /// callers that choose the provider themselves).
+    pub fn with_provider(
+        db_pool: DbPool,
+        event_bus: Option<crate::realtime::event_bus::EventBus>,
+        payment_provider: Arc<dyn PaymentProvider>,
+    ) -> Self {
         Self {
             db_pool,
             event_bus,
+            payment_provider,
         }
+    }
+
+    /// Identifier of the active gateway, e.g. `"paystack"`.
+    pub fn payment_provider_name(&self) -> &'static str {
+        self.payment_provider.name()
     }
 
     // ========================================================================
@@ -638,48 +666,48 @@ impl WalletService {
     // PAYMENT VERIFICATION
     // ========================================================================
 
-    /// Verify payment with Paystack
-    pub async fn verify_paystack_payment(
+    /// Start a deposit with the active gateway.
+    pub async fn initiate_provider_deposit(
         &self,
+        reference: &str,
+        amount: i64,
+        currency: &str,
+    ) -> Result<DepositInitiation, WalletError> {
+        self.payment_provider
+            .initiate_deposit(reference, amount, currency)
+            .await
+            .map_err(|e| {
+                tracing::warn!(provider = self.payment_provider.name(), error = %e, "deposit initiation failed");
+                WalletError::PaymentVerificationFailed
+            })
+    }
+
+    /// Verify a deposit with the gateway the caller says it paid through.
+    ///
+    /// Only the configured gateway is enabled. A `provider` that names any
+    /// other gateway is treated like an unknown one was before (#1069): not
+    /// verified, rather than an error, so the HTTP response shape is unchanged.
+    pub async fn verify_payment(
+        &self,
+        provider: &str,
         reference: &str,
         expected_amount: i64,
     ) -> Result<bool, WalletError> {
-        // TODO: Implement actual Paystack API call
-        // For now, this is a placeholder
-
-        // let client = reqwest::Client::new();
-        // let paystack_secret = std::env::var("PAYSTACK_SECRET_KEY")
-        //     .expect("PAYSTACK_SECRET_KEY must be set");
-
-        // let response = client
-        //     .get(&format!("https://api.paystack.co/transaction/verify/{}", reference))
-        //     .header("Authorization", format!("Bearer {}", paystack_secret))
-        //     .send()
-        //     .await
-        //     .map_err(|e| WalletError::PaymentVerificationFailed)?;
-
-        // if !response.status().is_success() {
-        //     return Err(WalletError::PaymentVerificationFailed);
-        // }
-
-        // let data: PaystackResponse = response.json().await
-        //     .map_err(|e| WalletError::PaymentVerificationFailed)?;
-
-        // Ok(data.data.status == "success" && data.data.amount == expected_amount)
-
-        tracing::warn!("Paystack verification not implemented, returning true for testing");
-        Ok(true)
-    }
-
-    /// Verify payment with Flutterwave
-    pub async fn verify_flutterwave_payment(
-        &self,
-        transaction_id: &str,
-        expected_amount: i64,
-    ) -> Result<bool, WalletError> {
-        // TODO: Implement actual Flutterwave API call
-        tracing::warn!("Flutterwave verification not implemented, returning true for testing");
-        Ok(true)
+        if provider != self.payment_provider.name() {
+            tracing::warn!(
+                requested = provider,
+                enabled = self.payment_provider.name(),
+                "payment verification requested for a provider that is not enabled"
+            );
+            return Ok(false);
+        }
+        self.payment_provider
+            .verify_deposit(reference, expected_amount)
+            .await
+            .map_err(|e| {
+                tracing::warn!(provider, error = %e, "payment verification failed");
+                WalletError::PaymentVerificationFailed
+            })
     }
 
     /// Process entry fee payment
@@ -704,27 +732,9 @@ impl WalletService {
             .await?;
 
         match payment_method {
-            "paystack" => {
+            method if method == self.payment_provider.name() => {
                 if let Some(ref ref_id) = reference {
-                    let verified = self.verify_paystack_payment(ref_id, amount).await?;
-                    if verified {
-                        self.add_fiat_balance(user_id, amount).await?;
-                        self.update_transaction_status(
-                            transaction.id,
-                            TransactionStatus::Completed,
-                        )
-                        .await?;
-                        transaction.status = TransactionStatus::Completed;
-                    } else {
-                        self.update_transaction_status(transaction.id, TransactionStatus::Failed)
-                            .await?;
-                        transaction.status = TransactionStatus::Failed;
-                    }
-                }
-            }
-            "flutterwave" => {
-                if let Some(ref ref_id) = reference {
-                    let verified = self.verify_flutterwave_payment(ref_id, amount).await?;
+                    let verified = self.verify_payment(method, ref_id, amount).await?;
                     if verified {
                         self.add_fiat_balance(user_id, amount).await?;
                         self.update_transaction_status(
@@ -784,5 +794,147 @@ impl WalletService {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod payment_provider_tests {
+    use super::*;
+    use crate::service::payment_provider::{PaymentError, PaymentStatus};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    /// Records every call so tests can assert which gateway method ran.
+    struct MockProvider {
+        name: &'static str,
+        calls: Arc<Mutex<Vec<String>>>,
+        verify_result: bool,
+    }
+
+    #[async_trait]
+    impl PaymentProvider for MockProvider {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        async fn initiate_deposit(
+            &self,
+            reference: &str,
+            amount: i64,
+            currency: &str,
+        ) -> Result<DepositInitiation, PaymentError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("initiate_deposit:{reference}:{amount}:{currency}"));
+            Ok(DepositInitiation {
+                reference: reference.to_string(),
+                authorization_url: Some("https://pay.example/checkout".to_string()),
+            })
+        }
+
+        async fn verify_deposit(
+            &self,
+            reference: &str,
+            expected_amount: i64,
+        ) -> Result<bool, PaymentError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("verify_deposit:{reference}:{expected_amount}"));
+            Ok(self.verify_result)
+        }
+
+        async fn initiate_withdrawal(
+            &self,
+            _reference: &str,
+            _amount: i64,
+            _currency: &str,
+            _destination: &str,
+        ) -> Result<PaymentStatus, PaymentError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push("initiate_withdrawal".to_string());
+            Ok(PaymentStatus::Pending)
+        }
+
+        async fn check_status(&self, _reference: &str) -> Result<PaymentStatus, PaymentError> {
+            self.calls.lock().unwrap().push("check_status".to_string());
+            Ok(PaymentStatus::Pending)
+        }
+    }
+
+    fn service_with(provider: MockProvider) -> WalletService {
+        // The pool is never used by these tests; connect_lazy doesn't dial.
+        let pool = PgPool::connect_lazy("postgres://localhost/arenax_test").unwrap();
+        WalletService::with_provider(Arc::new(pool), None, Arc::new(provider))
+    }
+
+    fn mock(name: &'static str, verify_result: bool) -> (MockProvider, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider = MockProvider {
+            name,
+            calls: calls.clone(),
+            verify_result,
+        };
+        (provider, calls)
+    }
+
+    #[tokio::test]
+    async fn initiate_deposit_calls_the_injected_provider() {
+        let (provider, calls) = mock("mockpay", true);
+        let service = service_with(provider);
+
+        let init = service
+            .initiate_provider_deposit("ref-1", 5_000, "NGN")
+            .await
+            .unwrap();
+
+        assert_eq!(init.reference, "ref-1");
+        assert_eq!(
+            init.authorization_url.as_deref(),
+            Some("https://pay.example/checkout")
+        );
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["initiate_deposit:ref-1:5000:NGN"]
+        );
+        assert_eq!(service.payment_provider_name(), "mockpay");
+    }
+
+    #[tokio::test]
+    async fn verify_payment_delegates_to_the_enabled_provider() {
+        let (provider, calls) = mock("mockpay", true);
+        let service = service_with(provider);
+
+        assert!(service
+            .verify_payment("mockpay", "ref-2", 700)
+            .await
+            .unwrap());
+        assert_eq!(*calls.lock().unwrap(), vec!["verify_deposit:ref-2:700"]);
+    }
+
+    #[tokio::test]
+    async fn verify_payment_passes_through_a_failed_verification() {
+        let (provider, _calls) = mock("mockpay", false);
+        let service = service_with(provider);
+
+        assert!(!service
+            .verify_payment("mockpay", "ref-3", 700)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn verify_payment_for_a_provider_that_is_not_enabled_is_false_and_never_calls_it() {
+        let (provider, calls) = mock("mockpay", true);
+        let service = service_with(provider);
+
+        assert!(!service
+            .verify_payment("flutterwave", "ref-4", 700)
+            .await
+            .unwrap());
+        assert!(calls.lock().unwrap().is_empty());
     }
 }

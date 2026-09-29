@@ -1,4 +1,7 @@
-//! LP (Liquidity Provider) incentives module.
+//! LP (Liquidity Provider) incentives crate.
+//!
+//! Extracted from `staking-manager` so the types and math are a proper
+//! workspace member (issue #1050).
 //!
 //! Covers five acceptance criteria:
 //!
@@ -18,9 +21,10 @@
 //!    per-user `LpPerformanceRecord` stored on-chain; admin can also push
 //!    off-chain perf snapshots via `record_lp_performance`.
 //!
-//! This module owns the storage types and all side-effect-free math so the
-//! contract methods in `lib.rs` stay thin.  `#[contracttype]` structs must be
-//! defined here (or re-exported) before use in `lib.rs`.
+//! This crate owns the storage types and all side-effect-free math so the
+//! contract methods in `staking-manager` stay thin.  `#[contracttype]` structs
+//! are defined here and re-exported by `staking-manager` before use.
+#![no_std]
 
 use soroban_sdk::{contracttype, Address};
 
@@ -101,20 +105,25 @@ pub struct LpPerformanceRecord {
 
 /// Pro-rata time-based LP reward.
 ///
-/// Accrued = (position.amount / pool.total_liquidity) * reward_rate_bps * elapsed
+/// Accrued = position.amount * reward_rate_bps * elapsed
 ///         / (SECS_PER_YEAR * BPS_DENOM)
 ///
-/// Uses a simplified formula that avoids division by zero when total_liquidity
-/// == 0 (returns 0 in that case).
+/// The pool-level rate passes through to each position: a pool emitting
+/// `rate_bps` of its total liquidity per year, split pro-rata by share,
+/// simplifies to `rate_bps` on each LP's own deposited amount — so no
+/// division by `total_liquidity` is needed (dividing by it would shrink
+/// every payout to a fraction of a token, effectively paying zero).
+///
+/// Returns 0 when the pool has no liquidity or the position is empty.
 pub fn calc_lp_rewards(pos: &LpPosition, rate_bps: u32, total_liquidity: i128, now: u64) -> i128 {
     if total_liquidity <= 0 || pos.amount <= 0 {
         return 0;
     }
     let elapsed = now.saturating_sub(pos.last_reward_ts) as i128;
     // Scale up to avoid integer truncation: compute numerator first.
-    // reward = pos.amount * rate_bps * elapsed / (total_liquidity * SECS_PER_YEAR * BPS_DENOM)
+    // reward = pos.amount * rate_bps * elapsed / (SECS_PER_YEAR * BPS_DENOM)
     let numerator = pos.amount * rate_bps as i128 * elapsed;
-    let denominator = total_liquidity * SECS_PER_YEAR as i128 * BPS_DENOM;
+    let denominator = SECS_PER_YEAR as i128 * BPS_DENOM;
     if denominator == 0 {
         0
     } else {
@@ -269,6 +278,7 @@ pub fn dynamic_rate(
 #[cfg(test)]
 mod math_tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::Env;
 
     fn dummy_pos(env: &Env, amount: i128, last_ts: u64) -> LpPosition {
@@ -288,11 +298,13 @@ mod math_tests {
     #[test]
     fn test_calc_lp_rewards_basic() {
         let env = Env::default();
-        // 10 % APY, depositor owns 50 % of pool, elapsed 1 year → 5 % of deposit
+        // 10 % APY on a 1_000_000 deposit for 1 year → 100_000 rewards,
+        // regardless of how big the rest of the pool is (the pool-level rate
+        // passes through to each position's own amount).
         let pos = dummy_pos(&env, 1_000_000, 0);
         let reward = calc_lp_rewards(&pos, 1_000, 2_000_000, SECS_PER_YEAR);
-        // expected: 1_000_000 * 1_000 * 31_536_000 / (2_000_000 * 31_536_000 * 10_000) = 50
-        assert_eq!(reward, 50);
+        // expected: 1_000_000 * 1_000 * 31_536_000 / (31_536_000 * 10_000) = 100_000
+        assert_eq!(reward, 100_000);
     }
 
     #[test]

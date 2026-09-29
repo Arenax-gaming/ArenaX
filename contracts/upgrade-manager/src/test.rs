@@ -152,3 +152,31 @@ fn pause_flag_persists_across_storage_reload() {
     assert!(flag);
     assert!(client.is_paused());
 }
+
+#[test]
+fn upgrade_manifest_recorded_and_queryable() {
+    let env = Env::default();
+    let (client, _admin, _governor) = setup(&env);
+    let proposer = Address::generate(&env);
+
+    let proposal_id = client.propose_upgrade_with_manifest(
+        &proposer,
+        &symbol_short!("token"),
+        &wasm_hash(&env, 5),
+        &String::from_str(&env, "v2 schema migration"),
+        &1000u64,
+        &2u32,
+        &1u32,
+    );
+    assert_eq!(proposal_id, 1);
+
+    let manifest = client.get_upgrade_manifest(&1u32).expect("manifest found");
+    assert_eq!(manifest.proposal_id, 1);
+    assert_eq!(manifest.schema_version, 2);
+    assert_eq!(manifest.min_compatible_schema, 1);
+    assert_eq!(manifest.proposed_by, proposer);
+
+    let manifests = client.get_contract_manifests(&symbol_short!("token"));
+    assert_eq!(manifests.len(), 1);
+    assert_eq!(manifests.get(0).unwrap().schema_version, 2);
+}

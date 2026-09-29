@@ -2,11 +2,14 @@
 
 import { Component, ReactNode } from "react";
 import { PageError } from "@/components/common/PageError";
+import { reportErrorToDatadog } from "@/lib/monitoring";
 
 interface Props {
   children: ReactNode;
   title?: string;
   message?: string;
+  /** Called when an error is caught — useful for parent-level reporting. */
+  onError?: (error: Error, info: React.ErrorInfo) => void;
 }
 
 interface State {
@@ -23,6 +26,15 @@ export class PageErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[PageErrorBoundary]", error, info);
+
+    // Report to Datadog RUM with user ID + route context. PII is stripped
+    // before anything is sent (Issue #1100).
+    reportErrorToDatadog(error, {
+      source: "PageErrorBoundary",
+      componentStack: info.componentStack,
+    });
+
+    this.props.onError?.(error, info);
   }
 
   reset = () => this.setState({ hasError: false, error: null });

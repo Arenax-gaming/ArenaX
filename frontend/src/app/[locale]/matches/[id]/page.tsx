@@ -4,10 +4,13 @@ import { MatchHubPageClient } from "./MatchHubPageClient";
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ spectate?: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
+  const { spectate } = await searchParams;
   const match = matchHubDetails[id];
 
   // Real matches are fetched live client-side and won't always be present in
@@ -20,7 +23,10 @@ export async function generateMetadata({
     };
   }
 
-  const title = `${match.player1.username} vs ${match.player2.username} — ArenaX`;
+  // #1089: a spectator link gets a title that makes the shared context clear.
+  const title = spectate === "true"
+    ? `Watch: ${match.player1.username} vs ${match.player2.username} — ArenaX`
+    : `${match.player1.username} vs ${match.player2.username} — ArenaX`;
   const description = match.notes
     ? match.notes.slice(0, 155)
     : `${match.tournamentName} · ${match.roundLabel} — watch live match details on ArenaX.`;

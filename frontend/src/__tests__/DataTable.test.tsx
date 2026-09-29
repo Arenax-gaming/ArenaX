@@ -103,4 +103,33 @@ describe('DataTable', () => {
 
     expect(handleRowClick).toHaveBeenCalledWith(testData[0]);
   });
+
+  // ── Column pinning (#1094) ──────────────────────────────────────────────
+
+  it('applies position: sticky to a pinned column', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['name']} />);
+
+    const header = screen.getByRole('columnheader', { name: 'Name' });
+    expect(header).toHaveStyle({ position: 'sticky' });
+
+    const cell = screen.getByText('Alice Johnson').closest('td')!;
+    expect(cell).toHaveStyle({ position: 'sticky' });
+  });
+
+  it('does not pin columns that are not listed in pinnedColumns', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['name']} />);
+
+    const emailHeader = screen.getByRole('columnheader', { name: 'Email' });
+    expect(emailHeader).not.toHaveStyle({ position: 'sticky' });
+  });
+
+  it('gives the last pinned column a shadow to mark the scroll boundary', () => {
+    render(<DataTable columns={columns} data={testData} pinnedColumns={['id', 'name']} />);
+
+    const idHeader = screen.getByRole('columnheader', { name: 'ID' });
+    const nameHeader = screen.getByRole('columnheader', { name: 'Name' });
+
+    expect(idHeader.className).not.toMatch(/shadow-/);
+    expect(nameHeader.className).toMatch(/shadow-/);
+  });
 });

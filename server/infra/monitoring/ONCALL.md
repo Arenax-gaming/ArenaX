@@ -36,6 +36,7 @@ docker compose -f server/infra/monitoring/docker-compose.yml up -d
 | `HighProcessMemory` / `BackendHighProcessMemory` | both | RSS > 1.5GB | warning | 10m |
 | `ElevatedApplicationErrors` | arenax-server | high/critical app errors > 1/s | warning | 5m |
 | `BackendDbPoolNearExhaustion` | arenax-backend | pool >90% active connections | warning | 5m |
+| `SorobanDlqBacklog` | arenax-backend | `soroban_dlq_depth` > 10 | critical | 5m |
 
 Definitions live in `alert.rules.yml` (arenax-server) and
 `backend-alert.rules.yml` (arenax-backend). Adjust thresholds there as

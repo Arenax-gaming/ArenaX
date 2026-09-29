@@ -141,6 +141,10 @@ where
             correlation_id = field::Empty,
             trace_id = field::Empty,
             latency_ms = field::Empty,
+            // Recorded by `ClaimsExt::claims()` the first time a handler
+            // authenticates the caller — absent on unauthenticated requests.
+            // Slow-query logs (#1084) inherit it from this ambient span.
+            user_id = field::Empty,
         );
         span.set_parent(parent_cx);
 
