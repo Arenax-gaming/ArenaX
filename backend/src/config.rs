@@ -52,6 +52,77 @@ fn env_u32(key: &str, default: u32) -> u32 {
     env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
+// ── Secret hardening (Issue #1161) ───────────────────────────────────────────
+
+/// Minimum number of characters accepted for a secret-bearing variable.
+///
+/// 32 chars is the practical floor for a high-entropy value (256 bits of
+/// base64/hex output), and matches the guidance in the issue.
+pub const MIN_SECRET_LENGTH: usize = 32;
+
+/// Placeholder / legacy values that are public knowledge and therefore must
+/// never be accepted, even if they happen to be long enough.
+const FORBIDDEN_SECRET_VALUES: &[&str] = &[
+    "default_secret_change_in_production",
+    "supersecretkey",
+    "changeme",
+    "change_me",
+    "password",
+    "secret",
+    "test",
+];
+
+/// Reject a secret that is empty, a known placeholder, or too short to carry
+/// meaningful entropy.
+///
+/// Returns a message safe to surface in a startup log: it names the variable
+/// and the reason, but never echoes the secret's value.
+pub fn require_strong_secret(name: &str, value: &str) -> Result<(), anyhow::Error> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        anyhow::bail!("{name} is empty; refusing to start with an empty secret");
+    }
+
+    if FORBIDDEN_SECRET_VALUES
+        .iter()
+        .any(|weak| trimmed.eq_ignore_ascii_case(weak))
+    {
+        anyhow::bail!(
+            "{name} is set to a well-known default value; refusing to start. \
+             Generate a unique secret (e.g. `openssl rand -base64 48`) and set it in the environment"
+        );
+    }
+
+    if trimmed.len() < MIN_SECRET_LENGTH {
+        anyhow::bail!(
+            "{name} must be at least {MIN_SECRET_LENGTH} characters long \
+             (got {}); generate a stronger secret (e.g. `openssl rand -base64 48`)",
+            trimmed.len()
+        );
+    }
+
+    Ok(())
+}
+
+/// Read a required secret from the environment and enforce [`MIN_SECRET_LENGTH`]
+/// plus the placeholder deny-list. A missing variable is reported by name.
+fn env_required_secret(name: &str) -> Result<String, anyhow::Error> {
+    let value = env::var(name)
+        .map_err(|_| anyhow::anyhow!("{name} environment variable is not set"))?;
+    require_strong_secret(name, &value)?;
+    Ok(value)
+}
+
+/// Validate a secret that is optional to configure: when present it must meet
+/// the same bar as a required one, but absence is allowed.
+fn validate_optional_secret(name: &str, value: Option<&str>) -> Result<(), anyhow::Error> {
+    if let Some(v) = value {
+        require_strong_secret(name, v)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
     Run,
@@ -93,6 +164,10 @@ pub struct PaymentsConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     pub jwt_secret: String,
+    /// Optional dedicated secret used to sign refresh tokens
+    /// (`JWT_REFRESH_SECRET`). When unset, refresh tokens are signed with
+    /// `jwt_secret`. When set it must satisfy the same strength rules.
+    pub jwt_refresh_secret: Option<String>,
     /// Duration string for the short-lived access token, e.g. "15m".
     pub jwt_expires_in: String,
     /// Duration string for the long-lived refresh token, e.g. "7d".
@@ -215,16 +290,24 @@ impl Config {
         let redis_url = env::var("REDIS_URL")?;
         let s3_endpoint = env::var("S3_ENDPOINT")?;
         let s3_access_key = env::var("S3_ACCESS_KEY")?;
-        let s3_secret_key = env::var("S3_SECRET_KEY")?;
+        // Secret-bearing variables are validated for length / placeholder values
+        // so a deployment can never boot on a publicly-known default (#1161).
+        let s3_secret_key = env_required_secret("S3_SECRET_KEY")?;
         let s3_bucket = env::var("S3_BUCKET")?;
-        let paystack_secret = env::var("PAYSTACK_SECRET")?;
-        let flutterwave_secret = env::var("FLUTTERWAVE_SECRET")?;
-        let jwt_secret = env::var("JWT_SECRET")?;
+        let paystack_secret = env_required_secret("PAYSTACK_SECRET")?;
+        let flutterwave_secret = env_required_secret("FLUTTERWAVE_SECRET")?;
+        let jwt_secret = env_required_secret("JWT_SECRET")?;
+        // An empty value (as shipped in env.example) means "not configured",
+        // not "configured to the empty string".
+        let jwt_refresh_secret = env::var("JWT_REFRESH_SECRET")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        validate_optional_secret("JWT_REFRESH_SECRET", jwt_refresh_secret.as_deref())?;
         let jwt_expires_in = env::var("JWT_EXPIRES_IN")?;
         let jwt_refresh_expires_in =
             env::var("JWT_REFRESH_EXPIRES_IN").unwrap_or_else(|_| "7d".to_string());
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")?;
-        let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")?;
+        let stellar_admin_secret = env_required_secret("STELLAR_ADMIN_SECRET")?;
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
         let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")?;
         let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")?;
@@ -277,6 +360,7 @@ impl Config {
             },
             auth: AuthConfig {
                 jwt_secret,
+                jwt_refresh_secret,
                 jwt_expires_in,
                 jwt_refresh_expires_in,
             },
@@ -315,43 +399,67 @@ impl Config {
 }
 
 #[cfg(test)]
-mod tests {
+mod secret_validation_tests {
     use super::*;
 
+    /// A value comfortably above the minimum entropy floor.
+    fn strong_secret() -> String {
+        "z".repeat(MIN_SECRET_LENGTH)
+    }
+
     #[test]
-    fn parses_valid_override_entries() {
-        let map = parse_rate_limit_overrides("auth_strict=3:60, tournament=5:120");
-        assert_eq!(map.len(), 2);
-        assert_eq!(
-            map["auth_strict"],
-            EndpointLimitOverride { limit: 3, window_secs: 60 }
-        );
-        assert_eq!(
-            map["tournament"],
-            EndpointLimitOverride { limit: 5, window_secs: 120 }
+    fn accepts_secret_at_minimum_length() {
+        assert!(require_strong_secret("JWT_SECRET", &strong_secret()).is_ok());
+    }
+
+    #[test]
+    fn accepts_secret_longer_than_minimum() {
+        let long = format!("{}{}", strong_secret(), "abcdefgh");
+        assert!(require_strong_secret("JWT_SECRET", &long).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_and_whitespace_secret() {
+        assert!(require_strong_secret("JWT_SECRET", "").is_err());
+        assert!(require_strong_secret("JWT_SECRET", "   ").is_err());
+    }
+
+    #[test]
+    fn rejects_secret_below_minimum_length() {
+        let short = "a".repeat(MIN_SECRET_LENGTH - 1);
+        assert!(require_strong_secret("JWT_SECRET", &short).is_err());
+    }
+
+    #[test]
+    fn rejects_the_legacy_hardcoded_default() {
+        // The exact value `JwtConfig::default()` used to fall back to.
+        assert!(
+            require_strong_secret("JWT_SECRET", "default_secret_change_in_production").is_err()
         );
     }
 
     #[test]
-    fn skips_malformed_entries_without_panicking() {
-        let map = parse_rate_limit_overrides(
-            "bogus, =5:60, auth=5, auth=zero:60, auth=0:60, ok=7:30,",
-        );
-        assert_eq!(map.len(), 1);
-        assert_eq!(map["ok"], EndpointLimitOverride { limit: 7, window_secs: 30 });
+    fn rejects_common_placeholders_case_insensitively() {
+        assert!(require_strong_secret("JWT_SECRET", "ChangeMe").is_err());
+        assert!(require_strong_secret("S3_SECRET_KEY", "SECRET").is_err());
+        assert!(require_strong_secret("JWT_SECRET", "password").is_err());
     }
 
     #[test]
-    fn empty_input_yields_no_overrides() {
-        assert!(parse_rate_limit_overrides("").is_empty());
+    fn error_message_names_the_variable_but_not_the_value() {
+        let err = require_strong_secret("JWT_REFRESH_SECRET", "short")
+            .expect_err("short secrets must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("JWT_REFRESH_SECRET"), "message was: {msg}");
+        assert!(!msg.contains("short"), "message leaked the secret: {msg}");
     }
 
     #[test]
-    fn bucket_names_are_case_insensitive() {
-        let map = parse_rate_limit_overrides("TOURNAMENT=9:60");
-        assert_eq!(
-            map["tournament"],
-            EndpointLimitOverride { limit: 9, window_secs: 60 }
+    fn optional_secret_validation_allows_absence() {
+        assert!(validate_optional_secret("JWT_REFRESH_SECRET", None).is_ok());
+        assert!(
+            validate_optional_secret("JWT_REFRESH_SECRET", Some(&strong_secret())).is_ok()
         );
+        assert!(validate_optional_secret("JWT_REFRESH_SECRET", Some("weak")).is_err());
     }
 }

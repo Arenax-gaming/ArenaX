@@ -153,11 +153,13 @@ DATABASE_URL=postgres://user:pass@localhost:5432/arenax
 REDIS_URL=redis://localhost:6379
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
-S3_SECRET_KEY=secret
-PAYSTACK_SECRET=sk_test_xxx
-JWT_SECRET=supersecretkey
+# Secrets must be >= 32 chars and must not be a known placeholder — the
+# backend refuses to start otherwise.
+S3_SECRET_KEY=dev-only-s3-secret-replace-me-0123456789
+PAYSTACK_SECRET=dev-only-paystack-secret-replace-me-0123456789
+JWT_SECRET=dev-only-jwt-secret-replace-me-0123456789abcdef
 STELLAR_NETWORK_URL=https://horizon-testnet.stellar.org
-STELLAR_ADMIN_SECRET=SBXXX...
+STELLAR_ADMIN_SECRET=dev-only-stellar-admin-secret-replace-me
 SOROBAN_CONTRACT_PRIZE=CAXXX...
 SOROBAN_CONTRACT_REPUTATION=CBXXX...
 ```
