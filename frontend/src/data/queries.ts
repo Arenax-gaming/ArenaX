@@ -116,7 +116,34 @@ export type TournamentParams = {
   status?: string;
   gameType?: string;
   search?: string;
+  pageStatus?: string;
+  tournamentType?: string;
+  visibility?: string;
+  minEntryFee?: number;
+  maxEntryFee?: number;
+  minPrizePool?: number;
+  maxPrizePool?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 };
+
+/** Builds a flat query-string map from `TournamentParams`, skipping undefined. */
+function tournamentQueryParams(params?: TournamentParams): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (params?.status)         p["status"]         = params.status;
+  if (params?.gameType)       p["gameType"]       = params.gameType;
+  if (params?.search)         p["search"]         = params.search;
+  if (params?.pageStatus)     p["pageStatus"]     = params.pageStatus;
+  if (params?.tournamentType) p["tournamentType"] = params.tournamentType;
+  if (params?.visibility)     p["visibility"]     = params.visibility;
+  if (params?.sortBy)         p["sortBy"]         = params.sortBy;
+  if (params?.sortOrder)      p["sortOrder"]      = params.sortOrder;
+  if (params?.minEntryFee !== undefined)  p["minEntryFee"]  = String(params.minEntryFee);
+  if (params?.maxEntryFee !== undefined)  p["maxEntryFee"]  = String(params.maxEntryFee);
+  if (params?.minPrizePool !== undefined) p["minPrizePool"] = String(params.minPrizePool);
+  if (params?.maxPrizePool !== undefined) p["maxPrizePool"] = String(params.maxPrizePool);
+  return p;
+}
 
 export function useTournaments(
   params?: TournamentParams,
@@ -190,15 +217,29 @@ export function useInfiniteTournaments(params?: Omit<TournamentParams, "page">) 
   return useInfiniteQuery<PaginatedResponse<Tournament>, Error, InfiniteData<PaginatedResponse<Tournament>>, ReturnType<typeof QK.tournaments.list>, number>({
     queryKey: QK.tournaments.list(params),
     queryFn: ({ pageParam = 1 }) => {
-      const p: Record<string, string> = { page: String(pageParam), limit: "20" };
-      if (params?.status) p["status"] = params.status;
-      if (params?.gameType) p["gameType"] = params.gameType;
-      if (params?.search) p["search"] = params.search;
+      const p = tournamentQueryParams(params);
+      p["page"] = String(pageParam);
+      p["limit"] = String(params?.limit ?? 20);
       return apiClient.getPaginated<Tournament>("/tournaments", { params: p });
     },
     initialPageParam: 1,
-    getNextPageParam: (last) =>
-      last.page < last.totalPages ? last.page + 1 : undefined,
+    getNextPageParam: (last) => {
+      const page = last.page ?? 1;
+      const limit = last.limit || 20;
+      const total = typeof last.total === "number" ? last.total : 0;
+      // Prefer the server's own totalPages when present; fall back to a
+      // total/limit computation or a full-page heuristic so the list keeps
+      // loading even if the backend omits paging fields.
+      const totalPages =
+        typeof last.totalPages === "number"
+          ? last.totalPages
+          : total > 0
+            ? Math.ceil(total / limit)
+            : Math.max(page, 1);
+      const hasMore =
+        page < totalPages || (Array.isArray(last.data) && last.data.length >= limit);
+      return hasMore ? page + 1 : undefined;
+    },
     staleTime: STALE.MEDIUM,
   });
 }
