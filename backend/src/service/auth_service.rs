@@ -175,7 +175,7 @@ impl AuthService {
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE email = $1
             "#,
@@ -185,6 +185,10 @@ impl AuthService {
         .await
         .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::unauthorized("Invalid credentials"))?;
+
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
+        }
 
         if !user.is_active {
             return Err(ApiError::forbidden("Account is deactivated"));
@@ -310,22 +314,6 @@ impl AuthService {
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        let cache_key = Self::profile_cache_key(user_id);
-        if let Some(redis_client) = &self.redis_client {
-            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
-                if let Ok(Some(cached)) = connection.get::<_, Option<String>>(&cache_key).await {
-                    if let Ok(user) = serde_json::from_str::<User>(&cached) {
-                        crate::metrics::record_profile_cache_hit();
-                        let _: Result<(), _> = connection
-                            .expire(&cache_key, PROFILE_CACHE_TTL_SECONDS as i64)
-                            .await;
-                        return Ok(user);
-                    }
-                }
-            }
-        }
-        crate::metrics::record_profile_cache_miss();
-
         let user = sqlx::query_as!(
             User,
             r#"
@@ -333,7 +321,7 @@ impl AuthService {
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE id = $1
             "#,
@@ -344,14 +332,11 @@ impl AuthService {
         .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::not_found("User not found"))?;
 
-        if let Some(redis_client) = &self.redis_client {
-            if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
-                if let Ok(serialized) = serde_json::to_string(&user) {
-                    let _: Result<(), _> = connection
-                        .set_ex(&cache_key, serialized, PROFILE_CACHE_TTL_SECONDS)
-                        .await;
-                }
-            }
+        // Deleted users are not allowed to authenticate any further: their
+        // account is being erased (GDPR/NDPR), so even a still-valid session
+        // must not resolve.
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
         }
 
         Ok(user)
@@ -410,9 +395,11 @@ impl AuthService {
 mod tests {
     use super::*;
 
-    // Carried over from the removed auth_service_updated.rs (#1068). The
-    // service hashes with DEFAULT_COST on register/change_password and
-    // checks with `verify` on login; this pins that round trip.
+    // auth_service_updated.rs was an older copy of this file and is removed
+    // (#1158). The only behavior kept from it is this bcrypt round trip:
+    // register and change_password hash with DEFAULT_COST, and login checks
+    // with verify. Its older user insert (required email, no phone number,
+    // no role) was not kept; this service is the one handlers call.
     #[test]
     fn bcrypt_hash_round_trips_and_rejects_wrong_password() {
         let hashed = hash("test_password", DEFAULT_COST).unwrap();

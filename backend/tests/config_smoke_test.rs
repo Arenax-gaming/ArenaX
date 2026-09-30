@@ -20,6 +20,8 @@ fn test_config_from_env_smoke() {
         ("STELLAR_ADMIN_SECRET", "STELLAR-ADMIN-0123456789abcdef0123456789"),
         ("SOROBAN_CONTRACT_PRIZE", "CAXXX"),
         ("SOROBAN_CONTRACT_REPUTATION", "CBXXX_REPUTATION"),
+        // The old typo must not configure the reputation contract.
+        ("SOROBAN_CONTRACT_REPUUTATION", "SHOULD_NOT_BE_READ"),
         ("SOROBAN_CONTRACT_ARENAX_TOKEN", "CCXXX"),
         ("AI_MODEL_PATH", "./models/anti_cheat.tflite"),
         ("PORT", "8080"),
@@ -32,7 +34,15 @@ fn test_config_from_env_smoke() {
         env::set_var(k, v);
     }
 
-    let config = Config::from_env().expect("Config::from_env should succeed with minimal required env");
-    assert_eq!(config.stellar.soroban_contract_reputation, "CBXXX_REPUTATION");
+    let config =
+        Config::from_env().expect("Config::from_env should succeed with minimal required env");
+    assert_eq!(
+        config.stellar.soroban_contract_reputation,
+        "CBXXX_REPUTATION"
+    );
+    assert_ne!(
+        config.stellar.soroban_contract_reputation,
+        "SHOULD_NOT_BE_READ"
+    );
     assert_eq!(config.server.port, 8080);
 }
