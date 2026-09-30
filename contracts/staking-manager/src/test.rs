@@ -1220,6 +1220,7 @@ fn test_validator_slash_history_pagination() {
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        min_slash_interval_seconds: 0,
     };
 
     env.mock_all_auths();
@@ -1240,7 +1241,7 @@ fn test_validator_slash_history_pagination() {
 
     let mut slash_ids = Vec::new(&env);
     for severity in [0u32, 1u32, 2u32] {
-        let slash_id = client.slash_validator(&admin, &validator, &severity, &1u32);
+        let slash_id = client.slash_validator(&admin, &validator, &severity, &1u32, &None);
         slash_ids.push_back(slash_id);
     }
 
@@ -1256,4 +1257,217 @@ fn test_validator_slash_history_pagination() {
     let page_2 = client.get_slash_records_paginated(&validator, &2u32, &2u32);
     assert_eq!(page_2.len(), 1);
     assert_eq!(page_2.get(0).unwrap().slash_id, slash_ids.get(2).unwrap());
+}
+
+#[test]
+#[should_panic(expected = "slash cooldown active")]
+fn test_rapid_repeat_slash_rejected() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let validator = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let config = SlashConfig {
+        enabled: true,
+        slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
+        burn_bps: 0,
+        appeal_window_seconds: 10_000,
+        min_slash_interval_seconds: 3600, // 1 hour cooldown
+    };
+
+    env.mock_all_auths();
+    client.configure_slashing(&config);
+
+    env.as_contract(&contract_id, || {
+        let stake_info = UserStakeInfo {
+            user: validator.clone(),
+            total_staked: 1_000i128,
+            total_slashed: 0,
+            active_tournaments: 0,
+            completed_tournaments: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
+    });
+
+    // First slash succeeds
+    client.slash_validator(&admin, &validator, &0u32, &1u32, &None);
+
+    // Second slash immediately without time advancement must panic
+    client.slash_validator(&admin, &validator, &0u32, &1u32, &None);
+}
+
+#[test]
+fn test_slash_beyond_stake_clamped() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let validator = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let config = SlashConfig {
+        enabled: true,
+        slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
+        burn_bps: 0,
+        appeal_window_seconds: 10_000,
+        min_slash_interval_seconds: 0,
+    };
+
+    env.mock_all_auths();
+    client.configure_slashing(&config);
+
+    // Validator only has 150 staked, but severity 2 requests 300
+    env.as_contract(&contract_id, || {
+        let stake_info = UserStakeInfo {
+            user: validator.clone(),
+            total_staked: 150i128,
+            total_slashed: 0,
+            active_tournaments: 0,
+            completed_tournaments: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
+    });
+
+    client.slash_validator(&admin, &validator, &2u32, &1u32, &None);
+
+    let history = client.get_slash_history(&validator);
+    assert_eq!(history.total_slashed, 150i128); // clamped to available stake
+}
+
+#[test]
+#[should_panic(expected = "severity 4 requires 2-of-N multisig signers")]
+fn test_severity_4_without_multisig_rejected() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let validator = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let config = SlashConfig {
+        enabled: true,
+        slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
+        burn_bps: 0,
+        appeal_window_seconds: 10_000,
+        min_slash_interval_seconds: 0,
+    };
+
+    env.mock_all_auths();
+    client.configure_slashing(&config);
+
+    env.as_contract(&contract_id, || {
+        let stake_info = UserStakeInfo {
+            user: validator.clone(),
+            total_staked: 1_000i128,
+            total_slashed: 0,
+            active_tournaments: 0,
+            completed_tournaments: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
+    });
+
+    // Calling severity 4 without multisig signers must fail
+    client.slash_validator(&admin, &validator, &4u32, &1u32, &None);
+}
+
+#[test]
+fn test_severity_4_with_multisig_succeeds() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let validator = Address::generate(&env);
+    let signer1 = Address::generate(&env);
+    let signer2 = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    let config = SlashConfig {
+        enabled: true,
+        slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
+        burn_bps: 0,
+        appeal_window_seconds: 10_000,
+        min_slash_interval_seconds: 0,
+    };
+
+    env.mock_all_auths();
+    client.configure_slashing(&config);
+
+    let mut gov_signers = Vec::new(&env);
+    gov_signers.push_back(signer1.clone());
+    gov_signers.push_back(signer2.clone());
+    client.set_governance_signers(&gov_signers);
+
+    env.as_contract(&contract_id, || {
+        let stake_info = UserStakeInfo {
+            user: validator.clone(),
+            total_staked: 1_000i128,
+            total_slashed: 0,
+            active_tournaments: 0,
+            completed_tournaments: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
+    });
+
+    let mut signers = Vec::new(&env);
+    signers.push_back(signer1);
+    signers.push_back(signer2);
+
+    let slash_id = client.slash_validator(&admin, &validator, &4u32, &1u32, &Some(signers));
+    let history = client.get_slash_history(&validator);
+    assert_eq!(history.slash_count, 1);
+    assert_eq!(history.total_slashed, 500i128);
+    assert_eq!(history.slash_ids.get(0).unwrap(), slash_id);
+}
+
+#[test]
+fn test_ttl_extension_and_config() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_ttl_config(&1000u32, &5000u32);
+    let (min_ttl, target_ttl) = client.get_ttl_config();
+    assert_eq!(min_ttl, 1000u32);
+    assert_eq!(target_ttl, 5000u32);
+}
+
+#[test]
+fn test_upgrade_schema_validation() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_storage_schema_version(&2u32);
+    assert_eq!(client.get_storage_schema_version(), 2u32);
+
+    let new_wasm = BytesN::from_array(&env, &[9u8; 32]);
+    // Schedule with min_compatible_schema = 2 (compatible)
+    client.schedule_upgrade(&new_wasm, &2u32, &Some(0u64));
+}
+
+#[test]
+#[should_panic(expected = "incompatible schema")]
+fn test_upgrade_incompatible_schema_fails() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let contract_id = initialize_contract(&env, &admin);
+    let client = StakingManagerClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_storage_schema_version(&1u32);
+
+    let new_wasm = BytesN::from_array(&env, &[9u8; 32]);
+    // Schedule with min_compatible_schema = 2 (incompatible with version 1)
+    client.schedule_upgrade(&new_wasm, &2u32, &Some(0u64));
+    client.upgrade(&new_wasm);
 }

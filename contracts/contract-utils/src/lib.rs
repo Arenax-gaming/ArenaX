@@ -54,6 +54,66 @@ pub mod storage {
 }
 
 // ---------------------------------------------------------------------------
+// Storage TTL Constants & Helpers (Issue #1060)
+// ---------------------------------------------------------------------------
+
+pub mod ttl {
+    use soroban_sdk::{contracttype, Env, Val};
+
+    /// Ledger counts based on ~5 seconds per ledger on Stellar network:
+    /// 1 day = 17,280 ledgers
+    /// Analytics: 30 days = 518,400 ledgers
+    pub const TTL_ANALYTICS: u32 = 518_400;
+    /// Orders: 90 days = 1,555,200 ledgers
+    pub const TTL_ORDERS: u32 = 1_555_200;
+    /// Financial positions: 1 year = 6,307,200 ledgers
+    pub const TTL_FINANCIAL_POSITIONS: u32 = 6_307_200;
+    /// NFT ownership: 5 years = 31,536,000 ledgers
+    pub const TTL_NFT_OWNERSHIP: u32 = 31_536_000;
+
+    /// Thresholds for extending
+    pub const MIN_TTL_ANALYTICS: u32 = 17_280;
+    pub const MIN_TTL_ORDERS: u32 = 17_280 * 7;
+    pub const MIN_TTL_FINANCIAL_POSITIONS: u32 = 17_280 * 30;
+    pub const MIN_TTL_NFT_OWNERSHIP: u32 = 17_280 * 90;
+
+    #[contracttype]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct TtlConfig {
+        pub min_ttl: u32,
+        pub target_ttl: u32,
+    }
+
+    pub fn extend_persistent_ttl(
+        env: &Env,
+        key: &impl soroban_sdk::IntoVal<Env, Val>,
+        min_ttl: u32,
+        target_ttl: u32,
+    ) {
+        env.storage().persistent().extend_ttl(key, min_ttl, target_ttl);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade & State Migration Helpers (Issue #1064)
+// ---------------------------------------------------------------------------
+
+pub mod upgrade {
+    use soroban_sdk::{contracttype, BytesN};
+
+    #[contracttype]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ScheduledUpgrade {
+        pub new_wasm_hash: BytesN<32>,
+        pub min_compatible_schema: u32,
+        pub scheduled_at: u64,
+        pub executable_at: u64,
+    }
+
+    pub const DEFAULT_UPGRADE_DELAY_SECONDS: u64 = 86_400; // 24 hours
+}
+
+// ---------------------------------------------------------------------------
 // Time Helpers
 // ---------------------------------------------------------------------------
 

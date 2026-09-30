@@ -385,10 +385,17 @@ class ApiClient {
     });
   }
 
-  async joinTournament(id: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/tournaments/${id}/register`, {
-      method: "POST",
-    });
+  async joinTournament(
+    id: string,
+    paymentMethod?: "fiat" | "arenax",
+  ): Promise<{ message: string; transactionHash?: string }> {
+    return this.request<{ message: string; transactionHash?: string }>(
+      `/tournaments/${id}/register`,
+      {
+        method: "POST",
+        ...(paymentMethod && { body: JSON.stringify({ paymentMethod }) }),
+      },
+    );
   }
 
   /** Saves the admin-arranged bracket seed order (#1092). */

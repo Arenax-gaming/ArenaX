@@ -1,5 +1,6 @@
 // Core models
 pub mod achievement;
+pub mod api_key;
 pub mod batch;
 pub mod dispute;
 pub mod idempotency;
@@ -13,6 +14,7 @@ pub mod social;
 pub mod stellar_account;
 pub mod stellar_transaction;
 pub mod tournament;
+pub mod tournament_finance;
 pub mod user;
 pub mod wallet;
 
@@ -57,6 +59,7 @@ pub use tournament::{
     TournamentParticipant, TournamentResponse, TournamentRound, TournamentStanding,
     TournamentStatus, TournamentType, TournamentVisibility, UpdateTournamentRequest,
 };
+pub use tournament_finance::*;
 pub use user::*;
 pub use wallet::{
     CreateWalletRequest, DepositRequest, PaymentMethod, PaymentProvider, Transaction,

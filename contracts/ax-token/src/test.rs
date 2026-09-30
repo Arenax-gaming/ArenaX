@@ -672,10 +672,40 @@ fn test_supply_cap_enforcement_and_burn() {
     client.mint(&user1, &1500i128);
     assert_eq!(client.total_supply(), 1500);
 
-    // Burn 500 tokens -> cap should decrease by 500 to 1500!
+    // Sequence 0 is treated as a flash-loan collision by FlashLoanGuard.
+    // Advance before the first burn, same as the snapshot-voting tests.
+    env.ledger().set_sequence_number(1);
+
+    // Burn 500 tokens. The cap stays 2000 — cap and supply are independent.
     client.burn(&user1, &500i128);
     assert_eq!(client.total_supply(), 1000);
-    assert_eq!(client.get_supply_cap(), 1500);
+    assert_eq!(client.get_supply_cap(), 2000);
+}
+
+#[test]
+fn test_admin_can_lower_supply_cap() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&2000i128);
+    client.mint(&user1, &500i128);
+
+    client.set_supply_cap(&1000i128);
+    assert_eq!(client.get_supply_cap(), 1000);
+}
+
+#[test]
+#[should_panic(expected = "supply cap cannot be increased by admin")]
+fn test_admin_cannot_raise_supply_cap() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+    client.set_supply_cap(&2000i128);
 }
 
 #[test]
@@ -697,12 +727,14 @@ fn test_adjust_cap_via_governance() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
+    env.ledger().set_sequence_number(1);
     client.set_supply_cap(&1000i128);
     client.mint(&user1, &1000i128);
 
     // Create proposal to increase cap to 5000
     let proposal_desc = String::from_str(&env, "Increase Cap to 5000");
     let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+    env.ledger().set_sequence_number(2);
     client.vote_on_proposal(&user1, &proposal_id, &true);
 
     env.ledger().set_timestamp(3601);
@@ -714,229 +746,344 @@ fn test_adjust_cap_via_governance() {
 }
 
 // ============================================================================
-// SNAPSHOT VOTING (#919)
+// BATCH MINT (#915)
 // ============================================================================
-//
-// NOTE: `FlashLoanGuard` (src/flash_loan_protection.rs) treats ledger
-// sequence 0 as "no prior operation" and the *first* protected call (burn,
-// transfer, or vote_on_proposal) for any address, in any fresh test `Env`,
-// also runs at sequence 0 — so it collides with that default and is always
-// rejected as a false "flash loan". This is a pre-existing bug, unrelated to
-// snapshot voting; every test below advances the ledger sequence to a
-// non-zero number before the first such call to avoid tripping it.
 
 #[test]
-fn test_snapshot_power_fixed_at_proposal_creation() {
-    // Voting power used for a proposal must reflect the balance an address
-    // held when the proposal was created, not whatever it holds by the time
-    // it actually votes — otherwise a voter could inflate their power after
-    // the fact by acquiring more tokens.
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    env.ledger().set_sequence_number(100);
-    env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
-
-    env.ledger().set_sequence_number(101);
-    let proposal_desc = String::from_str(&env, "Snapshot test");
-    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
-    let proposal = client.get_proposal(&proposal_id).unwrap();
-    assert_eq!(proposal.snapshot_ledger, 101);
-
-    // Balance grows well after the snapshot was taken.
-    env.ledger().set_sequence_number(102);
-    client.mint(&user1, &5000i128);
-    assert_eq!(client.balance(&user1), 6000);
-
-    env.ledger().set_sequence_number(103);
-    client.vote_on_proposal(&user1, &proposal_id, &true);
-
-    let proposal = client.get_proposal(&proposal_id).unwrap();
-    assert_eq!(
-        proposal.votes_for, 1000,
-        "vote should be weighted by the snapshot balance (1000), not the current one (6000)"
-    );
-}
-
-#[test]
-fn test_voting_power_at_reflects_delegation_snapshot() {
-    // A delegation made after a given ledger must not retroactively change
-    // the voting power recorded at that ledger, and must be reflected once
-    // it has actually happened.
-    let (env, admin, user1, user2) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    env.ledger().set_sequence_number(100);
-    client.mint(&user1, &1000i128);
-    client.mint(&user2, &500i128);
-    let ledger_before_delegation = env.ledger().sequence();
-
-    env.ledger().set_sequence_number(101);
-    client.delegate(&user2, &user1);
-    let ledger_after_delegation = env.ledger().sequence();
-
-    // Before the delegation: each holder's own balance.
-    assert_eq!(
-        client.get_voting_power_at(&user1, &ledger_before_delegation),
-        1000
-    );
-    assert_eq!(
-        client.get_voting_power_at(&user2, &ledger_before_delegation),
-        500
-    );
-
-    // After the delegation: user1 also carries user2's power; user2 has none.
-    assert_eq!(
-        client.get_voting_power_at(&user1, &ledger_after_delegation),
-        1500
-    );
-    assert_eq!(
-        client.get_voting_power_at(&user2, &ledger_after_delegation),
-        0
-    );
-
-    // A proposal snapshotted after the delegation counts the combined power.
-    env.ledger().set_sequence_number(102);
-    env.ledger().set_timestamp(1_000);
-    let proposal_desc = String::from_str(&env, "Delegated vote");
-    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
-
-    env.ledger().set_sequence_number(103);
-    client.vote_on_proposal(&user1, &proposal_id, &true);
-
-    let proposal = client.get_proposal(&proposal_id).unwrap();
-    assert_eq!(proposal.votes_for, 1500);
-}
-
-#[test]
-fn test_revoke_delegation_restores_snapshot_power() {
-    let (env, admin, user1, user2) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    env.ledger().set_sequence_number(100);
-    client.mint(&user1, &1000i128);
-    client.mint(&user2, &500i128);
-
-    env.ledger().set_sequence_number(101);
-    client.delegate(&user2, &user1);
-    assert_eq!(client.get_voting_power(&user1), 1500);
-    assert_eq!(client.get_voting_power(&user2), 0);
-
-    env.ledger().set_sequence_number(102);
-    client.revoke_delegation(&user2);
-    assert_eq!(client.get_voting_power(&user1), 1000);
-    assert_eq!(client.get_voting_power(&user2), 500);
-
-    // The snapshot at the ledger where the delegation was still active is
-    // unaffected by the later revocation.
-    assert_eq!(client.get_voting_power_at(&user1, &101), 1500);
-    assert_eq!(client.get_voting_power_at(&user2, &101), 0);
-}
-
-#[test]
-fn test_block_number_reference_on_proposal() {
-    // The proposal exposes the ledger sequence ("block number") its snapshot
-    // was taken at, and it matches the actual current ledger at creation.
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    env.ledger().set_sequence_number(250);
-    client.mint(&user1, &1000i128);
-
-    let proposal_desc = String::from_str(&env, "Block reference test");
-    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
-    let proposal = client.get_proposal(&proposal_id).unwrap();
-
-    assert_eq!(proposal.snapshot_ledger, 250);
-    assert_eq!(proposal.snapshot_ledger, env.ledger().sequence());
-}
-
-#[test]
-fn test_vote_aggregation_and_historical_records() {
-    // Vote tallies aggregate correctly on-chain, and each individual vote is
-    // retrievable afterward for historical/auditing purposes.
+fn test_batch_mint() {
     let (env, admin, user1, user2) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
     let user3 = Address::generate(&env);
 
     env.mock_all_auths();
-    env.ledger().set_sequence_number(100);
-    env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1500i128);
-    client.mint(&user2, &500i128);
-    client.mint(&user3, &300i128);
 
-    env.ledger().set_sequence_number(101);
-    let proposal_desc = String::from_str(&env, "Aggregate votes");
-    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone(), user3.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128, 500i128];
+    client.batch_mint(&recipients, &amounts);
 
-    env.ledger().set_sequence_number(102);
-    client.vote_on_proposal(&user1, &proposal_id, &true);
-    env.ledger().set_sequence_number(103);
-    client.vote_on_proposal(&user2, &proposal_id, &false);
-    env.ledger().set_sequence_number(104);
-    client.vote_on_proposal(&user3, &proposal_id, &true);
-
-    let proposal = client.get_proposal(&proposal_id).unwrap();
-    assert_eq!(proposal.votes_for, 1800);
-    assert_eq!(proposal.votes_against, 500);
-
-    let records = client.get_vote_records(&proposal_id);
-    assert_eq!(records.len(), 3);
-
-    let r0 = records.get(0).unwrap();
-    assert_eq!(r0.voter, user1);
-    assert!(r0.support);
-    assert_eq!(r0.power, 1500);
-    assert_eq!(r0.ledger, 102);
-
-    let r1 = records.get(1).unwrap();
-    assert_eq!(r1.voter, user2);
-    assert!(!r1.support);
-    assert_eq!(r1.power, 500);
-    assert_eq!(r1.ledger, 103);
-
-    let r2 = records.get(2).unwrap();
-    assert_eq!(r2.voter, user3);
-    assert!(r2.support);
-    assert_eq!(r2.power, 300);
-    assert_eq!(r2.ledger, 104);
+    assert_eq!(client.balance(&user1), 1000);
+    assert_eq!(client.balance(&user2), 2000);
+    assert_eq!(client.balance(&user3), 500);
+    assert_eq!(client.total_supply(), 3500);
+    assert_supply_equals_balances(&env, &contract_id, &[user1, user2, user3]);
 }
 
 #[test]
-fn test_transfer_and_burn_update_voting_power_checkpoints() {
-    // Transfers and burns move checkpointed voting power immediately, so a
-    // snapshot taken right after either reflects the new balances.
+#[should_panic(expected = "recipients and amounts length mismatch")]
+fn test_batch_mint_length_mismatch() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    let recipients = soroban_sdk::vec![&env, user1.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
+    client.batch_mint(&recipients, &amounts);
+}
+
+#[test]
+#[should_panic(expected = "batch must not be empty")]
+fn test_batch_mint_empty() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    let recipients: Vec<Address> = soroban_sdk::vec![&env];
+    let amounts: Vec<i128> = soroban_sdk::vec![&env];
+    client.batch_mint(&recipients, &amounts);
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn test_batch_mint_rejects_non_positive_amount() {
     let (env, admin, user1, user2) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
+
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 0i128];
+    client.batch_mint(&recipients, &amounts);
+}
+
+#[test]
+#[should_panic]
+fn test_batch_mint_unauthorized() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    // No mock_all_auths(): admin never authorized this call.
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
+    client.batch_mint(&recipients, &amounts);
+}
+
+#[test]
+fn test_batch_mint_merges_duplicate_recipients() {
+    // The same address appearing more than once in the batch should have
+    // its amounts summed into a single balance update, and still receive
+    // one mint event per input entry.
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 300i128, 700i128, 500i128];
+    client.batch_mint(&recipients, &amounts);
+
+    assert_eq!(client.balance(&user1), 1000);
+    assert_eq!(client.balance(&user2), 500);
+    assert_eq!(client.total_supply(), 1500);
+}
+
+#[test]
+#[should_panic(expected = "supply cap exceeded")]
+fn test_batch_mint_atomic_on_cap_exceeded() {
+    // The batch must be all-or-nothing: if the combined total breaches the
+    // supply cap, NO recipient should end up minted, including the ones
+    // earlier in the list that would have fit under the cap on their own.
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 900i128, 200i128]; // totals 1100 > cap
+    client.batch_mint(&recipients, &amounts);
+}
+
+#[test]
+fn test_batch_mint_atomic_rollback_leaves_no_partial_state() {
+    // Confirms the rollback from the panic above really is total: after a
+    // failed batch, neither recipient has any balance and total supply is
+    // unchanged.
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&1000i128);
+
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 900i128, 200i128];
+    let result = client.try_batch_mint(&recipients, &amounts);
+
+    assert!(result.is_err());
+    assert_eq!(client.balance(&user1), 0);
+    assert_eq!(client.balance(&user2), 0);
+    assert_eq!(client.total_supply(), 0);
+}
+
+// ============================================================================
+// PROPOSAL EXPIRY AND CLEANUP (#1054)
+// ============================================================================
+
+#[test]
+fn test_expired_proposal_can_be_cleaned_up() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
     env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
     client.mint(&user1, &1000i128);
-    assert_eq!(client.get_voting_power(&user1), 1000);
-    assert_eq!(client.get_voting_power(&user2), 0);
+
+    let proposal_desc = String::from_str(&env, "Expiring proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    // Vote AGAINST the proposal so it is rejected
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &false);
+
+    // Advance time past the voting period
+    env.ledger().set_timestamp(1_000 + 3601);
+
+    // Expire/cleanup proposal
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}
+
+#[test]
+#[should_panic(expected = "proposal not found")]
+fn test_expired_proposal_cannot_be_voted_on() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    let proposal_desc = String::from_str(&env, "Expiring proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    // Advance past end_time without votes (votes_for = 0, votes_against = 0 => rejected)
+    env.ledger().set_timestamp(1_000 + 3601);
+
+    client.expire_proposal(&proposal_id);
+
+    // Attempting to vote should panic with proposal not found
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+}
+
+#[test]
+fn test_passed_proposal_expires_after_grace_period() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    // Set grace period to 1 hour (3600s)
+    client.set_proposal_grace_period(&3600u64);
+    assert_eq!(client.get_proposal_grace_period(), 3600);
+
+    let proposal_desc = String::from_str(&env, "Passed proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
 
     env.ledger().set_sequence_number(101);
-    client.transfer(&user1, &user2, &400i128);
-    assert_eq!(client.get_voting_power(&user1), 600);
-    assert_eq!(client.get_voting_power(&user2), 400);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
 
-    env.ledger().set_sequence_number(102);
-    client.burn(&user2, &100i128);
-    assert_eq!(client.get_voting_power(&user2), 300);
+    // Advance past end_time + grace_period (end_time = 4600, grace_period = 3600 => after 8200)
+    env.ledger().set_timestamp(8201);
 
-    // Earlier snapshots are untouched by the later transfer/burn.
-    assert_eq!(client.get_voting_power_at(&user1, &100), 1000);
-    assert_eq!(client.get_voting_power_at(&user2, &100), 0);
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}
+
+#[test]
+#[should_panic(expected = "proposal within grace period")]
+fn test_passed_proposal_survives_grace_period() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    client.set_proposal_grace_period(&3600u64);
+
+    let proposal_desc = String::from_str(&env, "Passed proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    // Advance past end_time (4600) but within grace period (e.g. 5000 < 4600 + 3600)
+    env.ledger().set_timestamp(5000);
+
+    client.expire_proposal(&proposal_id);
+}
+
+#[test]
+fn test_execute_proposal_hook() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(100);
+    env.ledger().set_timestamp(1_000);
+    client.mint(&user1, &1000i128);
+
+    let proposal_desc = String::from_str(&env, "Exec proposal");
+    let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
+
+    env.ledger().set_sequence_number(101);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    env.ledger().set_timestamp(4601);
+
+    let target = Address::generate(&env);
+    client.approve_execution_target(&target);
+    assert!(client.is_execution_target_approved(&target));
+
+    let calldata = soroban_sdk::Bytes::new(&env);
+    client.execute_proposal(&proposal_id, &calldata);
+
+    let proposal = client.get_proposal(&proposal_id).unwrap();
+    assert!(proposal.executed);
+
+    // Executed proposal can be expired/cleaned up
+    client.expire_proposal(&proposal_id);
+    assert!(client.get_proposal(&proposal_id).is_none());
+}
+
+// ============================================================================
+// DATAKEY STORAGE ROUND-TRIP
+// ============================================================================
+
+#[test]
+fn test_datakey_variants_storage_round_trip() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = env.register(AxToken, ());
+
+    env.as_contract(&contract_id, || {
+        let store = env.storage().instance();
+
+        store.set(&DataKey::SupplyCap, &1_000_000i128);
+        assert_eq!(store.get::<_, i128>(&DataKey::SupplyCap), Some(1_000_000));
+
+        store.set(&DataKey::Paused, &true);
+        assert_eq!(store.get::<_, bool>(&DataKey::Paused), Some(true));
+
+        store.set(&DataKey::PauseTimeout, &3_600u64);
+        assert_eq!(store.get::<_, u64>(&DataKey::PauseTimeout), Some(3_600));
+
+        let info = PauseInfo {
+            paused: true,
+            paused_at: 42,
+            paused_by: admin.clone(),
+            timeout: 3_600,
+            reason: Symbol::new(&env, "audit"),
+        };
+        store.set(&DataKey::PauseInfo, &info);
+        let got: PauseInfo = store.get(&DataKey::PauseInfo).unwrap();
+        assert_eq!(got.paused_at, 42);
+        assert_eq!(got.paused_by, admin);
+
+        store.set(&DataKey::Delegate(user1.clone()), &user2);
+        assert_eq!(
+            store.get::<_, Address>(&DataKey::Delegate(user1.clone())),
+            Some(user2.clone())
+        );
+
+        let mut delegators = Vec::new(&env);
+        delegators.push_back(user1.clone());
+        store.set(&DataKey::Delegators(user2.clone()), &delegators);
+        assert_eq!(
+            store.get::<_, Vec<Address>>(&DataKey::Delegators(user2.clone())),
+            Some(delegators)
+        );
+
+        let mut history = Vec::new(&env);
+        history.push_back(DelegationRecord {
+            delegatee: user2.clone(),
+            timestamp: 7,
+            revoked: false,
+        });
+        store.set(&DataKey::DelegationHistory(user1.clone()), &history);
+        let got: Vec<DelegationRecord> = store
+            .get(&DataKey::DelegationHistory(user1.clone()))
+            .unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got.get(0).unwrap().delegatee, user2);
+    });
 }

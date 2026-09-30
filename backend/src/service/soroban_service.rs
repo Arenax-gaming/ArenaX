@@ -359,8 +359,7 @@ impl SorobanService {
                     status: TxStatus::Pending,
                     error: Some(format!("Monitoring failed: {}", e)),
                 }
-            }
-        };
+            });
 
         Ok(result)
     }

@@ -52,6 +52,13 @@ pub struct NFTTransferred {
     pub to: Address,
 }
 
+#[contractevent(topics = ["ArenaXVirtualEconomy_v1", "NFT_BURNED"])]
+pub struct NFTBurned {
+    pub token_id: BytesN<32>,
+    pub owner: Address,
+    pub name: String,
+}
+
 #[contractevent(topics = ["ArenaXVirtualEconomy_v1", "MARKETPLACE_ORDER_CREATED"])]
 pub struct MarketplaceOrderCreated {
     pub order_id: BytesN<32>,
@@ -155,6 +162,15 @@ pub fn emit_nft_transferred(env: &Env, token_id: &BytesN<32>, from: &Address, to
         token_id: token_id.clone(),
         from: from.clone(),
         to: to.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_nft_burned(env: &Env, token_id: &BytesN<32>, owner: &Address, name: &String) {
+    NFTBurned {
+        token_id: token_id.clone(),
+        owner: owner.clone(),
+        name: name.clone(),
     }
     .publish(env);
 }

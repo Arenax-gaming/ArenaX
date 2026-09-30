@@ -28,6 +28,9 @@ pub struct User {
     pub is_banned: Option<bool>,
     pub banned_until: Option<DateTime<Utc>>,
     pub device_fingerprint: Option<String>,
+    /// Soft-delete marker (GDPR/NDPR erasure). Set at account deletion;
+    /// PII fields are anonymised and login is refused.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl User {

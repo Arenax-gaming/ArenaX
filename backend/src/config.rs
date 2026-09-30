@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -137,6 +138,54 @@ pub struct RateLimitConfig {
     /// `RateLimit-Reset`) on responses. Defaults to `true`.
     #[serde(default = "default_rate_limit_headers")]
     pub headers: bool,
+    /// Per-endpoint overrides for the built-in rate-limit buckets, keyed by
+    /// bucket name (e.g. `auth_strict`, `tournament`, `default`). Parsed from
+    /// `RATE_LIMIT_OVERRIDES` as comma-separated `bucket=limit:window` pairs.
+    #[serde(default)]
+    pub overrides: HashMap<String, EndpointLimitOverride>,
+}
+
+/// A single per-endpoint rate-limit override: the request ceiling and the
+/// window length (in seconds) it applies to.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct EndpointLimitOverride {
+    pub limit: u32,
+    pub window_secs: u64,
+}
+
+/// Parse `RATE_LIMIT_OVERRIDES` — comma-separated `bucket=limit:window` pairs,
+/// e.g. `auth_strict=3:60,tournament=5:120,default=200:60`.
+///
+/// Malformed entries are skipped (with a warning) instead of failing startup so
+/// a single typo cannot take the API down; the built-in bucket limits remain in
+/// effect for anything that does not parse.
+fn parse_rate_limit_overrides(raw: &str) -> HashMap<String, EndpointLimitOverride> {
+    let mut overrides = HashMap::new();
+    for entry in raw.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let Some((name, spec)) = entry.split_once('=') else {
+            tracing::warn!(entry, "RATE_LIMIT_OVERRIDES: expected `bucket=limit:window`, ignoring entry");
+            continue;
+        };
+        let Some((limit, window)) = spec.split_once(':') else {
+            tracing::warn!(entry, "RATE_LIMIT_OVERRIDES: expected `limit:window`, ignoring entry");
+            continue;
+        };
+        match (limit.trim().parse::<u32>(), window.trim().parse::<u64>()) {
+            (Ok(limit), Ok(window_secs)) if limit > 0 && window_secs > 0 => {
+                overrides.insert(
+                    name.trim().to_ascii_lowercase(),
+                    EndpointLimitOverride { limit, window_secs },
+                );
+            }
+            _ => {
+                tracing::warn!(
+                    entry,
+                    "RATE_LIMIT_OVERRIDES: limit/window must be positive integers, ignoring entry"
+                );
+            }
+        }
+    }
+    overrides
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -191,6 +240,8 @@ impl Config {
         let rate_limit_headers = env::var("RATE_LIMIT_HEADERS")
             .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
             .unwrap_or(true);
+        let rate_limit_overrides =
+            parse_rate_limit_overrides(&env::var("RATE_LIMIT_OVERRIDES").unwrap_or_default());
         let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
             .unwrap_or_else(|_| "86400".to_string())
             .parse()?;
@@ -249,6 +300,7 @@ impl Config {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
                 headers: rate_limit_headers,
+                overrides: rate_limit_overrides,
             },
             idempotency: IdempotencyConfig {
                 ttl_seconds: idempotency_ttl_seconds,
@@ -259,5 +311,47 @@ impl Config {
                 sendgrid_from_email,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_override_entries() {
+        let map = parse_rate_limit_overrides("auth_strict=3:60, tournament=5:120");
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map["auth_strict"],
+            EndpointLimitOverride { limit: 3, window_secs: 60 }
+        );
+        assert_eq!(
+            map["tournament"],
+            EndpointLimitOverride { limit: 5, window_secs: 120 }
+        );
+    }
+
+    #[test]
+    fn skips_malformed_entries_without_panicking() {
+        let map = parse_rate_limit_overrides(
+            "bogus, =5:60, auth=5, auth=zero:60, auth=0:60, ok=7:30,",
+        );
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["ok"], EndpointLimitOverride { limit: 7, window_secs: 30 });
+    }
+
+    #[test]
+    fn empty_input_yields_no_overrides() {
+        assert!(parse_rate_limit_overrides("").is_empty());
+    }
+
+    #[test]
+    fn bucket_names_are_case_insensitive() {
+        let map = parse_rate_limit_overrides("TOURNAMENT=9:60");
+        assert_eq!(
+            map["tournament"],
+            EndpointLimitOverride { limit: 9, window_secs: 60 }
+        );
     }
 }
