@@ -130,6 +130,7 @@ pub struct TreasuryTxLog {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Token,
     Signers,
     Threshold,
     TimeLockDuration,
@@ -275,6 +276,11 @@ impl Treasury {
 
     pub fn get_balance(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::Balance).unwrap_or(0)
+    }
+
+    /// Address of the token contract the treasury custodies.
+    pub fn get_token(env: Env) -> Address {
+        Self::token(&env)
     }
 
     // -----------------------------------------------------------------
@@ -537,6 +543,16 @@ impl Treasury {
         if available < proposal.amount {
             panic!("exceeds budget allocation for category");
         }
+
+        // Pay out the custodied tokens. If the contract is underfunded the
+        // transfer panics and the whole execution reverts, leaving the
+        // proposal unexecuted and storage untouched.
+        let token = Self::token(&env);
+        token::Client::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &proposal.recipient,
+            &proposal.amount,
+        );
 
         env.storage()
             .instance()
@@ -1027,6 +1043,13 @@ impl Treasury {
     // -----------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------
+
+    fn token(env: &Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("token not set")
+    }
 
     fn require_admin(env: &Env, caller: &Address) {
         let admin: Address = env
