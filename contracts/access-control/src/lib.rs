@@ -19,6 +19,42 @@ pub const ROLE_ANALYST: u32 = 11; // Central RBAC Analyst role
 pub const ROLE_STAKING_MANAGER: u32 = 9;
 pub const ROLE_CROSS_GAME_ADMIN: u32 = 10;
 
+/// Canonical role ids. `has_role` keys storage by this integer, so a duplicate
+/// value makes two roles indistinguishable.
+const ALL_ROLE_IDS: [u32; 11] = [
+    ROLE_ADMIN,
+    ROLE_GOVERNANCE,
+    ROLE_OPERATOR,
+    ROLE_WHITELIST,
+    ROLE_MODERATOR,
+    ROLE_TOURNAMENT_ORGANIZER,
+    ROLE_GAME_DEVELOPER,
+    ROLE_ANALYTICS_VIEWER,
+    ROLE_ANALYST,
+    ROLE_STAKING_MANAGER,
+    ROLE_CROSS_GAME_ADMIN,
+];
+
+const fn role_ids_are_unique(roles: &[u32]) -> bool {
+    let mut i = 0;
+    while i < roles.len() {
+        let mut j = i + 1;
+        while j < roles.len() {
+            if roles[i] == roles[j] {
+                return false;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    true
+}
+
+const _: () = assert!(
+    role_ids_are_unique(&ALL_ROLE_IDS),
+    "access-control role ids must be unique"
+);
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {

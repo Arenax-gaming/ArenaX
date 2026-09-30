@@ -1,10 +1,10 @@
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
+use crate::models::api_key::{ApiKeySummary, GetApiKeyResponse, KeyStatus};
 use crate::service::api_key_service::{
     ApiKeyService, CreateApiKeyRequest, CreateApiKeyResponse, GenerateApiKeyRequest,
     GenerateApiKeyResponse, RevokeApiKeyRequest, RotateApiKeyRequest, UpdateApiKeyRequest,
 };
-use crate::models::api_key::{ApiKeySummary, KeyStatus};
 use actix_web::{web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -30,12 +30,40 @@ pub struct ListApiKeysResponseDto {
 }
 
 /// Rotate API Key response
+///
+/// Includes the rotation deadline (`old_key_expires_at`) so integratees know
+/// exactly how long the previous key stays valid after a zero-downtime
+/// rotation (Issue #1080).
 #[derive(Debug, Serialize)]
 pub struct RotateApiKeyResponseDto {
     pub old_key_id: Uuid,
     pub new_key_id: Uuid,
     pub new_key: String,
     pub rotated_at: chrono::DateTime<chrono::Utc>,
+    pub old_key_expires_at: chrono::DateTime<chrono::Utc>,
+    pub overlap_duration_seconds: i64,
+}
+
+/// Get API Key response (GET /api/api-keys/{key_id})
+#[derive(Debug, Serialize)]
+pub struct GetApiKeyResponseDto {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub key_preview: String,
+    pub status: KeyStatus,
+    pub is_active: bool,
+    pub scopes: Vec<String>,
+    pub expiration_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub use_count: i32,
+    pub max_uses: Option<i32>,
+    pub rotation_enabled: bool,
+    pub next_rotation_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub overlap_duration_seconds: i64,
+    pub old_key_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub webhook_url: Option<String>,
 }
 
 /// Usage log entry
@@ -123,7 +151,27 @@ pub async fn get_api_key(
         .get_key_summary_by_id(key_id, user_id)
         .await?;
 
-    Ok(HttpResponse::Ok().json(summary))
+    let details = GetApiKeyResponse::from_summary(summary);
+
+    Ok(HttpResponse::Ok().json(GetApiKeyResponseDto {
+        id: details.id,
+        name: details.name,
+        description: details.description,
+        key_preview: details.key_preview,
+        status: details.status,
+        is_active: details.is_active,
+        scopes: details.scopes,
+        expiration_date: details.expiration_date,
+        created_at: details.created_at,
+        last_used_at: details.last_used_at,
+        use_count: details.use_count,
+        max_uses: details.max_uses,
+        rotation_enabled: details.rotation_enabled,
+        next_rotation_date: details.next_rotation_date,
+        overlap_duration_seconds: details.overlap_duration_seconds,
+        old_key_expires_at: details.old_key_expires_at,
+        webhook_url: details.webhook_url,
+    }))
 }
 
 /// PUT /api/api-keys/{key_id}
@@ -194,6 +242,8 @@ pub async fn rotate_api_key(
         new_key_id: response.new_key_id,
         new_key: response.new_key,
         rotated_at: response.rotated_at,
+        old_key_expires_at: response.old_key_expires_at,
+        overlap_duration_seconds: response.overlap_duration_seconds,
     }))
 }
 
