@@ -41,6 +41,23 @@
       hsl(270 60% 92%),
       hsl(var(--background))
     );
+
+    /* Per-component themed surfaces */
+    --nav-bg: 210 40% 98%;
+    --nav-foreground: 222.2 47.4% 11.2%;
+    --nav-border: 214.3 31.8% 91.4%;
+    --hero-bg: 270 60% 97%;
+    --sidebar-bg: 210 40% 98%;
+    --footer-bg: 210 40% 96.1%;
+    --footer-foreground: 222.2 47.4% 11.2%;
+    --tournament-card-bg: 0 0% 100%;
+    --tournament-card-border: 214.3 31.8% 91.4%;
+    --scoreboard-bg: 210 40% 98%;
+    --leaderboard-bg: 210 40% 96.1%;
+    --table-header-bg: 210 40% 96.1%;
+    --table-stripe-bg: 210 40% 94%;
+    --empty-state-bg: 210 40% 96.1%;
+    --match-row-hover: 210 40% 93%;
   }
 
   .dark {
@@ -79,6 +96,23 @@
       hsl(273 55% 26%),
       hsl(var(--background))
     );
+
+    /* Per-component themed surfaces */
+    --nav-bg: 222.2 47.4% 11.2%;
+    --nav-foreground: 210 40% 98%;
+    --nav-border: 217.2 32.6% 17.5%;
+    --hero-bg: 273 55% 22%;
+    --sidebar-bg: 217.2 32.6% 14%;
+    --footer-bg: 222.2 47.4% 8%;
+    --footer-foreground: 215 20.2% 65.1%;
+    --tournament-card-bg: 217.2 32.6% 17.5%;
+    --tournament-card-border: 217.2 32.6% 22%;
+    --scoreboard-bg: 217.2 32.6% 14%;
+    --leaderboard-bg: 217.2 32.6% 12%;
+    --table-header-bg: 217.2 32.6% 15%;
+    --table-stripe-bg: 217.2 32.6% 17%;
+    --empty-state-bg: 217.2 32.6% 12%;
+    --match-row-hover: 217.2 32.6% 20%;
   }
 }
 

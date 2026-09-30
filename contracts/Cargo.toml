@@ -13,6 +13,7 @@ members = [
     "ax-token",
     "anti-cheat-oracle",
     "anti-cheat",
+    "lp-incentives",
     "staking-manager",
     "staking-rewards",
     "virtual-economy",

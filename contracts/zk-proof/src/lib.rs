@@ -1,12 +1,24 @@
 #![no_std]
 
 use arenax_events::zk_proof as events;
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype,
+    crypto::bls12_381::{Fr, G1Affine, G2Affine},
+    symbol_short, Address, Bytes, BytesN, Env, Vec,
+};
 
 // Proof type constants
 pub const PROOF_TYPE_PRIVATE_TX: u32 = 1;
 pub const PROOF_TYPE_ANONYMOUS_VOTE: u32 = 2;
 pub const PROOF_TYPE_CONFIDENTIAL_DATA: u32 = 3;
+
+/// Serialized Groth16 proof: A (G1, 96 bytes) || B (G2, 192 bytes) || C (G1, 96 bytes),
+/// all points uncompressed as accepted by the Soroban BLS12-381 host functions.
+pub const G1_LEN: u32 = 96;
+pub const G2_LEN: u32 = 192;
+pub const PROOF_LEN: u32 = G1_LEN * 2 + G2_LEN;
+/// Each public input is a 32-byte big-endian BLS12-381 scalar.
+pub const PUBLIC_INPUT_LEN: u32 = 32;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,6 +30,19 @@ pub enum DataKey {
     AnonymousVote(u64),
     ConfidentialData(u64),
     Paused,
+    VerifyingKey,
+}
+
+/// Groth16 verifying key over BLS12-381. `ic` holds one point per public
+/// input plus the constant term at index 0.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifyingKey {
+    pub alpha_g1: BytesN<96>,
+    pub beta_g2: BytesN<192>,
+    pub gamma_g2: BytesN<192>,
+    pub delta_g2: BytesN<192>,
+    pub ic: Vec<BytesN<96>>,
 }
 
 #[contracttype]
@@ -104,7 +129,33 @@ impl ZkProof {
         counter
     }
 
-    /// Verify a ZK proof
+    /// Set or replace the Groth16 verifying key (admin only).
+    pub fn set_verifying_key(env: Env, vk: VerifyingKey) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+        if vk.ic.is_empty() {
+            panic!("verifying key must contain at least one IC point");
+        }
+        env.storage().instance().set(&DataKey::VerifyingKey, &vk);
+    }
+
+    pub fn get_verifying_key(env: Env) -> VerifyingKey {
+        env.storage()
+            .instance()
+            .get(&DataKey::VerifyingKey)
+            .expect("verifying key not set")
+    }
+
+    /// Verify a stored proof with the Groth16 pairing check against the
+    /// admin-set verifying key. Returns `false` without touching storage when
+    /// the proof is malformed or fails verification.
+    ///
+    /// Cost: one 4-pair BLS12-381 pairing check plus one G1 MSM of size n
+    /// (n = public inputs), all executed as native host functions.
     pub fn verify_proof(env: Env, verifier: Address, proof_id: u64) -> bool {
         Self::require_not_paused(&env);
         verifier.require_auth();
@@ -115,9 +166,12 @@ impl ZkProof {
             .persistent()
             .get(&key)
             .expect("proof not found");
+        let vk = Self::get_verifying_key(env.clone());
 
-        // In a real implementation, we would verify the proof here
-        // For now, we just mark it as verified (placeholder)
+        if !Self::groth16_verify(&env, &vk, &proof.proof_data, &proof.public_inputs) {
+            return false;
+        }
+
         proof.verified = true;
         env.storage().persistent().set(&key, &proof);
 
@@ -274,6 +328,59 @@ impl ZkProof {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    /// Groth16 check: e(-A, B) · e(alpha, beta) · e(vk_x, gamma) · e(C, delta) == 1,
+    /// where vk_x = ic[0] + sum(input_i · ic[i + 1]).
+    fn groth16_verify(
+        env: &Env,
+        vk: &VerifyingKey,
+        proof_data: &Bytes,
+        public_inputs: &Vec<Bytes>,
+    ) -> bool {
+        if proof_data.len() != PROOF_LEN || public_inputs.len() + 1 != vk.ic.len() {
+            return false;
+        }
+        let bls = env.crypto().bls12_381();
+
+        let a = G1Affine::from_bytes(Self::slice_n::<96>(env, proof_data, 0));
+        let b = G2Affine::from_bytes(Self::slice_n::<192>(env, proof_data, G1_LEN));
+        let c = G1Affine::from_bytes(Self::slice_n::<96>(env, proof_data, G1_LEN + G2_LEN));
+
+        let mut vk_x = G1Affine::from_bytes(vk.ic.get_unchecked(0));
+        if !public_inputs.is_empty() {
+            let mut points = Vec::new(env);
+            let mut scalars = Vec::new(env);
+            for (i, input) in public_inputs.iter().enumerate() {
+                if input.len() != PUBLIC_INPUT_LEN {
+                    return false;
+                }
+                points.push_back(G1Affine::from_bytes(vk.ic.get_unchecked(i as u32 + 1)));
+                scalars.push_back(Fr::from_bytes(Self::slice_n::<32>(env, &input, 0)));
+            }
+            vk_x = bls.g1_add(&vk_x, &bls.g1_msm(points, scalars));
+        }
+
+        let mut g1 = Vec::new(env);
+        g1.push_back(-a);
+        g1.push_back(G1Affine::from_bytes(vk.alpha_g1.clone()));
+        g1.push_back(vk_x);
+        g1.push_back(c);
+        let mut g2 = Vec::new(env);
+        g2.push_back(b);
+        g2.push_back(G2Affine::from_bytes(vk.beta_g2.clone()));
+        g2.push_back(G2Affine::from_bytes(vk.gamma_g2.clone()));
+        g2.push_back(G2Affine::from_bytes(vk.delta_g2.clone()));
+
+        bls.pairing_check(g1, g2)
+    }
+
+    fn slice_n<const N: usize>(env: &Env, bytes: &Bytes, start: u32) -> BytesN<N> {
+        let mut buf = [0u8; N];
+        bytes
+            .slice(start..start + N as u32)
+            .copy_into_slice(&mut buf);
+        BytesN::from_array(env, &buf)
     }
 
     fn require_not_paused(env: &Env) {

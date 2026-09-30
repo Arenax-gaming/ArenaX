@@ -1,11 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    token::{StellarAssetClient, TokenClient},
-    Address, Env, Vec,
-};
+use soroban_sdk::{testutils::Address as _, token, Env, Vec};
 
 struct TestSetup<'a> {
     client: TreasuryClient<'a>,
@@ -22,6 +18,9 @@ fn setup(env: &Env) -> TestSetup<'_> {
     let contract_id = env.register(Treasury, ());
     let client = TreasuryClient::new(env, &contract_id);
     let admin = Address::generate(env);
+    let token = env
+        .register_stellar_asset_contract_v2(Address::generate(env))
+        .address();
 
     let token_sac = env.register_stellar_asset_contract_v2(admin.clone());
     let token = token_sac.address();
@@ -34,15 +33,42 @@ fn setup(env: &Env) -> TestSetup<'_> {
     signers.push_back(signer2);
 
     client.initialize(&admin, &token, &signers, &2, &3600);
+    (client, admin, signers)
+}
 
-    TestSetup {
-        client,
-        admin,
-        signers,
-        token,
-        token_admin,
-        token_client,
-    }
+/// Mint `amount` treasury tokens to a fresh depositor.
+fn funded_depositor(env: &Env, client: &TreasuryClient, amount: i128) -> Address {
+    let depositor = Address::generate(env);
+    token::StellarAssetClient::new(env, &client.get_token()).mint(&depositor, &amount);
+    depositor
+}
+
+#[test]
+fn deposit_moves_tokens_and_updates_counter() {
+    let env = Env::default();
+    let (client, _admin, _signers) = setup(&env);
+    let depositor = funded_depositor(&env, &client, 1_000);
+    let tok = token::Client::new(&env, &client.get_token());
+
+    client.deposit(&depositor, &400);
+
+    assert_eq!(client.get_balance(), 400);
+    assert_eq!(tok.balance(&client.address), 400);
+    assert_eq!(tok.balance(&depositor), 600);
+}
+
+#[test]
+fn deposit_with_insufficient_tokens_fails_and_leaves_storage_unchanged() {
+    let env = Env::default();
+    let (client, _admin, _signers) = setup(&env);
+    let depositor = funded_depositor(&env, &client, 100);
+
+    assert!(client.try_deposit(&depositor, &500).is_err());
+    assert_eq!(client.get_balance(), 0);
+    assert_eq!(
+        token::Client::new(&env, &client.get_token()).balance(&depositor),
+        100
+    );
 }
 
 #[test]
@@ -100,9 +126,8 @@ fn reads_work_while_paused() {
     let env = Env::default();
     let s = setup(&env);
 
-    let depositor = Address::generate(&env);
-    s.token_admin.mint(&depositor, &500);
-    s.client.deposit(&depositor, &500);
+    let depositor = funded_depositor(&env, &client, 500);
+    client.deposit(&depositor, &500);
 
     s.client.set_paused(&s.admin, &true);
 
@@ -121,9 +146,8 @@ fn unpause_restores_mutations() {
     let env = Env::default();
     let s = setup(&env);
 
-    s.client.set_paused(&s.admin, &true);
-    let depositor = Address::generate(&env);
-    s.token_admin.mint(&depositor, &250);
+    client.set_paused(&admin, &true);
+    let depositor = funded_depositor(&env, &client, 250);
 
     // Unpause restores normal operation.
     s.client.set_paused(&s.admin, &false);

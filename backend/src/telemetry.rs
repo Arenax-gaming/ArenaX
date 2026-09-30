@@ -190,9 +190,29 @@ pub fn init_telemetry() -> TelemetryGuard {
         tracing_opentelemetry::layer().with_tracer(tracer)
     });
 
+    // `LOG_FORMAT=json` emits structured JSON lines (with the current span's
+    // fields, e.g. `correlation_id`/`trace_id`) for ELK/Datadog ingestion.
+    let json_logs = std::env::var("LOG_FORMAT")
+        .map(|v| v.eq_ignore_ascii_case("json"))
+        .unwrap_or(false);
+    let (fmt_json, fmt_text) = if json_logs {
+        (
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_span_list(false),
+            ),
+            None,
+        )
+    } else {
+        (None, Some(tracing_subscriber::fmt::layer()))
+    };
+
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(fmt_json)
+        .with(fmt_text)
         .with(otel_layer)
         .with(sentry_layer)
         .init();

@@ -27,6 +27,7 @@ pub enum DataKey {
 
     // Marketplace
     MarketplaceOrder(BytesN<32>),
+    NftActiveOrder(BytesN<32>),
 
     // Royalty & Licensing
     NFTLicense(BytesN<32>),
@@ -94,6 +95,9 @@ pub enum DataKey {
     // NFTMetadata.category at mint time.
     Collection(String),
 
+    // Collection floor price history (#917) — ring-buffer of recent sales per collection.
+    CollectionPriceHistory(String),
+
     // Trading Rebates (#916)
     /// Tiered rebate configuration (thresholds + bps, distribution period).
     RebateConfig,
@@ -108,6 +112,27 @@ pub enum DataKey {
     /// Rebate payout history for an address (most recent last), for
     /// dashboard visibility.
     RebateHistory(Address),
+
+    // Storage TTL config (#1060)
+    TtlOrderMinLedgers,
+    TtlOrderTargetLedgers,
+    TtlNftMinLedgers,
+    TtlNftTargetLedgers,
+
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contracttype]
@@ -152,6 +177,10 @@ pub struct NFTAttribute {
 /// `NFTMetadata.category` matches `NFTCollection.name`. Collections are
 /// opt-in: minting with an unregistered category still succeeds, it just
 /// isn't counted toward any collection's `item_count`.
+///
+/// Floor price and volume fields are updated on every settled trade
+/// (marketplace fixed-price and Dutch auction) (#917: collection floor price
+/// tracking, price history, volume metrics).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NFTCollection {
@@ -162,6 +191,19 @@ pub struct NFTCollection {
     /// since `mint_nft` takes a fully-formed `NFTMetadata`.
     pub default_royalty_bps: u32,
     pub item_count: u32,
+    // ── Market data (#917) ──────────────────────────────────────────────────
+    /// Lowest sale price ever recorded for any NFT in this collection.
+    /// `0` means no sales have settled yet.
+    pub floor_price: i128,
+    /// Most recent settled sale price in this collection.
+    pub last_sale_price: i128,
+    /// Cumulative sum of all settled sale prices in this collection
+    /// (fixed-price orders + Dutch auction purchases).
+    pub total_volume: i128,
+    /// Total number of secondary-market sales that have settled.
+    pub sale_count: u64,
+    /// Ledger timestamp of the most recent settled sale.
+    pub last_sale_at: u64,
 }
 
 #[contracttype]
@@ -218,6 +260,7 @@ pub struct EconomyAnalytics {
     pub total_currency_minted: i128,
     pub total_currency_burned: i128,
     pub total_nfts_minted: u64,
+    pub total_nfts_burned: u64,
     pub total_trades_executed: u64,
     pub total_trade_volume: i128,
     pub total_fees_collected: i128,
@@ -427,6 +470,19 @@ pub struct PriceHistory {
     pub update_count: u64,
 }
 
+/// One registered source's latest quote for an asset pair (#1053).
+///
+/// Stored on [`OracleAnalytics`] rather than as its own storage key: `DataKey`
+/// is already at the 50-variant `contracttype` cap.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleSourceQuote {
+    pub source: Address,
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+}
+
 /// Aggregate statistics across all oracle price-feed activity.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -441,6 +497,10 @@ pub struct OracleAnalytics {
     pub stale_rejections: u64,
     /// Total number of distinct asset pairs registered.
     pub registered_pairs: u32,
+    /// Independent oracle sources, at most five (#1053).
+    pub sources: Vec<Address>,
+    /// Latest quote from each registered source, per asset pair (#1053).
+    pub quotes: Vec<OracleSourceQuote>,
 }
 
 // -----------------------------------------------------------------------------
@@ -492,6 +552,33 @@ pub struct NftStakingAnalytics {
     pub total_rewards_distributed: i128,
     /// Total number of unique stakers (monotonically increasing).
     pub unique_stakers: u32,
+}
+
+// -----------------------------------------------------------------------------
+// Collection Floor Price History (#917)
+// -----------------------------------------------------------------------------
+
+/// A single price observation in a collection's sale history.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionPriceEntry {
+    /// Sale price of the individual NFT that settled.
+    pub price: i128,
+    /// Floor price of the collection *after* this sale was recorded.
+    pub floor_after: i128,
+    /// Ledger timestamp when the sale settled.
+    pub timestamp: u64,
+}
+
+/// Ring-buffer of recent sale price observations for one collection (#917).
+/// Stores the last `max_entries` sales; older entries are evicted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionPriceHistory {
+    /// Ordered oldest-to-newest list of price entries (max 50).
+    pub entries: Vec<CollectionPriceEntry>,
+    /// Maximum entries retained (configurable, default 50).
+    pub max_entries: u32,
 }
 
 /// Tiered trading-rebate configuration (#916). Tiers are evaluated against a
