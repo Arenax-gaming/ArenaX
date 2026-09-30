@@ -1,5 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { Tournament } from "@/types/tournament";
 import { api } from "@/lib/api";
@@ -46,6 +47,18 @@ const baseTournament: Tournament = {
   updatedAt: new Date().toISOString(),
 };
 
+/** Every render needs a QueryClientProvider now that the button uses TanStack Query (#1088). */
+function renderButton(tournament: Tournament = baseTournament) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <JoinTournamentButton tournament={tournament} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("JoinTournamentButton", () => {
   beforeEach(() => {
     mockPush.mockClear();
@@ -55,10 +68,8 @@ describe("JoinTournamentButton", () => {
     localStorage.clear();
   });
 
-  // ── Existing tests ────────────────────────────────────────────────────────
-
   it("shows sign-in prompt when unauthenticated and opens modal", () => {
-    render(<JoinTournamentButton tournament={baseTournament} />);
+    renderButton();
 
     fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
 
@@ -70,15 +81,17 @@ describe("JoinTournamentButton", () => {
     localStorage.setItem("auth_token", "token-123");
     mockJoinTournament.mockResolvedValue({});
 
-    render(<JoinTournamentButton tournament={baseTournament} />);
+    renderButton();
 
     fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
     fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
 
     await waitFor(() => expect(mockJoinTournament).toHaveBeenCalledWith(baseTournament.id));
+    await waitFor(() =>
+      expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBe("true"),
+    );
 
-    expect(screen.getByText(/successfully joined/i, { selector: 'h2' })).toBeInTheDocument();
-    expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBe("true");
+    expect(screen.getByText(/successfully joined/i, { selector: "h2" })).toBeInTheDocument();
     expect(mockNotify).toHaveBeenCalledWith(expect.objectContaining({
       title: "Tournament Joined",
     }));
@@ -88,85 +101,70 @@ describe("JoinTournamentButton", () => {
     localStorage.setItem("auth_token", "token-123");
     mockJoinTournament.mockRejectedValue(new Error("Payment required"));
 
-    render(<JoinTournamentButton tournament={baseTournament} />);
+    renderButton();
 
     fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
     fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
 
     await waitFor(() => expect(mockJoinTournament).toHaveBeenCalled());
-    expect(screen.getByText(/unable to join tournament/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/unable to join tournament/i)).toBeInTheDocument());
     expect(screen.getByText(/payment required/i)).toBeInTheDocument();
   });
 
-  // ── New tests ─────────────────────────────────────────────────────────────
+  // ── Optimistic UI (#1088) ────────────────────────────────────────────────
 
-  it("shows a spinner and 'Joining…' on the main button while the request is in progress", async () => {
+  it("updates the main button to 'Registered' instantly, before a slow network request resolves", async () => {
     localStorage.setItem("auth_token", "token-123");
-    // Never resolves so the component stays in loading state
-    mockJoinTournament.mockImplementation(() => new Promise(() => {}));
-
-    render(<JoinTournamentButton tournament={baseTournament} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
-
-    // Main button should now read "Joining…"
-    expect(screen.getByRole("button", { name: /joining/i })).toBeInTheDocument();
-    // The Button component renders an SVG spinner when loading={true}
-    expect(document.querySelector("svg.animate-spin")).toBeInTheDocument();
-  });
-
-  it("disables the main button while the request is in progress", async () => {
-    localStorage.setItem("auth_token", "token-123");
-    mockJoinTournament.mockImplementation(() => new Promise(() => {}));
-
-    render(<JoinTournamentButton tournament={baseTournament} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
-
-    expect(screen.getByRole("button", { name: /joining/i })).toBeDisabled();
-  });
-
-  it("transitions the main button to 'Registered ✓' and keeps it disabled after a successful join", async () => {
-    localStorage.setItem("auth_token", "token-123");
-    mockJoinTournament.mockResolvedValue({});
-
-    render(<JoinTournamentButton tournament={baseTournament} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
-
-    await waitFor(() => expect(mockJoinTournament).toHaveBeenCalled());
-
-    const registeredButton = screen.getByRole("button", { name: /registered/i });
-    expect(registeredButton).toBeInTheDocument();
-    expect(registeredButton).toBeDisabled();
-  });
-
-  it("shows a toast with the backend error message on failure and restores the main button to idle", async () => {
-    localStorage.setItem("auth_token", "token-123");
-    mockJoinTournament.mockRejectedValue(new Error("Tournament is full"));
-
-    render(<JoinTournamentButton tournament={baseTournament} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
-
-    await waitFor(() => expect(mockJoinTournament).toHaveBeenCalled());
-
-    // Toast should carry the backend error message
-    expect(mockAddToast).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "error",
-        message: "Tournament is full",
-      })
+    let resolveJoin: (() => void) | undefined;
+    mockJoinTournament.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveJoin = resolve;
+        }),
     );
 
-    // Main button returns to idle — no longer in loading state
-    expect(screen.queryByRole("button", { name: /joining/i })).not.toBeInTheDocument();
-    // Main button re-enabled (it's behind the modal but present in the DOM)
-    expect(screen.getByRole("button", { name: /join tournament/i })).not.toBeDisabled();
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
+
+    // Optimistic: registered immediately, well before the 2s network delay
+    // a high-latency mobile connection would introduce.
+    expect(await screen.findByRole("button", { name: /registered/i })).toBeInTheDocument();
+    expect(mockJoinTournament).toHaveBeenCalledTimes(1);
+
+    resolveJoin?.();
+    await waitFor(() =>
+      expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBe("true"),
+    );
+  });
+
+  it("rolls back to 'Join Tournament' and shows a toast if the optimistic join fails", async () => {
+    localStorage.setItem("auth_token", "token-123");
+    let rejectJoin: ((err: Error) => void) | undefined;
+    mockJoinTournament.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectJoin = reject;
+        }),
+    );
+
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm join/i }));
+
+    // Optimistically registered while the request is in flight.
+    expect(await screen.findByRole("button", { name: /registered/i })).toBeInTheDocument();
+
+    rejectJoin?.(new Error("Tournament is full"));
+
+    // Rolled back: the main button reverts to "Join Tournament".
+    expect(await screen.findByRole("button", { name: /^join tournament$/i })).toBeInTheDocument();
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error", message: "Tournament is full" }),
+    );
+    expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).not.toBe("true");
   });
 
   it("does not trigger duplicate API calls when confirm is clicked multiple times rapidly", async () => {
@@ -174,7 +172,7 @@ describe("JoinTournamentButton", () => {
     // Never resolves — keeps the request in-flight throughout the test
     mockJoinTournament.mockImplementation(() => new Promise(() => {}));
 
-    render(<JoinTournamentButton tournament={baseTournament} />);
+    renderButton();
 
     fireEvent.click(screen.getByRole("button", { name: /join tournament/i }));
 

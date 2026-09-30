@@ -137,6 +137,42 @@ jobs:
         chmod +x ./scripts/rollback-verify.sh
         ./scripts/rollback-verify.sh
 
+  # Backend CI (Rust) — #1291 acceptance criteria: cargo fmt/clippy/test on PR
+  backend:
+    name: Backend (Rust)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/target
+        key: ${{ runner.os }}-cargo-backend-${{ hashFiles('backend/Cargo.lock') }}
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Run tests
+      run: cargo test
+
   # Contracts CI (Rust)
   contracts:
     name: Contracts

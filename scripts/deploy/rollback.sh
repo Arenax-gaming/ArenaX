@@ -8,7 +8,7 @@
 # Slow path: if the previous slot was already stopped, this restarts it
 # on whatever image tag it last ran (recorded in deploy/state/*-image)
 # before flipping traffic, which takes longer but still doesn't require
-# rebuilding anything.
+# rebuilding anything..
 #
 # Usage: ./scripts/deploy/rollback.sh
 set -euo pipefail

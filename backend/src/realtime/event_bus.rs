@@ -28,6 +28,14 @@ impl EventBus {
         self.publish(&channel, event).await;
     }
 
+    /// Publish an event to an arbitrary named channel.
+    ///
+    /// Used for fan-out channels that are not keyed by a single id — the
+    /// per-category leaderboard channels (Issue #900), for instance.
+    pub async fn publish_to_channel(&self, channel: &str, event: &RealtimeEvent) {
+        self.publish(channel, event).await;
+    }
+
     /// Publish a serialized event to a Redis Pub/Sub channel.
     async fn publish(&self, channel: &str, event: &RealtimeEvent) {
         let payload = match serde_json::to_string(event) {

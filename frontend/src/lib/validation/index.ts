@@ -59,5 +59,17 @@ export type {
   ValidationGovernanceViolation,
 } from "./analytics";
 
+// ── i18n ─────────────────────────────────────────────────────────────────────
+export {
+  VALIDATION_LOCALES,
+  API_ERROR_CODE_MAP,
+  resolveValidationLocale,
+  translateValidation,
+  translateApiError,
+  formatValidationDate,
+  formatValidationNumber,
+} from "./i18n";
+export type { ValidationLocale, MessageParams } from "./i18n";
+
 // ── Domain schemas ───────────────────────────────────────────────────────────
 export * from "./schemas";

@@ -501,5 +501,11 @@
     "filterBy": "Filter by {field}",
     "page": "Page {current} of {total}",
     "required": "Required field"
+  },
+  "match": {
+    "completed": "Match completed. {winner} wins {scoreA} to {scoreB}.",
+    "disputed": "Match disputed. Awaiting review.",
+    "scoreUpdated": "Score updated: {player1} {scoreA}, {player2} {scoreB}.",
+    "statusChanged": "Match status changed to {status}."
   }
 }

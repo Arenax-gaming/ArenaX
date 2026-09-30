@@ -160,3 +160,40 @@ fn test_batch_role_check() {
     assert!(results.get(0).unwrap());
     assert!(!results.get(1).unwrap());
 }
+
+#[test]
+fn test_role_constants_are_unique() {
+    let roles = super::ALL_ROLE_IDS;
+    for i in 0..roles.len() {
+        for j in (i + 1)..roles.len() {
+            assert_ne!(roles[i], roles[j], "role constants at {i} and {j} collide");
+        }
+    }
+    assert_ne!(ROLE_ANALYST, ROLE_ANALYTICS_VIEWER);
+}
+
+#[test]
+fn test_analyst_and_analytics_viewer_do_not_alias() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let analyst = Address::generate(&env);
+    let viewer = Address::generate(&env);
+
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    client.grant_role(&analyst, &ROLE_ANALYST);
+    client.grant_role(&viewer, &ROLE_ANALYTICS_VIEWER);
+
+    assert!(client.has_role(&analyst, &ROLE_ANALYST));
+    assert!(!client.has_role(&analyst, &ROLE_ANALYTICS_VIEWER));
+    assert!(client.has_role(&viewer, &ROLE_ANALYTICS_VIEWER));
+    assert!(!client.has_role(&viewer, &ROLE_ANALYST));
+
+    client.revoke_role(&analyst, &ROLE_ANALYST);
+    assert!(!client.has_role(&analyst, &ROLE_ANALYST));
+    assert!(client.has_role(&viewer, &ROLE_ANALYTICS_VIEWER));
+}

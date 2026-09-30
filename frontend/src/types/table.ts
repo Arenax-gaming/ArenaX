@@ -39,6 +39,12 @@ export interface DataTableProps<T> {
   selectable?: boolean;
   loading?: boolean;
   emptyMessage?: string;
+  /**
+   * Column ids to pin (position: sticky) to the left, e.g. on a narrow
+   * viewport where the rest of the table scrolls horizontally (#1094).
+   * Order in this array determines left-to-right pin order.
+   */
+  pinnedColumns?: string[];
   onRowClick?: (row: T) => void;
   onSortChange?: (sorts: SortConfig[]) => void;
   onFilterChange?: (filters: FilterConfig[]) => void;

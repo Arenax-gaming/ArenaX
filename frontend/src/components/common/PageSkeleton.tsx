@@ -603,3 +603,20 @@ export function PartyPageSkeleton({ className }: { className?: string }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Wallet dashboard skeleton — shown while WalletDashboard code-splits in (#1086)
+// ---------------------------------------------------------------------------
+
+export function WalletDashboardSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn("space-y-6", className)} aria-hidden="true">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <CardSkeleton lines={2} />
+        <CardSkeleton lines={2} />
+        <CardSkeleton lines={2} />
+      </div>
+      <CardSkeleton lines={5} hasFooter />
+    </div>
+  );
+}

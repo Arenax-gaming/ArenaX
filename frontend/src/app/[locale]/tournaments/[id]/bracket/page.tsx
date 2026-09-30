@@ -5,7 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { mockTournaments } from "@/data/mockTournaments";
 import { generateMockBracket } from "@/data/mockBracket";
+import { generateMockRoster } from "@/data/mockRoster";
 import { TournamentBracket } from "@/components/tournaments/TournamentBracket";
+import { BracketSeedingEditor } from "@/components/tournaments/BracketSeedingEditor";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { ArrowLeft, Trophy } from "lucide-react";
@@ -27,6 +29,11 @@ export default function TournamentBracketPage() {
     if (tournament.status !== "in_progress" && tournament.status !== "completed") return null;
     return generateMockBracket(tournament, currentUserId);
   }, [tournament, currentUserId]);
+
+  // Bracket admin view (#1092): the organizer can seed players while
+  // registration is still open, before the bracket is generated.
+  const isOrganizer = !!tournament && !!user && tournament.createdBy === user.id;
+  const roster = useMemo(() => (tournament ? generateMockRoster(tournament) : []), [tournament]);
 
   if (!tournament) {
     return (
@@ -64,9 +71,24 @@ export default function TournamentBracketPage() {
           </p>
         </div>
 
-        {/* Bracket or unavailable */}
+        {/* Bracket, seeding editor, or unavailable */}
         {bracketData ? (
           <TournamentBracket bracketData={bracketData} currentUserId={currentUserId} />
+        ) : isOrganizer ? (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Seed the bracket</h2>
+              <p className="text-sm text-muted-foreground">
+                Drag players to arrange seed order before the bracket locks in, or use
+                Tab, Enter, and the arrow keys.
+              </p>
+            </div>
+            <BracketSeedingEditor
+              tournamentId={tournament.id}
+              tournamentStatus={tournament.status}
+              players={roster}
+            />
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center rounded-lg border bg-card py-16 text-center">
             <Trophy className="mb-4 h-16 w-16 text-muted-foreground" />

@@ -4,8 +4,13 @@ use crate::db::DbPool;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest, User, UserProfile};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
+use redis::{AsyncCommands, Client as RedisClient};
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+const PROFILE_CACHE_VERSION: &str = "v1";
+const PROFILE_CACHE_TTL_SECONDS: u64 = 60;
 
 /// Active session info returned by `GET /api/auth/sessions`.
 #[derive(Debug, serde::Serialize)]
@@ -33,11 +38,34 @@ impl From<RefreshTokenRecord> for ActiveSession {
 pub struct AuthService {
     pool: DbPool,
     jwt_service: JwtService,
+    redis_client: Option<Arc<RedisClient>>,
 }
 
 impl AuthService {
     pub fn new(pool: DbPool, jwt_service: JwtService) -> Self {
-        Self { pool, jwt_service }
+        Self {
+            pool,
+            jwt_service,
+            redis_client: None,
+        }
+    }
+
+    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
+        self.redis_client = Some(redis_client);
+        self
+    }
+
+    fn profile_cache_key(user_id: Uuid) -> String {
+        format!("profile:{}:{}", PROFILE_CACHE_VERSION, user_id)
+    }
+
+    pub async fn invalidate_profile_cache(&self, user_id: Uuid) {
+        let Some(redis_client) = &self.redis_client else {
+            return;
+        };
+        if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+            let _: Result<(), _> = connection.del(Self::profile_cache_key(user_id)).await;
+        }
     }
 
     // ── Registration & Login ─────────────────────────────────────────────────
@@ -360,5 +388,23 @@ impl AuthService {
 
         info!(user_id = %user_id, "Password changed");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // auth_service_updated.rs was an older copy of this file and is removed
+    // (#1158). The only behavior kept from it is this bcrypt round trip:
+    // register and change_password hash with DEFAULT_COST, and login checks
+    // with verify. Its older user insert (required email, no phone number,
+    // no role) was not kept; this service is the one handlers call.
+    #[test]
+    fn bcrypt_hash_round_trips_and_rejects_wrong_password() {
+        let hashed = hash("test_password", DEFAULT_COST).unwrap();
+
+        assert!(verify("test_password", &hashed).unwrap());
+        assert!(!verify("wrong_password", &hashed).unwrap());
     }
 }

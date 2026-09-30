@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useMemo } from "react";
+import { useLocale } from "next-intl";
 import { useClipboard } from "./useClipboard";
 import { useAnalytics } from "./useAnalytics";
 import type { Tournament } from "@/types/tournament";
@@ -50,18 +51,23 @@ export interface UseTournamentShareResult {
 export function useTournamentShare(
   tournament: Tournament,
   winner?: BracketPlayer | null,
+  /** Deep-links the share URL to a specific bracket match (#1089). */
+  matchId?: string | null,
 ): UseTournamentShareResult {
   const { copy, hasCopied } = useClipboard({ resetAfterMs: 2500 });
   const { track } = useAnalytics();
+  const locale = useLocale();
 
   // ─── Derived values ────────────────────────────────────────────────────────
 
   const shareUrl = useMemo(() => {
-    if (typeof window === "undefined") {
-      return `/tournaments/${tournament.id}/results`;
-    }
-    return `${window.location.origin}/tournaments/${tournament.id}/results`;
-  }, [tournament.id]);
+    // localePrefix is "always" (see i18n/routing.ts), so every canonical
+    // link — including shared ones — must carry the locale segment (#1089).
+    const path = `/${locale}/tournaments/${tournament.id}/results`;
+    const query = matchId ? `?match=${encodeURIComponent(matchId)}` : "";
+    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    return `${origin}${path}${query}`;
+  }, [locale, tournament.id, matchId]);
 
   const shareMessage = useMemo(() => {
     const winnerName = winner?.username ?? "A champion";

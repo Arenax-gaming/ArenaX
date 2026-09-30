@@ -6,10 +6,6 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
 import {
-  useSessionExtender,
-  useGracePeriodExpired,
-} from "@/contexts/SessionTimeoutContext";
-import {
   SESSION_DURATION_SECONDS,
   WARNING_TIME_SECONDS,
   GRACE_PERIOD_SECONDS,
@@ -33,6 +29,13 @@ interface SessionTimeoutModalProps {
   onClose: () => void;
   className?: string;
   contentClassName?: string;
+  /**
+   * Whether the caller's grace period has already lapsed (suppresses the
+   * modal's own auto-extend timer). Callers that don't track a grace period
+   * — e.g. the JWT-expiry-driven `SessionExpiryWarningModal` — can omit
+   * this; it defaults to `false`.
+   */
+  gracePeriodExpired?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,11 +50,11 @@ export function SessionTimeoutModal({
   onClose,
   className,
   contentClassName,
+  gracePeriodExpired = false,
 }: SessionTimeoutModalProps) {
   const isClosingRef = useRef(false);
   const extendButtonRef = useRef<HTMLButtonElement>(null);
-  const gracePeriodExpired = useGracePeriodExpired();
-  
+
   // Auto-extend if user doesn't respond (within grace period)
   useEffect(() => {
     if (!isOpen || gracePeriodExpired) return;

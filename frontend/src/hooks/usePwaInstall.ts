@@ -2,6 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 
+/**
+ * What `install()` resolved to. `"unavailable"` means the browser never
+ * offered a prompt to defer, so nothing was shown at all.
+ */
+export type InstallOutcome = "accepted" | "dismissed" | "unavailable";
+
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -43,8 +49,15 @@ export function usePwaInstall() {
     };
   }, []);
 
-  const install = useCallback(async () => {
-    if (!deferredPrompt) return;
+  /**
+   * Show the browser's install dialog.
+   *
+   * Returns what the user chose (Issue #858). The caller needs it: an install
+   * rate is accepted-over-shown, and without the outcome a dismissal at the
+   * browser dialog is indistinguishable from an install.
+   */
+  const install = useCallback(async (): Promise<InstallOutcome> => {
+    if (!deferredPrompt) return "unavailable";
 
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
@@ -54,6 +67,8 @@ export function usePwaInstall() {
     if (outcome === "accepted") {
       setIsInstalled(true);
     }
+
+    return outcome;
   }, [deferredPrompt]);
 
   return {

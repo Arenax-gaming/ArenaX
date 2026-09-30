@@ -261,6 +261,91 @@ impl MatchService {
         Ok(dispute)
     }
 
+    /// Attach freshly-hashed evidence to `user_id`'s dispute for `match_id`
+    /// (#1081), creating the dispute if they have not filed one yet. The
+    /// SHA-256 hash and S3 key are persisted so the file's integrity can be
+    /// verified later by re-downloading and re-hashing it.
+    pub async fn attach_dispute_evidence(
+        &self,
+        match_id: Uuid,
+        user_id: Uuid,
+        evidence_hash: &str,
+        evidence_s3_key: &str,
+    ) -> Result<MatchDispute, ApiError> {
+        let existing = sqlx::query_as!(
+            MatchDispute,
+            r#"
+            SELECT * FROM match_disputes
+            WHERE match_id = $1 AND disputing_player_id = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            match_id,
+            user_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        if let Some(dispute) = existing {
+            let updated = sqlx::query_as!(
+                MatchDispute,
+                r#"
+                UPDATE match_disputes
+                SET evidence_hash = $2, evidence_s3_key = $3
+                WHERE id = $1
+                RETURNING *
+                "#,
+                dispute.id,
+                evidence_hash,
+                evidence_s3_key
+            )
+            .fetch_one(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+            return Ok(updated);
+        }
+
+        let match_record = self.get_match_by_id(match_id).await?;
+
+        let dispute = sqlx::query_as!(
+            MatchDispute,
+            r#"
+            INSERT INTO match_disputes (
+                id, match_id, disputing_player_id, reason,
+                evidence_hash, evidence_s3_key, status, created_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8
+            ) RETURNING *
+            "#,
+            Uuid::new_v4(),
+            match_id,
+            user_id,
+            "Evidence uploaded",
+            evidence_hash,
+            evidence_s3_key,
+            DisputeStatus::Pending as _,
+            Utc::now()
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.update_match_status(match_id, MatchStatus::Disputed)
+            .await?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "disputed",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "user_id": user_id,
+            "reason": "Evidence uploaded"
+        }))
+        .await?;
+
+        Ok(dispute)
+    }
+
     /// Join matchmaking queue
     pub async fn join_matchmaking(
         &self,

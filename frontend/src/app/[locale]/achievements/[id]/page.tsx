@@ -10,7 +10,33 @@ interface Props {
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   const achievement = MOCK_ACHIEVEMENTS.find((a) => a.id === id);
-  return { title: achievement ? `${achievement.title} | Achievements` : 'Achievement' };
+
+  if (!achievement) {
+    return { title: 'Achievement' };
+  }
+
+  const title = `${achievement.title} | Achievements`;
+  const description = achievement.description;
+  // Dynamic OG image (#1097): player name, icon, and rarity, rendered at
+  // the edge and CDN-cached — see app/api/og/achievement/[id].
+  const ogImageUrl = `/api/og/achievement/${achievement.id}`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: achievement.title }],
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImageUrl],
+    },
+  };
 }
 
 export default async function AchievementDetailPage({ params }: Props) {

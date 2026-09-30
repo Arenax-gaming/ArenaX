@@ -224,6 +224,9 @@ pub enum DataKey {
     BehaviorProfile(Address),         // Player behavior profile
     PatternDatabase(u32),             // Pattern detection database
     MlModelParams,
+    // Storage TTL config (#1060)
+    TtlAnalyticsMinLedgers,
+    TtlAnalyticsTargetLedgers,
 }
 
 // Anti-cheat contract
@@ -297,6 +300,40 @@ impl AntiCheatContract {
 
         // Emergency stop starts unpaused
         env.storage().persistent().set(&DataKey::Paused, &false);
+    }
+
+    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
+
+    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsMinLedgers, &min_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsTargetLedgers, &target_ttl);
+    }
+
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_ANALYTICS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_ANALYTICS);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn bump_entry_ttl(env: Env, key: DataKey) {
+        Self::require_admin(&env);
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, min_ttl, target_ttl);
     }
 
     // Report suspicious activity
@@ -461,9 +498,11 @@ impl AntiCheatContract {
             report_id,
         );
 
-        // In emergency mode with high confidence, auto-verify
+        // In emergency mode with high confidence, auto-verify.
+        // The public verify_activity entry point rejects non-admin callers, so
+        // this path uses the internal helper and does not require an admin signature.
         if emergency_mode && confidence_score > 80 {
-            Self::verify_activity(env.clone(), reporter.clone(), report_id, true);
+            Self::verify_activity_internal(&env, report_id, true);
         }
 
         report_id
@@ -594,6 +633,17 @@ impl AntiCheatContract {
 
         admin.require_auth();
 
+        Self::apply_sanction_internal(env, player, sanction_type, reason, duration, report_ids)
+    }
+
+    fn apply_sanction_internal(
+        env: Env,
+        player: Address,
+        sanction_type: SanctionType,
+        reason: String,
+        duration: u64,
+        report_ids: Vec<u64>,
+    ) -> u64 {
         let params: AntiCheatParams = env
             .storage()
             .persistent()
@@ -891,6 +941,19 @@ impl AntiCheatContract {
             panic!("only admin can verify activity");
         }
 
+        // Public verification of a report still requires the admin to authorize
+        // the transaction. That check used to live inside apply_sanction.
+        if verified {
+            admin.require_auth();
+        }
+
+        Self::verify_activity_internal(&env, report_id, verified);
+    }
+
+    /// Mark a report verified and, when confirmed, sanction the player.
+    /// Does not check the caller. Emergency auto-verify uses this so a
+    /// reporter submission is not rolled back by the admin guard.
+    fn verify_activity_internal(env: &Env, report_id: u64, verified: bool) {
         let mut activity: SuspiciousActivity = env
             .storage()
             .persistent()
@@ -902,15 +965,21 @@ impl AntiCheatContract {
             .persistent()
             .set(&DataKey::Report(report_id), &activity);
 
+        arenax_events::anti_cheat::emit_activity_verified(
+            env,
+            report_id,
+            &activity.player,
+            verified,
+        );
+
         if verified {
-            // Apply automatic sanction for verified cheating
-            let mut report_ids = Vec::new(&env);
+            let mut report_ids = Vec::new(env);
             report_ids.push_back(report_id);
-            Self::apply_sanction(
+            Self::apply_sanction_internal(
                 env.clone(),
                 activity.player.clone(),
                 SanctionType::ReputationPenalty,
-                String::from_str(&env, "Verified suspicious activity"),
+                String::from_str(env, "Verified suspicious activity"),
                 0,
                 report_ids,
             );
@@ -1116,6 +1185,15 @@ impl AntiCheatContract {
         }
     }
 
+    fn require_admin(env: &Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+    }
+
     // Helper: Update trust score with weighted factors
     fn update_trust_score(
         env: &Env,
@@ -1162,9 +1240,16 @@ impl AntiCheatContract {
 
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);
@@ -1186,9 +1271,16 @@ impl AntiCheatContract {
             .saturating_sub(10);
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);

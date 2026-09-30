@@ -24,12 +24,16 @@ use crate::middleware::cors_middleware;
 use crate::middleware::anti_bot::{AntiBotConfig, AntiBotMiddleware};
 use crate::middleware::csrf::{csrf_protection, csrf_token_handler};
 use crate::middleware::idempotency_middleware::IdempotencyMiddleware;
+use crate::middleware::ip_list::IpListMiddleware;
 use crate::middleware::metrics_middleware::RequestMetrics;
 use crate::middleware::rate_limit::RateLimitMiddleware;
 use crate::middleware::security::{SecurityConfig, SecurityMiddleware};
 use crate::middleware::security_headers::security_headers;
+use crate::middleware::tenant_context::TenantContextMiddleware;
 use crate::middleware::tracing_middleware::RequestTracing;
+use crate::models::idempotency::IdempotencyPolicy;
 use crate::service::batch_service::BatchService;
+use crate::service::evidence_storage::{EvidenceStore, S3EvidenceStore};
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -37,7 +41,6 @@ use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
 use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
-use crate::service::batch_service::BatchService;
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
@@ -45,6 +48,11 @@ use crate::telemetry::init_telemetry;
 async fn main() -> io::Result<()> {
     // Load configuration
     let config = Config::from_env().expect("Failed to load configuration");
+
+    // Reject a misspelled PAYMENT_PROVIDER at startup instead of letting
+    // WalletService fall back to a gateway nobody chose (#1069).
+    crate::service::payment_provider::PaymentProviderKind::from_env()
+        .expect("Invalid PAYMENT_PROVIDER");
 
     // Initialize telemetry — kept alive for the process lifetime so spans
     // are flushed to the OTLP exporter (Jaeger/Datadog) on shutdown.
@@ -89,6 +97,12 @@ async fn main() -> io::Result<()> {
         60,
     );
     tracing::info!("Tournament orchestrator polling worker started");
+
+    // Spawn the job queue worker for async tournament bracket/prize processing.
+    let _job_worker_handle = crate::orchestrator::TournamentOrchestrator::spawn_job_worker(
+        Arc::new(TournamentService::new(db_pool.clone())),
+    );
+    tracing::info!("Tournament job queue worker started");
 
     // Create Redis connection manager
     let redis_client = redis::Client::open(config.redis.url.clone())
@@ -172,35 +186,40 @@ async fn main() -> io::Result<()> {
     // Initialize BatchService — Issue #952
     let batch_service = Arc::new(BatchService::new(db_pool.clone()));
 
-    // Initialize ApiKeyService — Issue #1080 (zero-downtime key rotation with
-    // overlap, expiry of old keys, and rotation webhooks).
-    let api_key_service = Arc::new(crate::service::api_key_service::ApiKeyService::new(db_pool.clone()));
-
-    // Background job: expire old keys whose rotation overlap window elapsed.
-    {
-        let api_key_service = api_key_service.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-            loop {
-                interval.tick().await;
-                match api_key_service.expire_expired_old_keys().await {
-                    Ok(count) if count > 0 => {
-                        tracing::info!(count, "Expired old API keys after rotation overlap");
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to expire old API keys");
-                    }
-                }
-            }
-        });
-    }
-    tracing::info!("API key overlap expiry job started");
+    // Fan-out notification delivery (in-app/push/email) — Issue #1107
+    let notification_service = Arc::new(crate::service::notification_service::NotificationService::new(
+        db_pool.clone(),
+        config.notifications.sendgrid_api_key.clone(),
+        config.notifications.sendgrid_from_email.clone(),
+    ));
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
+
+    // Response cache for read-heavy endpoints — Issue #910
+    let response_cache = crate::middleware::cache::ResponseCache::new(redis_conn.clone());
+
+    // Real-time leaderboard deltas — Issue #900
+    let leaderboard_broadcaster = Arc::new(
+        crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster::new(event_bus.clone()),
+    );
+
+    // The per-player throttle holds back the tail of a burst until something
+    // else arrives to shake it loose. This timer is that something: it costs
+    // one lock acquisition per second per category and guarantees the last
+    // change a player made is delivered within a second of happening.
+    {
+        let broadcaster = leaderboard_broadcaster.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                ticker.tick().await;
+                broadcaster.flush_all().await;
+            }
+        });
+    }
 
     // Initialize Auth Services for Realtime
     let jwt_config = crate::auth::jwt_service::JwtConfig::from_config(
@@ -216,7 +235,8 @@ async fn main() -> io::Result<()> {
     let auth_service = crate::service::auth_service::AuthService::new(
         db_pool.clone(),
         crate::auth::jwt_service::JwtService::new(jwt_config, redis_conn.clone()),
-    );
+    )
+    .with_redis(Arc::new(redis_client.clone()));
 
     // Start Redis Pub/Sub subscriber (broadcasts to local WebSocket actors)
     let broadcaster = WsBroadcaster::new(
@@ -235,12 +255,18 @@ async fn main() -> io::Result<()> {
     // Snapshot the rate limit config so it can be moved into the HttpServer closure.
     let rate_limit_config = config.rate_limit.clone();
 
+    // Tamper-evident dispute evidence storage (#1081, #1076).
+    let evidence_store: Arc<dyn EvidenceStore> = Arc::new(S3EvidenceStore::new(&config.storage));
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
             .app_data(web::Data::new(redis_conn.clone()))
+            .app_data(web::Data::new(Arc::new(redis_client.clone())))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
+            .app_data(web::Data::new(response_cache.clone()))
+            .app_data(web::Data::new(leaderboard_broadcaster.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
@@ -251,13 +277,10 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(tournament_service.clone()))
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(batch_service.clone()))
+            .app_data(web::Data::new(notification_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
-            .app_data(web::Data::new(api_key_service.clone()))
-            // Soroban RPC base URL for the readiness probe (/api/health/ready).
-            .app_data(web::Data::new(
-                crate::http::health::SorobanRpcUrl(config.stellar.network_url.clone()),
-            ))
+            .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
             .wrap(SecurityMiddleware::new(redis_conn.clone(), SecurityConfig::default()))
@@ -266,14 +289,23 @@ async fn main() -> io::Result<()> {
             .wrap(actix_web::middleware::from_fn(csrf_protection))
             .wrap(cors_middleware())
             .wrap(actix_web::middleware::Logger::default())
+            .wrap(RequestMetrics::new())
             // RequestTracing sees the request first (extracts trace context /
             // correlation id) and the response last (records latency,
             // stamps correlation headers) among the "inner" layers below.
             .wrap(RequestTracing::new())
+                        // Reports 5xx responses and panics from any layer inside this
+            // one to Sentry (see telemetry.rs::init_sentry — no-op when
+            // SENTRY_DSN is unset).
+            .wrap(sentry_actix::Sentry::new())
             // Outermost: guarantees security headers land on every response,
             // including ones short-circuited by an inner layer (CORS
             // preflight, CSRF rejection, rate limiting, etc).
             .wrap(actix_web::middleware::from_fn(security_headers))
+            // Unauthenticated Prometheus scrape target — kept outside the
+            // `/api` scope (and its rate-limit/idempotency/security
+            // middleware) so scraping never competes with real traffic.
+            .route("/metrics", web::get().to(crate::metrics::metrics_handler))
             .service(
                 web::scope("/api")
                     .route("/health", web::get().to(crate::http::health::health_check))
@@ -294,10 +326,7 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::feature_flag_handler::configure_routes)
                     // Auth endpoints (login, register, refresh are rate-limited strictly)
                     .configure(crate::http::auth_handler::configure_routes)
-                    // User profile + GDPR/NDPR account erasure & data export (Issue #1078)
                     .configure(crate::http::users::configure_routes)
-                    // API key management incl. zero-downtime rotation (Issue #1080)
-                    .configure(crate::http::api_key::configure_api_key_routes)
                     .route(
                         "/notifications",
                         web::get().to(crate::http::notification_handler::get_notifications),
@@ -317,6 +346,13 @@ async fn main() -> io::Result<()> {
                     .route(
                         "/notifications/{id}",
                         web::delete().to(crate::http::notification_handler::delete_notification),
+                    )
+                    // Push notification service (FCM) — Issue #908
+                    .service(
+                        web::scope("/push")
+                            .route("/devices", web::post().to(crate::http::push_notification_handler::register_device))
+                            .route("/devices", web::delete().to(crate::http::push_notification_handler::unregister_device))
+                            .route("/send/{user_id}", web::post().to(crate::http::push_notification_handler::send_push_to_user)),
                     )
                     // Wallet endpoints
                     .service(
@@ -370,11 +406,15 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::tournament_handler::configure_routes)
                     // Match authority endpoints — on-chain match FSM
                     .configure(crate::http::match_authority_handler::configure_routes)
+                    // Dispute resolution endpoints — ticketed, escalatable disputes (Issue #909)
+                    .configure(crate::http::dispute_handler::configure_routes)
                     // Gas endpoints
                     .service(
                         web::scope("/gas")
                             .route("/estimate", web::post().to(crate::http::gas_estimation_handler::estimate))
                     )
+                    // Async payment webhooks — Paystack + Flutterwave (#1157)
+                    .configure(crate::http::webhook_handler::configure_routes)
                     // Matchmaking endpoints
                     .service(
                         web::scope("/matchmaking")
@@ -411,8 +451,31 @@ async fn main() -> io::Result<()> {
                             .route("/cleanup", web::delete().to(crate::http::idempotency_examples::cleanup_test_data))
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
+                    )
+                    // Leaderboard endpoints
+                    .service(
+                        web::scope("/leaderboards")
+                            .route("/{category}", web::get().to(crate::http::leaderboard_handler::get_leaderboard))
+                            .route("/{category}/season/{season}", web::get().to(crate::http::leaderboard_handler::get_seasonal_leaderboard))
+                            .route("/{category}/player/{player_id}", web::get().to(crate::http::leaderboard_handler::get_player_rank))
+                            .route("/{category}/player/{player_id}/elo-history", web::get().to(crate::http::leaderboard_handler::get_elo_history))
+                            .route("/{category}/history/{player_id}", web::get().to(crate::http::leaderboard_handler::get_rank_history))
+                            .route("/{category}/refresh", web::post().to(crate::http::leaderboard_handler::refresh_leaderboard))
+                            .route("/{category}/stats", web::get().to(crate::http::leaderboard_handler::get_leaderboard_stats))
                     ),
             )
+            // Registered at the app level, not inside the `/api` scope above:
+            // both modules declare their own `/api/...` scope, so nesting them
+            // would produce `/api/api/...`.
+            //
+            // Player suspensions and appeals — Issue #906
+            .configure(crate::http::suspension_handler::configure)
+            // Email notification preferences and unsubscribe — Issue #905
+            .configure(crate::http::email_handler::configure)
+            // Cache hit/miss metrics — Issue #910
+            .configure(crate::http::cache_handler::configure)
+            // Audit log endpoints — Issue #863 / #1066
+            .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
     })
     .bind((config.server.host.clone(), config.server.port))?

@@ -27,7 +27,8 @@ function findChampionFromBracket(bracket: BracketData) {
     (p): p is NonNullable<typeof p> => p != null,
   );
   const winner = sides.find((p) => p.id === finalMatch.winnerId) ?? null;
-  return winner;
+  const runnerUp = sides.find((p) => p.id !== finalMatch.winnerId) ?? null;
+  return { winner, runnerUp };
 }
 
 // ── OG metadata ───────────────────────────────────────────────────────────────
@@ -58,9 +59,12 @@ export async function generateMetadata({
     };
   }
 
-  // Derive champion server-side (no currentUserId needed for metadata).
+  // Derive standings server-side (no currentUserId needed for metadata).
   const bracket = generateMockBracket(tournament, "");
-  const champion = findChampionFromBracket(bracket);
+  const { winner, runnerUp } = findChampionFromBracket(bracket) ?? {
+    winner: null,
+    runnerUp: null,
+  };
 
   const prize = tournament.prizePool.toLocaleString("en-US", {
     style: "currency",
@@ -68,9 +72,16 @@ export async function generateMetadata({
     maximumFractionDigits: 0,
   });
 
-  const winnerName = champion?.username ?? "The champion";
+  const winnerName = winner?.username ?? "The champion";
   const title = `🏆 ${winnerName} wins ${tournament.name} | ArenaX`;
   const description = `${winnerName} claimed the championship in "${tournament.name}" on ArenaX with a ${prize} prize pool!`;
+
+  // Dynamic OG image (#1097): top standings + prize pool, rendered at the
+  // edge and CDN-cached — see app/api/og/tournament/[id]/result.
+  const ogParams = new URLSearchParams();
+  if (winner?.username) ogParams.set("first", winner.username);
+  if (runnerUp?.username) ogParams.set("second", runnerUp.username);
+  const ogImageUrl = `/api/og/tournament/${tournament.id}/result?${ogParams.toString()}`;
 
   return {
     title,
@@ -80,10 +91,10 @@ export async function generateMetadata({
       description,
       images: [
         {
-          url: getTournamentBannerUrl(tournament.id),
+          url: ogImageUrl,
           width: 1200,
-          height: 400,
-          alt: `${tournament.name} tournament banner`,
+          height: 630,
+          alt: `${tournament.name} final standings`,
         },
       ],
       type: "website",
@@ -92,7 +103,7 @@ export async function generateMetadata({
       card: "summary_large_image",
       title,
       description,
-      images: [getTournamentBannerUrl(tournament.id)],
+      images: [ogImageUrl],
     },
   };
 }

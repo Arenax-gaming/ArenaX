@@ -13,7 +13,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { hasAnalyticsConsent } from "@/lib/consentCookie";
+import { hasConsentedTo } from "@/lib/consentPreferences";
 
 type FormEvent =
   | { type: "form_start" }
@@ -22,7 +22,9 @@ type FormEvent =
   | { type: "form_abandon"; durationMs: number };
 
 function sendEvent(formId: string, event: FormEvent) {
-  if (!hasAnalyticsConsent()) return;
+  // Form interactions build a behavioural profile of the user, so they fall
+  // under "personalisation" rather than the coarser "analytics" bucket (#1093).
+  if (!hasConsentedTo("personalisation")) return;
 
   // Datadog RUM integration — only runs client-side when RUM is initialised
   if (

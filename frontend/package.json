@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/upload-datadog-sourcemaps.mjs",
+    "upload:sourcemaps": "node scripts/upload-datadog-sourcemaps.mjs",
     "start": "next start",
     "lint": "next lint && npm run check:routes",
     "check:routes": "node scripts/check-no-duplicate-routes.mjs",

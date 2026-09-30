@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::env;
 
-#lderive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
@@ -13,9 +13,10 @@ pub struct Config {
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
     pub idempotency: IdempotencyConfig,
+    pub notifications: NotificationsConfig,
 }
 
-#lderive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
@@ -31,6 +32,13 @@ pub struct DatabaseConfig {
     pub circuit_failure_threshold: u32,
     /// How long the breaker stays open before admitting a trial request.
     pub circuit_open_secs: u64,
+    /// PostgreSQL `statement_timeout` applied to every connection (#1084):
+    /// a slow query or deadlock is cancelled instead of holding a pool
+    /// connection indefinitely. `DATABASE_STATEMENT_TIMEOUT_MS`, default 5000.
+    pub statement_timeout_ms: u64,
+    /// Queries slower than this are logged at WARN with their SQL and
+    /// duration (#1084). `DATABASE_SLOW_QUERY_THRESHOLD_MS`, default 200.
+    pub slow_query_threshold_ms: u64,
 }
 
 /// Read a `u64` from the environment, falling back when unset or unparseable.
@@ -43,18 +51,18 @@ fn env_u32(key: &str, default: u32) -> u32 {
     env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
-#lderive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
     Run,
     Disabled,
 }
 
 impl MigrationMode {
-    fn from_env_value(value: &str) -> Result<Self, anyhow*::Error> {
+    fn from_env_value(value: &str) -> Result<Self, anyhow::Error> {
         match value.trim().to_ascii_lowercase().as_str() {
             "run" | "auto" | "true" | "1" => Ok(Self::Run),
             "disabled" | "disable" | "off" | "false" | "0" => Ok(Self::Disabled),
-            other => anyhow*:bail(!
+            other => anyhow::bail!(
                 "invalid BACKEND_MIGRATION_MODE value `{}`; expected `run` or `disabled`",
                 other
             ),
@@ -62,12 +70,12 @@ impl MigrationMode {
     }
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RedisConfig {
     pub url: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub s3_endpoint: String,
     pub s3_access_key: String,
@@ -75,13 +83,13 @@ pub struct StorageConfig {
     pub s3_bucket: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PaymentsConfig {
     pub paystack_secret: String,
     pub flutterwave_secret: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     pub jwt_secret: String,
     /// Duration string for the short-lived access token, e.g. "15m".
@@ -91,7 +99,7 @@ pub struct AuthConfig {
     pub jwt_refresh_expires_in: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StellarConfig {
     pub network_url: String,
     pub admin_secret: String,
@@ -105,12 +113,12 @@ pub struct StellarConfig {
     pub soroban_contract_match: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AiConfig {
     pub model_path: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub port: u16,
     pub host: String,
@@ -121,24 +129,34 @@ fn default_rate_limit_headers() -> bool {
     true
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RateLimitConfig {
     pub requests: u32,
     pub window: u64,
     /// Whether to send rate limit headers (`RateLimit-Limit`, `RateLimit-Remaining`,
     /// `RateLimit-Reset`) on responses. Defaults to `true`.
-    #serde(default = "default_rate_limit_headers")
+    #[serde(default = "default_rate_limit_headers")]
     pub headers: bool,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct IdempotencyConfig {
     pub ttl_seconds: u64,
     pub max_response_size_kb: u32,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotificationsConfig {
+    /// SendGrid API key for the email fan-out channel (#1107). Empty when
+    /// unset — the email channel then fails fast rather than silently
+    /// no-op'ing, so a misconfigured deployment is visible in the delivery
+    /// audit log instead of just losing emails quietly.
+    pub sendgrid_api_key: String,
+    pub sendgrid_from_email: String,
+}
+
 impl Config {
-    pub fn from_env() -> Result<Self, anyhow*:Error> {
+    pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
 
         let database_url = env::var("DATABASE_URL")?;
@@ -159,7 +177,7 @@ impl Config {
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")?;
         let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")?;
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
-        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUUTATION")?;
+        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")?;
         let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")?;
         // Falls back to the prize contract so existing deployments don't break.
         let soroban_contract_match = env::var("SOROBAN_CONTRACT_MATCH")
@@ -179,16 +197,21 @@ impl Config {
         let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
             .unwrap_or_else(|_| "1024".to_string())
             .parse()?;
+        let sendgrid_api_key = env::var("SENDGRID_API_KEY").unwrap_or_default();
+        let sendgrid_from_email =
+            env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "no-reply@arenax.gg".to_string());
 
         Ok(Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
-                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20);
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20),
                 acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
                 health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
                 circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
                 circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
+                statement_timeout_ms: env_u64("DATABASE_STATEMENT_TIMEOUT_MS", 5000),
+                slow_query_threshold_ms: env_u64("DATABASE_SLOW_QUERY_THRESHOLD_MS", 200),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -230,6 +253,10 @@ impl Config {
             idempotency: IdempotencyConfig {
                 ttl_seconds: idempotency_ttl_seconds,
                 max_response_size_kb: idempotency_max_response_size_kb,
+            },
+            notifications: NotificationsConfig {
+                sendgrid_api_key,
+                sendgrid_from_email,
             },
         })
     }

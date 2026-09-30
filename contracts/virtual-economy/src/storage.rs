@@ -27,6 +27,7 @@ pub enum DataKey {
 
     // Marketplace
     MarketplaceOrder(BytesN<32>),
+    NftActiveOrder(BytesN<32>),
 
     // Royalty & Licensing
     NFTLicense(BytesN<32>),
@@ -89,6 +90,49 @@ pub enum DataKey {
     // Referral
     ReferralConfig,
     ReferralAccount(Address),
+
+    // NFT Collections (#913) — keyed by collection name, matched against
+    // NFTMetadata.category at mint time.
+    Collection(String),
+
+    // Collection floor price history (#917) — ring-buffer of recent sales per collection.
+    CollectionPriceHistory(String),
+
+    // Trading Rebates (#916)
+    /// Tiered rebate configuration (thresholds + bps, distribution period).
+    RebateConfig,
+    /// Trading volume accumulated by an address since the last monthly
+    /// rebate run. Reset to zero once that volume has been rebated.
+    TraderVolume(Address),
+    /// Addresses with a nonzero `TraderVolume`, so a monthly run can find
+    /// everyone owed a rebate without an off-chain indexer.
+    TrackedTraders,
+    /// Ledger timestamp of the last completed monthly rebate distribution.
+    LastRebateRun,
+    /// Rebate payout history for an address (most recent last), for
+    /// dashboard visibility.
+    RebateHistory(Address),
+
+    // Storage TTL config (#1060)
+    TtlOrderMinLedgers,
+    TtlOrderTargetLedgers,
+    TtlNftMinLedgers,
+    TtlNftTargetLedgers,
+
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contracttype]
@@ -118,7 +162,7 @@ pub struct NFTMetadata {
     pub rarity: u32, // 1-5 scale
     pub category: String,
     pub creator: Address,
-    pub royalty_bps: u32, // basis points, max 2000 (20%)
+    pub royalty_bps: u32, // basis points, configurable 0-1000 (0-10%, #913)
 }
 
 #[contracttype]
@@ -127,6 +171,39 @@ pub struct NFTAttribute {
     pub trait_type: String,
     pub value: String,
     pub display_type: Option<String>,
+}
+
+/// A named grouping of NFTs (#913) — an NFT joins a collection when its
+/// `NFTMetadata.category` matches `NFTCollection.name`. Collections are
+/// opt-in: minting with an unregistered category still succeeds, it just
+/// isn't counted toward any collection's `item_count`.
+///
+/// Floor price and volume fields are updated on every settled trade
+/// (marketplace fixed-price and Dutch auction) (#917: collection floor price
+/// tracking, price history, volume metrics).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NFTCollection {
+    pub name: String,
+    pub creator: Address,
+    /// Applied to new mints in this collection that don't specify their own
+    /// `royalty_bps` override — informational default, not auto-applied,
+    /// since `mint_nft` takes a fully-formed `NFTMetadata`.
+    pub default_royalty_bps: u32,
+    pub item_count: u32,
+    // ── Market data (#917) ──────────────────────────────────────────────────
+    /// Lowest sale price ever recorded for any NFT in this collection.
+    /// `0` means no sales have settled yet.
+    pub floor_price: i128,
+    /// Most recent settled sale price in this collection.
+    pub last_sale_price: i128,
+    /// Cumulative sum of all settled sale prices in this collection
+    /// (fixed-price orders + Dutch auction purchases).
+    pub total_volume: i128,
+    /// Total number of secondary-market sales that have settled.
+    pub sale_count: u64,
+    /// Ledger timestamp of the most recent settled sale.
+    pub last_sale_at: u64,
 }
 
 #[contracttype]
@@ -183,6 +260,7 @@ pub struct EconomyAnalytics {
     pub total_currency_minted: i128,
     pub total_currency_burned: i128,
     pub total_nfts_minted: u64,
+    pub total_nfts_burned: u64,
     pub total_trades_executed: u64,
     pub total_trade_volume: i128,
     pub total_fees_collected: i128,
@@ -392,6 +470,19 @@ pub struct PriceHistory {
     pub update_count: u64,
 }
 
+/// One registered source's latest quote for an asset pair (#1053).
+///
+/// Stored on [`OracleAnalytics`] rather than as its own storage key: `DataKey`
+/// is already at the 50-variant `contracttype` cap.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OracleSourceQuote {
+    pub source: Address,
+    pub asset_pair: BytesN<32>,
+    pub price: i128,
+    pub timestamp: u64,
+}
+
 /// Aggregate statistics across all oracle price-feed activity.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -406,6 +497,10 @@ pub struct OracleAnalytics {
     pub stale_rejections: u64,
     /// Total number of distinct asset pairs registered.
     pub registered_pairs: u32,
+    /// Independent oracle sources, at most five (#1053).
+    pub sources: Vec<Address>,
+    /// Latest quote from each registered source, per asset pair (#1053).
+    pub quotes: Vec<OracleSourceQuote>,
 }
 
 // -----------------------------------------------------------------------------
@@ -457,4 +552,57 @@ pub struct NftStakingAnalytics {
     pub total_rewards_distributed: i128,
     /// Total number of unique stakers (monotonically increasing).
     pub unique_stakers: u32,
+}
+
+// -----------------------------------------------------------------------------
+// Collection Floor Price History (#917)
+// -----------------------------------------------------------------------------
+
+/// A single price observation in a collection's sale history.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionPriceEntry {
+    /// Sale price of the individual NFT that settled.
+    pub price: i128,
+    /// Floor price of the collection *after* this sale was recorded.
+    pub floor_after: i128,
+    /// Ledger timestamp when the sale settled.
+    pub timestamp: u64,
+}
+
+/// Ring-buffer of recent sale price observations for one collection (#917).
+/// Stores the last `max_entries` sales; older entries are evicted.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectionPriceHistory {
+    /// Ordered oldest-to-newest list of price entries (max 50).
+    pub entries: Vec<CollectionPriceEntry>,
+    /// Maximum entries retained (configurable, default 50).
+    pub max_entries: u32,
+}
+
+/// Tiered trading-rebate configuration (#916). Tiers are evaluated against a
+/// trader's accumulated volume since the last monthly run; the highest tier
+/// whose threshold is met wins.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebateConfig {
+    pub tier1_min_volume: i128,
+    pub tier2_min_volume: i128,
+    pub tier3_min_volume: i128,
+    pub tier1_bps: u32, // 100 = 1%
+    pub tier2_bps: u32, // 200 = 2%
+    pub tier3_bps: u32, // 500 = 5%
+    /// Minimum time (seconds) that must elapse between monthly runs.
+    pub period_seconds: u64,
+}
+
+/// A single historical rebate payout, for dashboard visibility (#916).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RebatePayout {
+    pub volume: i128,
+    pub bps: u32,
+    pub amount: i128,
+    pub paid_at: u64,
 }
