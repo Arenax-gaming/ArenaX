@@ -20,11 +20,24 @@
 
 export type WebVitalName = 'LCP' | 'FCP' | 'CLS' | 'TTI' | 'INP' | 'FID' | 'TTFB';
 
+export type DeviceCategory = 'mobile' | 'desktop';
+
 export interface WebVitalMetric {
     name: WebVitalName;
     value: number;
     id: string;
     label?: string;
+    /** Route template (e.g. "/tournaments/[id]"), not the full URL — #1114. */
+    route?: string;
+    device?: DeviceCategory;
+    /** `navigator.connection.effectiveType`, e.g. "4g" | "3g" | "slow-2g" (#1114). */
+    connection?: string;
+    /**
+     * SHA-256 hash of the user id, already anonymised by the caller before
+     * it reaches the reporter (#1114) — this module never sees or transmits
+     * a raw user id.
+     */
+    userIdHash?: string;
 }
 
 export interface WebVitalReport extends WebVitalMetric {
@@ -103,7 +116,12 @@ const isProduction = () => process.env.NODE_ENV === 'production';
 export const createWebVitalsReporter = (
     options: WebVitalsReporterOptions = {}
 ): WebVitalsReporter => {
-    const endpoint = options.endpoint ?? process.env.NEXT_PUBLIC_ANALYTICS_ENDPOINT ?? '';
+    // Defaults to the app's own route (#1114) rather than an empty string,
+    // so reporting works out of the box without a separately-hosted
+    // analytics collector; NEXT_PUBLIC_ANALYTICS_ENDPOINT can still point
+    // it at Datadog or another collector instead.
+    const endpoint =
+        options.endpoint ?? process.env.NEXT_PUBLIC_ANALYTICS_ENDPOINT ?? '/api/analytics/web-vitals';
     const bufferSize = options.bufferSize ?? 10;
     const flushIntervalMs = options.flushIntervalMs ?? 5_000;
     const fetcher: typeof fetch =
@@ -180,3 +198,22 @@ export const createWebVitalsReporter = (
 
 /** Default reporter used by the production code path. */
 export const defaultWebVitalsReporter = createWebVitalsReporter();
+
+/**
+ * SHA-256 hex digest of a user id (#1114) — Web Vitals reports carry this
+ * instead of the raw id so a report can be attributed to "the same user
+ * across page loads" for debugging without transmitting anything that
+ * identifies them on its own. Returns undefined when the Web Crypto API
+ * isn't available (very old browsers) rather than falling back to sending
+ * the raw id.
+ */
+export async function hashUserId(userId: string): Promise<string | undefined> {
+    if (typeof crypto === 'undefined' || typeof crypto.subtle === 'undefined') {
+        return undefined;
+    }
+    const bytes = new TextEncoder().encode(userId);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+}

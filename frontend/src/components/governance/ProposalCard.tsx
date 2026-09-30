@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { formatDistanceToNow } from "date-fns";
 import { Vote, Clock, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import {
@@ -17,8 +18,17 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import type { Proposal, VoteChoice } from "@/types/governance";
 import { isVotable, PROPOSAL_STATUS_LABELS } from "@/types/governance";
-import { VoteBreakdownChart } from "./VoteBreakdownChart";
 import { VoteModal } from "./VoteModal";
+
+// Code-split out of the initial governance bundle (#1086) — every proposal
+// card on the page would otherwise pull this in eagerly.
+const VoteBreakdownChart = dynamic(
+  () => import("./VoteBreakdownChart").then((m) => m.VoteBreakdownChart),
+  {
+    ssr: false,
+    loading: () => <div className="h-6 w-full animate-pulse rounded bg-muted" />,
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Status badge

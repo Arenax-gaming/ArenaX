@@ -66,6 +66,13 @@ pub struct MatchDispute {
     pub disputing_player_id: Uuid,
     pub reason: String,
     pub evidence_urls: Option<String>, // JSON array of URLs
+    /// SHA-256 hex digest of the uploaded evidence file, computed server-side
+    /// at upload time (#1081). Returned to the player so they can re-hash
+    /// their local copy and confirm the stored file was never swapped.
+    pub evidence_hash: Option<String>,
+    /// S3 object key the evidence file was stored under, namespaced
+    /// `{user_id}/{match_id}/{hash}.{ext}`.
+    pub evidence_s3_key: Option<String>,
     pub status: DisputeStatus,
     pub admin_reviewer_id: Option<Uuid>,
     pub admin_notes: Option<String>,

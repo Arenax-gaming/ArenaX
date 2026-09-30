@@ -32,6 +32,13 @@ interface AuthContextType {
   refreshAccessToken: () => Promise<number>;
   /** True while a token refresh is in flight. */
   isRefreshing: boolean;
+  /**
+   * Epoch ms at which the current access token expires, derived from the
+   * `expires_in` returned by login/refresh (the token itself is an httpOnly
+   * cookie and never readable from JS — see `mapBackendUser`). Null before
+   * the first login/refresh of this session.
+   */
+  expiresAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +149,7 @@ export const AuthProvider = ({
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isRefreshingRef = useRef(false);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -204,6 +212,7 @@ export const AuthProvider = ({
 
       cacheUser(authUser);
       queryClient.setQueryData(AUTH_PROFILE_QUERY_KEY, authUser);
+      setExpiresAt(Date.now() + response.expires_in * 1_000);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Invalid email or password";
@@ -302,6 +311,7 @@ export const AuthProvider = ({
       localStorage.removeItem(PENDING_VERIFICATION_EMAIL_KEY);
     }
     setError(null);
+    setExpiresAt(null);
     queryClient.removeQueries({ queryKey: AUTH_PROFILE_QUERY_KEY });
   }, [queryClient]);
 
@@ -312,7 +322,11 @@ export const AuthProvider = ({
     isRefreshingRef.current = true;
     setIsRefreshing(true);
     try {
-      return await api.refreshAccessToken();
+      const ttl = await api.refreshAccessToken();
+      if (ttl > 0) {
+        setExpiresAt(Date.now() + ttl * 1_000);
+      }
+      return ttl;
     } finally {
       isRefreshingRef.current = false;
       setIsRefreshing(false);
@@ -321,12 +335,18 @@ export const AuthProvider = ({
 
   // ── Wire auth-failure handler ──────────────────────────────────────────────
   // When ApiClient can't refresh (session truly expired), it calls this so
-  // we log the user out and redirect to the login page.
-
+  // we log the user out and redirect to the login page with the current URL
+  // preserved so the user lands back where they were after signing in again.
   useEffect(() => {
     api.setOnAuthFailure(() => {
       logout();
-      router.push("/login?reason=session_expired");
+      const returnTo =
+        typeof window !== "undefined"
+          ? window.location.pathname + window.location.search
+          : "/";
+      router.push(
+        `/login?reason=session_expired&returnTo=${encodeURIComponent(returnTo)}`,
+      );
     });
   }, [logout, router]);
 
@@ -346,6 +366,7 @@ export const AuthProvider = ({
         resendVerificationEmail,
         refreshAccessToken,
         isRefreshing,
+        expiresAt,
       }}
     >
       {children}

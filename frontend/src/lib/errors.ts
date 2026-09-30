@@ -80,6 +80,8 @@ export class AuthenticationError extends ArenaXError {
 /** Thrown when user-supplied data fails validation. */
 export class ValidationError extends ArenaXError {
   public field?: string;
+  /** Server-supplied error code (e.g. `EMAIL_INVALID`) when available. */
+  public code?: string;
 
   constructor(
     message: string,

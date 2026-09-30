@@ -1,0 +1,14 @@
+{
+  "_comment": "Monitor-as-code for the Datadog account this frontend's RUM data (RumProvider.tsx) already ships to. Not applied automatically by this repo — apply via `POST /api/v1/monitor` or the equivalent Terraform resource (#1114).",
+  "name": "ArenaX Web Vitals — P75 LCP budget breach",
+  "type": "query alert",
+  "query": "p75(last_15m):avg:web_vitals.lcp{service:arenax-frontend} by {route} > 4000",
+  "message": "P75 Largest Contentful Paint for {{route.name}} has been above 4s for 15 minutes.\n@slack-arenax-perf-alerts",
+  "tags": ["service:arenax-frontend", "team:frontend", "metric:lcp"],
+  "options": {
+    "thresholds": { "critical": 4000, "warning": 2500 },
+    "notify_no_data": false,
+    "renotify_interval": 60,
+    "evaluation_delay": 60
+  }
+}

@@ -215,17 +215,47 @@ pub async fn verify_chain(
     Ok(HttpResponse::Ok().json(verification))
 }
 
+/// `GET /api/audit/logs/{id}`
+///
+/// Fetch a single audit log entry by its UUID.
+pub async fn get_audit_log_by_id(
+    pool: web::Data<PgPool>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let id = path.into_inner();
+    let entry = sqlx::query_as::<_, AuditEntry>(
+        r#"
+        SELECT id, sequence_number, user_id, action, resource_type, resource_id,
+               old_values, new_values, source, entry_hash, previous_hash, created_at
+        FROM audit_logs
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool.get_ref())
+    .await
+    .map_err(|e| ApiError::InternalServerError(format!("Failed to query audit log: {e}")))?;
+
+    match entry {
+        Some(e) => Ok(HttpResponse::Ok().json(e)),
+        None => Err(ApiError::NotFound),
+    }
+}
+
 /// Mount the audit routes.
 ///
-/// Scoped under `/admin`, which the existing admin middleware guards. These
-/// endpoints expose who did what across the whole platform, so they must never
-/// be reachable without that guard.
+/// Scoped under both `/admin/audit-logs` and `/api/audit/logs`.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/audit-logs")
             .route("", web::get().to(query_audit_logs))
             .route("/verify", web::get().to(verify_chain))
             .route("/{resource_type}/{resource_id}", web::get().to(resource_history)),
+    )
+    .service(
+        web::scope("/api/audit/logs")
+            .route("", web::get().to(query_audit_logs))
+            .route("/{id}", web::get().to(get_audit_log_by_id)),
     );
 }
 

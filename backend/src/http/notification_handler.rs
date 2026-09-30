@@ -1,27 +1,13 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use serde::Deserialize;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
 use crate::db::DbPool;
 use crate::models::{ApiResponse, PaginatedResponse, PaginationParams};
-
-#[derive(Debug, FromRow, Serialize)]
-struct NotificationRow {
-    id: Uuid,
-    user_id: Uuid,
-    #[sqlx(rename = "type")]
-    typ: String,
-    title: String,
-    message: String,
-    link: Option<String>,
-    link_label: Option<String>,
-    read: bool,
-    created_at: chrono::DateTime<Utc>,
-}
+use crate::service::notification_service::{NewNotification, NotificationRow, NotificationService};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,10 +73,11 @@ pub async fn get_notifications(
     Ok(HttpResponse::Ok().json(PaginatedResponse::new(data, total, &query)))
 }
 
-/// POST /api/notifications - Create notification (requires auth)
+/// POST /api/notifications - Create notification, fanned out to every
+/// channel the user has enabled (in-app/push/email) (#1107).
 pub async fn create_notification(
     req: HttpRequest,
-    pool: web::Data<DbPool>,
+    notification_service: web::Data<Arc<NotificationService>>,
     body: web::Json<CreateNotificationRequest>,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = req.user_id().ok_or(ApiError::Unauthorized)?;
@@ -98,22 +85,16 @@ pub async fn create_notification(
     let typ = body.typ.as_deref().unwrap_or("info").to_string();
     let message = body.message.as_deref().unwrap_or("").to_string();
 
-    let row = sqlx::query_as::<_, NotificationRow>(
-        r#"
-        INSERT INTO notifications (user_id, type, title, message, link, link_label)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, user_id, type, title, message, link, link_label, read, created_at
-        "#,
-    )
-    .bind(user_id)
-    .bind(&typ)
-    .bind(&body.title)
-    .bind(&message)
-    .bind(&body.link)
-    .bind(&body.link_label)
-    .fetch_one(pool.as_ref())
-    .await
-    .map_err(ApiError::DatabaseError)?;
+    let row = notification_service
+        .create_and_fan_out(NewNotification {
+            user_id,
+            typ,
+            title: body.title.clone(),
+            message,
+            link: body.link.clone(),
+            link_label: body.link_label.clone(),
+        })
+        .await?;
 
     Ok(HttpResponse::Created().json(ApiResponse {
         data: notification_to_json(row),

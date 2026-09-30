@@ -136,13 +136,11 @@ pub async fn verify_deposit(
         })));
     }
 
-    let verified = match body.provider.as_str() {
-        "paystack" => service.verify_paystack_payment(&body.reference, transaction.amount.mantissa()).await?,
-        "flutterwave" => service
-            .verify_flutterwave_payment(&body.reference, transaction.amount.mantissa())
-            .await?,
-        _ => false,
-    };
+    // The active gateway comes from PAYMENT_PROVIDER (#1069); a provider
+    // that isn't enabled verifies as false, as an unknown one always did.
+    let verified = service
+        .verify_payment(&body.provider, &body.reference, transaction.amount.mantissa())
+        .await?;
 
     if verified {
         service

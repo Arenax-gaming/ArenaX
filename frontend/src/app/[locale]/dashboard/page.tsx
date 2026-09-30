@@ -12,11 +12,13 @@ import { RecentGames } from "@/components/dashboard/RecentGames";
 import { AchievementProgress } from "@/components/dashboard/AchievementProgress";
 import { FriendsList } from "@/components/dashboard/FriendsList";
 import { QuickPlay } from "@/components/dashboard/QuickPlay";
+import { LoginStreak } from "@/components/dashboard/LoginStreak";
 import { LeaderboardPreview } from "@/components/dashboard/LeaderboardPreview";
 import { NewsFeed } from "@/components/dashboard/NewsFeed";
 import { RouteGuard } from "@/components/navigation/RouteGuard";
 
-// Skeleton for the stats row while data loads
+// Skeleton for the stats row while data loads — matches the loaded layout to
+// prevent cumulative layout shift (Issue #1101)
 function StatsSkeleton() {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -27,27 +29,16 @@ function StatsSkeleton() {
   );
 }
 
-// Skeleton for recent games while data loads
-function RecentGamesSkeleton() {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="h-14 bg-muted animate-pulse rounded-lg" />
-      ))}
-    </div>
-  );
-}
-
 export default function DashboardPage() {
   const { user } = useAuth();
 
   // Fetch last 5 matches for this user
-  const { data: matchesData, isLoading: matchesLoading } = useMatches(
+  const { data: matchesData, isLoading: matchesLoading, isError: matchesError, refetch: refetchMatches } = useMatches(
     user ? { mine: true, limit: 5 } : undefined,
   );
 
   // Fetch real rank, streak and W/L stats from /users/me/stats
-  const { data: statsData, isLoading: statsLoading } = useQuery({
+  const { data: statsData, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
     queryKey: ["profileStats", user?.id],
     queryFn: () => api.getProfileStats(),
     enabled: !!user,
@@ -117,9 +108,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats row */}
-      {statsLoading && matchesLoading ? (
-        <StatsSkeleton />
-      ) : (
+      <div className="space-y-6">
         <Suspense fallback={<StatsSkeleton />}>
           <StatsOverview
             elo={user.elo}
@@ -128,27 +117,32 @@ export default function DashboardPage() {
             winRate={winRate}
             rank={rank}
             streak={streak}
+            isLoading={statsLoading && matchesLoading}
+            isError={statsError}
+            onRetry={refetchStats}
           />
         </Suspense>
-      )}
 
-      {/* Main grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column — 2/3 width */}
-        <div className="lg:col-span-2 space-y-6">
-          {matchesLoading ? (
-            <RecentGamesSkeleton />
-          ) : (
-            <RecentGames matches={matches} currentUserId={user.id} />
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <AchievementProgress />
-            <NewsFeed />
+        {/* Main grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left column — 2/3 width */}
+          <div className="lg:col-span-2 space-y-6">
+            <RecentGames
+              matches={matches}
+              currentUserId={user.id}
+              isLoading={matchesLoading}
+              isError={matchesError}
+              onRetry={refetchMatches}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <AchievementProgress />
+              <NewsFeed />
+            </div>
           </div>
-        </div>
 
         {/* Right sidebar — 1/3 width */}
         <div className="space-y-6">
+          <LoginStreak />
           <QuickPlay />
           <FriendsList compact />
           <LeaderboardPreview />

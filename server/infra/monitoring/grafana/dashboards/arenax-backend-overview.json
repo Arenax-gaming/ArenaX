@@ -109,6 +109,53 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "Per-Route Latency P50 / P95 / P99",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "arenax-prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "route" },
+            "properties": [{ "id": "custom.width", "value": 400 }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "route:p50_request_duration_seconds:5m{job=\"arenax-backend\"}",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "route:p95_request_duration_seconds:5m{job=\"arenax-backend\"}",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "route:p99_request_duration_seconds:5m{job=\"arenax-backend\"}",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Dependency Health",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "arenax-prometheus" },
+      "targets": [
+        {
+          "expr": "dependency_health{job=\"arenax-backend\"}",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

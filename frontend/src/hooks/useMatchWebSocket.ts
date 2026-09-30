@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BracketMatchStatus, ScoreReport } from "@/types/bracket";
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,10 @@ interface UseMatchWebSocketReturn {
   isConnected: boolean;
   lastUpdate: MatchUpdate | null;
   connectionError: string | null;
+  /** True while a reconnect attempt is scheduled or in progress. */
+  isReconnecting: boolean;
+  /** True briefly after the connection is restored following a drop. */
+  connectionRestored: boolean;
   reconnect: () => void;
   disconnect: () => void;
 }
@@ -34,8 +39,17 @@ interface UseMatchWebSocketReturn {
 // Constants
 // ---------------------------------------------------------------------------
 
+/** Initial reconnect delay (ms). */
+const INITIAL_RECONNECT_DELAY_MS = 500;
+
 /** Maximum reconnect delay (ms). */
 const MAX_RECONNECT_DELAY_MS = 30_000;
+
+/** Reconnect attempts before surfacing a connection-lost notification. */
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+/** How long the "connection restored" flag stays set (ms). */
+const RESTORED_NOTICE_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // useMatchWebSocket
@@ -46,7 +60,9 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 // cookie with the WebSocket upgrade request (same-origin).  No token is ever
 // embedded in the URL or passed via localStorage.
 //
-// Reconnection: exponential back-off capped at MAX_RECONNECT_DELAY_MS.
+// Reconnection: exponential back-off (500ms → 30s), giving up after
+// MAX_RECONNECT_ATTEMPTS. The last received update is kept while offline so
+// the UI can keep rendering cached state.
 // ---------------------------------------------------------------------------
 
 export function useMatchWebSocket({
@@ -56,10 +72,13 @@ export function useMatchWebSocket({
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<MatchUpdate | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [connectionRestored, setConnectionRestored] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
+  const restoredTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set to true when the cleanup function runs so stale async callbacks
   // don't attempt to reconnect after the component has unmounted.
   const closedRef = useRef(false);
@@ -94,6 +113,7 @@ export function useMatchWebSocket({
       wsRef.current = null;
     }
     setIsConnected(false);
+    setIsReconnecting(false);
     setConnectionError(null);
   }, []);
 
@@ -130,9 +150,19 @@ export function useMatchWebSocket({
         ws.close();
         return;
       }
+      const wasReconnecting = retryCountRef.current > 0;
       retryCountRef.current = 0;
       setIsConnected(true);
+      setIsReconnecting(false);
       setConnectionError(null);
+      if (wasReconnecting) {
+        setConnectionRestored(true);
+        if (restoredTimerRef.current) clearTimeout(restoredTimerRef.current);
+        restoredTimerRef.current = setTimeout(
+          () => setConnectionRestored(false),
+          RESTORED_NOTICE_MS,
+        );
+      }
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -176,12 +206,21 @@ export function useMatchWebSocket({
       // Normal closure — no reconnect needed.
       if (event.code === 1000) return;
 
+      if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
+        setIsReconnecting(false);
+        setConnectionError(
+          "Connection to match feed lost. Showing last known state.",
+        );
+        return;
+      }
+
       // Transient failure — reconnect with exponential back-off.
       const delay = Math.min(
         MAX_RECONNECT_DELAY_MS,
-        1_000 * 2 ** retryCountRef.current,
+        INITIAL_RECONNECT_DELAY_MS * 2 ** retryCountRef.current,
       );
       retryCountRef.current += 1;
+      setIsReconnecting(true);
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
 
@@ -210,6 +249,7 @@ export function useMatchWebSocket({
 
     return () => {
       closedRef.current = true;
+      if (restoredTimerRef.current) clearTimeout(restoredTimerRef.current);
       disconnect();
     };
     // `connect` and `disconnect` are stable callbacks; re-run when the
@@ -241,7 +281,15 @@ export function useMatchWebSocket({
     return () => clearTimeout(timer);
   }, [enabled, isConnected, matchId]);
 
-  return { isConnected, lastUpdate, connectionError, reconnect, disconnect };
+  return {
+    isConnected,
+    lastUpdate,
+    connectionError,
+    isReconnecting,
+    connectionRestored,
+    reconnect,
+    disconnect,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +306,16 @@ interface ScoreSubmission {
 
 interface UseMatchScoreReportingOptions {
   expectedReport?: ScoreReport | null;
+  /** Keys the "pending report" cache entry (#1088). Falls back to a shared key when omitted. */
+  matchId?: string;
+}
+
+/** Thrown by the mutation when the reporter's score doesn't match the opponent's (#1088). */
+class ScoreConflictError extends Error {
+  constructor(public readonly expectedReport: ScoreReport) {
+    super("SCORE_CONFLICT");
+    this.name = "ScoreConflictError";
+  }
 }
 
 interface UseMatchScoreReportingReturn {
@@ -272,28 +330,28 @@ interface UseMatchScoreReportingReturn {
 export function useMatchScoreReporting(
   options: UseMatchScoreReportingOptions = {},
 ): UseMatchScoreReportingReturn {
-  const [isReporting, setIsReporting] = useState(false);
-  const [pendingReport, setPendingReport] = useState<ScoreReport | null>(null);
+  const queryClient = useQueryClient();
   const [conflictDetected, setConflictDetected] = useState(false);
   const [conflictingReport, setConflictingReport] = useState<ScoreReport | null>(
     null,
   );
 
-  const reportScore = useCallback(
-    async (report: ScoreSubmission): Promise<boolean> => {
-      setIsReporting(true);
+  const pendingKey = ["pendingScoreReport", options.matchId ?? "unknown"] as const;
 
-      const submittedReport: ScoreReport = {
-        reporterId: report.reporterId,
-        reporterName: report.reporterName ?? "You",
-        player1Score: report.player1Score,
-        player2Score: report.player2Score,
-        submittedAt: new Date().toISOString(),
-      };
+  // Cache-only value: never fetched, only ever written by the mutation's
+  // onMutate below — this is what makes the "Pending Confirmation" state
+  // (#1088) visible the instant the user submits, not after the round trip.
+  const { data: pendingReport = null } = useQuery({
+    queryKey: pendingKey,
+    queryFn: () => null as ScoreReport | null,
+    staleTime: Infinity,
+    enabled: false,
+  });
 
-      setPendingReport(submittedReport);
-
-      // Small debounce to avoid double-submissions on fast taps.
+  const mutation = useMutation({
+    mutationFn: async (report: ScoreSubmission) => {
+      // Small debounce to avoid double-submissions on fast taps, and to
+      // simulate the server round trip that resolves the report.
       await new Promise((resolve) => setTimeout(resolve, 900));
 
       if (
@@ -301,18 +359,43 @@ export function useMatchScoreReporting(
         (options.expectedReport.player1Score !== report.player1Score ||
           options.expectedReport.player2Score !== report.player2Score)
       ) {
-        setConflictDetected(true);
-        setConflictingReport(options.expectedReport);
-        setIsReporting(false);
-        return false;
+        throw new ScoreConflictError(options.expectedReport);
       }
-
+      return report;
+    },
+    onMutate: (report) => {
+      const submittedReport: ScoreReport = {
+        reporterId: report.reporterId,
+        reporterName: report.reporterName ?? "You",
+        player1Score: report.player1Score,
+        player2Score: report.player2Score,
+        submittedAt: new Date().toISOString(),
+      };
+      queryClient.setQueryData(pendingKey, submittedReport);
+    },
+    onError: (error) => {
+      if (error instanceof ScoreConflictError) {
+        setConflictDetected(true);
+        setConflictingReport(error.expectedReport);
+      }
+    },
+    onSuccess: () => {
       setConflictDetected(false);
       setConflictingReport(null);
-      setIsReporting(false);
-      return true;
     },
-    [options.expectedReport],
+  });
+
+  const reportScore = useCallback(
+    async (report: ScoreSubmission): Promise<boolean> => {
+      try {
+        await mutation.mutateAsync(report);
+        return true;
+      } catch (error) {
+        if (error instanceof ScoreConflictError) return false;
+        throw error;
+      }
+    },
+    [mutation],
   );
 
   const clearConflict = useCallback(() => {
@@ -323,7 +406,7 @@ export function useMatchScoreReporting(
   return {
     reportScore,
     pendingReport,
-    isReporting,
+    isReporting: mutation.isPending,
     conflictDetected,
     conflictingReport,
     clearConflict,

@@ -4,6 +4,7 @@
 
 This document describes the memory leak fixes implemented in the ArenaX frontend application to prevent memory accumulation when components are removed from the DOM.
 
+
 ## Issues Identified
 
 ### 1. **useKeyboardShortcuts - Chord Timer Leak**

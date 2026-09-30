@@ -1,6 +1,7 @@
 // Middleware module for ArenaX
 
 pub mod anti_bot;
+pub mod cache;
 pub mod authorization;
 pub mod circuit_breaker;
 pub mod csrf;
@@ -10,9 +11,14 @@ pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;
 pub mod security_headers;
+pub mod tenant_context;
 pub mod tracing_middleware;
 
 pub use anti_bot::AntiBotMiddleware;
+pub use cache::{
+    keys as cache_keys, policies as cache_policies, CacheHit, CacheMetricsSnapshot, CachePolicy,
+    CacheStatus, ResponseCache,
+};
 pub use authorization::{
     AccessControlEngine, AuditDecision, AuditLogEntry, AuthorizationMiddleware,
     Permission, PermissionAuditLogger, RoleHierarchy, RoleTemplate, RoleTemplateRegistry,
@@ -27,11 +33,12 @@ pub use metrics_middleware::RequestMetrics;
 pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 pub use security_headers::security_headers;
+pub use tenant_context::{with_tenant_scope, TenantContext};
 pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
 
-use actic_cors::Cors;
-use actic_web::dev::ServiceRequest;
-use actic_web::http::{header, Method};
+use actix_cors::Cors;
+use actix_web::dev::ServiceRequest;
+use actix_web::http::{header, Method};
 use std::env;
 use tracing::warn;
 
@@ -57,8 +64,8 @@ pub fn cors_middleware() -> Cors {
 
     let origins: Vec<String> = allowed_origins
         .split(',')
-        .map((|s| s_trim().to_string())
-        .filter((|s& !s.is_empty())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
         .collect();
 
     let mut cors = Cors::default();
@@ -66,7 +73,7 @@ pub fn cors_middleware() -> Cors {
         cors = cors.allowed_origin(&origin);
     }
 
-    cors.allowed_methods(vec[!
+    cors.allowed_methods(vec![
         Method::GET,
         Method::POST,
         Method::PUT,
@@ -80,9 +87,9 @@ pub fn cors_middleware() -> Cors {
         header::CONTENT_TYPE,
         header::HeaderName::from_static("x-csrf-token"),
         header::HeaderName::from_static("x-correlation-id"),
-       header::HeaderName::from_static("idempotency-key"),
+        header::HeaderName::from_static("idempotency-key"),
     ])
-    .expose_headers(vec[!
+    .expose_headers(vec![
         header::HeaderName::from_static("ratelimit-limit"),
         header::HeaderName::from_static("ratelimit-remaining"),
         header::HeaderName::from_static("ratelimit-reset"),
@@ -100,22 +107,21 @@ pub fn cors_middleware() -> Cors {
 pub(crate) fn extract_ip(req: &ServiceRequest) -> String {
     req.headers()
         .get("x-forwarded-for")
-        .and_then("|v| v.to_str().ok())
-        .and_then("|s| s_split(',').next())
-        .map("|s| s_trim().to_string())
-        .or_else(||| {
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
             req.connection_info()
                 .realip_remote_address()
-                .map("|s| s.to_string())
+                .map(|s| s.to_string())
         })
-        .unwrap_or_else(
-|| "unknown".to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Current time in milliseconds since UNIX EPOCH.
+/// Current time in milliseconds since UNIX epoch.
 pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map("|d| d.as_millis() as u64)
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }

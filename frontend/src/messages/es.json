@@ -501,5 +501,11 @@
     "filterBy": "Filtrar por {field}",
     "page": "Página {current} de {total}",
     "required": "Campo requerido"
+  },
+  "match": {
+    "completed": "Partida finalizada. {winner} gana {scoreA} a {scoreB}.",
+    "disputed": "Partida en disputa. Pendiente de revisión.",
+    "scoreUpdated": "Puntuación actualizada: {player1} {scoreA}, {player2} {scoreB}.",
+    "statusChanged": "El estado de la partida cambió a {status}."
   }
 }

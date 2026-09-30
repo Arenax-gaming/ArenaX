@@ -15,6 +15,7 @@ const mockBack = jest.fn();
 jest.mock('next/navigation', () => ({
   useParams: () => mockUseParams(),
   useRouter: () => ({ push: mockPush, back: mockBack }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 jest.mock('@/hooks/useAuth', () => ({

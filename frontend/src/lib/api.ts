@@ -385,9 +385,27 @@ class ApiClient {
     });
   }
 
-  async joinTournament(id: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/tournaments/${id}/register`, {
-      method: "POST",
+  async joinTournament(
+    id: string,
+    paymentMethod?: "fiat" | "arenax",
+  ): Promise<{ message: string; transactionHash?: string }> {
+    return this.request<{ message: string; transactionHash?: string }>(
+      `/tournaments/${id}/register`,
+      {
+        method: "POST",
+        ...(paymentMethod && { body: JSON.stringify({ paymentMethod }) }),
+      },
+    );
+  }
+
+  /** Saves the admin-arranged bracket seed order (#1092). */
+  async saveTournamentSeeding(
+    id: string,
+    seeding: { playerId: string; seed: number }[],
+  ): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/tournaments/${id}/seeding`, {
+      method: "PUT",
+      body: JSON.stringify({ seeding }),
     });
   }
 
@@ -683,6 +701,23 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ event_type: eventType, event_data: eventData }),
     });
+  }
+
+  // ── Matchmaking / ELO ────────────────────────────────────────────────────────────
+
+  /** GET /api/matchmaking/elo/:game?from=X&to=Y (#1096). */
+  async getEloHistory(
+    game: string,
+    from?: string,
+    to?: string,
+  ): Promise<{ date: string; elo: number }[]> {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    const qs = params.toString();
+    return this.request<{ date: string; elo: number }[]>(
+      `/matchmaking/elo/${encodeURIComponent(game)}${qs ? `?${qs}` : ""}`,
+    );
   }
 
   // ── Leaderboards ───────────────────────────────────────────────────────────────

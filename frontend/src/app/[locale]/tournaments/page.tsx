@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, useMemo, useCallback, useRef, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Trophy, Users } from "lucide-react";
 import { TournamentCardWithQuickJoin } from "@/components/tournaments/TournamentCardWithQuickJoin";
 import { TournamentCardSkeleton } from "@/components/tournaments/TournamentCardSkeleton";
@@ -15,8 +15,10 @@ import {
   TOURNAMENT_PAGE_STATUS_COLORS,
   TOURNAMENT_PAGE_STATUSES,
 } from "@/types/tournament";
-import { useTournaments, useJoinedTournaments } from "@/hooks/useTournaments";
+import { useInfiniteTournaments } from "@/data";
+import { useJoinedTournaments } from "@/hooks/useTournaments";
 import { useAuth } from "@/hooks/useAuth";
+import { useInfiniteScrollSentinel } from "@/hooks/useInfiniteScrollSentinel";
 import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 
 type TabType = "joined" | "available";
@@ -28,6 +30,8 @@ function getStatusStyles(pageStatus: TournamentPageStatus) {
 function TournamentsContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   const [activeTab, setActiveTab] = useState<TabType>("available");
 
@@ -45,13 +49,21 @@ function TournamentsContent() {
     sortOrder:       (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
   });
 
-  // --- Real API calls ---
+  // --- Real API calls (infinite, page-by-page via IntersectionObserver) ---
   const {
-    data: tournaments = [],
+    data: pages,
     isLoading,
     isError,
     refetch,
-  } = useTournaments(filters);
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteTournaments(filters);
+
+  const tournaments = useMemo(
+    () => pages?.pages.flatMap((page) => page.data) ?? [],
+    [pages],
+  );
 
   const { data: joinedIds = [] } = useJoinedTournaments(user?.id);
 
@@ -86,6 +98,30 @@ function TournamentsContent() {
   const handleFiltersChange = useCallback((newFilters: TournamentFilters) => {
     setFilters(newFilters);
   }, []);
+
+  // URL page sync — mirrors how many pages we've loaded into the query string
+  // (e.g. ?page=3) without pushing history entries. The infinite hook resets to
+  // page 1 whenever the filters change, so this stays in lockstep with the data.
+  const loadedPages = pages?.pages.length ?? 1;
+  useEffect(() => {
+    if (isLoading || loadedPages <= 1) return;
+    const current = Number(searchParams.get("page") ?? 1);
+    if (current === loadedPages) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", String(loadedPages));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pages, isLoading, loadedPages, searchParams, pathname, router]);
+
+  // Infinite scroll sentinel attached to the end of the grid.
+  const { sentinelRef } = useInfiniteScrollSentinel({
+    onLoadMore: () => {
+      if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    },
+    hasMore: hasNextPage,
+    isLoading: isFetchingNextPage,
+    itemCount: tournaments.length,
+    enabled: !isLoading && !isError,
+  });
 
   const joinedCount = allJoinedIds.size;
   const availableCount = tournaments.length - joinedCount;
@@ -239,17 +275,30 @@ function TournamentsContent() {
           </Button>
         </div>
       ) : visibleTournaments.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {visibleTournaments.map((tournament) => (
-            <TournamentCardWithQuickJoin
-              key={tournament.id}
-              tournament={tournament}
-              isJoined={allJoinedIds.has(tournament.id)}
-              onJoinSuccess={handleJoinSuccess}
-              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {visibleTournaments.map((tournament) => (
+              <TournamentCardWithQuickJoin
+                key={tournament.id}
+                tournament={tournament}
+                isJoined={allJoinedIds.has(tournament.id)}
+                onJoinSuccess={handleJoinSuccess}
+                bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
+              />
+            ))}
+            <div ref={sentinelRef} className="col-span-full h-1" aria-hidden="true" />
+          </div>
+          {hasNextPage && isFetchingNextPage && (
+            <div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6"
+              aria-live="polite"
+            >
+              {Array.from({ length: 3 }).map((_, i) => (
+                <TournamentCardSkeleton key={`next-${i}`} />
+              ))}
+            </div>
+          )}
+        </>
       ) : (
         <EmptyState
           icon={Trophy}
