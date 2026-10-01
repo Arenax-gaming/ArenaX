@@ -18,7 +18,8 @@
 //! - Differential privacy noise is added to aggregate queries.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, String, Vec,
+    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, String, Symbol,
+    Vec,
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -141,6 +142,31 @@ pub struct PrivateMetric {
     pub epsilon: u32, // Privacy budget (basis points)
 }
 
+/// Cross-contract aggregated platform snapshot (single-read dashboard view).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformSnapshot {
+    pub total_transactions: u64,
+    pub total_volume: i128,
+    pub total_users: u64,
+    pub total_fees_collected: i128,
+    pub last_updated: u64,
+}
+
+/// Hourly snapshot slot for the 168-hour (7-day) circular buffer.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HourlySnapshot {
+    pub hour: u64,
+    pub total_transactions: u64,
+    pub total_volume: i128,
+    pub total_users: u64,
+    pub total_fees_collected: i128,
+}
+
+/// Number of hourly slots retained (7 days).
+pub const SNAPSHOT_WINDOW_HOURS: u64 = 168;
+
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -161,6 +187,12 @@ pub enum DataKey {
     PlatformAggregation(u64, u64),    // (period_start, period_end)
     PrivacyEpsilon,
     AggregationCounter,
+    /// Single-read aggregated counters for cross-contract dashboards.
+    PlatformSnapshot,
+    /// Registered push contracts: id (Symbol) -> Address.
+    RegisteredContract(Symbol),
+    /// Circular hourly buffer slot (slot = hour % 168).
+    HourlySnapshot(u32),
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -190,6 +222,16 @@ impl AnalyticsContract {
                 last_updated: env.ledger().timestamp(),
             },
         );
+        env.storage().instance().set(
+            &DataKey::PlatformSnapshot,
+            &PlatformSnapshot {
+                total_transactions: 0,
+                total_volume: 0,
+                total_users: 0,
+                total_fees_collected: 0,
+                last_updated: env.ledger().timestamp(),
+            },
+        );
     }
 
     pub fn add_reporter(env: Env, reporter: Address) {
@@ -204,6 +246,31 @@ impl AnalyticsContract {
         env.storage()
             .instance()
             .remove(&DataKey::AuthReporter(reporter));
+    }
+
+    // ── Cross-contract aggregation registry ─────────────────────────────────
+
+    /// Register a push contract id (Symbol) -> Address. Admin only.
+    pub fn register_contract(env: Env, id: Symbol, addr: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::RegisteredContract(id), &addr);
+    }
+
+    /// Remove a registered push contract. Admin only.
+    pub fn unregister_contract(env: Env, id: Symbol) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .remove(&DataKey::RegisteredContract(id));
+    }
+
+    /// Check whether a contract id is registered.
+    pub fn is_registered_contract(env: Env, id: Symbol) -> bool {
+        env.storage()
+            .instance()
+            .has(&DataKey::RegisteredContract(id))
     }
 
     // ── Recording ─────────────────────────────────────────────────────────────
@@ -333,6 +400,126 @@ impl AnalyticsContract {
         pm.total_staked = total_staked;
         pm.last_updated = env.ledger().timestamp();
         env.storage().instance().set(&DataKey::Platform, &pm);
+    }
+
+    // ── Cross-contract metrics consolidation ────────────────────────────────
+
+    /// Push-style event ingestion. Only callable by registered contracts:
+    /// looks up the address for `contract_id` and requires its auth.
+    pub fn record_event(env: Env, contract_id: Symbol, event_type: Symbol, value: i128) {
+        Self::require_not_paused(&env);
+        let reporter: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::RegisteredContract(contract_id.clone()))
+            .expect("contract not registered");
+        reporter.require_auth();
+
+        let is_tx = event_type == Symbol::new(&env, "transaction")
+            || event_type == Symbol::new(&env, "tx");
+        let is_volume = event_type == Symbol::new(&env, "volume");
+        let is_user = event_type == Symbol::new(&env, "user")
+            || event_type == Symbol::new(&env, "users");
+        let is_fee =
+            event_type == Symbol::new(&env, "fee") || event_type == Symbol::new(&env, "fees");
+        if !(is_tx || is_volume || is_user || is_fee) {
+            panic!("unknown event type");
+        }
+
+        let now = env.ledger().timestamp();
+        let mut snap: PlatformSnapshot = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlatformSnapshot)
+            .unwrap_or(PlatformSnapshot {
+                total_transactions: 0,
+                total_volume: 0,
+                total_users: 0,
+                total_fees_collected: 0,
+                last_updated: now,
+            });
+
+        // Per-event deltas; every metric event also counts as a transaction.
+        let mut d_tx: u64 = 0;
+        let mut d_volume: i128 = 0;
+        let mut d_users: u64 = 0;
+        let mut d_fees: i128 = 0;
+        if is_tx {
+            d_tx = if value > 1 { value as u64 } else { 1 };
+        } else if is_volume {
+            d_volume = value;
+            d_tx = 1;
+        } else if is_user {
+            d_users = if value > 0 { value as u64 } else { 1 };
+            d_tx = 1;
+        } else if is_fee {
+            d_fees = value;
+            d_tx = 1;
+        }
+
+        snap.total_transactions += d_tx;
+        snap.total_volume += d_volume;
+        snap.total_users += d_users;
+        snap.total_fees_collected += d_fees;
+        snap.last_updated = now;
+        env.storage()
+            .instance()
+            .set(&DataKey::PlatformSnapshot, &snap);
+
+        // Hourly circular buffer: slot = hour % 168. Update in-hour,
+        // overwrite on new hour buckets.
+        let hour = now / 3600;
+        let slot = (hour % SNAPSHOT_WINDOW_HOURS) as u32;
+        let key = DataKey::HourlySnapshot(slot);
+        let mut bucket: HourlySnapshot = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(HourlySnapshot {
+                hour,
+                total_transactions: 0,
+                total_volume: 0,
+                total_users: 0,
+                total_fees_collected: 0,
+            });
+        if bucket.hour != hour {
+            bucket = HourlySnapshot {
+                hour,
+                total_transactions: 0,
+                total_volume: 0,
+                total_users: 0,
+                total_fees_collected: 0,
+            };
+        }
+        bucket.total_transactions += d_tx;
+        bucket.total_volume += d_volume;
+        bucket.total_users += d_users;
+        bucket.total_fees_collected += d_fees;
+        env.storage().persistent().set(&key, &bucket);
+    }
+
+    /// Single-read platform snapshot for dashboards.
+    pub fn get_platform_snapshot(env: Env) -> PlatformSnapshot {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlatformSnapshot)
+            .unwrap_or(PlatformSnapshot {
+                total_transactions: 0,
+                total_volume: 0,
+                total_users: 0,
+                total_fees_collected: 0,
+                last_updated: 0,
+            })
+    }
+
+    /// Read one hourly circular-buffer slot (0..168).
+    pub fn get_hourly_snapshot(env: Env, slot: u32) -> Option<HourlySnapshot> {
+        if slot >= SNAPSHOT_WINDOW_HOURS as u32 {
+            panic!("invalid slot");
+        }
+        env.storage()
+            .persistent()
+            .get(&DataKey::HourlySnapshot(slot))
     }
 
     // ── Views ─────────────────────────────────────────────────────────────────
@@ -674,3 +861,6 @@ impl AnalyticsContract {
         panic!("not an authorised reporter");
     }
 }
+
+#[cfg(test)]
+mod test;
