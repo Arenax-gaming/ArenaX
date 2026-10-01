@@ -5,7 +5,12 @@
 // now that this crate is a workspace member.
 #![allow(deprecated)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol,
+    Vec,
+};
+use soroban_sdk::xdr::ToXdr;
+use time_lock::{TimeLockClient, CATEGORY_TREASURY, PRIORITY_MEDIUM};
 
 // ---------------------------------------------------------------------------
 // Issue #918: Multi-sig treasury
@@ -101,6 +106,19 @@ pub struct AllocationProposal {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct DurationProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub new_duration: u64,
+    pub votes_for: Vec<Address>,
+    pub votes_against: Vec<Address>,
+    pub created_at: u64,
+    pub finalized: bool,
+    pub approved: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct TreasuryDashboard {
     pub balance: i128,
     pub total_allocated: i128,
@@ -126,6 +144,16 @@ pub struct TreasuryTxLog {
     pub executed_by: Address,
 }
 
+/// Scheduled contract upgrade (#1064).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -134,6 +162,7 @@ pub enum DataKey {
     Signers,
     Threshold,
     TimeLockDuration,
+    TimeLockContract,
     Balance,
     /// Address of the AX token contract used for real on-chain transfers (#918).
     TokenAddress,
@@ -142,11 +171,17 @@ pub enum DataKey {
     AllocationProposalCounter,
     AllocationProposal(u64),
     AllocationVote(u64, Address),
+    DurationProposalCounter,
+    DurationProposal(u64),
+    DurationVote(u64, Address),
     BudgetAllocation(Symbol),
     TotalAllocated,
     TotalSpent,
     Paused,
-    Token,
+    TransactionLog,
+    ScheduledUpgrade,
+    PreviousWasmHash,
+    StorageSchemaVersion,
 }
 
 #[contract]
@@ -165,6 +200,7 @@ impl Treasury {
         signers: Vec<Address>,
         threshold: u32,
         time_lock_duration: u64,
+        time_lock: Address,
         token_address: Option<Address>,
     ) {
         if env.storage().instance().has(&DataKey::Admin) {
@@ -186,6 +222,9 @@ impl Treasury {
         env.storage()
             .instance()
             .set(&DataKey::TimeLockDuration, &time_lock_duration);
+        env.storage()
+            .instance()
+            .set(&DataKey::TimeLockContract, &time_lock);
         env.storage().instance().set(&DataKey::Balance, &0i128);
         env.storage()
             .instance()
@@ -193,6 +232,9 @@ impl Treasury {
         env.storage()
             .instance()
             .set(&DataKey::AllocationProposalCounter, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationProposalCounter, &0u64);
         env.storage()
             .instance()
             .set(&DataKey::TotalAllocated, &0i128);
@@ -276,11 +318,6 @@ impl Treasury {
 
     pub fn get_balance(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::Balance).unwrap_or(0)
-    }
-
-    /// Address of the token contract the treasury custodies.
-    pub fn get_token(env: Env) -> Address {
-        Self::token(&env)
     }
 
     // -----------------------------------------------------------------
@@ -376,6 +413,24 @@ impl Treasury {
         false
     }
 
+    pub fn get_time_lock(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::TimeLockContract)
+            .expect("time-lock not set")
+    }
+
+    /// Deterministically derive the time-lock operation id for a proposal.
+    /// sha256(treasury_address_xdr || proposal_id_be) so ids are unique even
+    /// when several treasuries share one time-lock contract.
+    pub fn proposal_operation_id(env: &Env, proposal_id: u64) -> BytesN<32> {
+        let mut buf = env.current_contract_address().to_xdr(env);
+        for b in proposal_id.to_be_bytes().iter() {
+            buf.push_back(*b);
+        }
+        env.crypto().sha256(&buf).into()
+    }
+
     // -----------------------------------------------------------------
     // Spending proposals (multi-sig approval + time-lock execution)
     // -----------------------------------------------------------------
@@ -431,6 +486,30 @@ impl Treasury {
         env.storage()
             .instance()
             .set(&DataKey::SpendingProposalCounter, &counter);
+
+        // Schedule the matching operation in the dedicated time-lock contract.
+        // execute_after is frozen on the proposal; later duration changes only
+        // affect future proposals.
+        let time_lock_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TimeLockContract)
+            .expect("time-lock not set");
+        let operation_id = Self::proposal_operation_id(&env, counter);
+        let self_addr = env.current_contract_address();
+        let timelock = TimeLockClient::new(&env, &time_lock_addr);
+        timelock.schedule_operation(
+            &self_addr,
+            &operation_id,
+            &self_addr,
+            &Symbol::new(&env, "exec_prop"),
+            &Bytes::new(&env),
+            &time_lock_duration,
+            &Symbol::new(&env, "spend"),
+            &CATEGORY_TREASURY,
+            &PRIORITY_MEDIUM,
+            &0u64,
+        );
 
         env.events().publish(
             (
@@ -527,6 +606,19 @@ impl Treasury {
         if proposal.approvals.len() < threshold {
             panic!("insufficient approvals");
         }
+
+        // Delegate timing/execution validation to the dedicated time-lock
+        // contract. The operation was scheduled at creation with the then
+        // current duration; the time-lock enforces its own execute_after.
+        let time_lock_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TimeLockContract)
+            .expect("time-lock not set");
+        let operation_id = Self::proposal_operation_id(&env, proposal_id);
+        let self_addr = env.current_contract_address();
+        TimeLockClient::new(&env, &time_lock_addr)
+            .execute_operation(&self_addr, &operation_id);
 
         let now = env.ledger().timestamp();
         if now < proposal.execute_after {
@@ -818,6 +910,142 @@ impl Treasury {
                 allocated: 0,
                 spent: 0,
             })
+    }
+
+    // -----------------------------------------------------------------
+    // Time-lock duration governance (no direct admin setter)
+    // -----------------------------------------------------------------
+
+    /// Propose a new time-lock duration. Only signers may propose; approval
+    /// requires the multi-sig threshold via vote + finalize. Applies only to
+    /// future spending proposals; existing proposals keep their frozen
+    /// execute_after.
+    pub fn propose_time_lock_update(env: Env, proposer: Address, new_duration: u64) -> u64 {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &proposer);
+
+        let mut counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DurationProposalCounter)
+            .unwrap_or(0);
+        counter += 1;
+
+        let mut votes_for = Vec::new(&env);
+        votes_for.push_back(proposer.clone());
+
+        let proposal = DurationProposal {
+            id: counter,
+            proposer: proposer.clone(),
+            new_duration,
+            votes_for,
+            votes_against: Vec::new(&env),
+            created_at: env.ledger().timestamp(),
+            finalized: false,
+            approved: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationProposal(counter), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationProposalCounter, &counter);
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationVote(counter, proposer.clone()), &true);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "DURATION_PROPOSE"),
+            ),
+            (counter, proposer, new_duration),
+        );
+
+        counter
+    }
+
+    pub fn vote_time_lock_update(env: Env, signer: Address, proposal_id: u64, support: bool) {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &signer);
+
+        let vote_key = DataKey::DurationVote(proposal_id, signer.clone());
+        if env.storage().instance().has(&vote_key) {
+            panic!("already voted");
+        }
+
+        let mut proposal = Self::get_duration_proposal(env.clone(), proposal_id)
+            .expect("duration proposal not found");
+        if proposal.finalized {
+            panic!("duration proposal already finalized");
+        }
+
+        if support {
+            proposal.votes_for.push_back(signer.clone());
+        } else {
+            proposal.votes_against.push_back(signer.clone());
+        }
+        env.storage().instance().set(&vote_key, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "DURATION_VOTE"),
+            ),
+            (proposal_id, signer, support),
+        );
+    }
+
+    /// Finalize a duration change once threshold of `for` votes is reached.
+    /// Only updates the default for future proposals.
+    pub fn finalize_time_lock_update(env: Env, caller: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &caller);
+
+        let mut proposal = Self::get_duration_proposal(env.clone(), proposal_id)
+            .expect("duration proposal not found");
+        if proposal.finalized {
+            panic!("already finalized");
+        }
+
+        let threshold = Self::get_threshold(env.clone());
+        if proposal.votes_for.len() < threshold {
+            panic!("insufficient votes for quorum");
+        }
+
+        proposal.finalized = true;
+        proposal.approved = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::DurationProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::TimeLockDuration, &proposal.new_duration);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "DURATION_FINALIZE"),
+            ),
+            (proposal_id, proposal.new_duration),
+        );
+    }
+
+    pub fn get_duration_proposal(env: Env, proposal_id: u64) -> Option<DurationProposal> {
+        env.storage()
+            .instance()
+            .get(&DataKey::DurationProposal(proposal_id))
+    }
+
+    pub fn get_duration_proposal_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DurationProposalCounter)
+            .unwrap_or(0)
     }
 
     // -----------------------------------------------------------------
