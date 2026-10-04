@@ -258,7 +258,8 @@ fn spending_proposal_executes_against_real_deposits() {
             .propose_budget_allocation(&s.admin, &Symbol::new(&env, "ops"), &400);
     s.client
         .vote_budget_allocation(&s.signers.get(1).unwrap(), &allocation_id, &true);
-    s.client.finalize_budget_allocation(&s.admin, &allocation_id);
+    s.client
+        .finalize_budget_allocation(&s.admin, &allocation_id);
 
     // Create + approve a spending proposal (threshold of 2 approvals).
     let recipient = Address::generate(&env);
@@ -280,7 +281,12 @@ fn spending_proposal_executes_against_real_deposits() {
     assert_eq!(s.token_client.balance(&recipient), 300);
     assert_eq!(s.token_client.balance(&s.client.address), 700);
     assert_eq!(s.client.get_balance(), 700);
-    assert!(s.client.get_spending_proposal(&proposal_id).unwrap().executed);
+    assert!(
+        s.client
+            .get_spending_proposal(&proposal_id)
+            .unwrap()
+            .executed
+    );
 }
 
 #[test]
@@ -299,7 +305,8 @@ fn spending_proposal_exceeding_real_balance_fails() {
             .propose_budget_allocation(&s.admin, &Symbol::new(&env, "ops"), &500);
     s.client
         .vote_budget_allocation(&s.signers.get(1).unwrap(), &allocation_id, &true);
-    s.client.finalize_budget_allocation(&s.admin, &allocation_id);
+    s.client
+        .finalize_budget_allocation(&s.admin, &allocation_id);
 
     let recipient = Address::generate(&env);
     let proposal_id = s.client.create_spending_proposal(

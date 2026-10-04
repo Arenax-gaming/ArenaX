@@ -5,11 +5,10 @@
 // now that this crate is a workspace member.
 #![allow(deprecated)]
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol,
-    Vec,
-};
 use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
+};
 use time_lock::{TimeLockClient, CATEGORY_TREASURY, PRIORITY_MEDIUM};
 
 // ---------------------------------------------------------------------------
@@ -243,9 +242,7 @@ impl Treasury {
 
         // Store the token address if provided (#918: real on-chain transfers)
         if let Some(token) = token_address {
-            env.storage()
-                .instance()
-                .set(&DataKey::TokenAddress, &token);
+            env.storage().instance().set(&DataKey::TokenAddress, &token);
         }
 
         env.events().publish(
@@ -617,8 +614,7 @@ impl Treasury {
             .expect("time-lock not set");
         let operation_id = Self::proposal_operation_id(&env, proposal_id);
         let self_addr = env.current_contract_address();
-        TimeLockClient::new(&env, &time_lock_addr)
-            .execute_operation(&self_addr, &operation_id);
+        TimeLockClient::new(&env, &time_lock_addr).execute_operation(&self_addr, &operation_id);
 
         let now = env.ledger().timestamp();
         if now < proposal.execute_after {
