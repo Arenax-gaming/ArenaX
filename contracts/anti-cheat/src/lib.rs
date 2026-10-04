@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Map, String, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Map, String,
+    Vec,
 };
 
 mod test;
@@ -184,6 +185,42 @@ pub struct MlModelParams {
     pub threshold: u32,         // Prediction threshold (0-100)
 }
 
+// ─── Match result attestation (#1110) ──────────────────────────────────────
+
+/// One signer's ed25519 signature over the match result digest.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationSignature {
+    pub public_key: BytesN<32>,
+    pub signature: BytesN<64>,
+}
+
+/// An on-chain record proving a match result was attested by the configured
+/// signer set.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct MatchResultAttestation {
+    pub match_id: u64,
+    /// SHA-256 digest of `match_id ++ winner_score ++ winner` — what the
+    /// signers signed.
+    pub result_digest: BytesN<32>,
+    pub winner: Address,
+    pub winner_score: i64,
+    pub signature_count: u32,
+    pub required_signatures: u32,
+    pub attested_at: u64,
+}
+
+/// Multi-signer attestation configuration.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AttestationConfig {
+    /// Registered signer public keys → currently enabled.
+    pub signers: Map<BytesN<32>, bool>,
+    /// Minimum number of distinct signatures required for attestation.
+    pub required_signatures: u32,
+}
+
 // Spam protection metrics per reporter
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -224,6 +261,15 @@ pub enum DataKey {
     BehaviorProfile(Address),         // Player behavior profile
     PatternDatabase(u32),             // Pattern detection database
     MlModelParams,
+    /// Attestation signer registry (issue #1110)
+    AttestationSigners,
+    /// Minimum number of required attestation signatures (issue #1110)
+    AttestationThreshold,
+    /// Stored attestation for a match (issue #1110)
+    Attestation(u64),
+    // Storage TTL config (#1060)
+    TtlAnalyticsMinLedgers,
+    TtlAnalyticsTargetLedgers,
 }
 
 // Anti-cheat contract
@@ -297,6 +343,40 @@ impl AntiCheatContract {
 
         // Emergency stop starts unpaused
         env.storage().persistent().set(&DataKey::Paused, &false);
+    }
+
+    // ── Storage TTL Extension (#1060) ────────────────────────────────────────
+
+    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsMinLedgers, &min_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlAnalyticsTargetLedgers, &target_ttl);
+    }
+
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_ANALYTICS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlAnalyticsTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_ANALYTICS);
+        (min_ttl, target_ttl)
+    }
+
+    pub fn bump_entry_ttl(env: Env, key: DataKey) {
+        Self::require_admin(&env);
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, min_ttl, target_ttl);
     }
 
     // Report suspicious activity
@@ -461,9 +541,11 @@ impl AntiCheatContract {
             report_id,
         );
 
-        // In emergency mode with high confidence, auto-verify
+        // In emergency mode with high confidence, auto-verify.
+        // The public verify_activity entry point rejects non-admin callers, so
+        // this path uses the internal helper and does not require an admin signature.
         if emergency_mode && confidence_score > 80 {
-            Self::verify_activity(env.clone(), reporter.clone(), report_id, true);
+            Self::verify_activity_internal(&env, report_id, true);
         }
 
         report_id
@@ -594,6 +676,17 @@ impl AntiCheatContract {
 
         admin.require_auth();
 
+        Self::apply_sanction_internal(env, player, sanction_type, reason, duration, report_ids)
+    }
+
+    fn apply_sanction_internal(
+        env: Env,
+        player: Address,
+        sanction_type: SanctionType,
+        reason: String,
+        duration: u64,
+        report_ids: Vec<u64>,
+    ) -> u64 {
         let params: AntiCheatParams = env
             .storage()
             .persistent()
@@ -891,6 +984,19 @@ impl AntiCheatContract {
             panic!("only admin can verify activity");
         }
 
+        // Public verification of a report still requires the admin to authorize
+        // the transaction. That check used to live inside apply_sanction.
+        if verified {
+            admin.require_auth();
+        }
+
+        Self::verify_activity_internal(&env, report_id, verified);
+    }
+
+    /// Mark a report verified and, when confirmed, sanction the player.
+    /// Does not check the caller. Emergency auto-verify uses this so a
+    /// reporter submission is not rolled back by the admin guard.
+    fn verify_activity_internal(env: &Env, report_id: u64, verified: bool) {
         let mut activity: SuspiciousActivity = env
             .storage()
             .persistent()
@@ -902,15 +1008,21 @@ impl AntiCheatContract {
             .persistent()
             .set(&DataKey::Report(report_id), &activity);
 
+        arenax_events::anti_cheat::emit_activity_verified(
+            env,
+            report_id,
+            &activity.player,
+            verified,
+        );
+
         if verified {
-            // Apply automatic sanction for verified cheating
-            let mut report_ids = Vec::new(&env);
+            let mut report_ids = Vec::new(env);
             report_ids.push_back(report_id);
-            Self::apply_sanction(
+            Self::apply_sanction_internal(
                 env.clone(),
                 activity.player.clone(),
                 SanctionType::ReputationPenalty,
-                String::from_str(&env, "Verified suspicious activity"),
+                String::from_str(env, "Verified suspicious activity"),
                 0,
                 report_ids,
             );
@@ -1009,6 +1121,212 @@ impl AntiCheatContract {
                 flagged_as_spammer: false,
                 last_updated: env.ledger().timestamp(),
             })
+    }
+
+    // ─── Match result attestation (#1110) ─────────────────────────────────
+
+    /// Set the multi-signer attestation configuration (admin only).
+    ///
+    /// `signers` maps public keys to "enabled"; `required_signatures` is the
+    /// minimum number of distinct signatures a future attestation must carry.
+    pub fn set_attestation_config(
+        env: Env,
+        caller: Address,
+        signers: Map<BytesN<32>, bool>,
+        required_signatures: u32,
+    ) {
+        Self::require_not_paused(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+
+        if caller != admin {
+            panic!("only admin can set attestation config");
+        }
+        caller.require_auth();
+
+        if required_signatures > signers.len() {
+            panic!("invalid required signatures");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AttestationSigners, &signers);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AttestationThreshold, &required_signatures);
+    }
+
+    /// Register a new attestation signer (admin only).
+    pub fn add_attestation_signer(env: Env, caller: Address, public_key: BytesN<32>) {
+        Self::require_not_paused(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        if caller != admin {
+            panic!("only admin can set attestation config");
+        }
+        caller.require_auth();
+
+        let mut signers: Map<BytesN<32>, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationSigners)
+            .unwrap_or_else(|| Map::new(&env));
+        signers.set(public_key, true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AttestationSigners, &signers);
+    }
+
+    /// Disable an attestation signer (admin only).
+    pub fn remove_attestation_signer(env: Env, caller: Address, public_key: BytesN<32>) {
+        Self::require_not_paused(&env);
+
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        if caller != admin {
+            panic!("only admin can set attestation config");
+        }
+        caller.require_auth();
+
+        let mut signers: Map<BytesN<32>, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationSigners)
+            .unwrap_or_else(|| Map::new(&env));
+        signers.set(public_key, false);
+        env.storage()
+            .persistent()
+            .set(&DataKey::AttestationSigners, &signers);
+    }
+
+    /// Read the current attestation configuration.
+    pub fn get_attestation_config(env: Env) -> AttestationConfig {
+        let signers: Map<BytesN<32>, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationSigners)
+            .unwrap_or_else(|| Map::new(&env));
+        let required_signatures: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationThreshold)
+            .unwrap_or(0);
+        AttestationConfig {
+            signers,
+            required_signatures,
+        }
+    }
+
+    /// The digest signers are asked to sign for a given match result.
+    ///
+    /// Message layout (big-endian): `match_id (8) ++ winner_score (8) ++
+    /// winner G-address bytes`. Deterministic and cheap to recompute off-chain,
+    /// so a client can fetch it via this read and sign it before calling
+    /// `attest_match_result`.
+    pub fn attestation_digest(
+        env: Env,
+        match_id: u64,
+        winner: Address,
+        winner_score: i64,
+    ) -> BytesN<32> {
+        let mut message = Bytes::new(&env);
+        message.extend_from_array(&match_id.to_be_bytes());
+        message.extend_from_array(&winner_score.to_be_bytes());
+        message.append(&winner.to_string().to_bytes());
+        env.crypto().sha256(&message).to_bytes()
+    }
+
+    /// Attest a match result with the required number of signatures.
+    ///
+    /// Every signature must come from a registered signer, a signer may not
+    /// sign twice, and the signer count must reach `required_signatures`.
+    /// Strict by design: a single bad signature rejects the whole attestation
+    /// (the host `ed25519_verify` traps on failure in production wasm).
+    pub fn attest_match_result(
+        env: Env,
+        match_id: u64,
+        winner: Address,
+        winner_score: i64,
+        signatures: Vec<AttestationSignature>,
+    ) -> MatchResultAttestation {
+        Self::require_not_paused(&env);
+
+        let signers: Map<BytesN<32>, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationSigners)
+            .unwrap_or_else(|| Map::new(&env));
+        let required_signatures: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AttestationThreshold)
+            .unwrap_or(0);
+
+        if required_signatures == 0 {
+            panic!("attestation disabled");
+        }
+        if signatures.len() < required_signatures {
+            panic!("insufficient valid signatures");
+        }
+
+        let result_digest =
+            Self::attestation_digest(env.clone(), match_id, winner.clone(), winner_score);
+        let digest_message: Bytes = result_digest.clone().into();
+
+        let mut seen: Map<BytesN<32>, bool> = Map::new(&env);
+        for signature in signatures.iter() {
+            if !signers.get(signature.public_key.clone()).unwrap_or(false) {
+                panic!("signer not registered");
+            }
+            if seen.get(signature.public_key.clone()).unwrap_or(false) {
+                panic!("duplicate signature");
+            }
+            env.crypto()
+                .ed25519_verify(&signature.public_key, &digest_message, &signature.signature);
+            seen.set(signature.public_key, true);
+        }
+
+        let attested = MatchResultAttestation {
+            match_id,
+            result_digest: result_digest.clone(),
+            winner,
+            winner_score,
+            signature_count: signatures.len(),
+            required_signatures,
+            attested_at: env.ledger().timestamp(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Attestation(match_id), &attested);
+
+        arenax_events::anti_cheat::emit_match_result_attested(
+            &env,
+            match_id,
+            &attested.winner,
+            attested.winner_score,
+            &attested.result_digest,
+            attested.signature_count,
+            attested.required_signatures,
+        );
+
+        attested
+    }
+
+    /// Read a stored match result attestation, if any.
+    pub fn get_attestation(env: Env, match_id: u64) -> Option<MatchResultAttestation> {
+        env.storage().persistent().get(&DataKey::Attestation(match_id))
     }
 
     /// Record a blocked spam attempt in analytics. Called by off-chain indexers
@@ -1116,6 +1434,15 @@ impl AntiCheatContract {
         }
     }
 
+    fn require_admin(env: &Env) {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("not initialized");
+        admin.require_auth();
+    }
+
     // Helper: Update trust score with weighted factors
     fn update_trust_score(
         env: &Env,
@@ -1162,9 +1489,16 @@ impl AntiCheatContract {
 
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);
@@ -1186,9 +1520,16 @@ impl AntiCheatContract {
             .saturating_sub(10);
         trust_score.last_updated = env.ledger().timestamp();
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage()
             .persistent()
             .set(&DataKey::TrustScore(player.clone()), &trust_score);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TrustScore(player.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Emit trust score update event
         arenax_events::anti_cheat::emit_trust_score_updated(env, player, trust_score.score);

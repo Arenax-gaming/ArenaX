@@ -198,6 +198,15 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    healthcheck:
+      # Readiness probe: routing decisions use /api/health/ready (issue #1079).
+      # The endpoint returns 200 for healthy/degraded and 503 only when the
+      # backend cannot serve traffic (e.g. Postgres is unreachable).
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health/ready >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     volumes:
       - ./backend:/app
       - cargo_cache:/usr/local/cargo/registry

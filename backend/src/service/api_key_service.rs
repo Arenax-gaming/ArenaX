@@ -2,8 +2,9 @@ use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::api_key::{
     ApiKey, ApiKeyRotationHistory, ApiKeySummary, ApiKeyUsageLog, CreateApiKeyRequest,
-    CreateApiKeyResponse, GenerateApiKeyRequest, GenerateApiKeyResponse, KeyStatus,
-    RevokeApiKeyRequest, RotateApiKeyRequest, RotateApiKeyResponse, UpdateApiKeyRequest,
+    CreateApiKeyResponse, GenerateApiKeyRequest, GenerateApiKeyResponse, GetApiKeyResponse,
+    KeyStatus, RevokeApiKeyRequest, RotateApiKeyRequest, RotateApiKeyResponse,
+    UpdateApiKeyRequest,
 };
 use chrono::{Duration, Utc};
 use sha2::{Digest, Sha256};
@@ -11,6 +12,29 @@ use std::env;
 use tracing::{info, warn};
 use uuid::Uuid;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+/// Default overlap window (24 hours) during which both old and new API keys
+/// are accepted after rotation (zero-downtime, Issue #1080).
+pub const DEFAULT_API_KEY_OVERLAP_SECONDS: i64 = 86400; // 24h
+
+/// Maximum configurable overlap window (7 days).
+pub const MAX_API_KEY_OVERLAP_SECONDS: i64 = 604800; // 7d
+
+/// Clamp a requested overlap window to the permitted range, falling back to
+/// the default when not provided.
+fn normalized_overlap(requested: Option<i64>, existing: i64) -> i64 {
+    requested
+        .or_else(|| Some(existing))
+        .unwrap_or(DEFAULT_API_KEY_OVERLAP_SECONDS)
+        .clamp(0, MAX_API_KEY_OVERLAP_SECONDS)
+}
+
+/// Returns `true` when a rotated (old) key's overlap window has elapsed and
+/// the key must be rejected. New keys (`old_key_expires_at = None`) are never
+/// expired by this rule.
+fn old_key_is_expired(old_key_expires_at: Option<chrono::DateTime<Utc>>, now: chrono::DateTime<Utc>) -> bool {
+    old_key_expires_at.map(|deadline| deadline <= now).unwrap_or(false)
+}
 
 /// Calculate SHA-256 hash of a key
 fn key_hash(key: &str) -> String {
@@ -82,6 +106,11 @@ impl ApiKeyService {
             None
         };
 
+        let overlap_duration_seconds = request
+            .overlap_duration_seconds
+            .unwrap_or(DEFAULT_API_KEY_OVERLAP_SECONDS)
+            .clamp(0, MAX_API_KEY_OVERLAP_SECONDS);
+
         let key_id = Uuid::new_v4();
 
         // Insert the API key
@@ -90,9 +119,9 @@ impl ApiKeyService {
             INSERT INTO api_keys (
                 id, key, name, description, user_id, key_type, scopes,
                 expiration_date, is_active, rotation_enabled, rotation_interval,
-                next_rotation_date, max_uses, metadata
+                next_rotation_date, max_uses, metadata, overlap_duration_seconds, webhook_url
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13, $14, $15)
             "#,
             key_id,
             &key_hash_value,
@@ -109,6 +138,8 @@ impl ApiKeyService {
             request.metadata
                 .map(|m| serde_json::to_value(m).unwrap_or_default())
                 .unwrap_or_default(),
+            overlap_duration_seconds,
+            request.webhook_url,
         )
         .execute(&self.pool)
         .await
@@ -158,6 +189,11 @@ impl ApiKeyService {
             None
         };
 
+        let overlap_duration_seconds = request
+            .overlap_duration_seconds
+            .unwrap_or(DEFAULT_API_KEY_OVERLAP_SECONDS)
+            .clamp(0, MAX_API_KEY_OVERLAP_SECONDS);
+
         let key_id = Uuid::new_v4();
 
         sqlx::query!(
@@ -165,9 +201,9 @@ impl ApiKeyService {
             INSERT INTO api_keys (
                 id, key, name, description, user_id, key_type, scopes,
                 expiration_date, is_active, rotation_enabled, rotation_interval,
-                next_rotation_date, max_uses, metadata
+                next_rotation_date, max_uses, metadata, overlap_duration_seconds, webhook_url
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13, $14, $15)
             "#,
             key_id,
             &key_hash_value,
@@ -184,6 +220,8 @@ impl ApiKeyService {
             request.metadata
                 .map(|m| serde_json::to_value(m).unwrap_or_default())
                 .unwrap_or_default(),
+            overlap_duration_seconds,
+            request.webhook_url,
         )
         .execute(&self.pool)
         .await
@@ -227,7 +265,11 @@ impl ApiKeyService {
                 next_rotation_date,
                 max_uses,
                 use_count,
-                metadata
+                metadata,
+                overlap_duration_seconds,
+                old_key_hash,
+                old_key_expires_at,
+                webhook_url
             FROM api_keys
             WHERE id = $1 AND user_id = $2
             "#,
@@ -240,6 +282,16 @@ impl ApiKeyService {
         .ok_or_else(|| ApiError::not_found("API key not found"))?;
 
         Ok(key)
+    }
+
+    /// Get full API key details (incl. rotation deadline) for a user.
+    pub async fn get_key_details(
+        &self,
+        key_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<GetApiKeyResponse, ApiError> {
+        let summary = self.get_key_summary_by_id(key_id, user_id).await?;
+        Ok(GetApiKeyResponse::from_summary(summary))
     }
 
     /// Get API key summary by ID
@@ -265,6 +317,10 @@ impl ApiKeyService {
                 max_uses,
                 rotation_enabled,
                 next_rotation_date,
+                old_key_expires_at,
+                overlap_duration_seconds,
+                webhook_url,
+                key_preview,
                 created_by_username,
                 created_by_email,
                 status
@@ -301,6 +357,10 @@ impl ApiKeyService {
                 max_uses,
                 rotation_enabled,
                 next_rotation_date,
+                old_key_expires_at,
+                overlap_duration_seconds,
+                webhook_url,
+                key_preview,
                 created_by_username,
                 created_by_email,
                 status
@@ -347,7 +407,11 @@ impl ApiKeyService {
                 next_rotation_date,
                 max_uses,
                 use_count,
-                metadata
+                metadata,
+                overlap_duration_seconds,
+                old_key_hash,
+                old_key_expires_at,
+                webhook_url
             FROM api_keys
             WHERE key = $1
             "#,
@@ -361,6 +425,16 @@ impl ApiKeyService {
         // Check if key is active
         if !key.is_active {
             return Err(ApiError::unauthorized("API key has been revoked"));
+        }
+
+        // Zero-downtime rotation overlap (Issue #1080): a key that was rotated
+        // remains valid until `old_key_expires_at`. Both the old and the new
+        // key are accepted during the overlap window; afterwards the old key
+        // is rejected (and expired by the background job).
+        if old_key_is_expired(key.old_key_expires_at, Utc::now()) {
+            return Err(ApiError::unauthorized(
+                "API key expired after rotation overlap period",
+            ));
         }
 
         // Check expiration
@@ -426,8 +500,10 @@ impl ApiKeyService {
                 rotation_interval = COALESCE($6, rotation_interval),
                 next_rotation_date = COALESCE($7, next_rotation_date),
                 max_uses = COALESCE($8, max_uses),
+                overlap_duration_seconds = COALESCE($9, overlap_duration_seconds),
+                webhook_url = COALESCE($10, webhook_url),
                 updated_at = NOW()
-            WHERE id = $9 AND user_id = $10
+            WHERE id = $11 AND user_id = $12
             RETURNING *
             "#,
             request.name,
@@ -438,6 +514,10 @@ impl ApiKeyService {
             rotation_interval,
             next_rotation_date,
             request.max_uses,
+            request
+                .overlap_duration_seconds
+                .map(|v| v.clamp(0, MAX_API_KEY_OVERLAP_SECONDS)),
+            request.webhook_url,
             key_id,
             user_id,
         )
@@ -493,7 +573,12 @@ impl ApiKeyService {
 
     // ── Key Rotation ─────────────────────────────────────────────────────────
 
-    /// Rotate an API key
+    /// Rotate an API key with a zero-downtime overlap window (Issue #1080).
+    ///
+    /// Generates a new key, keeps the old key **valid** until
+    /// `old_key_expires_at = now() + overlap_duration_seconds` (default 24h,
+    /// max 7 days) and returns the deadline so integrators can migrate. Both
+    /// the old and the new key authenticate during the overlap period.
     #[tracing::instrument(skip(self, request), fields(key_id = %key_id))]
     pub async fn rotate_key(
         &self,
@@ -507,52 +592,67 @@ impl ApiKeyService {
             return Err(ApiError::bad_request("Cannot rotate revoked API key"));
         }
 
+        let overlap_duration_seconds =
+            normalized_overlap(request.overlap_duration_seconds, existing_key.overlap_duration_seconds);
+
         // Generate new key
         let new_key = Self::generate_key();
         let new_key_hash_value = key_hash(&new_key);
         let old_key_hash_value = existing_key.key.clone();
 
         let now = Utc::now();
+        let old_key_expires_at = now + Duration::seconds(overlap_duration_seconds);
         let next_rotation_date = if existing_key.rotation_enabled {
             Some(now + Duration::seconds(existing_key.rotation_interval.unwrap_or(7776000)))
         } else {
             None
         };
 
-        // Update existing key to inactive (old key no longer valid)
+        // Instead of deactivating the old key immediately, mark it as the
+        // "old" key so it stays valid until `old_key_expires_at`. New key
+        // takes over as the primary key for the same properties.
         sqlx::query!(
             r#"
             UPDATE api_keys
             SET 
-                is_active = false,
+                old_key_hash = $1,
+                old_key_expires_at = $2,
+                overlap_duration_seconds = $3,
                 updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $4 AND user_id = $5
             "#,
+            &old_key_hash_value,
+            old_key_expires_at,
+            overlap_duration_seconds,
             key_id,
+            user_id,
         )
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
 
-        // Create new key with same properties
+        // Create new key with same properties (fresh — no overlap markers).
         let new_key_id = Uuid::new_v4();
         sqlx::query!(
             r#"
             INSERT INTO api_keys (
                 id, key, name, description, user_id, key_type, scopes,
                 expiration_date, is_active, rotation_enabled, rotation_interval,
-                next_rotation_date, max_uses, use_count, metadata, created_at
+                next_rotation_date, max_uses, use_count, metadata, created_at,
+                overlap_duration_seconds, old_key_hash, old_key_expires_at, webhook_url
             )
             SELECT 
                 $1, $2, name, description, user_id, key_type, scopes,
                 expiration_date, true, rotation_enabled, rotation_interval,
-                $3, max_uses, 0, metadata, NOW()
+                $3, max_uses, 0, metadata, NOW(),
+                $4, NULL, NULL, webhook_url
             FROM api_keys
-            WHERE id = $4
+            WHERE id = $5
             "#,
             new_key_id,
             &new_key_hash_value,
             next_rotation_date,
+            overlap_duration_seconds,
             key_id,
         )
         .execute(&self.pool)
@@ -577,14 +677,117 @@ impl ApiKeyService {
         .await
         .map_err(ApiError::database_error)?;
 
-        info!(key_id = %key_id, new_key_id = %new_key_id, "API key rotated");
+        // Notify the key owner's registered callback URL that rotation was
+        // initiated (best-effort; webhook failures are logged, not fatal).
+        if let Some(ref callback) = existing_key.webhook_url {
+            Self::notify_webhook(
+                callback,
+                "api_key.rotation_initiated",
+                serde_json::json!({
+                    "key_id": key_id,
+                    "new_key_id": new_key_id,
+                    "old_key_expires_at": old_key_expires_at.to_rfc3339(),
+                    "rotated_at": now.to_rfc3339(),
+                }),
+            )
+            .await;
+        }
+
+        info!(key_id = %key_id, new_key_id = %new_key_id, overlap_duration_seconds, "API key rotated");
 
         Ok(RotateApiKeyResponse {
             old_key_id: key_id,
             new_key_id,
             new_key,
             rotated_at: now,
+            old_key_expires_at,
+            overlap_duration_seconds,
         })
+    }
+
+    /// Background job: expire any old (rotated) key whose overlap window has
+    /// elapsed. Notifies the registered callback URL before deactivating.
+    pub async fn expire_expired_old_keys(&self) -> Result<u64, ApiError> {
+        let due = sqlx::query!(
+            r#"
+            SELECT id, webhook_url
+            FROM api_keys
+            WHERE old_key_expires_at IS NOT NULL
+              AND old_key_expires_at <= NOW()
+              AND is_active = true
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        for row in &due {
+            if let Some(ref callback) = row.webhook_url {
+                Self::notify_webhook(
+                    callback,
+                    "api_key.old_key_expired",
+                    serde_json::json!({
+                        "key_id": row.id,
+                    }),
+                )
+                .await;
+            }
+        }
+
+        let expired = sqlx::query!(
+            r#"
+            UPDATE api_keys
+            SET is_active = false, revoked_at = NOW(), updated_at = NOW()
+            WHERE old_key_expires_at IS NOT NULL
+              AND old_key_expires_at <= NOW()
+              AND is_active = true
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        for row in &due {
+            warn!(key_id = %row.id, "Expired old API key after rotation overlap");
+        }
+
+        Ok(expired.rows_affected())
+    }
+
+    /// Deliver a rotation webhook to the key owner's registered callback URL.
+    ///
+    /// Fire-and-forget: failures are logged but never fail the calling
+    /// operation, since rotation must succeed regardless.
+    async fn notify_webhook(callback_url: &str, event: &str, payload: serde_json::Value) {
+        let url = callback_url.trim().to_string();
+        if url.is_empty() {
+            return;
+        }
+        let body = serde_json::json!({
+            "event": event,
+            "payload": payload,
+            "sent_at": Utc::now().to_rfc3339(),
+        });
+
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(error = %e, "Failed to build webhook client");
+                return;
+            }
+        };
+
+        match client.post(&url).json(&body).send().await {
+            Ok(resp) => {
+                info!(url = %url, event, status = %resp.status(), "API key webhook delivered");
+            }
+            Err(e) => {
+                warn!(url = %url, event, error = %e, "API key webhook delivery failed");
+            }
+        }
     }
 
     // ── Usage Tracking ───────────────────────────────────────────────────────
@@ -726,5 +929,40 @@ impl ApiKeyService {
                 "Duration must end with 'd', 'h', or 'm'",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #1080: an old key must stay accepted while the overlap window is
+    /// still open, and only be rejected once `old_key_expires_at` passes.
+    #[test]
+    fn old_key_accepted_during_overlap_and_rejected_after() {
+        let now = Utc::now();
+        let overlap = DEFAULT_API_KEY_OVERLAP_SECONDS;
+        let old_key_expires_at = Some(now + Duration::seconds(overlap));
+
+        // During the overlap window both old and new key are valid.
+        assert!(!old_key_is_expired(old_key_expires_at, now), "old key must stay valid inside the overlap window");
+        assert!(!old_key_is_expired(None, now), "new key is never expired by the overlap rule");
+
+        // Advance time past `old_key_expires_at` → old key is rejected.
+        let later = now + Duration::seconds(overlap + 1);
+        assert!(old_key_is_expired(old_key_expires_at, later), "old key must be rejected after the overlap window");
+    }
+
+    /// Issue #1080: overlap duration defaults to 24h and is clamped to
+    /// [0, 7 days] regardless of the requested value.
+    #[test]
+    fn overlap_duration_defaults_and_clamps() {
+        assert_eq!(normalized_overlap(None, DEFAULT_API_KEY_OVERLAP_SECONDS), 86400);
+
+        let max = normalized_overlap(Some(999999999), DEFAULT_API_KEY_OVERLAP_SECONDS);
+        assert_eq!(max, MAX_API_KEY_OVERLAP_SECONDS, "overlap must be capped at 7 days");
+
+        let min = normalized_overlap(Some(-5), DEFAULT_API_KEY_OVERLAP_SECONDS);
+        assert_eq!(min, 0, "overlap must never be negative");
     }
 }

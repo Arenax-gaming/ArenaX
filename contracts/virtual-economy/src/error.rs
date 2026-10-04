@@ -59,7 +59,7 @@ pub enum VirtualEconomyError {
 
     // NFT staking errors
     NftStakingNotConfigured = 90,
-    NftAlreadyStaked = 91,
+    NftCurrentlyStaked = 91,
     NftNotStaked = 92,
     NftLockPeriodNotMet = 93,
     NftStakingPaused = 94,
@@ -83,4 +83,21 @@ pub enum VirtualEconomyError {
     // is capped at 50 cases by the XDR spec (ScSpecUdtErrorEnumV0), and it
     // was already at that cap, so new features must reuse existing cases
     // rather than add new ones.
+}
+
+impl VirtualEconomyError {
+    /// Re-entrant marketplace call (#1056).
+    ///
+    /// Alias of [`Self::InvalidMetadata`]. Trades never return that case for
+    /// metadata, and the contracterror enum cannot grow past 50 variants.
+    #[allow(non_upper_case_globals)]
+    pub const Reentrancy: Self = Self::InvalidMetadata;
+
+    /// Fewer than two non-stale oracle sources were available (#1053).
+    ///
+    /// Alias of [`Self::OraclePriceStale`] for the same 50-variant cap.
+    /// Legacy primary/fallback resolution still returns `OraclePriceStale`
+    /// when no multi-oracle sources are registered.
+    #[allow(non_upper_case_globals)]
+    pub const OracleInsufficientSources: Self = Self::OraclePriceStale;
 }

@@ -1049,3 +1049,69 @@ fn test_deprecate_version_when_paused() {
     client.set_paused(&true);
     client.deprecate_version(&admin, &name, &1);
 }
+
+#[test]
+fn test_deprecate_with_successor_and_get_current() {
+    let (env, admin, contract1, contract2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = ContractRegistryClient::new(&env, &contract_id);
+
+    let name = Symbol::new(&env, "match_contract");
+
+    env.mock_all_auths();
+    client.register_contract(&name, &contract1);
+
+    let entry_v1 = client.get_current(&name);
+    assert_eq!(entry_v1.address, contract1);
+    assert_eq!(entry_v1.version, 1);
+    assert!(!entry_v1.deprecated);
+    assert_eq!(entry_v1.successor, None);
+
+    // Deprecate v1 with v2 as successor
+    client.deprecate_contract(&contract1, &Some(contract2.clone()));
+
+    let entry_v2 = client.get_current(&name);
+    assert_eq!(entry_v2.address, contract2);
+    assert_eq!(entry_v2.version, 2);
+    assert!(!entry_v2.deprecated);
+    assert_eq!(entry_v2.successor, None);
+}
+
+#[test]
+#[should_panic(expected = "all entries for contract are deprecated")]
+fn test_fully_deprecated_name_returns_error() {
+    let (env, admin, contract1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = ContractRegistryClient::new(&env, &contract_id);
+
+    let name = Symbol::new(&env, "match_contract");
+
+    env.mock_all_auths();
+    client.register_contract(&name, &contract1);
+
+    // Deprecate without successor
+    client.deprecate_contract(&contract1, &None);
+
+    client.get_current(&name);
+}
+
+#[test]
+#[should_panic(expected = "all entries for contract are deprecated")]
+fn test_chained_deprecation_eventually_fails_when_all_deprecated() {
+    let (env, admin, contract1, contract2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = ContractRegistryClient::new(&env, &contract_id);
+
+    let name = Symbol::new(&env, "match_contract");
+
+    env.mock_all_auths();
+    client.register_contract(&name, &contract1);
+    client.deprecate_contract(&contract1, &Some(contract2.clone()));
+
+    assert_eq!(client.get_current(&name).address, contract2);
+
+    // Now deprecate v2 without successor
+    client.deprecate_contract(&contract2, &None);
+    client.get_current(&name);
+}
+

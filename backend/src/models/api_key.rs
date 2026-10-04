@@ -55,6 +55,18 @@ pub struct ApiKey {
     pub max_uses: Option<i32>,
     pub use_count: i32,
     pub metadata: serde_json::Value,
+    /// Overlap window (seconds) during which both old and new key are
+    /// accepted after rotation. Default 24h, max 7 days (Issue #1080).
+    pub overlap_duration_seconds: i64,
+    /// Hash of the key this row replaced; set when this row is the "old" key
+    /// in a zero-downtime rotation.
+    pub old_key_hash: Option<String>,
+    /// Deadline until which this (old) key remains valid after rotation.
+    /// Before this instant the key is accepted; afterwards it is expired by
+    /// the background job and rejected.
+    pub old_key_expires_at: Option<DateTime<Utc>>,
+    /// Registered callback URL notified on rotation events.
+    pub webhook_url: Option<String>,
 }
 
 /// API Key summary (view model)
@@ -73,6 +85,10 @@ pub struct ApiKeySummary {
     pub max_uses: Option<i32>,
     pub rotation_enabled: bool,
     pub next_rotation_date: Option<DateTime<Utc>>,
+    pub old_key_expires_at: Option<DateTime<Utc>>,
+    pub overlap_duration_seconds: Option<i64>,
+    pub webhook_url: Option<String>,
+    pub key_preview: Option<String>,
     pub created_by_username: Option<String>,
     pub created_by_email: Option<String>,
     pub status: KeyStatus,
@@ -118,6 +134,12 @@ pub struct CreateApiKeyRequest {
     pub rotation_interval: Option<String>,
     pub max_uses: Option<i32>,
     pub metadata: Option<serde_json::Value>,
+    /// Overlap window in seconds for zero-downtime rotation
+    /// (default 24h = 86400, max 7 days = 604800).
+    #[serde(default)]
+    pub overlap_duration_seconds: Option<i64>,
+    /// Registered callback URL to be notified of rotation events.
+    pub webhook_url: Option<String>,
 }
 
 /// Create API Key response
@@ -137,12 +159,6 @@ pub struct ListApiKeysResponse {
     pub total: usize,
 }
 
-/// Get API Key response
-#[derive(Debug, Serialize)]
-pub struct GetApiKeyResponse {
-    pub api_key: ApiKey,
-}
-
 /// Update API Key request
 #[derive(Debug, Deserialize)]
 pub struct UpdateApiKeyRequest {
@@ -154,6 +170,11 @@ pub struct UpdateApiKeyRequest {
     pub rotation_interval: Option<String>,
     pub max_uses: Option<i32>,
     pub metadata: Option<serde_json::Value>,
+    /// Overlap window in seconds for zero-downtime rotation.
+    #[serde(default)]
+    pub overlap_duration_seconds: Option<i64>,
+    /// Registered callback URL to be notified of rotation events.
+    pub webhook_url: Option<String>,
 }
 
 /// Revoke API Key request
@@ -166,6 +187,10 @@ pub struct RevokeApiKeyRequest {
 #[derive(Debug, Deserialize)]
 pub struct RotateApiKeyRequest {
     pub reason: Option<String>,
+    /// Overlap window in seconds during which both old and new key remain
+    /// valid (default 24h = 86400, max 7 days = 604800).
+    #[serde(default)]
+    pub overlap_duration_seconds: Option<i64>,
 }
 
 /// API Key usage statistics
@@ -187,6 +212,59 @@ pub struct RotateApiKeyResponse {
     pub new_key_id: Uuid,
     pub new_key: String,
     pub rotated_at: DateTime<Utc>,
+    /// Deadline until which the old key remains valid (both keys accepted
+    /// during the overlap window).
+    pub old_key_expires_at: DateTime<Utc>,
+    pub overlap_duration_seconds: i64,
+}
+
+/// Details returned by `GET /api/api-keys/:id` so integrators can see the
+/// rotation deadline (`old_key_expires_at`) and a preview of the key.
+#[derive(Debug, Serialize)]
+pub struct GetApiKeyResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub key_preview: String,
+    pub status: KeyStatus,
+    pub is_active: bool,
+    pub scopes: Vec<String>,
+    pub expiration_date: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub use_count: i32,
+    pub max_uses: Option<i32>,
+    pub rotation_enabled: bool,
+    pub next_rotation_date: Option<DateTime<Utc>>,
+    pub overlap_duration_seconds: i64,
+    pub old_key_expires_at: Option<DateTime<Utc>>,
+    pub webhook_url: Option<String>,
+}
+
+impl GetApiKeyResponse {
+    /// Build from a summary row; falls back to an empty preview when the view
+    /// did not expose one.
+    pub fn from_summary(summary: ApiKeySummary) -> Self {
+        Self {
+            key_preview: summary.key_preview.clone().unwrap_or_else(|| "••••••••".to_string()),
+            id: summary.id,
+            name: summary.name,
+            description: summary.description,
+            status: summary.status,
+            is_active: summary.is_active,
+            scopes: summary.scopes,
+            expiration_date: summary.expiration_date,
+            created_at: summary.created_at,
+            last_used_at: summary.last_used_at,
+            use_count: summary.use_count,
+            max_uses: summary.max_uses,
+            rotation_enabled: summary.rotation_enabled,
+            next_rotation_date: summary.next_rotation_date,
+            overlap_duration_seconds: summary.overlap_duration_seconds.unwrap_or(86400),
+            old_key_expires_at: summary.old_key_expires_at,
+            webhook_url: summary.webhook_url,
+        }
+    }
 }
 
 /// Generate new API key request

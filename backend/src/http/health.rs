@@ -3,7 +3,7 @@ use crate::db::DbPool;
 use actix_web::{web, HttpResponse, Result};
 use redis::aio::ConnectionManager;
 use serde_json::json;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Default minimum free disk percentage (0.0-100.0) before the service is
 /// considered degraded.
@@ -12,6 +12,17 @@ const MIN_FREE_DISK_PERCENT: f64 = 5.0;
 /// Filesystem path inspected for free disk space. Defaults to the process
 /// working directory, which follows the deployment's storage partition.
 const DISK_CHECK_PATH: &str = ".";
+
+/// Per-dependency timeout for the readiness probe (2 seconds, Issue #1079).
+const CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Soroban RPC base URL injected as app data for readiness checks.
+///
+/// A plain `web::Data<String>` is avoided to prevent collisions with other
+/// `String` app data (same reason the match-authority handler uses a
+/// `SignerSecret` newtype).
+#[derive(Clone)]
+pub struct SorobanRpcUrl(pub String);
 
 /// Aggregate overall health from per-dependency results.
 ///
@@ -92,6 +103,102 @@ pub async fn health_check(
     })))
 }
 
+/// GET /api/health/live
+///
+/// Liveness probe: returns 200 immediately without touching downstream
+/// dependencies, so a load balancer / orchestrator that only needs to know the
+/// process is alive does not get a false negative while (for example) Redis is
+/// being restarted.
+pub async fn liveness_check() -> Result<HttpResponse, ApiError> {
+    Ok(HttpResponse::Ok().json(json!({
+        "status": "ok",
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    })))
+}
+
+/// GET /api/health/ready
+///
+/// Readiness probe: live checks against PostgreSQL, Redis and the Soroban RPC
+/// endpoint, each with a 2-second timeout. Used for load-balancer / Kubernetes
+/// readiness decisions and routing: healthy and degraded both answer 200 while
+/// `unhealthy` answers 503 so traffic is pulled off the instance.
+pub async fn readiness_check(
+    db_pool: web::Data<DbPool>,
+    redis: web::Data<ConnectionManager>,
+    soroban_url: web::Data<SorobanRpcUrl>,
+) -> Result<HttpResponse, ApiError> {
+    // PostgreSQL ping (2s timeout)
+    let db_checked = tokio::time::timeout(CHECK_TIMEOUT, crate::db::health_check(&db_pool)).await;
+    let db_ok = matches!(db_checked, Ok(Ok(())));
+    let db = if db_ok { "ok" } else { "error" };
+
+    // Redis PING (2s timeout)
+    let redis_checked = tokio::time::timeout(CHECK_TIMEOUT, async {
+        redis::cmd("PING")
+            .query_async::<String>(&mut redis_conn(&redis))
+            .await
+    })
+    .await;
+    let redis_ok = matches!(redis_checked, Ok(Ok(ref pong)) if pong == "PONG");
+    let redis = if redis_ok { "ok" } else { "error" };
+
+    // Soroban RPC reachability (2s timeout, GET on the JSON-RPC endpoint)
+    let soroban_ok = check_soroban_rpc(&soroban_url.0).await;
+    let soroban = if soroban_ok { "ok" } else { "error" };
+
+    // Update the Prometheus gauge on every readiness check (Issue #1079)
+    crate::metrics::record_dependency_health("db", db_ok);
+    crate::metrics::record_dependency_health("redis", redis_ok);
+    crate::metrics::record_dependency_health("soroban", soroban_ok);
+
+    // Aggregate: the API cannot serve users without the database, so a DB
+    // failure is `unhealthy` (503). Missing Redis / Soroban is `degraded`.
+    let status = if !db_ok {
+        "unhealthy"
+    } else if redis_ok && soroban_ok {
+        "healthy"
+    } else {
+        "degraded"
+    };
+
+    let body = json!({
+        "status": status,
+        "checks": {
+            "db": db,
+            "redis": redis,
+            "soroban": soroban
+        },
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    if status == "unhealthy" {
+        Ok(HttpResponse::ServiceUnavailable().json(body))
+    } else {
+        Ok(HttpResponse::Ok().json(body))
+    }
+}
+
+/// Probe the Soroban RPC endpoint for reachability within the 2s budget.
+///
+/// A plain client `GET` is sufficient — reaching the endpoint (any HTTP
+/// response) proves the RPC service is up; a timeout or transport error marks
+/// it down. RPC bodies are not required for reachability.
+async fn check_soroban_rpc(base_url: &str) -> bool {
+    if base_url.trim().is_empty() {
+        return false;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(CHECK_TIMEOUT)
+        .build()
+        .unwrap_or_default();
+    tokio::time::timeout(CHECK_TIMEOUT, async {
+        client.get(base_url).send().await
+    })
+    .await
+    .map(|result| result.map(|resp| resp.status().is_success()).unwrap_or(false))
+    .unwrap_or(false)
+}
+
 #[derive(serde::Deserialize)]
 struct HealthQuery {
     #[serde(default)]
@@ -149,5 +256,38 @@ mod tests {
     fn round2_rounds_to_two_decimal_places() {
         assert_eq!(round2(1.236), 1.24);
         assert_eq!(round2(2.0), 2.0);
+    }
+
+    #[test]
+    fn readiness_aggregation_rules() {
+        // db down => unhealthy
+        let db_ok = false;
+        let redis_ok = true;
+        let soroban_ok = true;
+        assert_eq!(
+            readiness_status_label(db_ok, redis_ok, soroban_ok),
+            "unhealthy"
+        );
+
+        // db up, redis down => degraded
+        assert_eq!(readiness_status_label(true, false, true), "degraded");
+
+        // db up, soroban down => degraded
+        assert_eq!(readiness_status_label(true, true, false), "degraded");
+
+        // all up => healthy
+        assert_eq!(readiness_status_label(true, true, true), "healthy");
+    }
+
+    // Mirrors the aggregation logic in `readiness_check` (kept as a pure
+    // function so it can be unit-tested without live dependencies).
+    fn readiness_status_label(db_ok: bool, redis_ok: bool, soroban_ok: bool) -> &'static str {
+        if !db_ok {
+            "unhealthy"
+        } else if redis_ok && soroban_ok {
+            "healthy"
+        } else {
+            "degraded"
+        }
     }
 }

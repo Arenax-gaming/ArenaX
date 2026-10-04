@@ -27,8 +27,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
-import { MatchHubDetails } from "@/data/matchHub";
-import { MatchDetail } from "@/types/match";
+import { MatchHubDetails, MatchDetail } from "@/types/match";
 import { PageErrorBoundary } from "@/components/common/PageErrorBoundary";
 
 export function MatchHubPageClient() {
@@ -53,7 +52,7 @@ function MatchHubPageContent() {
   // regardless of participant/status detection below.
   const forceSpectate = searchParams?.get("spectate") === "true";
 
-  const { data: matchData, isLoading, error, refetch } = useMatch(matchId);
+  const { data: matchData, isLoading, isError, refetch } = useMatch(matchId);
 
   // Handle both possible data shapes
   const match = matchData as (MatchHubDetails | null);
@@ -85,7 +84,7 @@ function MatchHubPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
-  const { isConnected, lastUpdate, connectionError, reconnect } = useMatchWebSocket({
+  const { isConnected, lastUpdate, connectionError, connectionRestored, reconnect } = useMatchWebSocket({
     matchId,
     enabled: match?.status === "in_progress" || match?.status === "disputed",
   });
@@ -159,17 +158,41 @@ function MatchHubPageContent() {
     );
   }
 
-  // Error state or no data
-  if (error || (!match && !matchDetail)) {
+  // Error state — API call failed; let the user retry without seeing stale/mock data
+  if (isError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="text-center">
+          <AlertTriangle className="mx-auto mb-4 h-12 w-12 text-destructive" />
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Failed to Load Match</h1>
+          <p className="mb-6 text-muted-foreground">
+            We couldn&apos;t reach the server. Check your connection and try again.
+          </p>
+          <div className="flex gap-4 justify-center">
+            <Button onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Retry
+            </Button>
+            <Button variant="ghost" onClick={() => router.push("/tournaments")}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Tournaments
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No data returned (match not found)
+  if (!match && !matchDetail) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="text-center">
           <h1 className="mb-2 text-3xl font-bold text-foreground">Match Not Found</h1>
           <p className="mb-6 text-muted-foreground">
-            The match you&apos;re looking for doesn&apos;t exist or failed to load.
+            This match doesn&apos;t exist or may have been removed.
           </p>
           <div className="flex gap-4 justify-center">
-            <Button onClick={() => refetch()}>Retry</Button>
             <Button variant="ghost" onClick={() => router.push("/tournaments")}>
               Back to Tournaments
             </Button>
@@ -336,6 +359,10 @@ function MatchHubPageContent() {
                   <Button variant="ghost" size="sm" onClick={reconnect} className="text-white hover:bg-white/10">
                     <RefreshCw className="h-4 w-4" />
                   </Button>
+                </div>
+              ) : connectionRestored ? (
+                <div role="status" className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                  Connection restored. Live updates resumed.
                 </div>
               ) : null}
 

@@ -3,6 +3,7 @@
 import React, { useCallback, useRef, useState, useEffect } from "react";
 import { Tournament } from "@/types/tournament";
 import { TournamentCardWithQuickJoin } from "./TournamentCardWithQuickJoin";
+import { TournamentCardSkeleton } from "./TournamentCardSkeleton";
 import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 import { VirtualGrid, VirtualGridRenderProps } from "@/components/ui/VirtualGrid";
 import { Trophy } from "lucide-react";
@@ -16,6 +17,22 @@ const CARD_GAP = 24; // px — matches gap-6
 // Number of items below which we skip virtualisation and use static grid
 const VIRTUALIZATION_THRESHOLD = 12;
 
+// Number of skeleton cards shown while a tournament page is loading
+const SKELETON_COUNT = 6;
+
+// Mobile-first responsive grid shared by cards and skeletons
+const GRID_CLASS = "grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3";
+
+function SkeletonGrid({ count = SKELETON_COUNT, label }: { count?: number; label: string }) {
+  return (
+    <div className={GRID_CLASS} role="status" aria-busy="true" aria-label={label}>
+      {Array.from({ length: count }).map((_, i) => (
+        <TournamentCardSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
+
 interface TournamentListProps {
   tournaments: Tournament[];
   joinedIds?: Set<string>;
@@ -26,8 +43,10 @@ interface TournamentListProps {
   virtualHeight?: number;
   /** Called when the user scrolls near the bottom (infinite scroll) */
   onLoadMore?: () => void;
-  /** Show a loading spinner at the bottom while fetching */
+  /** Show skeleton cards below current results while the next page loads */
   isLoadingMore?: boolean;
+  /** Show skeleton cards in place of results until the first page arrives */
+  isLoading?: boolean;
 }
 
 export function TournamentList({
@@ -39,12 +58,13 @@ export function TournamentList({
   virtualHeight = 720,
   onLoadMore,
   isLoadingMore = false,
+  isLoading = false,
 }: TournamentListProps) {
   const useVirtual = tournaments.length >= VIRTUALIZATION_THRESHOLD;
 
   const renderTournamentCell = useCallback(
     ({ item, style }: VirtualGridRenderProps<Tournament>) => (
-      <div style={style} role="listitem">
+      <div style={style} role="listitem" className="animate-fade-in">
         <TournamentCardWithQuickJoin
           tournament={item}
           isJoined={joinedIds.has(item.id)}
@@ -55,6 +75,10 @@ export function TournamentList({
     ),
     [joinedIds, onJoinSuccess]
   );
+
+  if (isLoading && tournaments.length === 0) {
+    return <SkeletonGrid label="Loading tournaments" />;
+  }
 
   if (tournaments.length === 0) {
     return (
@@ -74,21 +98,20 @@ export function TournamentList({
   if (!useVirtual) {
     // Static grid for small lists — no virtualisation overhead
     return (
-      <div
-        className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3"
-        role="list"
-        aria-label="Tournaments"
-      >
-        {tournaments.map((tournament) => (
-          <div key={tournament.id} role="listitem">
-            <TournamentCardWithQuickJoin
-              tournament={tournament}
-              isJoined={joinedIds.has(tournament.id)}
-              onJoinSuccess={onJoinSuccess}
-              bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
-            />
-          </div>
-        ))}
+      <div className="space-y-6">
+        <div className={GRID_CLASS} role="list" aria-label="Tournaments">
+          {tournaments.map((tournament) => (
+            <div key={tournament.id} role="listitem" className="animate-fade-in">
+              <TournamentCardWithQuickJoin
+                tournament={tournament}
+                isJoined={joinedIds.has(tournament.id)}
+                onJoinSuccess={onJoinSuccess}
+                bannerSizes={TOURNAMENT_GRID_IMAGE_SIZES}
+              />
+            </div>
+          ))}
+        </div>
+        {isLoadingMore && <SkeletonGrid count={3} label="Loading more tournaments" />}
       </div>
     );
   }
@@ -107,8 +130,8 @@ export function TournamentList({
       className="rounded-lg"
       loadingIndicator={
         isLoadingMore ? (
-          <div className="flex justify-center py-4" aria-busy="true" aria-label="Loading more tournaments">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <div className="pt-6">
+            <SkeletonGrid count={3} label="Loading more tournaments" />
           </div>
         ) : null
       }
