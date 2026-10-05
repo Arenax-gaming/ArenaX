@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{Address, BytesN, Env, Vec};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{Address, Env, Vec};
 
 fn setup() -> (Env, Address, VirtualEconomyContractClient<'static>) {
     let env = Env::default();
@@ -284,11 +284,17 @@ fn test_burn_listed_nft_auto_cancels_order() {
         &None,
     );
     assert_eq!(client.get_economy_analytics().active_orders, 1);
-    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Active);
+    assert_eq!(
+        client.get_marketplace_order(&order_id).status,
+        OrderStatus::Active
+    );
 
     client.burn_nft(&admin, &token_id);
 
-    assert_eq!(client.get_marketplace_order(&order_id).status, OrderStatus::Cancelled);
+    assert_eq!(
+        client.get_marketplace_order(&order_id).status,
+        OrderStatus::Cancelled
+    );
     assert_eq!(client.get_economy_analytics().active_orders, 0);
     assert_eq!(client.get_economy_analytics().total_nfts_burned, 1);
     assert_eq!(client.balance_of(&admin), 0);

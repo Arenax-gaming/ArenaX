@@ -13,7 +13,7 @@ module.exports = {
     "\\.(jpg|jpeg|png|gif|svg|webp)$": "<rootDir>/__mocks__/fileMock.js",
   },
   transform: {
-    "^.+\\.(js|jsx|ts|tsx)$": ["babel-jest", { configFile: "./babel.config.js" }],
+    "^.+\\.(js|jsx|ts|tsx)$": ["babel-jest", { configFile: "./babel-jest.config.js" }],
   },
   // Ship ESM-only packages (react-dnd and its ecosystem) must be transformed
   // too — babel-jest compiles their `export` syntax to CommonJS.

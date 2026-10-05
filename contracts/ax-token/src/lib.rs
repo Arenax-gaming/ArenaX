@@ -4,7 +4,22 @@ mod flash_loan_protection;
 use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
+};
+
+/// Minimal client for the staking-manager contract, used for composite
+/// voting power (AX checkpoints + stake weight + escrow).
+mod staking_client {
+    use soroban_sdk::{contractclient, Address, Env};
+
+    #[contractclient(name = "StakingClient")]
+    #[allow(dead_code)]
+    pub trait StakingInterface {
+        fn get_governance_weight(env: Env, user: Address) -> i128;
+        fn get_voting_weight(env: Env, user: Address) -> i128;
+    }
+}
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -97,6 +112,16 @@ pub struct PauseInfo {
     pub reason: Symbol,
 }
 
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -126,6 +151,18 @@ pub enum DataKey {
     Delegate(Address),
     Delegators(Address),
     DelegationHistory(Address),
+    // Governance voting extensions (#914)
+    VoteRecords(u64),
+    ProposalGracePeriod,
+    ApprovedExecutionTarget(Address),
+    Checkpoints(Address),
+    // Composite voting power: linked staking contract + quadratic voting flag
+    StakingContract,
+    QuadraticVoting,
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
 }
 
 #[contract]
@@ -886,8 +923,7 @@ impl AxToken {
         // not live, so it can't be inflated by acquiring tokens or a
         // delegation after the proposal opened.
         // Composite power includes AX checkpoints + stake weight + escrow (#914).
-        let voting_power =
-            Self::composite_voting_power(&env, &voter, proposal.snapshot_ledger);
+        let voting_power = Self::composite_voting_power(&env, &voter, proposal.snapshot_ledger);
 
         if voting_power <= 0 {
             panic!("no voting power");
@@ -1513,21 +1549,20 @@ impl AxToken {
         let checkpoint_power = Self::power_at(env, address, ledger_seq);
 
         // 2 & 3. Stake power — cross-contract call if staking contract is set
-        let stake_power: i128 =
-            if let Some(staking_addr) = env
-                .storage()
-                .instance()
-                .get::<DataKey, Address>(&DataKey::StakingContract)
-            {
-                let client = staking_client::StakingClient::new(env, &staking_addr);
-                // governance_weight = tier-weighted reward stake
-                let gov = client.get_governance_weight(address.clone());
-                // voting_weight = time-lock escrow weight
-                let escrow = client.get_voting_weight(address.clone());
-                gov.saturating_add(escrow)
-            } else {
-                0
-            };
+        let stake_power: i128 = if let Some(staking_addr) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::StakingContract)
+        {
+            let client = staking_client::StakingClient::new(env, &staking_addr);
+            // governance_weight = tier-weighted reward stake
+            let gov = client.get_governance_weight(address);
+            // voting_weight = time-lock escrow weight
+            let escrow = client.get_voting_weight(address);
+            gov.saturating_add(escrow)
+        } else {
+            0
+        };
 
         let raw_power = checkpoint_power.saturating_add(stake_power);
 

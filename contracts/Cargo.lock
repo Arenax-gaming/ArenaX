@@ -59,6 +59,8 @@ name = "anti-cheat"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "contract-utils",
+ "ed25519-dalek",
  "soroban-sdk",
 ]
 
@@ -237,6 +239,7 @@ name = "ax-token"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "contract-utils",
  "soroban-sdk",
 ]
 
@@ -773,6 +776,7 @@ checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 name = "event-manager"
 version = "0.1.0"
 dependencies = [
+ "arenax-events",
  "soroban-sdk",
 ]
 
@@ -1844,6 +1848,7 @@ name = "staking-manager"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "contract-utils",
  "lp-incentives",
  "soroban-sdk",
 ]
@@ -2011,6 +2016,7 @@ dependencies = [
 name = "treasury"
 version = "0.1.0"
 dependencies = [
+ "contract-utils",
  "soroban-sdk",
 ]
 
@@ -2058,6 +2064,7 @@ name = "virtual-economy"
 version = "0.1.0"
 dependencies = [
  "arenax-events",
+ "contract-utils",
  "soroban-sdk",
 ]
 
