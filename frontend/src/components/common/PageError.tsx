@@ -37,9 +37,10 @@ export function PageError({
   // Intentionally provider-free: error boundaries render outside (or in
   // place of) the NextIntlClientProvider subtree, so useTranslations() here
   // throws "No intl context found" and masks the real error. Use plain
-  // English fallbacks; localized pages pass explicit title/retryLabel.
+  // English fallbacks matching src/messages/en.json (common.retry); localized
+  // pages pass explicit title/retryLabel.
   const defaultTitle = "Something went wrong";
-  const defaultRetryLabel = "Try again";
+  const defaultRetryLabel = "Retry";
 
   return (
     <div
