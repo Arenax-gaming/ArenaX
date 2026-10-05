@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
-import { NextIntlClientProvider, useMessages } from "next-intl";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages } from "next-intl/server";
 import { routing, Locale } from "@/i18n/routing";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
@@ -50,7 +51,7 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
   params,
 }: {
@@ -58,12 +59,12 @@ export default function RootLayout({
   params: { locale: Locale };
 }) {
   const { locale } = params;
-  
+
   if (!routing.locales.includes(locale)) {
     notFound();
   }
 
-  const messages = useMessages();
+  const messages = await getMessages();
   const isRtl = rtlLocales.includes(locale);
 
   return (
