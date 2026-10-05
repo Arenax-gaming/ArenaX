@@ -7,7 +7,6 @@
 "use client";
 
 import React from "react";
-import { useTranslations } from "next-intl";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -35,9 +34,12 @@ export function PageError({
   className,
   retrying = false,
 }: PageErrorProps) {
-  const t = useTranslations();
-  const defaultTitle = t("error.title");
-  const defaultRetryLabel = t("common.retry");
+  // Intentionally provider-free: error boundaries render outside (or in
+  // place of) the NextIntlClientProvider subtree, so useTranslations() here
+  // throws "No intl context found" and masks the real error. Use plain
+  // English fallbacks; localized pages pass explicit title/retryLabel.
+  const defaultTitle = "Something went wrong";
+  const defaultRetryLabel = "Try again";
 
   return (
     <div
