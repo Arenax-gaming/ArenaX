@@ -1,17 +1,19 @@
 import createMiddleware from "next-intl/middleware";
 import { NextRequest, NextResponse } from "next/server";
-import { routing } from "./src/i18n/routing";
-import { NONCE_HEADER, buildContentSecurityPolicy, cspHeaderName, generateNonce } from "./src/lib/csp";
+import { routing } from "./i18n/routing";
+import { NONCE_HEADER, buildContentSecurityPolicy, cspHeaderName, generateNonce } from "./lib/csp";
 
 const intlMiddleware = createMiddleware(routing);
 
 // ---------------------------------------------------------------------------
 // JWT helpers (Edge-safe — no Node.js APIs)
-// Merged from src/middleware.ts: Next.js only runs a SINGLE middleware file,
-// so the previous src/middleware.ts (auth) shadowed this file (intl) and
-// broke locale routing ("Unable to find `next-intl` locale because the
-// middleware didn't run") + "/" never redirected to "/en", hanging Playwright
-// webServer until timeout. Both concerns now live here: intl first, then auth.
+//
+// This file MUST live at src/middleware.ts (not the project root): with a
+// src/ app directory Next.js only loads middleware from src/, so the previous
+// root-level middleware (next-intl + CSP) never executed — locale routing
+// never ran ("Unable to find `next-intl` locale"), "/" never redirected to
+// "/en", and Playwright's webServer probe timed out. Both concerns now live
+// here: intl first, then auth.
 // ---------------------------------------------------------------------------
 
 function base64UrlDecode(input: string): string {
