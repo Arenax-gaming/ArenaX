@@ -10,12 +10,16 @@ test.describe("Auth journeys", () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthHandlers(page);
     await mockNotificationHandlers(page);
-    // Mock username-availability check so it doesn't block submission
-    await page.route("**/api/auth/username-available**", (route) =>
+    // Mock username-availability check so it doesn't block submission.
+    // NOTE: the app calls /api/auth/check-username (see
+    // useUsernameAvailability -> api.checkUsernameAvailability); an outdated
+    // `username-available` pattern here never matched, leaving the check in
+    // "error" state and blocking submit.
+    await page.route("**/api/auth/check-username**", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ available: true }),
+        body: JSON.stringify({ data: { available: true } }),
       })
     );
   });

@@ -157,3 +157,40 @@ export async function mockNotificationHandlers(page: Page) {
     })
   );
 }
+
+function base64UrlEncode(value: unknown): string {
+  return Buffer.from(JSON.stringify(value))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Seed an `auth_token` cookie so the Next.js middleware (which enforces auth
+ * server-side from the cookie — it cannot see localStorage) lets the test
+ * through to protected routes.
+ *
+ * The token is an unsigned JWT with a far-future expiry. Signature
+ * verification only runs when JWT_SECRET/ADMIN_JWT_SECRET is set, which it
+ * isn't in E2E, so the payload shape is all that matters.
+ */
+export async function mockAuthCookie(page: Page, roles: string[] = ["user"]) {
+  const header = base64UrlEncode({ alg: "none", typ: "JWT" });
+  const payload = base64UrlEncode({
+    sub: "user-1",
+    username: "testuser",
+    roles,
+    exp: 9999999999,
+  });
+  await page.context().addCookies([
+    {
+      name: "auth_token",
+      value: `${header}.${payload}.test-signature`,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+}

@@ -10,7 +10,7 @@
  */
 
 import { test, expect, type Page, type Route } from "@playwright/test";
-import { mockNotificationHandlers } from "./mocks/handlers";
+import { mockAuthCookie, mockNotificationHandlers } from "./mocks/handlers";
 
 const LOCALE = "en";
 
@@ -105,6 +105,9 @@ async function mockProfileWith401ThenSuccess(page: Page) {
 test.describe("Silent token refresh", () => {
   test.beforeEach(async ({ page }) => {
     await mockNotificationHandlers(page);
+    // Seed a valid auth cookie so the middleware lets protected pages load;
+    // the tests below then drive the client-side refresh flows via mocks.
+    await mockAuthCookie(page);
   });
 
   test("401 on profile fetch triggers silent refresh and user stays logged in", async ({

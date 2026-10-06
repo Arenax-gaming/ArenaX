@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   mockAuthHandlers,
+  mockAuthCookie,
   mockMatchHandlers,
   mockNotificationHandlers,
 } from "./mocks/handlers";
@@ -22,6 +23,9 @@ test.describe("Match journeys", () => {
     await mockAuthHandlers(page);
     await mockMatchHandlers(page);
     await mockNotificationHandlers(page);
+    // Middleware enforces auth server-side from the auth_token cookie (it
+    // cannot see localStorage) — seed it so protected routes load.
+    await mockAuthCookie(page);
   });
 
   test("enter matchmaking queue by selecting a game mode", async ({ page }) => {

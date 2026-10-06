@@ -93,6 +93,11 @@ export default function RegisterPage() {
       password: result.data.password,
       confirmPassword: result.data.confirmPassword,
     });
+
+    // register() intentionally does not populate the full user profile until
+    // the email is verified, so the `user` effect above won't fire — navigate
+    // explicitly on success.
+    router.replace("/auth/verify-email");
   };
 
   const isSubmitDisabled =
