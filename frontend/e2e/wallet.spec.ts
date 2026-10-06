@@ -94,7 +94,7 @@ test.describe("Wallet journeys", () => {
 
   test("initiate withdraw flow fills amount and submits", async ({ page }) => {
     let withdrawCalled = false;
-    await page.route("**/api/wallet/withdraw", (route) => {
+    await page.route("**/api/v1/wallet/withdraw", (route) => {
       withdrawCalled = true;
       return route.fulfill({
         status: 200,

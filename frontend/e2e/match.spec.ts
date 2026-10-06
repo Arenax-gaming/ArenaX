@@ -69,7 +69,7 @@ test.describe("Match journeys", () => {
   test("report score for a match", async ({ page }) => {
     // Seed the match report API intercept
     let reportCalled = false;
-    await page.route("**/api/matches/*/report", (route) => {
+    await page.route("**/api/v1/matches/*/report", (route) => {
       reportCalled = true;
       return route.fulfill({
         status: 200,

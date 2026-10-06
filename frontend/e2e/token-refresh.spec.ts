@@ -48,7 +48,7 @@ async function seedExpiredSession(page: Page) {
 
 /** Mock a successful token refresh */
 async function mockSuccessfulRefresh(page: Page) {
-  await page.route("**/api/auth/refresh", (route) =>
+  await page.route("**/api/v1/auth/refresh", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -64,7 +64,7 @@ async function mockSuccessfulRefresh(page: Page) {
 
 /** Mock a failing token refresh (401 from /auth/refresh) */
 async function mockFailedRefresh(page: Page) {
-  await page.route("**/api/auth/refresh", (route) =>
+  await page.route("**/api/v1/auth/refresh", (route) =>
     route.fulfill({
       status: 401,
       contentType: "application/json",
@@ -76,7 +76,7 @@ async function mockFailedRefresh(page: Page) {
 /** Mock a profile endpoint that returns 401 the first time, then 200 on retry */
 async function mockProfileWith401ThenSuccess(page: Page) {
   let callCount = 0;
-  await page.route("**/api/users/me", (route) => {
+  await page.route("**/api/v1/users/me", (route) => {
     callCount += 1;
     if (callCount === 1) {
       return route.fulfill({
@@ -144,7 +144,7 @@ test.describe("Silent token refresh", () => {
     await mockFailedRefresh(page);
 
     // Stub profile endpoint to always return 401 (expired token, no valid refresh)
-    await page.route("**/api/users/me", (route) =>
+    await page.route("**/api/v1/users/me", (route) =>
       route.fulfill({
         status: 401,
         contentType: "application/json",
@@ -176,7 +176,7 @@ test.describe("Silent token refresh", () => {
   test("parallel 401 requests share a single refresh call", async ({ page }) => {
     let refreshCount = 0;
 
-    await page.route("**/api/auth/refresh", (route) => {
+    await page.route("**/api/v1/auth/refresh", (route) => {
       refreshCount += 1;
       return route.fulfill({
         status: 200,
@@ -192,7 +192,7 @@ test.describe("Silent token refresh", () => {
 
     // Two endpoints both return 401 so both will attempt refresh simultaneously
     let notifCount = 0;
-    await page.route("**/api/notifications**", (route) => {
+    await page.route("**/api/v1/notifications**", (route) => {
       notifCount += 1;
       if (notifCount === 1) {
         return route.fulfill({

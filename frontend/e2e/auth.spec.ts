@@ -15,7 +15,7 @@ test.describe("Auth journeys", () => {
     // useUsernameAvailability -> api.checkUsernameAvailability); an outdated
     // `username-available` pattern here never matched, leaving the check in
     // "error" state and blocking submit.
-    await page.route("**/api/auth/check-username**", (route) =>
+    await page.route("**/api/v1/auth/check-username**", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -35,6 +35,8 @@ test.describe("Auth journeys", () => {
     // Wait for username availability check to settle
     await page.waitForTimeout(500);
 
+    await page.check("#agreeToTerms");
+
     await page.click('button[type="submit"]');
 
     await expect(page).toHaveURL(/verify-email/, { timeout: 10_000 });
@@ -43,7 +45,9 @@ test.describe("Auth journeys", () => {
   test("verify email with token in URL → redirects home", async ({ page }) => {
     await page.goto(`/${LOCALE}/auth/verify-email?token=mock-verification-token`);
     // Auto-verifies via useEffect; should redirect to /
-    await expect(page).toHaveURL(/^\/(en\/)?$/, { timeout: 10_000 });
+    // NOTE: toHaveURL matches against the full URL, so the pattern must not
+    // be ^-anchored to the path.
+    await expect(page).toHaveURL(/\/(en\/)?$/, { timeout: 10_000 });
   });
 
   test("login with valid credentials → redirects home", async ({ page }) => {
@@ -53,11 +57,13 @@ test.describe("Auth journeys", () => {
     await page.fill("#password", "Password1!");
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL(/^\/(en\/?)?$/, { timeout: 10_000 });
+    // NOTE: toHaveURL matches against the full URL, so the pattern must not
+    // be ^-anchored to the path.
+    await expect(page).toHaveURL(/\/(en\/?)?$/, { timeout: 10_000 });
   });
 
   test("login shows error on invalid credentials", async ({ page }) => {
-    await page.route("**/api/auth/login", (route) =>
+    await page.route("**/api/v1/auth/login", (route) =>
       route.fulfill({
         status: 401,
         contentType: "application/json",
