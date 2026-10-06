@@ -164,7 +164,16 @@ function classifyRoute(path: string): RouteType {
  *  1. next-intl locale handling (redirects "/" → "/en", sets locale cookie).
  *     Redirect responses are returned immediately (with CSP header).
  *  2. Auth / role guards (previously in src/middleware.ts).
- *  3. CSP nonce forwarding via request headers for Server Components.
+ *  3. CSP nonce + user-context forwarding via request headers for Server
+ *     Components.
+ *
+ * Chaining note: next-intl communicates the resolved locale to the render via
+ * a REWRITE carrying an `X-NEXT-INTL-LOCALE` request header
+ * (`x-middleware-rewrite` + `x-middleware-request-*` response headers). Simply
+ * returning a fresh `NextResponse.next()` drops that rewrite, so
+ * `getRequestConfig` logs "Unable to find `next-intl` locale" and calls
+ * `notFound()`. We therefore re-issue intl's rewrite (when present) with our
+ * headers merged in, and set `X-NEXT-INTL-LOCALE` explicitly.
  */
 export default async function middleware(request: NextRequest) {
   const intlResponse = intlMiddleware(request);
@@ -187,84 +196,122 @@ export default async function middleware(request: NextRequest) {
   const strippedPath = stripLocale(pathname);
   const routeType = classifyRoute(strippedPath);
 
-  if (routeType !== "public") {
+  const authRedirect = async (): Promise<NextResponse | null> => {
+    if (routeType === "public") return null;
+
     const loginUrl = new URL(`/${locale}/login`, request.url);
     loginUrl.searchParams.set("redirect", pathname);
 
-    const token = extractToken(request);
-    if (!token) {
-      const redirect = NextResponse.redirect(loginUrl);
+    const deny = (url: URL): NextResponse => {
+      const redirect = NextResponse.redirect(url);
       redirect.headers.set(headerName, csp);
-      intlResponse.headers.forEach((value, key) => {
-        if (!redirect.headers.has(key)) redirect.headers.set(key, value);
-      });
+      copyIntlMeaningfulHeaders(intlResponse, redirect, headerName);
       return redirect;
-    }
+    };
+
+    const token = extractToken(request);
+    if (!token) return deny(loginUrl);
 
     const payload = parseJwtPayload(token);
-    if (!payload) {
-      const redirect = NextResponse.redirect(loginUrl);
-      redirect.headers.set(headerName, csp);
-      return redirect;
-    }
+    if (!payload) return deny(loginUrl);
 
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp !== undefined && payload.exp < now) {
       loginUrl.searchParams.set("reason", "expired");
-      const redirect = NextResponse.redirect(loginUrl);
-      redirect.headers.set(headerName, csp);
-      return redirect;
+      return deny(loginUrl);
     }
 
     const jwtSecret = process.env.JWT_SECRET ?? process.env.ADMIN_JWT_SECRET;
     if (jwtSecret) {
       const valid = await verifyJwtSignature(token, jwtSecret);
-      if (!valid) {
-        const redirect = NextResponse.redirect(loginUrl);
-        redirect.headers.set(headerName, csp);
-        return redirect;
-      }
+      if (!valid) return deny(loginUrl);
     }
 
     const roles: string[] = Array.isArray(payload.roles) ? payload.roles : [];
     if (routeType === "admin" && !roles.includes("admin")) {
-      const deniedUrl = new URL(`/${locale}/admin/access-denied`, request.url);
-      const redirect = NextResponse.redirect(deniedUrl);
-      redirect.headers.set(headerName, csp);
-      return redirect;
+      return deny(new URL(`/${locale}/admin/access-denied`, request.url));
     }
 
-    // Auth passed — forward user context + nonce + CSP to the render.
-    const requestHeaders = new Headers(request.headers);
-    requestHeaders.set(NONCE_HEADER, nonce);
-    requestHeaders.set(headerName, csp);
-    requestHeaders.set("x-user-id", String(payload.sub ?? ""));
-    requestHeaders.set("x-user-roles", roles.join(","));
-    requestHeaders.set("x-locale", locale);
+    return null;
+  };
 
-    const response = NextResponse.next({ request: { headers: requestHeaders } });
-    intlResponse.headers.forEach((value, key) => {
-      response.headers.set(key, value);
-    });
-    response.headers.set(headerName, csp);
-    response.headers.set("x-user-id", String(payload.sub ?? ""));
-    response.headers.set("x-user-roles", roles.join(","));
-    response.headers.set("x-locale", locale);
-    return response;
-  }
+  const redirect = await authRedirect();
+  if (redirect) return redirect;
 
-  // Public route: pass through with nonce (existing next-intl + CSP behaviour).
+  // Auth passed (or public route) — forward locale + nonce + user context.
+  const token = routeType === "public" ? null : extractToken(request);
+  const payload = token ? parseJwtPayload(token) : null;
+  const roles: string[] =
+    payload && Array.isArray(payload.roles) ? payload.roles : [];
+
+  // Prefer the locale next-intl itself resolved (forwarded on its rewrite);
+  // fall back to the pathname prefix (identical for localePrefix: "always").
+  const intlLocale = intlResponse.headers.get(
+    "x-middleware-request-x-next-intl-locale"
+  );
+  const requestLocale =
+    intlLocale && (SUPPORTED_LOCALES as readonly string[]).includes(intlLocale)
+      ? intlLocale
+      : locale;
+
   const requestHeaders = new Headers(request.headers);
+  // Preserve the locale resolved by next-intl so getRequestConfig finds it.
+  requestHeaders.set("X-NEXT-INTL-LOCALE", requestLocale);
   requestHeaders.set(NONCE_HEADER, nonce);
   requestHeaders.set(headerName, csp);
+  requestHeaders.set("x-user-id", String(payload?.sub ?? ""));
+  requestHeaders.set("x-user-roles", roles.join(","));
+  requestHeaders.set("x-locale", locale);
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
-  intlResponse.headers.forEach((value, key) => {
-    response.headers.set(key, value);
-  });
+  // Re-issue intl's rewrite (if any) with our merged headers so the locale
+  // header actually reaches the render; otherwise plain pass-through.
+  const rewriteTarget = intlResponse.headers.get("x-middleware-rewrite");
+  const response = rewriteTarget
+    ? NextResponse.rewrite(new URL(rewriteTarget, request.url), {
+        request: { headers: requestHeaders },
+      })
+    : NextResponse.next({ request: { headers: requestHeaders } });
+
+  copyIntlMeaningfulHeaders(intlResponse, response, headerName);
   response.headers.set(headerName, csp);
-
+  response.headers.set("x-user-id", String(payload?.sub ?? ""));
+  response.headers.set("x-user-roles", roles.join(","));
+  response.headers.set("x-locale", locale);
   return response;
+}
+
+/**
+ * Copy next-intl's meaningful response headers (locale cookie, alternate
+ * links) onto our chained response. The `x-middleware-*` internals are
+ * regenerated from the request headers we pass to `next()`/`rewrite()`, so
+ * they must NOT be copied (they would describe intl's header set, not ours).
+ */
+function copyIntlMeaningfulHeaders(
+  from: NextResponse,
+  to: NextResponse,
+  cspHeaderName: string
+): void {
+  from.headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (lower.startsWith("x-middleware-")) return;
+    if (lower === cspHeaderName.toLowerCase()) return;
+    // set-cookie is handled below via getSetCookie() (forEach would join
+    // multiple cookies with commas, corrupting them).
+    if (lower === "set-cookie") return;
+    if (!to.headers.has(key)) to.headers.set(key, value);
+  });
+  const getSetCookie =
+    typeof (from.headers as Headers & { getSetCookie?: () => string[] })
+      .getSetCookie === "function"
+      ? (
+          from.headers as Headers & { getSetCookie: () => string[] }
+        ).getSetCookie()
+      : [];
+  for (const cookie of getSetCookie) {
+    if (!to.headers.get("set-cookie")?.includes(cookie.split(";")[0])) {
+      to.headers.append("set-cookie", cookie);
+    }
+  }
 }
 
 export const config = {
