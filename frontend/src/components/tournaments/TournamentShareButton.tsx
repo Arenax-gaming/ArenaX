@@ -75,6 +75,8 @@ export interface TournamentShareButtonProps {
    */
   variant?: "button" | "icon";
   className?: string;
+  /** Deep-links the shared URL to this bracket match via `?match=` (#1089). */
+  matchId?: string | null;
 }
 
 export function TournamentShareButton({
@@ -82,6 +84,7 @@ export function TournamentShareButton({
   winner,
   variant = "button",
   className,
+  matchId,
 }: TournamentShareButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -94,7 +97,7 @@ export function TournamentShareButton({
     shareUrl,
     shareMessage,
     supportsNativeShare,
-  } = useTournamentShare(tournament, winner);
+  } = useTournamentShare(tournament, winner, matchId);
 
   // ── Clipboard button label helpers ────────────────────────────────────────
   // We track which action was last triggered so we can show the right

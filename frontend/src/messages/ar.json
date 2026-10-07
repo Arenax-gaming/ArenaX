@@ -501,5 +501,11 @@
     "filterBy": "التصفية حسب {field}",
     "page": "صفحة {current} من {total}",
     "required": "حقل مطلوب"
+  },
+  "match": {
+    "completed": "انتهت المباراة. فاز {winner} بنتيجة {scoreA} إلى {scoreB}.",
+    "disputed": "المباراة متنازع عليها. بانتظار المراجعة.",
+    "scoreUpdated": "تحديث النتيجة: {player1} {scoreA}، {player2} {scoreB}.",
+    "statusChanged": "تغيرت حالة المباراة إلى {status}."
   }
 }

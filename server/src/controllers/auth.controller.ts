@@ -39,9 +39,16 @@ const refreshSchema = z.object({
     refreshToken: z.string().min(1)
 });
 
+// Twitch supports the Authorization Code flow (`code` + `redirectUri`), which
+// exchanges the code server-side; `accessToken` remains for google/discord and
+// for existing Twitch clients (#1160). Which combination is valid depends on
+// the provider, so that check lives in the service where the error message can
+// name the provider.
 const socialAuthSchema = z.object({
     provider: z.enum(['google', 'discord', 'twitch']),
-    accessToken: z.string().min(1)
+    accessToken: z.string().min(1).optional(),
+    code: z.string().min(1).optional(),
+    redirectUri: z.string().url().optional()
 });
 
 const verifyEmailSchema = z.object({

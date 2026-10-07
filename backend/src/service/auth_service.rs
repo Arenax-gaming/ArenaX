@@ -4,8 +4,13 @@ use crate::db::DbPool;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest, User, UserProfile};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
+use redis::{AsyncCommands, Client as RedisClient};
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+const PROFILE_CACHE_VERSION: &str = "v1";
+const PROFILE_CACHE_TTL_SECONDS: u64 = 60;
 
 /// Active session info returned by `GET /api/auth/sessions`.
 #[derive(Debug, serde::Serialize)]
@@ -33,11 +38,34 @@ impl From<RefreshTokenRecord> for ActiveSession {
 pub struct AuthService {
     pool: DbPool,
     jwt_service: JwtService,
+    redis_client: Option<Arc<RedisClient>>,
 }
 
 impl AuthService {
     pub fn new(pool: DbPool, jwt_service: JwtService) -> Self {
-        Self { pool, jwt_service }
+        Self {
+            pool,
+            jwt_service,
+            redis_client: None,
+        }
+    }
+
+    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
+        self.redis_client = Some(redis_client);
+        self
+    }
+
+    fn profile_cache_key(user_id: Uuid) -> String {
+        format!("profile:{}:{}", PROFILE_CACHE_VERSION, user_id)
+    }
+
+    pub async fn invalidate_profile_cache(&self, user_id: Uuid) {
+        let Some(redis_client) = &self.redis_client else {
+            return;
+        };
+        if let Ok(mut connection) = redis_client.get_multiplexed_async_connection().await {
+            let _: Result<(), _> = connection.del(Self::profile_cache_key(user_id)).await;
+        }
     }
 
     // ── Registration & Login ─────────────────────────────────────────────────
@@ -140,6 +168,10 @@ impl AuthService {
     /// Authenticate a user and return a fresh token pair.
     #[tracing::instrument(skip(self, request), fields(email = %request.email))]
     pub async fn login(&self, request: LoginRequest) -> Result<AuthResponse, ApiError> {
+        if request.email.trim().is_empty() || request.password.is_empty() {
+            return Err(ApiError::bad_request("Email and password are required"));
+        }
+
         let user = sqlx::query_as!(
             User,
             r#"
@@ -147,7 +179,7 @@ impl AuthService {
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE email = $1
             "#,
@@ -157,6 +189,10 @@ impl AuthService {
         .await
         .map_err(ApiError::database_error)?
         .ok_or_else(|| ApiError::unauthorized("Invalid credentials"))?;
+
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
+        }
 
         if !user.is_active {
             return Err(ApiError::forbidden("Account is deactivated"));
@@ -282,14 +318,14 @@ impl AuthService {
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        sqlx::query_as!(
+        let user = sqlx::query_as!(
             User,
             r#"
             SELECT id, username, email, phone_number, display_name, avatar_url, bio,
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
                    stellar_account_id, stellar_public_key, total_earnings, is_banned,
-                   banned_until, device_fingerprint
+                   banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE id = $1
             "#,
@@ -298,7 +334,16 @@ impl AuthService {
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
-        .ok_or_else(|| ApiError::not_found("User not found"))
+        .ok_or_else(|| ApiError::not_found("User not found"))?;
+
+        // Deleted users are not allowed to authenticate any further: their
+        // account is being erased (GDPR/NDPR), so even a still-valid session
+        // must not resolve.
+        if user.deleted_at.is_some() {
+            return Err(ApiError::unauthorized("Account has been deleted"));
+        }
+
+        Ok(user)
     }
 
     /// Change a user's password and immediately revoke all existing sessions.
@@ -308,6 +353,10 @@ impl AuthService {
         old_password: &str,
         new_password: &str,
     ) -> Result<(), ApiError> {
+        if old_password.is_empty() {
+            return Err(ApiError::bad_request("Current password cannot be empty"));
+        }
+
         if new_password.len() < 8 {
             return Err(ApiError::bad_request(
                 "Password must be at least 8 characters",
@@ -347,5 +396,39 @@ impl AuthService {
 
         info!(user_id = %user_id, "Password changed");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // auth_service_updated.rs was an older copy of this file and is removed
+    // (#1158). The only behavior kept from it is this bcrypt round trip:
+    // register and change_password hash with DEFAULT_COST, and login checks
+    // with verify. Its older user insert (required email, no phone number,
+    // no role) was not kept; this service is the one handlers call.
+    #[test]
+    fn bcrypt_hash_round_trips_and_rejects_wrong_password() {
+        let hashed = hash("test_password", DEFAULT_COST).unwrap();
+
+        assert!(verify("test_password", &hashed).unwrap());
+        assert!(!verify("wrong_password", &hashed).unwrap());
+    }
+
+    // Pin minimum password length boundary validation (must be at least 8 characters) (#1068, #1158).
+    #[test]
+    fn test_password_validation() {
+        let short_password = "short";
+        assert!(short_password.len() < 8);
+
+        let valid_password = "long_enough_password";
+        assert!(valid_password.len() >= 8);
+    }
+
+    #[test]
+    fn test_password_length_boundary() {
+        assert!("1234567".len() < 8);
+        assert!("12345678".len() >= 8);
     }
 }

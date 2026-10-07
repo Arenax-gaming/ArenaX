@@ -288,7 +288,9 @@ export class EnhancedApiClient {
 
         if (status === 422 || status === 400) {
           const field = (errorPayload?.field as string | undefined);
-          throw new ValidationError(message, field, { url, status, code });
+          const validationError = new ValidationError(message, field, { url, status, code });
+          validationError.code = code;
+          throw validationError;
         }
         throw new ApiError(message, status, { url, code });
       }

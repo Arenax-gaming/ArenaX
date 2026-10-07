@@ -25,7 +25,8 @@ impl NFTManager {
             return Err(VirtualEconomyError::InvalidMetadata);
         }
 
-        if metadata.royalty_bps > 2000 {
+        // Creator royalties are configurable 0-10% (#913).
+        if metadata.royalty_bps > 1000 {
             return Err(VirtualEconomyError::RoyaltyTooHigh);
         }
 
@@ -143,6 +144,25 @@ impl NFTManager {
             .set(&DataKey::OwnedNFTs(to.clone()), &to_nfts);
 
         Ok(())
+    }
+
+    /// Remove token from an owner's list
+    pub fn remove_from_ownership_list(env: &Env, owner: &Address, token_id: &BytesN<32>) {
+        let owned_nfts: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnedNFTs(owner.clone()))
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut new_owned_nfts: Vec<BytesN<32>> = Vec::new(env);
+        for nft in owned_nfts.iter() {
+            if nft != *token_id {
+                new_owned_nfts.push_back(nft);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::OwnedNFTs(owner.clone()), &new_owned_nfts);
     }
 }
 

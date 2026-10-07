@@ -35,7 +35,13 @@ export type AnalyticsEventName =
   | "profile_edited"
   | "achievement_unlocked"
   | "ab_test_assigned"
-  | "funnel_step";
+  | "funnel_step"
+  // PWA install funnel (Issue #858)
+  | "pwa_prompt_shown"
+  | "pwa_prompt_dismissed"
+  | "pwa_install_accepted"
+  | "pwa_install_declined"
+  | "pwa_installed";
 
 export interface SessionProperties {
   sessionId: string;

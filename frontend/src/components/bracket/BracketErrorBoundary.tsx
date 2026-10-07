@@ -5,6 +5,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { logError } from "@/lib/errorLogger";
 import { determineErrorCategory, ErrorCategory } from "@/lib/errors";
+import { reportErrorToDatadog } from "@/lib/monitoring";
 import { cn } from "@/lib/utils";
 
 // ─── Props / State ────────────────────────────────────────────────────────────
@@ -84,6 +85,17 @@ export class BracketErrorBoundary extends Component<
       tournamentId: this.props.tournamentId,
       tournamentName: this.props.tournamentName,
       errorId: this.state.errorId,
+      componentStack: info.componentStack,
+      retryCount: this.state.retryCount,
+    });
+
+    // Forward to Datadog RUM with tournament context (Issue #1100).
+    // PII is stripped from the error message and context before sending.
+    reportErrorToDatadog(error, {
+      source: "BracketErrorBoundary",
+      tournamentId: this.props.tournamentId,
+      tournamentName: this.props.tournamentName,
+      errorId: this.state.errorId ?? undefined,
       componentStack: info.componentStack,
       retryCount: this.state.retryCount,
     });
@@ -186,8 +198,8 @@ export class BracketErrorBoundary extends Component<
             size="sm"
             variant="outline"
             onClick={this.handleRetry}
-            aria-label={`Retry loading the tournament bracket (attempt ${retryCount + 1})`}
-            className="gap-2"
+            aria-label={`Retry (${retryCount}/${MAX_BRACKET_RETRIES}) — reload the tournament bracket`}
+            className="h-[36px] px-4 py-2 gap-2"
           >
             <RefreshCw
               className="h-3.5 w-3.5"
@@ -198,7 +210,7 @@ export class BracketErrorBoundary extends Component<
         )}
 
         {/* Tournament info fallback — visible even when bracket fails */}
-        {(tournamentName || tournamentInfo) && (
+        {(tournamentName || tournamentId || tournamentInfo) && (
           <div
             className="mt-4 w-full rounded-lg bg-muted/40 p-4 text-left"
             aria-label="Tournament information"

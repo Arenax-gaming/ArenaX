@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useQuery } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle, Loader2 } from "lucide-react";
 import { Tournament } from "@/types/tournament";
@@ -22,6 +24,39 @@ import {
   type TournamentRegistrationFormData,
 } from "@/lib/validations/tournament";
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
+import { useWallet } from "@/hooks/useWallet";
+import { fetchWalletBalances } from "@/lib/wallet";
+
+export type RegistrationPaymentMethod = "fiat" | "arenax";
+
+const PAYMENT_METHOD_STORAGE_KEY = "arenax.registration.paymentMethod";
+
+/** Estimated card processing fee for fiat payments (2.9% + $0.30). */
+const FIAT_FEE_RATE = 0.029;
+const FIAT_FEE_FIXED = 0.3;
+/** Stellar base network fee (100 stroops) for ArenaX token payments. */
+const TOKEN_NETWORK_FEE_XLM = 0.00001;
+
+export function estimateRegistrationFee(
+  entryFee: number,
+  method: RegistrationPaymentMethod,
+): { fee: number; total: number } {
+  if (entryFee <= 0) return { fee: 0, total: 0 };
+  const fee =
+    method === "fiat"
+      ? Math.round((entryFee * FIAT_FEE_RATE + FIAT_FEE_FIXED) * 100) / 100
+      : 0;
+  return { fee, total: entryFee + fee };
+}
+
+function readStoredPaymentMethod(): RegistrationPaymentMethod {
+  try {
+    const value = localStorage.getItem(PAYMENT_METHOD_STORAGE_KEY);
+    return value === "arenax" ? "arenax" : "fiat";
+  } catch {
+    return "fiat";
+  }
+}
 
 interface RegistrationFormProps {
   tournament: Tournament;
@@ -39,6 +74,44 @@ export function RegistrationForm({
 }: RegistrationFormProps) {
   const { notify } = useNotifications();
   const analytics = useFormAnalytics(`tournament-registration-${tournament.id}`);
+  const { publicKey } = useWallet();
+  const [paymentMethod, setPaymentMethod] =
+    useState<RegistrationPaymentMethod>("fiat");
+  const [transactionHash, setTransactionHash] = useState<string | null>(null);
+
+  // Restore the saved preference after mount (localStorage is client-only).
+  useEffect(() => {
+    setPaymentMethod(readStoredPaymentMethod());
+  }, []);
+
+  const selectPaymentMethod = (method: RegistrationPaymentMethod) => {
+    setPaymentMethod(method);
+    try {
+      localStorage.setItem(PAYMENT_METHOD_STORAGE_KEY, method);
+    } catch {
+      // Storage unavailable — preference just won't persist.
+    }
+  };
+
+  const isPaid = tournament.entryFee > 0;
+  const payWithToken = isPaid && paymentMethod === "arenax";
+  const { fee, total } = useMemo(
+    () => estimateRegistrationFee(tournament.entryFee, paymentMethod),
+    [tournament.entryFee, paymentMethod],
+  );
+
+  const { data: balances, isLoading: isBalanceLoading } = useQuery({
+    queryKey: ["walletBalances", publicKey],
+    queryFn: () => fetchWalletBalances(publicKey as string),
+    enabled: payWithToken && !!publicKey,
+    staleTime: 15_000,
+  });
+  const tokenBalance = balances?.ARENAX.available ?? 0;
+  const walletMissing = payWithToken && !publicKey;
+  const insufficientBalance =
+    payWithToken && !!balances && tokenBalance < total;
+  const cannotPay =
+    walletMissing || insufficientBalance || (payWithToken && isBalanceLoading);
 
   const form = useForm<TournamentRegistrationFormData>({
     resolver: zodResolver(tournamentRegistrationSchema),
@@ -54,7 +127,11 @@ export function RegistrationForm({
 
   const onSubmit = async (_data: TournamentRegistrationFormData) => {
     try {
-      await api.joinTournament(tournament.id, partyId);
+      const result = await api.joinTournament(
+        tournament.id,
+        isPaid ? paymentMethod : undefined,
+      );
+      setTransactionHash(result?.transactionHash ?? null);
       analytics.trackSubmit({ success: true });
 
       notify({
@@ -101,6 +178,14 @@ export function RegistrationForm({
           </span>
           . Check in 15 minutes before your first match.
         </div>
+        {transactionHash && (
+          <p className="text-xs text-muted-foreground">
+            Transaction hash:{" "}
+            <code className="break-all font-mono text-foreground">
+              {transactionHash}
+            </code>
+          </p>
+        )}
       </div>
     );
   }
@@ -237,16 +322,76 @@ export function RegistrationForm({
           )}
         />
 
-        {/* Entry fee notice */}
-        {tournament.entryFee > 0 && (
-          <div className="rounded-lg border border-blue-200 bg-info-muted p-3 dark:border-info/30 dark:bg-info-muted/20">
-            <p className="text-xs text-info dark:text-info-muted-foreground">
-              <span className="font-semibold">Payment:</span> Your wallet will be
-              charged{" "}
-              <span className="font-semibold">${tournament.entryFee}</span> upon
-              confirmation.
-            </p>
-          </div>
+        {/* Payment method + fee estimate */}
+        {isPaid && (
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium text-foreground">
+              Payment method
+            </legend>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["fiat", "Card (fiat)"],
+                  ["arenax", "ArenaX token"],
+                ] as const
+              ).map(([method, label]) => (
+                <label
+                  key={method}
+                  className={`cursor-pointer rounded-lg border p-3 text-sm ${
+                    paymentMethod === method
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border text-muted-foreground"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value={method}
+                    checked={paymentMethod === method}
+                    onChange={() => selectPaymentMethod(method)}
+                    className="sr-only"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            <div
+              aria-live="polite"
+              className="rounded-lg border border-blue-200 bg-info-muted p-3 text-xs text-info dark:border-info/30 dark:bg-info-muted/20 dark:text-info-muted-foreground"
+            >
+              <div className="flex justify-between">
+                <span>Entry fee</span>
+                <span>{payWithToken ? `${tournament.entryFee} ARENAX` : `$${tournament.entryFee.toFixed(2)}`}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{payWithToken ? "Network fee (est.)" : "Processing fee (est.)"}</span>
+                <span>{payWithToken ? `${TOKEN_NETWORK_FEE_XLM} XLM` : `$${fee.toFixed(2)}`}</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t border-info/20 pt-1 font-semibold">
+                <span>Total</span>
+                <span>{payWithToken ? `${total} ARENAX` : `$${total.toFixed(2)}`}</span>
+              </div>
+              {payWithToken && balances && (
+                <div className="mt-1 flex justify-between">
+                  <span>Available balance</span>
+                  <span>{tokenBalance} ARENAX</span>
+                </div>
+              )}
+            </div>
+
+            {walletMissing && (
+              <p role="alert" className="text-xs text-destructive">
+                Connect your wallet to pay with ArenaX tokens.
+              </p>
+            )}
+            {insufficientBalance && (
+              <p role="alert" className="text-xs text-destructive">
+                Insufficient ArenaX balance. You need {total} ARENAX but have{" "}
+                {tokenBalance}. Top up your wallet or pay by card.
+              </p>
+            )}
+          </fieldset>
         )}
 
         {/* Actions */}
@@ -263,7 +408,7 @@ export function RegistrationForm({
           )}
           <Button
             type="submit"
-            disabled={form.formState.isSubmitting}
+            disabled={form.formState.isSubmitting || cannotPay}
             className="flex-1 gap-2"
           >
             {form.formState.isSubmitting && (

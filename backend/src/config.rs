@@ -1,7 +1,8 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 
-#lderive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
@@ -13,9 +14,10 @@ pub struct Config {
     pub server: ServerConfig,
     pub rate_limit: RateLimitConfig,
     pub idempotency: IdempotencyConfig,
+    pub notifications: NotificationsConfig,
 }
 
-#lderive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub migration_mode: MigrationMode,
@@ -31,6 +33,13 @@ pub struct DatabaseConfig {
     pub circuit_failure_threshold: u32,
     /// How long the breaker stays open before admitting a trial request.
     pub circuit_open_secs: u64,
+    /// PostgreSQL `statement_timeout` applied to every connection (#1084):
+    /// a slow query or deadlock is cancelled instead of holding a pool
+    /// connection indefinitely. `DATABASE_STATEMENT_TIMEOUT_MS`, default 5000.
+    pub statement_timeout_ms: u64,
+    /// Queries slower than this are logged at WARN with their SQL and
+    /// duration (#1084). `DATABASE_SLOW_QUERY_THRESHOLD_MS`, default 200.
+    pub slow_query_threshold_ms: u64,
 }
 
 /// Read a `u64` from the environment, falling back when unset or unparseable.
@@ -43,18 +52,89 @@ fn env_u32(key: &str, default: u32) -> u32 {
     env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
 }
 
-#lderive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+// ── Secret hardening (Issue #1161) ───────────────────────────────────────────
+
+/// Minimum number of characters accepted for a secret-bearing variable.
+///
+/// 32 chars is the practical floor for a high-entropy value (256 bits of
+/// base64/hex output), and matches the guidance in the issue.
+pub const MIN_SECRET_LENGTH: usize = 32;
+
+/// Placeholder / legacy values that are public knowledge and therefore must
+/// never be accepted, even if they happen to be long enough.
+const FORBIDDEN_SECRET_VALUES: &[&str] = &[
+    "default_secret_change_in_production",
+    "supersecretkey",
+    "changeme",
+    "change_me",
+    "password",
+    "secret",
+    "test",
+];
+
+/// Reject a secret that is empty, a known placeholder, or too short to carry
+/// meaningful entropy.
+///
+/// Returns a message safe to surface in a startup log: it names the variable
+/// and the reason, but never echoes the secret's value.
+pub fn require_strong_secret(name: &str, value: &str) -> Result<(), anyhow::Error> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        anyhow::bail!("{name} is empty; refusing to start with an empty secret");
+    }
+
+    if FORBIDDEN_SECRET_VALUES
+        .iter()
+        .any(|weak| trimmed.eq_ignore_ascii_case(weak))
+    {
+        anyhow::bail!(
+            "{name} is set to a well-known default value; refusing to start. \
+             Generate a unique secret (e.g. `openssl rand -base64 48`) and set it in the environment"
+        );
+    }
+
+    if trimmed.len() < MIN_SECRET_LENGTH {
+        anyhow::bail!(
+            "{name} must be at least {MIN_SECRET_LENGTH} characters long \
+             (got {}); generate a stronger secret (e.g. `openssl rand -base64 48`)",
+            trimmed.len()
+        );
+    }
+
+    Ok(())
+}
+
+/// Read a required secret from the environment and enforce [`MIN_SECRET_LENGTH`]
+/// plus the placeholder deny-list. A missing variable is reported by name.
+fn env_required_secret(name: &str) -> Result<String, anyhow::Error> {
+    let value = env::var(name)
+        .map_err(|_| anyhow::anyhow!("{name} environment variable is not set"))?;
+    require_strong_secret(name, &value)?;
+    Ok(value)
+}
+
+/// Validate a secret that is optional to configure: when present it must meet
+/// the same bar as a required one, but absence is allowed.
+fn validate_optional_secret(name: &str, value: Option<&str>) -> Result<(), anyhow::Error> {
+    if let Some(v) = value {
+        require_strong_secret(name, v)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
     Run,
     Disabled,
 }
 
 impl MigrationMode {
-    fn from_env_value(value: &str) -> Result<Self, anyhow*::Error> {
+    fn from_env_value(value: &str) -> Result<Self, anyhow::Error> {
         match value.trim().to_ascii_lowercase().as_str() {
             "run" | "auto" | "true" | "1" => Ok(Self::Run),
             "disabled" | "disable" | "off" | "false" | "0" => Ok(Self::Disabled),
-            other => anyhow*:bail(!
+            other => anyhow::bail!(
                 "invalid BACKEND_MIGRATION_MODE value `{}`; expected `run` or `disabled`",
                 other
             ),
@@ -62,12 +142,12 @@ impl MigrationMode {
     }
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RedisConfig {
     pub url: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub s3_endpoint: String,
     pub s3_access_key: String,
@@ -75,15 +155,19 @@ pub struct StorageConfig {
     pub s3_bucket: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PaymentsConfig {
     pub paystack_secret: String,
     pub flutterwave_secret: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AuthConfig {
     pub jwt_secret: String,
+    /// Optional dedicated secret used to sign refresh tokens
+    /// (`JWT_REFRESH_SECRET`). When unset, refresh tokens are signed with
+    /// `jwt_secret`. When set it must satisfy the same strength rules.
+    pub jwt_refresh_secret: Option<String>,
     /// Duration string for the short-lived access token, e.g. "15m".
     pub jwt_expires_in: String,
     /// Duration string for the long-lived refresh token, e.g. "7d".
@@ -91,7 +175,7 @@ pub struct AuthConfig {
     pub jwt_refresh_expires_in: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StellarConfig {
     pub network_url: String,
     pub admin_secret: String,
@@ -105,12 +189,12 @@ pub struct StellarConfig {
     pub soroban_contract_match: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct AiConfig {
     pub model_path: String,
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub port: u16,
     pub host: String,
@@ -121,24 +205,82 @@ fn default_rate_limit_headers() -> bool {
     true
 }
 
-#derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RateLimitConfig {
     pub requests: u32,
     pub window: u64,
     /// Whether to send rate limit headers (`RateLimit-Limit`, `RateLimit-Remaining`,
     /// `RateLimit-Reset`) on responses. Defaults to `true`.
-    #serde(default = "default_rate_limit_headers")
+    #[serde(default = "default_rate_limit_headers")]
     pub headers: bool,
+    /// Per-endpoint overrides for the built-in rate-limit buckets, keyed by
+    /// bucket name (e.g. `auth_strict`, `tournament`, `default`). Parsed from
+    /// `RATE_LIMIT_OVERRIDES` as comma-separated `bucket=limit:window` pairs.
+    #[serde(default)]
+    pub overrides: HashMap<String, EndpointLimitOverride>,
 }
 
-#derive(Debug, Deserialize, Clone)]
+/// A single per-endpoint rate-limit override: the request ceiling and the
+/// window length (in seconds) it applies to.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct EndpointLimitOverride {
+    pub limit: u32,
+    pub window_secs: u64,
+}
+
+/// Parse `RATE_LIMIT_OVERRIDES` — comma-separated `bucket=limit:window` pairs,
+/// e.g. `auth_strict=3:60,tournament=5:120,default=200:60`.
+///
+/// Malformed entries are skipped (with a warning) instead of failing startup so
+/// a single typo cannot take the API down; the built-in bucket limits remain in
+/// effect for anything that does not parse.
+fn parse_rate_limit_overrides(raw: &str) -> HashMap<String, EndpointLimitOverride> {
+    let mut overrides = HashMap::new();
+    for entry in raw.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let Some((name, spec)) = entry.split_once('=') else {
+            tracing::warn!(entry, "RATE_LIMIT_OVERRIDES: expected `bucket=limit:window`, ignoring entry");
+            continue;
+        };
+        let Some((limit, window)) = spec.split_once(':') else {
+            tracing::warn!(entry, "RATE_LIMIT_OVERRIDES: expected `limit:window`, ignoring entry");
+            continue;
+        };
+        match (limit.trim().parse::<u32>(), window.trim().parse::<u64>()) {
+            (Ok(limit), Ok(window_secs)) if limit > 0 && window_secs > 0 => {
+                overrides.insert(
+                    name.trim().to_ascii_lowercase(),
+                    EndpointLimitOverride { limit, window_secs },
+                );
+            }
+            _ => {
+                tracing::warn!(
+                    entry,
+                    "RATE_LIMIT_OVERRIDES: limit/window must be positive integers, ignoring entry"
+                );
+            }
+        }
+    }
+    overrides
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct IdempotencyConfig {
     pub ttl_seconds: u64,
     pub max_response_size_kb: u32,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotificationsConfig {
+    /// SendGrid API key for the email fan-out channel (#1107). Empty when
+    /// unset — the email channel then fails fast rather than silently
+    /// no-op'ing, so a misconfigured deployment is visible in the delivery
+    /// audit log instead of just losing emails quietly.
+    pub sendgrid_api_key: String,
+    pub sendgrid_from_email: String,
+}
+
 impl Config {
-    pub fn from_env() -> Result<Self, anyhow*:Error> {
+    pub fn from_env() -> Result<Self, anyhow::Error> {
         dotenvy::dotenv().ok();
 
         let database_url = env::var("DATABASE_URL")?;
@@ -148,18 +290,26 @@ impl Config {
         let redis_url = env::var("REDIS_URL")?;
         let s3_endpoint = env::var("S3_ENDPOINT")?;
         let s3_access_key = env::var("S3_ACCESS_KEY")?;
-        let s3_secret_key = env::var("S3_SECRET_KEY")?;
+        // Secret-bearing variables are validated for length / placeholder values
+        // so a deployment can never boot on a publicly-known default (#1161).
+        let s3_secret_key = env_required_secret("S3_SECRET_KEY")?;
         let s3_bucket = env::var("S3_BUCKET")?;
-        let paystack_secret = env::var("PAYSTACK_SECRET")?;
-        let flutterwave_secret = env::var("FLUTTERWAVE_SECRET")?;
-        let jwt_secret = env::var("JWT_SECRET")?;
+        let paystack_secret = env_required_secret("PAYSTACK_SECRET")?;
+        let flutterwave_secret = env_required_secret("FLUTTERWAVE_SECRET")?;
+        let jwt_secret = env_required_secret("JWT_SECRET")?;
+        // An empty value (as shipped in env.example) means "not configured",
+        // not "configured to the empty string".
+        let jwt_refresh_secret = env::var("JWT_REFRESH_SECRET")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        validate_optional_secret("JWT_REFRESH_SECRET", jwt_refresh_secret.as_deref())?;
         let jwt_expires_in = env::var("JWT_EXPIRES_IN")?;
         let jwt_refresh_expires_in =
             env::var("JWT_REFRESH_EXPIRES_IN").unwrap_or_else(|_| "7d".to_string());
         let stellar_network_url = env::var("STELLAR_NETWORK_URL")?;
-        let stellar_admin_secret = env::var("STELLAR_ADMIN_SECRET")?;
+        let stellar_admin_secret = env_required_secret("STELLAR_ADMIN_SECRET")?;
         let soroban_contract_prize = env::var("SOROBAN_CONTRACT_PRIZE")?;
-        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUUTATION")?;
+        let soroban_contract_reputation = env::var("SOROBAN_CONTRACT_REPUTATION")?;
         let soroban_contract_arenax_token = env::var("SOROBAN_CONTRACT_ARENAX_TOKEN")?;
         // Falls back to the prize contract so existing deployments don't break.
         let soroban_contract_match = env::var("SOROBAN_CONTRACT_MATCH")
@@ -173,22 +323,29 @@ impl Config {
         let rate_limit_headers = env::var("RATE_LIMIT_HEADERS")
             .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
             .unwrap_or(true);
+        let rate_limit_overrides =
+            parse_rate_limit_overrides(&env::var("RATE_LIMIT_OVERRIDES").unwrap_or_default());
         let idempotency_ttl_seconds: u64 = env::var("IDEMPOTENCY_TTL_SECONDS")
             .unwrap_or_else(|_| "86400".to_string())
             .parse()?;
         let idempotency_max_response_size_kb: u32 = env::var("IDEMPOTENCY_MAX_RESPONSE_SIZE_KB")
             .unwrap_or_else(|_| "1024".to_string())
             .parse()?;
+        let sendgrid_api_key = env::var("SENDGRID_API_KEY").unwrap_or_default();
+        let sendgrid_from_email =
+            env::var("SENDGRID_FROM_EMAIL").unwrap_or_else(|_| "no-reply@arenax.gg".to_string());
 
         Ok(Config {
             database: DatabaseConfig {
                 url: database_url,
                 migration_mode,
-                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20);
+                max_connections: env_u32("DATABASE_MAX_CONNECTIONS", 20),
                 acquire_timeout_secs: env_u64("DATABASE_ACQUIRE_TIMEOUT_SECS", 2),
                 health_check_interval_secs: env_u64("DATABASE_HEALTH_INTERVAL_SECS", 10),
                 circuit_failure_threshold: env_u32("DATABASE_CIRCUIT_FAILURES", 3),
                 circuit_open_secs: env_u64("DATABASE_CIRCUIT_OPEN_SECS", 30),
+                statement_timeout_ms: env_u64("DATABASE_STATEMENT_TIMEOUT_MS", 5000),
+                slow_query_threshold_ms: env_u64("DATABASE_SLOW_QUERY_THRESHOLD_MS", 200),
             },
             redis: RedisConfig { url: redis_url },
             storage: StorageConfig {
@@ -203,6 +360,7 @@ impl Config {
             },
             auth: AuthConfig {
                 jwt_secret,
+                jwt_refresh_secret,
                 jwt_expires_in,
                 jwt_refresh_expires_in,
             },
@@ -226,11 +384,82 @@ impl Config {
                 requests: rate_limit_requests,
                 window: rate_limit_window,
                 headers: rate_limit_headers,
+                overrides: rate_limit_overrides,
             },
             idempotency: IdempotencyConfig {
                 ttl_seconds: idempotency_ttl_seconds,
                 max_response_size_kb: idempotency_max_response_size_kb,
             },
+            notifications: NotificationsConfig {
+                sendgrid_api_key,
+                sendgrid_from_email,
+            },
         })
+    }
+}
+
+#[cfg(test)]
+mod secret_validation_tests {
+    use super::*;
+
+    /// A value comfortably above the minimum entropy floor.
+    fn strong_secret() -> String {
+        "z".repeat(MIN_SECRET_LENGTH)
+    }
+
+    #[test]
+    fn accepts_secret_at_minimum_length() {
+        assert!(require_strong_secret("JWT_SECRET", &strong_secret()).is_ok());
+    }
+
+    #[test]
+    fn accepts_secret_longer_than_minimum() {
+        let long = format!("{}{}", strong_secret(), "abcdefgh");
+        assert!(require_strong_secret("JWT_SECRET", &long).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_and_whitespace_secret() {
+        assert!(require_strong_secret("JWT_SECRET", "").is_err());
+        assert!(require_strong_secret("JWT_SECRET", "   ").is_err());
+    }
+
+    #[test]
+    fn rejects_secret_below_minimum_length() {
+        let short = "a".repeat(MIN_SECRET_LENGTH - 1);
+        assert!(require_strong_secret("JWT_SECRET", &short).is_err());
+    }
+
+    #[test]
+    fn rejects_the_legacy_hardcoded_default() {
+        // The exact value `JwtConfig::default()` used to fall back to.
+        assert!(
+            require_strong_secret("JWT_SECRET", "default_secret_change_in_production").is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_common_placeholders_case_insensitively() {
+        assert!(require_strong_secret("JWT_SECRET", "ChangeMe").is_err());
+        assert!(require_strong_secret("S3_SECRET_KEY", "SECRET").is_err());
+        assert!(require_strong_secret("JWT_SECRET", "password").is_err());
+    }
+
+    #[test]
+    fn error_message_names_the_variable_but_not_the_value() {
+        let err = require_strong_secret("JWT_REFRESH_SECRET", "short")
+            .expect_err("short secrets must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("JWT_REFRESH_SECRET"), "message was: {msg}");
+        assert!(!msg.contains("short"), "message leaked the secret: {msg}");
+    }
+
+    #[test]
+    fn optional_secret_validation_allows_absence() {
+        assert!(validate_optional_secret("JWT_REFRESH_SECRET", None).is_ok());
+        assert!(
+            validate_optional_secret("JWT_REFRESH_SECRET", Some(&strong_secret())).is_ok()
+        );
+        assert!(validate_optional_secret("JWT_REFRESH_SECRET", Some("weak")).is_err());
     }
 }

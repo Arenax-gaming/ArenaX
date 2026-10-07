@@ -1,5 +1,5 @@
-/// Comprehensive unit tests for Match Contract
 #![cfg(test)]
+/// Comprehensive unit tests for Match Contract
 
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
 

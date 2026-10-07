@@ -501,5 +501,11 @@
     "filterBy": "Filtrer par {field}",
     "page": "Page {current} sur {total}",
     "required": "Champ requis"
+  },
+  "match": {
+    "completed": "Match terminé. {winner} gagne {scoreA} à {scoreB}.",
+    "disputed": "Match contesté. En attente de révision.",
+    "scoreUpdated": "Score mis à jour : {player1} {scoreA}, {player2} {scoreB}.",
+    "statusChanged": "Le statut du match est passé à {status}."
   }
 }

@@ -1,9 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "../styles/globals.css";
+import { NONCE_HEADER } from "@/lib/csp";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
-import { AppLayout } from "@/components/layout/AppLayout";
+// NOTE: No AppLayout here on purpose. The locale layout
+// (src/app/[locale]/layout.tsx) renders <AppLayout> INSIDE
+// <NextIntlClientProvider>. Rendering it here too would (a) duplicate the
+// header/footer and (b) crash with "No intl context found" because this root
+// layout has no intl provider — which broke E2E dev-server readiness.
 import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
@@ -36,15 +42,21 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Set by middleware.ts on every request (#1091) — required for these
+  // inline scripts to run under the nonce-based CSP script-src.
+  const nonce = headers().get(NONCE_HEADER) ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: organizationStructuredData() }}
         />
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: websiteStructuredData() }}
         />
       </head>
@@ -63,7 +75,7 @@ export default function RootLayout({
                     <NotificationProvider>
                       <AnalyticsProvider>
                         <WebVitalsInit />
-                        <AppLayout>{children}</AppLayout>
+                        {children}
                         <ConsentBanner />
                       </AnalyticsProvider>
                     </NotificationProvider>

@@ -63,7 +63,7 @@ npm run build
 
 ## Pull requests
 
-- Keep PRs focused — one concern per PR
+- Keep PRs focused — one concern per PR.
 - All CI checks must pass before merge
 - Smart contract changes require two approvals
 - DB migrations must include a `.down.sql`

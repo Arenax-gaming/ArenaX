@@ -1,6 +1,7 @@
 use crate::auth::jwt_service::{Claims, JwtService};
 use crate::realtime::auth::RealtimeAuth;
 use crate::realtime::events::{channels, ClientMessage, DeliverEvent, WsEnvelope};
+use crate::realtime::rate_limiter::{ConnectionRateLimiter, RateLimitOutcome, RATE_LIMIT_CLOSE_CODE};
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::WsAddressBook;
 use actix::{Actor, ActorContext, AsyncContext, Handler, StreamHandler, ActorFutureExt};
@@ -31,6 +32,10 @@ pub struct UserWebSocket {
     address_book: Arc<WsAddressBook>,
     auth: Arc<RealtimeAuth>,
     reconnect_session_id: Option<Uuid>,
+    /// Per-connection message flood guard (#1083) — HTTP's `RateLimitMiddleware`
+    /// only runs on the upgrade handshake, so every message on an already-open
+    /// socket needs its own limiter.
+    rate_limiter: ConnectionRateLimiter,
 }
 
 impl UserWebSocket {
@@ -61,7 +66,17 @@ impl UserWebSocket {
             address_book,
             auth,
             reconnect_session_id,
+            rate_limiter: ConnectionRateLimiter::from_env(),
         }
+    }
+
+    /// Sends the `rate_limit` notice and drops the message that triggered it (#1083).
+    fn send_rate_limit_notice(&self, ctx: &mut <Self as Actor>::Context, retry_after_secs: u64) {
+        let msg = serde_json::json!({
+            "type": "rate_limit",
+            "retry_after": retry_after_secs,
+        });
+        ctx.text(msg.to_string());
     }
 
     /// Starts a heartbeat that pings the client every HEARTBEAT_INTERVAL (30s)
@@ -195,6 +210,41 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for UserWebSocket {
                 self.registry.record_heartbeat(&self.session_id);
             }
             ws::Message::Text(text) => {
+                // Per-connection flood guard (#1083) — checked before any
+                // parsing/dispatch so a flooding client can't burn work
+                // beyond the rate-limiter's own O(1) check.
+                match self.rate_limiter.check() {
+                    RateLimitOutcome::Allowed => {}
+                    RateLimitOutcome::Throttled { retry_after_secs } => {
+                        crate::metrics::WS_MESSAGES_RATE_LIMITED_TOTAL
+                            .with_label_values(&[&self.user_id.to_string()])
+                            .inc();
+                        warn!(
+                            user_id = %self.user_id,
+                            session_id = %self.session_id,
+                            "WebSocket message rate limit exceeded — dropping message"
+                        );
+                        self.send_rate_limit_notice(ctx, retry_after_secs);
+                        return;
+                    }
+                    RateLimitOutcome::DisconnectRequired => {
+                        crate::metrics::WS_MESSAGES_RATE_LIMITED_TOTAL
+                            .with_label_values(&[&self.user_id.to_string()])
+                            .inc();
+                        warn!(
+                            user_id = %self.user_id,
+                            session_id = %self.session_id,
+                            "Repeated WebSocket flooding — closing connection"
+                        );
+                        ctx.close(Some(ws::CloseReason {
+                            code: ws::CloseCode::Other(RATE_LIMIT_CLOSE_CODE),
+                            description: Some("rate limit exceeded".to_string()),
+                        }));
+                        ctx.stop();
+                        return;
+                    }
+                }
+
                 debug!(
                     user_id = %self.user_id,
                     session_id = %self.session_id,

@@ -501,5 +501,11 @@
     "filterBy": "Sàyo nípa {field}",
     "page": "Ojú ewé {current} nínú {total}",
     "required": "Pẹpẹ Pọnran"
+  },
+  "match": {
+    "completed": "Ere ti pari. {winner} ti ṣẹgun {scoreA} si {scoreB}.",
+    "disputed": "A ń jiyan ere yìí. À ń dúró de àyẹ̀wò.",
+    "scoreUpdated": "Àmì tuntun: {player1} {scoreA}, {player2} {scoreB}.",
+    "statusChanged": "Ipò ere yí padà sí {status}."
   }
 }

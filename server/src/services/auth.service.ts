@@ -11,6 +11,10 @@ import { HttpError } from '../utils/http-error';
 import stellarWalletService from './stellar-wallet.service';
 import emailService from './email.service';
 import { logger } from './logger.service';
+import {
+    resolveTwitchProfileFromAuthorizationCode,
+    validateTwitchToken
+} from './twitch-oauth.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -446,8 +450,49 @@ export const logoutUser = async (input: LogoutInput): Promise<void> => {
 
 export interface SocialAuthInput {
     provider: 'google' | 'discord' | 'twitch';
-    accessToken: string;
+    /** Pre-obtained provider access token (google/discord, plus legacy twitch). */
+    accessToken?: string;
+    /** Twitch Authorization Code flow — preferred over `accessToken` (#1160). */
+    code?: string;
+    /** Required with `code`; must match the redirect URI used to obtain it. */
+    redirectUri?: string;
 }
+
+const requireAccessToken = (accessToken: string | undefined, provider: string): string => {
+    if (!accessToken) {
+        throw new HttpError(400, `${provider} login requires an accessToken`);
+    }
+    return accessToken;
+};
+
+/**
+ * Resolve the Twitch profile for a login attempt (#1160).
+ *
+ * Prefers the Authorization Code flow: the client sends a short-lived code
+ * that we redeem server-side with our client secret, so a token obtained by
+ * another Twitch application can never be substituted for ours. The legacy
+ * access-token path is kept for existing clients but is now introspected and
+ * rejected unless Twitch confirms the token was issued to our client_id.
+ */
+const resolveTwitchProfile = async (
+    input: SocialAuthInput
+): Promise<{ email: string; username: string; providerId: string }> => {
+    if (input.code) {
+        if (!input.redirectUri) {
+            throw new HttpError(400, 'redirectUri is required to complete Twitch login');
+        }
+        return resolveTwitchProfileFromAuthorizationCode(input.code, input.redirectUri);
+    }
+
+    if (input.accessToken) {
+        return validateTwitchToken(input.accessToken);
+    }
+
+    throw new HttpError(
+        400,
+        'Twitch login requires either an authorization code or an access token'
+    );
+};
 
 export const authenticateSocial = async (input: SocialAuthInput) => {
     const prisma = getDatabaseClient();
@@ -455,13 +500,15 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
     let userProfile: { email: string; username: string; providerId: string };
     switch (input.provider) {
         case 'google':
-            userProfile = await validateGoogleToken(input.accessToken);
+            userProfile = await validateGoogleToken(requireAccessToken(input.accessToken, 'Google'));
             break;
         case 'discord':
-            userProfile = await validateDiscordToken(input.accessToken);
+            userProfile = await validateDiscordToken(
+                requireAccessToken(input.accessToken, 'Discord')
+            );
             break;
         case 'twitch':
-            userProfile = await validateTwitchToken(input.accessToken);
+            userProfile = await resolveTwitchProfile(input);
             break;
         default:
             throw new HttpError(400, 'Unsupported provider');
@@ -565,22 +612,6 @@ async function validateDiscordToken(accessToken: string): Promise<{ email: strin
     return {
         email: email || `${id}@discord.local`,
         username: global_name || discordUsername || `discord_${id}`,
-        providerId: id
-    };
-}
-
-async function validateTwitchToken(accessToken: string): Promise<{ email: string; username: string; providerId: string }> {
-    const response = await axios.get('https://api.twitch.tv/helix/users', {
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Client-Id': process.env.TWITCH_CLIENT_ID || ''
-        }
-    });
-    
-    const { email, id, login } = response.data.data[0];
-    return {
-        email: email || `${id}@twitch.local`,
-        username: login || `twitch_${id}`,
         providerId: id
     };
 }

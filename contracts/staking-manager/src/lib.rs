@@ -1,18 +1,33 @@
 #![no_std]
-#![no_std]
+// Repo-wide convention (see virtual-economy, analytics, time-lock): the
+// contract-impl surface has multi-argument entry points, and a few call sites
+// pass owned values where references also implement the generic bounds.
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+// Test helpers register contracts with explicit IDs via the deprecated
+// `Env::register_contract`; the official replacement (`register_at`) has the
+// same behaviour, so the lint is allowed at crate level (as in treasury,
+// analytics, staking-rewards).
+#![allow(deprecated)]
 
 mod flexible_rewards;
 mod validator_penalty;
+mod voting_escrow;
 
 use arenax_events::staking as events;
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, BytesN, Env, String, Vec};
 
 use flexible_rewards::{calc_pending as calc_flexible_pending, early_exit_penalty};
 pub use flexible_rewards::{FlexiblePosition, RewardPool};
 use validator_penalty::ValidatorPenaltyManager;
 
-pub use lp_incentives::{LpPerformanceRecord, LpPoolConfig, LpPosition};
 use lp_incentives::{calc_fee_share, calc_il_protection, calc_lp_rewards, dynamic_rate};
+pub use lp_incentives::{LpPerformanceRecord, LpPoolConfig, LpPosition};
+
+pub use voting_escrow::VotingEscrowLock;
+use voting_escrow::{
+    early_unlock_penalty, lock_bonus_bps, voting_weight as calc_voting_weight, MAX_LOCK_DURATION,
+};
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -50,6 +65,26 @@ pub enum DataKey {
     ValidatorAppeal(BytesN<32>),
     /// Running total of tokens removed from circulation via slash burns.
     BurnedSupply,
+    // LP incentives — these keys were referenced throughout this file
+    // (create_lp_pool, deposit_lp, etc.) but never declared, so the crate
+    // did not compile at all prior to #912. Pre-existing, unrelated to the
+    // voting escrow feature below.
+    LpPoolCounter,
+    LpPool(u32),
+    LpPosition(Address, u32),
+    LpUserPools(Address),
+    LpHistory(Address, u32),
+    // Time-lock voting escrow (#912)
+    VotingEscrowLock(Address),
+    // Governance signers for 2-of-N slashing multi-sig (#1061)
+    GovernanceSigners,
+    // Storage TTL config (#1060)
+    TtlMinLedgers,
+    TtlTargetLedgers,
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
+    ScheduledUpgrade,
+    PreviousWasmHash,
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -146,12 +181,24 @@ pub struct SlashConfig {
     /// Whether the slashing system is currently active.
     pub enabled: bool,
     /// Ordered list of slash amounts per severity level (index = severity 0-4).
+    /// Severity 0 = lightest infraction; severity 4 = heaviest (e.g. double-sign).
     pub slash_amounts: Vec<i128>,
-    /// Fraction of slashed tokens to burn (rest goes to reward pool).
-    /// Expressed in basis points (5000 = 50 %).
+    /// Fraction of slashed tokens sent to the burn address expressed in basis
+    /// points (5000 = 50 %). The remaining fraction is sent to `treasury_address`.
     pub burn_bps: u32,
-    /// Seconds after a slash during which the validator may appeal.
+    /// Seconds after a slash during which the validator may file an appeal.
+    /// After this window the slash is final. Set to 0 to disable appeals.
     pub appeal_window_seconds: u64,
+    /// AX token contract address — used for the on-chain token transfers that
+    /// move slashed tokens to the treasury and burn address.
+    pub ax_token: Address,
+    /// Treasury contract address that receives the non-burned portion of
+    /// slashed tokens. The DAO can then reallocate these as a reward pool
+    /// top-up, insurance fund, or governance decision.
+    pub treasury_address: Address,
+    /// Minimum seconds between consecutive slashes of the same validator (#1061).
+    /// Set to 0 to disable the cooldown.
+    pub min_slash_interval_seconds: u64,
 }
 
 /// Immutable record of a single slash event.
@@ -162,10 +209,14 @@ pub struct SlashRecord {
     pub validator: Address,
     pub amount: i128,
     pub severity: u32,
+    /// Numeric reason code (application-defined enum, stored for indexer filtering).
     pub reason: u32,
+    /// Human-readable rationale logged on-chain for transparency and auditing.
+    pub rationale: String,
     pub slashed_at: u64,
     pub burned_amount: i128,
-    pub pool_amount: i128,
+    /// Amount sent to the treasury contract.
+    pub treasury_amount: i128,
     pub appealed: bool,
     pub appeal_resolved: bool,
     pub appeal_granted: bool,
@@ -177,7 +228,10 @@ pub struct SlashRecord {
 pub struct AppealRecord {
     pub slash_id: BytesN<32>,
     pub appellant: Address,
+    /// Numeric reason code for the appeal (application-defined).
     pub appeal_reason: u32,
+    /// Human-readable appeal justification stored on-chain.
+    pub appeal_rationale: String,
     pub submitted_at: u64,
     pub resolved: bool,
     pub granted: bool,
@@ -190,8 +244,21 @@ pub struct ValidatorSlashHistory {
     pub validator: Address,
     pub total_slashed: i128,
     pub slash_count: u32,
+    pub slash_ids: Vec<BytesN<32>>,
     /// `Some(slash_id)` when there is an open appeal pending resolution.
     pub active_appeal: Option<BytesN<32>>,
+    /// Timestamp of the last slash event (#1061).
+    pub last_slash_time: u64,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -587,6 +654,8 @@ impl StakingManager {
             &amount,
         );
 
+        let (min_ttl, target_ttl) = Self::get_ttl_config(env.clone());
+
         env.storage().persistent().set(
             &stake_key,
             &StakeInfo {
@@ -598,12 +667,21 @@ impl StakingManager {
                 can_withdraw: false,
             },
         );
+        env.storage()
+            .persistent()
+            .extend_ttl(&stake_key, min_ttl, target_ttl);
+
         let mut updated = info;
         updated.total_staked += amount;
         updated.participant_count += 1;
         env.storage()
             .persistent()
             .set(&DataKey::TournamentInfo(tournament_id.clone()), &updated);
+        env.storage().persistent().extend_ttl(
+            &DataKey::TournamentInfo(tournament_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
         Self::update_user_stake_info(&env, &user, amount, 0, 1, 0);
         events::emit_staked(&env, &user, &tournament_id, amount);
     }
@@ -693,6 +771,15 @@ impl StakingManager {
             .persistent()
             .get(&DataKey::TournamentInfo(tournament_id))
             .expect("tournament not found")
+    }
+
+    /// Return the total staked for a tournament, or 0 if not found.
+    pub fn get_total_staked(env: Env, tournament_id: BytesN<32>) -> i128 {
+        env.storage()
+            .persistent()
+            .get::<_, TournamentInfo>(&DataKey::TournamentInfo(tournament_id))
+            .map(|info| info.total_staked)
+            .unwrap_or(0)
     }
 
     pub fn get_user_stake_info(env: Env, user: Address) -> UserStakeInfo {
@@ -1032,6 +1119,115 @@ impl StakingManager {
         }
     }
 
+    // ── Time-Lock Voting Escrow (#912) ──────────────────────────────────────────
+    //
+    // A separate facility from the flexible reward pools above: users lock AX
+    // for a duration of their choosing (up to 4 years) in exchange for a
+    // boosted voting weight (10% per full year locked) rather than yield.
+    // Exiting before the chosen unlock time forfeits a flat 25% of principal
+    // to the admin, mirroring where the flexible-pool early-exit penalty goes.
+
+    /// Lock `amount` AX for `duration` seconds (capped at 4 years) and mint a
+    /// voting-escrow position. Panics if the user already has an open lock —
+    /// withdraw it first before opening a new one.
+    pub fn create_voting_lock(env: Env, user: Address, amount: i128, duration: u64) -> i128 {
+        Self::require_not_paused(&env);
+        user.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        if duration == 0 || duration > MAX_LOCK_DURATION {
+            panic!("duration must be between 1 second and 4 years");
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::VotingEscrowLock(user.clone()))
+        {
+            panic!("existing lock — withdraw it before opening a new one");
+        }
+
+        let ax_token = Self::get_ax_token(env.clone());
+        token::Client::new(&env, &ax_token).transfer(
+            &user,
+            env.current_contract_address(),
+            &amount,
+        );
+
+        let now = env.ledger().timestamp();
+        let unlock_at = now + duration;
+        let lock = VotingEscrowLock {
+            user: user.clone(),
+            amount,
+            locked_at: now,
+            duration,
+            unlock_at,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::VotingEscrowLock(user.clone()), &lock);
+
+        let weight = calc_voting_weight(amount, duration);
+        events::emit_voting_escrow_locked(&env, &user, amount, duration, unlock_at, weight);
+        weight
+    }
+
+    /// Withdraw a voting-escrow lock. Before `unlock_at` this forfeits 25% of
+    /// principal to the admin; from `unlock_at` onward the full amount is
+    /// returned.
+    pub fn withdraw_voting_lock(env: Env, user: Address) -> i128 {
+        Self::require_not_paused(&env);
+        user.require_auth();
+
+        let key = DataKey::VotingEscrowLock(user.clone());
+        let lock: VotingEscrowLock = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("no voting lock found");
+
+        let now = env.ledger().timestamp();
+        let penalty = early_unlock_penalty(lock.amount, now, lock.unlock_at);
+        let payout = lock.amount - penalty;
+
+        let ax_token = Self::get_ax_token(env.clone());
+        let client = token::Client::new(&env, &ax_token);
+        client.transfer(&env.current_contract_address(), &user, &payout);
+        if penalty > 0 {
+            let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+            client.transfer(&env.current_contract_address(), &admin, &penalty);
+        }
+
+        env.storage().persistent().remove(&key);
+
+        events::emit_voting_escrow_withdrawn(&env, &user, payout, penalty);
+        payout
+    }
+
+    /// This user's current voting-escrow lock, if any — the unlock schedule
+    /// (amount, lock/unlock timestamps, duration) and its live voting weight,
+    /// for dashboard visualization.
+    pub fn get_voting_lock(env: Env, user: Address) -> Option<VotingEscrowLock> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::VotingEscrowLock(user))
+    }
+
+    /// Current voting weight granted by `user`'s lock (0 if none). Weight is
+    /// fixed for the life of the lock — it does not decay as unlock nears.
+    pub fn get_voting_weight(env: Env, user: Address) -> i128 {
+        match Self::get_voting_lock(env, user) {
+            Some(lock) => calc_voting_weight(lock.amount, lock.duration),
+            None => 0,
+        }
+    }
+
+    /// The voting-weight bonus, in basis points, that `duration` would earn —
+    /// useful for a UI to preview the bonus before committing to a lock.
+    pub fn preview_lock_bonus_bps(_env: Env, duration: u64) -> u32 {
+        lock_bonus_bps(duration.min(MAX_LOCK_DURATION))
+    }
+
     // ── Validator Penalty / Slashing ─────────────────────────────────────────
 
     /// Configure the validator slash system. Admin-only.
@@ -1040,23 +1236,42 @@ impl StakingManager {
         ValidatorPenaltyManager::configure_slashing(&env, config);
     }
 
+    /// Return the current slash configuration, or `None` if not yet set.
+    pub fn get_slash_config(env: Env) -> Option<SlashConfig> {
+        ValidatorPenaltyManager::get_slash_config(&env)
+    }
+
     /// Slash a validator at the given `severity` (0 = lightest, 4 = heaviest).
-    /// Returns the unique `slash_id` for the event. Admin-only.
+    /// `reason` is a numeric code; `rationale` is a human-readable description
+    /// logged immutably on-chain. `signers` carries the 2-of-N multisig
+    /// approvals required for severity 4. Returns the unique `slash_id`.
+    /// Admin-only.
     pub fn slash_validator(
         env: Env,
         admin: Address,
         validator: Address,
         severity: u32,
         reason: u32,
+        rationale: String,
+        signers: Option<Vec<Address>>,
     ) -> BytesN<32> {
         Self::require_admin(&env);
-        ValidatorPenaltyManager::slash_validator(&env, admin, validator, severity, reason)
+        ValidatorPenaltyManager::slash_validator(
+            &env, admin, validator, severity, reason, rationale, signers,
+        )
     }
 
     /// Submit an appeal against a slash. Only the slashed validator may call
     /// this, and only within the configured `appeal_window_seconds`.
-    pub fn appeal_slash(env: Env, validator: Address, slash_id: BytesN<32>, reason: u32) {
-        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason);
+    /// `reason` is a numeric code; `appeal_rationale` is stored on-chain.
+    pub fn appeal_slash(
+        env: Env,
+        validator: Address,
+        slash_id: BytesN<32>,
+        reason: u32,
+        appeal_rationale: String,
+    ) {
+        ValidatorPenaltyManager::appeal_slash(&env, validator, slash_id, reason, appeal_rationale);
     }
 
     /// Resolve an open appeal. Admin-only.
@@ -1071,9 +1286,150 @@ impl StakingManager {
         ValidatorPenaltyManager::get_slash_history(&env, validator)
     }
 
+    /// Return slash records for a validator in slash-id order, paginated.
+    pub fn get_slash_records_paginated(
+        env: Env,
+        validator: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<SlashRecord> {
+        ValidatorPenaltyManager::get_slash_records_paginated(&env, validator, offset, limit)
+    }
+
     /// Return the `SlashRecord` for a given `slash_id`, or `None` if not found.
     pub fn get_slash_record(env: Env, slash_id: BytesN<32>) -> Option<SlashRecord> {
         ValidatorPenaltyManager::get_slash_record(&env, slash_id)
+    }
+
+    /// Return the `AppealRecord` for a given `slash_id`, or `None` if not found.
+    pub fn get_appeal_record(env: Env, slash_id: BytesN<32>) -> Option<AppealRecord> {
+        ValidatorPenaltyManager::get_appeal_record(&env, slash_id)
+    }
+
+    // ── Governance signers for 2-of-N slashing multisig (#1061) ─────────────
+
+    /// Set the registered governance signers. Admin-only.
+    pub fn set_governance_signers(env: Env, signers: Vec<Address>) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernanceSigners, &signers);
+    }
+
+    /// Return the registered governance signers, or empty if not set.
+    pub fn get_governance_signers(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::GovernanceSigners)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // ── Storage TTL config (#1060) ─────────────────────────────────────────
+
+    /// Set the TTL config. Admin-only.
+    pub fn set_ttl_config(env: Env, min_ttl: u32, target_ttl: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlMinLedgers, &min_ttl);
+        env.storage()
+            .instance()
+            .set(&DataKey::TtlTargetLedgers, &target_ttl);
+    }
+
+    /// Return the TTL config, falling back to financial-position defaults.
+    pub fn get_ttl_config(env: Env) -> (u32, u32) {
+        let min_ttl: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+        (min_ttl, target_ttl)
+    }
+
+    // ── Upgrade and state migration (#1064) ────────────────────────────────
+
+    /// Return the current storage schema version, defaulting to 1.
+    pub fn get_storage_schema_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1)
+    }
+
+    /// Set the storage schema version. Admin-only.
+    pub fn set_storage_schema_version(env: Env, version: u32) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &version);
+    }
+
+    /// Schedule a contract upgrade. Admin-only.
+    pub fn schedule_upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        min_compatible_schema: u32,
+        delay_seconds: Option<u64>,
+    ) {
+        Self::require_admin(&env);
+        let now = env.ledger().timestamp();
+        let delay = delay_seconds.unwrap_or(86_400);
+        let scheduled = ScheduledUpgrade {
+            new_wasm_hash,
+            min_compatible_schema,
+            scheduled_at: now,
+            executable_at: now + delay,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::ScheduledUpgrade, &scheduled);
+    }
+
+    /// Execute a scheduled upgrade after checking schema compatibility.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::require_admin(&env);
+        let scheduled: ScheduledUpgrade = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledUpgrade)
+            .expect("no scheduled upgrade");
+
+        if scheduled.new_wasm_hash != new_wasm_hash {
+            panic!("wasm hash does not match scheduled upgrade");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < scheduled.executable_at {
+            panic!("timelock not elapsed");
+        }
+
+        let current_schema: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(1);
+
+        if current_schema < scheduled.min_compatible_schema {
+            panic!("incompatible schema");
+        }
+
+        let current_hash = env
+            .storage()
+            .instance()
+            .get(&DataKey::PreviousWasmHash)
+            .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
+        env.storage()
+            .instance()
+            .set(&DataKey::PreviousWasmHash, &current_hash);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
@@ -1276,7 +1632,12 @@ impl StakingManager {
         Self::require_admin(&env);
         let mut pool = Self::load_lp_pool(&env, pool_id);
         let old = pool.reward_rate_bps;
-        let new_rate = dynamic_rate(pool.total_liquidity, target_liquidity, base_rate_bps, min_rate_bps);
+        let new_rate = dynamic_rate(
+            pool.total_liquidity,
+            target_liquidity,
+            base_rate_bps,
+            min_rate_bps,
+        );
         pool.reward_rate_bps = new_rate;
         env.storage()
             .persistent()
@@ -1322,45 +1683,43 @@ impl StakingManager {
         let ax_token = Self::get_ax_token(env.clone());
         token::Client::new(&env, &ax_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
         let now = env.ledger().timestamp();
         let key = DataKey::LpPosition(user.clone(), pool_id);
 
-        let position = if let Some(mut pos) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, LpPosition>(&key)
-        {
-            // Snapshot accrued rewards before topping up
-            pos.pending_rewards += calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now);
-            pos.last_reward_ts = now;
-            // Update fee debt to current cumulative so prior fees aren't double-counted
-            pos.fee_debt = pool.cumulative_fees;
-            pos.amount += amount;
-            // Overwrite entry prices only if caller provided new ones
-            if entry_price_a > 0 {
-                pos.entry_price_a = entry_price_a;
-            }
-            if entry_price_b > 0 {
-                pos.entry_price_b = entry_price_b;
-            }
-            pos
-        } else {
-            LpPosition {
-                user: user.clone(),
-                pool_id,
-                amount,
-                deposited_at: now,
-                fee_debt: pool.cumulative_fees,
-                pending_rewards: 0,
-                last_reward_ts: now,
-                entry_price_a,
-                entry_price_b,
-            }
-        };
+        let position =
+            if let Some(mut pos) = env.storage().persistent().get::<DataKey, LpPosition>(&key) {
+                // Snapshot accrued rewards before topping up
+                pos.pending_rewards +=
+                    calc_lp_rewards(&pos, pool.reward_rate_bps, pool.total_liquidity, now);
+                pos.last_reward_ts = now;
+                // Update fee debt to current cumulative so prior fees aren't double-counted
+                pos.fee_debt = pool.cumulative_fees;
+                pos.amount += amount;
+                // Overwrite entry prices only if caller provided new ones
+                if entry_price_a > 0 {
+                    pos.entry_price_a = entry_price_a;
+                }
+                if entry_price_b > 0 {
+                    pos.entry_price_b = entry_price_b;
+                }
+                pos
+            } else {
+                LpPosition {
+                    user: user.clone(),
+                    pool_id,
+                    amount,
+                    deposited_at: now,
+                    fee_debt: pool.cumulative_fees,
+                    pending_rewards: 0,
+                    last_reward_ts: now,
+                    entry_price_a,
+                    entry_price_b,
+                }
+            };
 
         env.storage().persistent().set(&key, &position);
         Self::track_lp_user_pool(&env, &user, pool_id);
@@ -1371,10 +1730,7 @@ impl StakingManager {
             .set(&DataKey::LpPool(pool_id), &pool);
 
         // Record history (criterion #5)
-        Self::push_lp_history(
-            &env, &user, pool_id, now,
-            amount, 0, 0, 0,
-        );
+        Self::push_lp_history(&env, &user, pool_id, now, amount, 0, 0, 0);
 
         events::emit_lp_deposited(&env, &user, pool_id, amount);
     }
@@ -1459,13 +1815,24 @@ impl StakingManager {
 
         // Record history (criterion #5)
         Self::push_lp_history(
-            &env, &user, pool_id, now,
-            -pos.amount, reward_payout, fee_share, il_payout,
+            &env,
+            &user,
+            pool_id,
+            now,
+            -pos.amount,
+            reward_payout,
+            fee_share,
+            il_payout,
         );
 
         events::emit_lp_withdrawn(
-            &env, &user, pool_id,
-            pos.amount, reward_payout, fee_share, il_payout,
+            &env,
+            &user,
+            pool_id,
+            pos.amount,
+            reward_payout,
+            fee_share,
+            il_payout,
         );
     }
 
@@ -1526,10 +1893,7 @@ impl StakingManager {
             .set(&DataKey::LpPool(pool_id), &pool);
 
         // Record history (criterion #5)
-        Self::push_lp_history(
-            &env, &user, pool_id, now,
-            0, reward_payout, fee_share, 0,
-        );
+        Self::push_lp_history(&env, &user, pool_id, now, 0, reward_payout, fee_share, 0);
 
         events::emit_lp_rewards_claimed(&env, &user, pool_id, reward_payout, fee_share);
         (reward_payout, fee_share)
@@ -1579,12 +1943,24 @@ impl StakingManager {
         Self::require_admin(&env);
         let now = env.ledger().timestamp();
         Self::push_lp_history(
-            &env, &user, pool_id, now,
-            liquidity_delta, rewards_claimed, fees_claimed, il_protection_paid,
+            &env,
+            &user,
+            pool_id,
+            now,
+            liquidity_delta,
+            rewards_claimed,
+            fees_claimed,
+            il_protection_paid,
         );
         events::emit_lp_performance_recorded(
-            &env, &user, pool_id, now,
-            liquidity_delta, rewards_claimed, fees_claimed, il_protection_paid,
+            &env,
+            &user,
+            pool_id,
+            now,
+            liquidity_delta,
+            rewards_claimed,
+            fees_claimed,
+            il_protection_paid,
         );
     }
 

@@ -1,8 +1,11 @@
+"use client";
+
 import React from "react";
 import Link from "next/link";
 import { Tournament, TournamentStatus } from "@/types/tournament";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
 import { Users, Trophy, Clock, Zap } from "lucide-react";
 
 interface TournamentCardProps {
@@ -46,6 +49,8 @@ const statusConfig: Record<
 };
 
 export function TournamentCard({ tournament }: TournamentCardProps) {
+  const { schedule, cancelScheduled } = useTournamentPrefetch();
+
   const status = statusConfig[tournament.status];
   const participantPercentage = Math.round(
     (tournament.currentParticipants / tournament.maxParticipants) * 100,
@@ -54,7 +59,14 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
   const canJoin = tournament.status === "registration_open" && !isFull;
 
   return (
-    <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg">
+    <Card
+      className="flex flex-col overflow-hidden transition-shadow hover:shadow-lg"
+      onMouseEnter={() => schedule(tournament.id)}
+      onMouseLeave={cancelScheduled}
+      onFocus={() => schedule(tournament.id)}
+      onBlur={cancelScheduled}
+      onTouchStart={() => schedule(tournament.id)}
+    >
       {/* Header with Status */}
       <div className="flex items-start justify-between border-b p-4">
         <div className="flex-1">

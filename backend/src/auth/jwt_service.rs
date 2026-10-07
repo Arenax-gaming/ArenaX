@@ -93,6 +93,16 @@ pub struct JwtConfig {
 }
 
 impl Default for JwtConfig {
+    /// Build a config from the `JWT_SECRET` environment variable.
+    ///
+    /// This intentionally *fails loudly* instead of falling back to a
+    /// hardcoded secret (#1161). A deployment that forgets `JWT_SECRET` would
+    /// otherwise sign every token with a value that is public in the source
+    /// tree, letting anyone forge JWTs.
+    ///
+    /// Production startup should prefer `Config::from_env()`, which validates
+    /// the same secret (and reports it among the other configuration errors).
+    /// This `Default` exists for tests and tooling.
     fn default() -> Self {
         // Parse JWT_EXPIRES_IN env var (e.g. "15m", "1h", "7d") into a Duration.
         // Falls back to 15 minutes if the variable is absent or unparseable.
@@ -107,9 +117,20 @@ impl Default for JwtConfig {
             .and_then(|v| parse_duration_str(&v))
             .unwrap_or_else(|| Duration::days(7));
 
+        let secret_key = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+            panic!(
+                "JWT_SECRET environment variable is not set; refusing to start with an \
+                 insecure default secret"
+            )
+        });
+
+        // Same strength rules the startup path enforces (>= 32 chars, no
+        // known placeholder values).
+        crate::config::require_strong_secret("JWT_SECRET", &secret_key)
+            .unwrap_or_else(|e| panic!("invalid JWT_SECRET: {e}"));
+
         Self {
-            secret_key: std::env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "default_secret_change_in_production".to_string()),
+            secret_key,
             access_token_expiry,
             refresh_token_expiry,
             algorithm: Algorithm::HS256,
@@ -989,6 +1010,17 @@ mod tests {
 
     #[test]
     fn test_jwt_config_default() {
+        // `JwtConfig::default()` reads JWT_SECRET from the environment and no
+        // longer falls back to the old hardcoded value (#1161). The rejection
+        // paths (missing / weak / default secret) are exercised in
+        // `tests/secret_validation_test.rs`, which drives the real startup path
+        // via `Config::from_env` in a single sequential test so it does not
+        // race other tests over the process environment.
+        std::env::set_var(
+            "JWT_SECRET",
+            "test_jwt_secret_for_unit_tests_0123456789abcdef",
+        );
+
         let config = JwtConfig::default();
         assert_eq!(config.algorithm, Algorithm::HS256);
         assert_eq!(config.access_token_expiry.num_minutes(), 15);

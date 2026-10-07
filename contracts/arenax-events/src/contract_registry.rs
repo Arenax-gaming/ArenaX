@@ -67,6 +67,18 @@ pub struct ContractStatusChanged {
     pub status: Symbol,
 }
 
+#[contractevent(topics = ["ArenaXCReg_v1", "DEPRECATED"])]
+pub struct ContractDeprecated {
+    pub address: Address,
+    pub successor: Option<Address>,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "SUCCESSOR_LINKED"])]
+pub struct SuccessorLinked {
+    pub old_address: Address,
+    pub successor: Address,
+}
+
 pub fn emit_initialized(env: &Env, admin: &Address) {
     Initialized {
         admin: admin.clone(),
@@ -158,6 +170,22 @@ pub fn emit_contract_status_changed(env: &Env, name: &Symbol, status: &Symbol) {
     ContractStatusChanged {
         name: name.clone(),
         status: status.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_contract_deprecated(env: &Env, address: &Address, successor: &Option<Address>) {
+    ContractDeprecated {
+        address: address.clone(),
+        successor: successor.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_successor_linked(env: &Env, old_address: &Address, successor: &Address) {
+    SuccessorLinked {
+        old_address: old_address.clone(),
+        successor: successor.clone(),
     }
     .publish(env);
 }

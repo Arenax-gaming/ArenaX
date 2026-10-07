@@ -122,7 +122,13 @@ pub trait ClaimsExt {
 
 impl ClaimsExt for actix_web::HttpRequest {
     fn claims(&self) -> Option<Claims> {
-        self.extensions().get::<Claims>().cloned()
+        let claims = self.extensions().get::<Claims>().cloned();
+        // Attach the caller to the request's tracing span (#1084) so slow
+        // database queries logged during this request carry `user_id` too.
+        if let Some(ref c) = claims {
+            tracing::Span::current().record("user_id", tracing::field::display(&c.sub));
+        }
+        claims
     }
 
     fn user_id(&self) -> Option<uuid::Uuid> {

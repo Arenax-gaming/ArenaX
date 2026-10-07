@@ -22,7 +22,10 @@ import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
 export function TournamentDetailsPageClient() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
+  // #1089: `?match=<id>` deep-links straight to a bracket match.
+  const deepLinkedMatchId = searchParams?.get("match") ?? null;
   // #320: read the dynamic [id] route param and look up the tournament
   // by id. Unknown ids fall through to the "Tournament Not Found"
   // branch below rather than rendering a hardcoded fallback.
@@ -109,8 +112,7 @@ export function TournamentDetailsPageClient() {
   }
 
   const showBracket = tournament.status === "in_progress" || tournament.status === "completed";
-  const highlightedMatchId =
-    tournament.id === "2" ? "2-match-10" : tournament.id === "1" ? "1-match-13" : null;
+  const highlightedMatchId = deepLinkedMatchId;
 
   return (
     <div className="min-h-screen bg-background px-4 py-8">
@@ -187,13 +189,14 @@ export function TournamentDetailsPageClient() {
                   tournamentId={tournament.id}
                   tournamentInfo={{
                     status: tournament.status,
-                    participantCount: tournament.participants?.length,
-                    startDate: tournament.startDate,
+                    participantCount: tournament.currentParticipants,
+                    startDate: tournament.startTime,
                   }}
                 >
                   <SingleEliminationBracket
                     bracketData={bracketData}
                     currentUserId={currentUserId}
+                    highlightedMatchId={highlightedMatchId}
                   />
                 </BracketErrorBoundary>
               </div>

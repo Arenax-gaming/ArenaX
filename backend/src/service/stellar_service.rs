@@ -29,6 +29,55 @@ pub enum StellarError {
 
 pub type DbPool = Arc<PgPool>;
 
+/// Structured log line for a point in a Stellar transaction's lifecycle
+/// (#1106): `SUBMIT`/`CONFIRM` at INFO, `RETRY` at WARN, `DLQ` at ERROR.
+/// `correlation_id` isn't a field here — it's already on the ambient
+/// `http.request` tracing span (`middleware/tracing_middleware.rs`), and any
+/// subscriber/exporter that walks the span stack (this backend already
+/// exports to OTLP) attaches it to every event emitted underneath that span
+/// automatically. Never pass a secret key or raw signature as `contract` or
+/// through `memo` — this call site logs identifiers only.
+fn log_stellar_event(
+    status: StellarEventStatus,
+    tx_hash: &str,
+    contract: &str,
+    method: &str,
+    user_id: Option<Uuid>,
+    amount: i64,
+) {
+    let status_str = status.as_str();
+    match status {
+        StellarEventStatus::Submit | StellarEventStatus::Confirm => {
+            tracing::info!(tx_hash, contract, method, ?user_id, amount, status = status_str, "Stellar transaction event");
+        }
+        StellarEventStatus::Retry => {
+            tracing::warn!(tx_hash, contract, method, ?user_id, amount, status = status_str, "Stellar transaction retry");
+        }
+        StellarEventStatus::Dlq => {
+            tracing::error!(tx_hash, contract, method, ?user_id, amount, status = status_str, "Stellar transaction moved to dead-letter queue");
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StellarEventStatus {
+    Submit,
+    Confirm,
+    Retry,
+    Dlq,
+}
+
+impl StellarEventStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Submit => "submit",
+            Self::Confirm => "confirm",
+            Self::Retry => "retry",
+            Self::Dlq => "dlq",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct StellarService {
     db_pool: DbPool,
@@ -277,19 +326,32 @@ impl StellarService {
         // 3. Sign and submit the transaction
         // 4. Record the transaction in the database
 
-        tracing::info!(
-            "Escrowing {} stroops to prize pool {} for tournament {}",
-            amount,
-            prize_pool_account,
-            tournament_id
-        );
-
         let tx_hash = format!("escrow-{}", Uuid::new_v4());
+
+        // The source account must be identified by its *public* key — never
+        // the admin secret itself, which must never appear in a log line,
+        // a memo, or a stored DB column (#1106).
+        let admin_public = self
+            .admin_secret
+            .as_deref()
+            .map(stellar_public_from_secret)
+            .transpose()
+            .map_err(StellarError::StellarSdkError)?
+            .unwrap_or_else(|| "admin".to_string());
+
+        log_stellar_event(
+            StellarEventStatus::Submit,
+            &tx_hash,
+            "native",
+            "escrow_entry_fees",
+            None,
+            amount,
+        );
 
         // Record transaction
         self.record_transaction(
             &tx_hash,
-            self.admin_secret.as_deref().unwrap_or("admin"),
+            &admin_public,
             prize_pool_account,
             amount,
             "XLM",
@@ -299,6 +361,15 @@ impl StellarService {
             None,
         )
         .await?;
+
+        log_stellar_event(
+            StellarEventStatus::Confirm,
+            &tx_hash,
+            "native",
+            "escrow_entry_fees",
+            None,
+            amount,
+        );
 
         Ok(tx_hash)
     }
@@ -322,14 +393,16 @@ impl StellarService {
             // 2. Build a payment operation
             // 3. Sign and submit the transaction
 
-            tracing::info!(
-                "Distributing {} stroops to user {} (account: {})",
-                amount,
-                user_id,
-                user_account.public_key
-            );
-
             let tx_hash = format!("prize-{}", Uuid::new_v4());
+
+            log_stellar_event(
+                StellarEventStatus::Submit,
+                &tx_hash,
+                "native",
+                "distribute_prizes",
+                Some(user_id),
+                amount,
+            );
 
             // Record transaction
             self.record_transaction(
@@ -347,6 +420,15 @@ impl StellarService {
                 Some(user_id),
             )
             .await?;
+
+            log_stellar_event(
+                StellarEventStatus::Confirm,
+                &tx_hash,
+                "native",
+                "distribute_prizes",
+                Some(user_id),
+                amount,
+            );
 
             transaction_hashes.push(tx_hash);
         }
@@ -388,14 +470,16 @@ impl StellarService {
         // 2. Build a payment operation with asset type
         // 3. Sign and submit the transaction
 
-        tracing::info!(
-            "Transferring {} ArenaX tokens from {} to {}",
-            amount,
-            from_account.public_key,
-            to_public_key
-        );
-
         let tx_hash = format!("token-{}", Uuid::new_v4());
+
+        log_stellar_event(
+            StellarEventStatus::Submit,
+            &tx_hash,
+            "ARENAX",
+            "transfer_tokens",
+            Some(from_user_id),
+            amount,
+        );
 
         // Record transaction
         self.record_transaction(
@@ -410,6 +494,15 @@ impl StellarService {
             Some(from_user_id),
         )
         .await?;
+
+        log_stellar_event(
+            StellarEventStatus::Confirm,
+            &tx_hash,
+            "ARENAX",
+            "transfer_tokens",
+            Some(from_user_id),
+            amount,
+        );
 
         Ok(tx_hash)
     }
@@ -764,5 +857,132 @@ mod stellar_strkey_tests {
         let (version, decoded_payload) = stellar_strkey_decode(&encoded).unwrap();
         assert_eq!(version, 6 << 3);
         assert_eq!(decoded_payload, payload);
+    }
+}
+
+/// Integration test for structured Stellar transaction logging (#1106):
+/// installs a minimal capturing `tracing::Subscriber` (no extra dependency —
+/// `tracing-test`/JSON formatting aren't in this crate's deps), submits a
+/// transaction event, and asserts the required fields are present in the
+/// captured record, mirroring "grep structured logs" against real output.
+#[cfg(test)]
+mod stellar_logging_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing::field::{Field, Visit};
+    use tracing::span::{Attributes, Id, Record};
+    use tracing::{Event, Metadata, Subscriber};
+
+    #[derive(Default, Clone)]
+    struct CapturedEvent {
+        level: tracing::Level,
+        message: String,
+        fields: std::collections::HashMap<String, String>,
+    }
+
+    struct FieldCollector<'a>(&'a mut CapturedEvent);
+
+    impl<'a> Visit for FieldCollector<'a> {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            let formatted = format!("{value:?}");
+            if field.name() == "message" {
+                self.0.message = formatted.trim_matches('"').to_string();
+            } else {
+                self.0.fields.insert(field.name().to_string(), formatted.trim_matches('"').to_string());
+            }
+        }
+    }
+
+    struct CapturingSubscriber {
+        events: Arc<Mutex<Vec<CapturedEvent>>>,
+    }
+
+    impl Subscriber for CapturingSubscriber {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _span: &Attributes<'_>) -> Id {
+            Id::from_u64(1)
+        }
+        fn record(&self, _span: &Id, _values: &Record<'_>) {}
+        fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+        fn event(&self, event: &Event<'_>) {
+            let mut captured = CapturedEvent {
+                level: *event.metadata().level(),
+                ..Default::default()
+            };
+            event.record(&mut FieldCollector(&mut captured));
+            self.events.lock().unwrap().push(captured);
+        }
+        fn enter(&self, _span: &Id) {}
+        fn exit(&self, _span: &Id) {}
+    }
+
+    #[test]
+    fn submit_and_confirm_events_carry_all_required_fields() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = CapturingSubscriber { events: events.clone() };
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_stellar_event(
+                StellarEventStatus::Submit,
+                "test-tx-hash-123",
+                "native",
+                "escrow_entry_fees",
+                None,
+                5_000_000,
+            );
+            log_stellar_event(
+                StellarEventStatus::Confirm,
+                "test-tx-hash-123",
+                "native",
+                "escrow_entry_fees",
+                None,
+                5_000_000,
+            );
+        });
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 2, "expected one SUBMIT and one CONFIRM event");
+
+        for (event, expected_status) in captured.iter().zip(["submit", "confirm"]) {
+            assert_eq!(event.level, tracing::Level::INFO);
+            assert_eq!(event.fields.get("tx_hash").map(String::as_str), Some("test-tx-hash-123"));
+            assert_eq!(event.fields.get("contract").map(String::as_str), Some("native"));
+            assert_eq!(event.fields.get("method").map(String::as_str), Some("escrow_entry_fees"));
+            assert_eq!(event.fields.get("amount").map(String::as_str), Some("5000000"));
+            assert_eq!(event.fields.get("status").map(String::as_str), Some(expected_status));
+        }
+    }
+
+    #[test]
+    fn retry_and_dlq_events_use_warn_and_error_levels() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = CapturingSubscriber { events: events.clone() };
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_stellar_event(StellarEventStatus::Retry, "tx-2", "ARENAX", "transfer_tokens", None, 100);
+            log_stellar_event(StellarEventStatus::Dlq, "tx-2", "ARENAX", "transfer_tokens", None, 100);
+        });
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured[0].level, tracing::Level::WARN);
+        assert_eq!(captured[0].fields.get("status").map(String::as_str), Some("retry"));
+        assert_eq!(captured[1].level, tracing::Level::ERROR);
+        assert_eq!(captured[1].fields.get("status").map(String::as_str), Some("dlq"));
+    }
+
+    #[test]
+    fn user_id_is_included_when_present() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = CapturingSubscriber { events: events.clone() };
+        let user_id = Uuid::new_v4();
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_stellar_event(StellarEventStatus::Confirm, "tx-3", "native", "distribute_prizes", Some(user_id), 42);
+        });
+
+        let captured = events.lock().unwrap();
+        assert!(captured[0].fields.get("user_id").unwrap().contains(&user_id.to_string()));
     }
 }
