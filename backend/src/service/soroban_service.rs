@@ -110,8 +110,6 @@ impl Default for RetryConfig {
     }
 }
 
-/// Soroban service for transaction management
-#[derive(Clone)]
 /// Lifecycle stage of a structured Soroban transaction log line (#1106).
 /// `correlation_id` isn't a field here — it's already on the ambient
 /// `http.request` tracing span and captured by any subscriber walking the
@@ -150,6 +148,8 @@ fn log_soroban_event(status: SorobanEventStatus, tx_hash: &str, contract: &str, 
     }
 }
 
+/// Soroban service for transaction management
+#[derive(Clone)]
 pub struct SorobanService {
     network: NetworkConfig,
     client: reqwest::Client,

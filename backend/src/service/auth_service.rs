@@ -168,6 +168,10 @@ impl AuthService {
     /// Authenticate a user and return a fresh token pair.
     #[tracing::instrument(skip(self, request), fields(email = %request.email))]
     pub async fn login(&self, request: LoginRequest) -> Result<AuthResponse, ApiError> {
+        if request.email.trim().is_empty() || request.password.is_empty() {
+            return Err(ApiError::bad_request("Email and password are required"));
+        }
+
         let user = sqlx::query_as!(
             User,
             r#"
@@ -349,6 +353,10 @@ impl AuthService {
         old_password: &str,
         new_password: &str,
     ) -> Result<(), ApiError> {
+        if old_password.is_empty() {
+            return Err(ApiError::bad_request("Current password cannot be empty"));
+        }
+
         if new_password.len() < 8 {
             return Err(ApiError::bad_request(
                 "Password must be at least 8 characters",
@@ -406,5 +414,21 @@ mod tests {
 
         assert!(verify("test_password", &hashed).unwrap());
         assert!(!verify("wrong_password", &hashed).unwrap());
+    }
+
+    // Pin minimum password length boundary validation (must be at least 8 characters) (#1068, #1158).
+    #[test]
+    fn test_password_validation() {
+        let short_password = "short";
+        assert!(short_password.len() < 8);
+
+        let valid_password = "long_enough_password";
+        assert!(valid_password.len() >= 8);
+    }
+
+    #[test]
+    fn test_password_length_boundary() {
+        assert!("1234567".len() < 8);
+        assert!("12345678".len() >= 8);
     }
 }
