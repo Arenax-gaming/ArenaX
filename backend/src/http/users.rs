@@ -98,6 +98,74 @@ pub async fn get_user_stats(
     })))
 }
 
+/// DELETE /api/users/me
+///
+/// Soft-deletes the authenticated user's account (GDPR/NDPR right to erasure):
+/// PII is anonymised, `deleted_at` is set, the account is deactivated and
+/// login is refused. The Stellar public key is retained for the on-chain audit
+/// trail.
+pub async fn delete_account(
+    pool: web::Data<sqlx::PgPool>,
+    req: HttpRequest,
+) -> Result<HttpResponse, ApiError> {
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
+
+    let service = UserService::new(pool.get_ref().clone());
+    service.soft_delete_user(user_id).await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "success": true,
+        "message": "Account deletion scheduled. Your personal data has been anonymised (right to erasure)."
+    })))
+}
+
+/// GET /api/users/me/export
+///
+/// Queues an asynchronous data-export job. The archive is prepared in the
+/// background and delivered via email link when ready (GDPR/NDPR data
+/// portability; not a synchronous download).
+pub async fn export_user_data(
+    pool: web::Data<sqlx::PgPool>,
+    req: HttpRequest,
+) -> Result<HttpResponse, ApiError> {
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
+
+    let service = UserService::new(pool.get_ref().clone());
+    let job = service.queue_data_export(user_id).await?;
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "success": true,
+        "message": "Data export queued. You will receive a secure download link by email once it is ready.",
+        "data": job
+    })))
+}
+
+/// GET /api/users/me/export/{job_id}
+///
+/// Returns the status (and the retrieval link, once ready) of a queued data
+/// export job.
+pub async fn get_export_job(
+    pool: web::Data<sqlx::PgPool>,
+    req: HttpRequest,
+    job_id: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
+
+    let service = UserService::new(pool.get_ref().clone());
+    let job = service.get_export_job(job_id.into_inner(), user_id).await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "success": true,
+        "data": job
+    })))
+}
+
 /// Configure user routes.
 ///
 /// Intended to be called via `.configure(...)` inside an existing `/api`
@@ -109,6 +177,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::get().to(get_user_profile))
             .route("/me", web::get().to(get_current_user_profile))
             .route("/me", web::put().to(update_user_profile))
+            .route("/me", web::delete().to(delete_account))
+            .route("/me/export", web::get().to(export_user_data))
+            .route("/me/export/{job_id}", web::get().to(get_export_job))
             .route("/{id}/stats", web::get().to(get_user_stats)),
     );
 }

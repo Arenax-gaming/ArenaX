@@ -1,43 +1,13 @@
 import type { Metadata } from "next";
-import { matchHubDetails } from "@/data/matchHub";
 import { MatchHubPageClient } from "./MatchHubPageClient";
 
-export async function generateMetadata({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ spectate?: string }>;
-}): Promise<Metadata> {
-  const { id } = await params;
-  const { spectate } = await searchParams;
-  const match = matchHubDetails[id];
-
-  // Real matches are fetched live client-side and won't always be present in
-  // this mock lookup. That's expected — this is best-effort SEO metadata,
-  // not a data source for the page itself.
-  if (!match) {
-    return {
-      title: "Match — ArenaX",
-      description: "View live match details on ArenaX.",
-    };
-  }
-
-  // #1089: a spectator link gets a title that makes the shared context clear.
-  const title = spectate === "true"
-    ? `Watch: ${match.player1.username} vs ${match.player2.username} — ArenaX`
-    : `${match.player1.username} vs ${match.player2.username} — ArenaX`;
-  const description = match.notes
-    ? match.notes.slice(0, 155)
-    : `${match.tournamentName} · ${match.roundLabel} — watch live match details on ArenaX.`;
-
+// Match metadata is resolved client-side from the live API.
+// Static fixture data is intentionally not used here — SEO metadata is
+// generic so that no production code depends on fixture files.
+export function generateMetadata(): Metadata {
   return {
-    title,
-    description,
-    openGraph: {
-      title,
-      description,
-    },
+    title: "Match — ArenaX",
+    description: "View live match details on ArenaX.",
   };
 }
 

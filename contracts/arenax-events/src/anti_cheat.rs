@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String};
 
 pub const NAMESPACE: &str = "ArenaXAntiCheat";
 pub const VERSION: &str = "v1";
@@ -44,6 +44,22 @@ pub struct SuspiciousActivityReported {
     pub report_id: u64,
 }
 
+#[contractevent(topics = ["ArenaXAC_v1", "VERIFIED"])]
+pub struct ActivityVerified {
+    pub report_id: u64,
+    pub player: Address,
+    pub verified: bool,
+}
+
+pub fn emit_activity_verified(env: &Env, report_id: u64, player: &Address, verified: bool) {
+    ActivityVerified {
+        report_id,
+        player: player.clone(),
+        verified,
+    }
+    .publish(env);
+}
+
 #[contractevent(topics = ["ArenaXAC_v1", "SANCTION"])]
 pub struct SanctionApplied {
     pub player: Address,
@@ -71,6 +87,37 @@ pub struct AppealReviewed {
 pub struct TrustScoreUpdated {
     pub player: Address,
     pub score: u32,
+}
+
+/// Match result attestation (issue #1110).
+#[contractevent(topics = ["ArenaXAC_v1", "ATTEST"])]
+pub struct MatchResultAttested {
+    pub match_id: u64,
+    pub winner: Address,
+    pub winner_score: i64,
+    pub result_digest: BytesN<32>,
+    pub signature_count: u32,
+    pub required_signatures: u32,
+}
+
+pub fn emit_match_result_attested(
+    env: &Env,
+    match_id: u64,
+    winner: &Address,
+    winner_score: i64,
+    result_digest: &BytesN<32>,
+    signature_count: u32,
+    required_signatures: u32,
+) {
+    MatchResultAttested {
+        match_id,
+        winner: winner.clone(),
+        winner_score,
+        result_digest: result_digest.clone(),
+        signature_count,
+        required_signatures,
+    }
+    .publish(env);
 }
 
 pub fn emit_suspicious_activity_reported(

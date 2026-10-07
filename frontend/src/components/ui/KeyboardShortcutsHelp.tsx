@@ -8,7 +8,7 @@
  * Accessibility: role="dialog", aria-modal, focus trapping, Escape / ? to close.
  */
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import type { Shortcut, ShortcutCategory } from "../../hooks/useKeyboardShortcuts";
 
@@ -19,6 +19,13 @@ const CATEGORY_LABELS: Record<ShortcutCategory, string> = {
   tournament: "Tournament",
   profile: "Profile",
 };
+
+/** Built-in browser/form interactions surfaced for discoverability. */
+const BUILT_IN_SHORTCUTS: Shortcut[] = [
+  { id: "builtin_tab", description: "Move focus to next element", category: "navigation", key: "Tab" },
+  { id: "builtin_shift_tab", description: "Move focus to previous element", category: "navigation", key: "Shift+Tab" },
+  { id: "builtin_enter", description: "Join / submit focused action", category: "global", key: "Enter" },
+];
 
 interface KeyCapProps {
   combo: string;
@@ -60,11 +67,24 @@ export function KeyboardShortcutsHelp({
 }: KeyboardShortcutsHelpProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [query, setQuery] = useState("");
+
+  const visibleShortcuts = useMemo(() => {
+    const all = [...shortcuts, ...BUILT_IN_SHORTCUTS.filter((b) => !shortcuts.some((s) => s.id === b.id))];
+    const q = query.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((s) => {
+      const key = (customBindings[s.id] ?? s.key).toLowerCase();
+      return s.description.toLowerCase().includes(q) || key.includes(q);
+    });
+  }, [shortcuts, customBindings, query]);
 
   // Store the element that was focused before the modal opened
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement;
+    } else {
+      setQuery("");
     }
   }, [isOpen]);
 
@@ -93,8 +113,9 @@ export function KeyboardShortcutsHelp({
       const dialog = dialogRef.current;
       if (!dialog) return;
 
-      // Close on Escape or ?
-      if (e.key === "Escape" || e.key === "?") {
+      // Close on Escape, or ? when not typing in the search field
+      const typing = e.target instanceof HTMLInputElement;
+      if (e.key === "Escape" || (e.key === "?" && !typing)) {
         e.preventDefault();
         onClose();
         return;
@@ -134,7 +155,7 @@ export function KeyboardShortcutsHelp({
   if (!isOpen) return null;
 
   // Group shortcuts by category
-  const grouped = shortcuts.reduce<Record<ShortcutCategory, Shortcut[]>>(
+  const grouped = visibleShortcuts.reduce<Record<ShortcutCategory, Shortcut[]>>(
     (acc, s) => {
       if (!acc[s.category]) acc[s.category] = [];
       acc[s.category]!.push(s);
@@ -172,8 +193,20 @@ export function KeyboardShortcutsHelp({
           </button>
         </div>
 
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search shortcuts…"
+          aria-label="Search shortcuts"
+          className="mb-4 w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+
         {/* Shortcut groups */}
         <div className="max-h-[60vh] overflow-y-auto space-y-5 pr-1">
+          {visibleShortcuts.length === 0 && (
+            <p className="text-center text-sm text-gray-500">No shortcuts match “{query}”</p>
+          )}
           {(Object.keys(CATEGORY_LABELS) as ShortcutCategory[]).map((category) => {
             const items = grouped[category];
             if (!items || items.length === 0) return null;

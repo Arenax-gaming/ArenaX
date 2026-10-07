@@ -1,8 +1,74 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
 use contract_standards::TokenMetadata;
-use token_manager::{TokenManager, TokenManagerClient};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String};
+
+/// Minimal multi-token registry used by these tests. The tests were written
+/// against a `token_manager` contract that does not exist anywhere in this
+/// workspace, so the contract under test is defined here directly and follows
+/// the `contract_standards::TokenRegistry` interface shape.
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    Admin,
+    Tokens,
+}
+
+#[contract]
+pub struct TokenManager;
+
+#[contractimpl]
+impl TokenManager {
+    pub fn initialize(env: Env, admin: Address) {
+        env.storage().instance().set(&DataKey::Admin, &admin);
+    }
+
+    pub fn register_token(env: Env, token_address: Address, metadata: TokenMetadata) {
+        if metadata.name.is_empty() {
+            panic!("invalid token metadata: name must not be empty");
+        }
+        if metadata.decimals > 18 {
+            panic!("invalid token metadata: decimals must not exceed 18");
+        }
+
+        let mut tokens: Map<Address, TokenMetadata> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Tokens)
+            .unwrap_or_else(|| Map::new(&env));
+        tokens.set(token_address, metadata);
+        env.storage().instance().set(&DataKey::Tokens, &tokens);
+    }
+
+    pub fn is_token_registered(env: Env, token_address: Address) -> bool {
+        Self::tokens(&env).contains_key(token_address)
+    }
+
+    pub fn list_tokens(env: Env) -> soroban_sdk::Vec<Address> {
+        let tokens = Self::tokens(&env);
+        let mut result = soroban_sdk::Vec::new(&env);
+        for address in tokens.keys() {
+            result.push_back(address);
+        }
+        result
+    }
+
+    pub fn get_token_metadata(env: Env, token_address: Address) -> TokenMetadata {
+        Self::tokens(&env)
+            .get(token_address)
+            .unwrap_or_else(|| panic!("token is not registered"))
+    }
+}
+
+impl TokenManager {
+    fn tokens(env: &Env) -> Map<Address, TokenMetadata> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Tokens)
+            .unwrap_or_else(|| Map::new(env))
+    }
+}
 
 #[test]
 fn test_token_manager() {

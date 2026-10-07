@@ -108,6 +108,23 @@
 
     /* Accent colour overrides (set per-user via JS) */
     --accent-primary: var(--primary);
+
+    /* Per-component themed surfaces */
+    --nav-bg: 210 40% 98%;
+    --nav-foreground: 222.2 47.4% 11.2%;
+    --nav-border: 214.3 31.8% 91.4%;
+    --hero-bg: 270 60% 97%;
+    --sidebar-bg: 210 40% 98%;
+    --footer-bg: 210 40% 96.1%;
+    --footer-foreground: 222.2 47.4% 11.2%;
+    --tournament-card-bg: 0 0% 100%;
+    --tournament-card-border: 214.3 31.8% 91.4%;
+    --scoreboard-bg: 210 40% 98%;
+    --leaderboard-bg: 210 40% 96.1%;
+    --table-header-bg: 210 40% 96.1%;
+    --table-stripe-bg: 210 40% 94%;
+    --empty-state-bg: 210 40% 96.1%;
+    --match-row-hover: 210 40% 93%;
   }
 
   .dark {
@@ -154,6 +171,23 @@
     --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
     --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.4);
     --shadow-glow: 0 0 30px hsl(var(--primary) / 0.4);
+
+    /* Per-component themed surfaces */
+    --nav-bg: 222.2 47.4% 11.2%;
+    --nav-foreground: 210 40% 98%;
+    --nav-border: 217.2 32.6% 17.5%;
+    --hero-bg: 273 55% 22%;
+    --sidebar-bg: 217.2 32.6% 14%;
+    --footer-bg: 222.2 47.4% 8%;
+    --footer-foreground: 215 20.2% 65.1%;
+    --tournament-card-bg: 217.2 32.6% 17.5%;
+    --tournament-card-border: 217.2 32.6% 22%;
+    --scoreboard-bg: 217.2 32.6% 14%;
+    --leaderboard-bg: 217.2 32.6% 12%;
+    --table-header-bg: 217.2 32.6% 15%;
+    --table-stripe-bg: 217.2 32.6% 17%;
+    --empty-state-bg: 217.2 32.6% 12%;
+    --match-row-hover: 217.2 32.6% 20%;
   }
 }
 
@@ -357,6 +391,23 @@ html.compact {
     content: "";
     @apply flex-1 border-t border-border;
   }
+
+  /* Per-component surfaces (theme-aware via the tokens above) */
+  .surface-nav          { background-color: hsl(var(--nav-bg)); color: hsl(var(--nav-foreground)); }
+  .surface-nav-border   { border-color: hsl(var(--nav-border)); }
+  .surface-hero         { background-color: hsl(var(--hero-bg)); }
+  .surface-sidebar      { background-color: hsl(var(--sidebar-bg)); }
+  .surface-footer       { background-color: hsl(var(--footer-bg)); color: hsl(var(--footer-foreground)); }
+  .surface-tournament-card {
+    background-color: hsl(var(--tournament-card-bg));
+    border-color: hsl(var(--tournament-card-border));
+  }
+  .surface-scoreboard   { background-color: hsl(var(--scoreboard-bg)); }
+  .surface-leaderboard  { background-color: hsl(var(--leaderboard-bg)); }
+  .surface-table-header { background-color: hsl(var(--table-header-bg)); }
+  .surface-table-stripe { background-color: hsl(var(--table-stripe-bg)); }
+  .surface-empty-state  { background-color: hsl(var(--empty-state-bg)); }
+  .surface-match-row:hover { background-color: hsl(var(--match-row-hover)); }
 }
 
 /* ─── Print styles ──────────────────────────────────────────────────────────── */

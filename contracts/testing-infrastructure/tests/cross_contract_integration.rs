@@ -7,7 +7,6 @@
 ///   4. Error handling between contracts
 ///   5. Gas tracking (instruction-count assertions)
 #[cfg(test)]
-
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     token::StellarAssetClient,
@@ -24,7 +23,7 @@ use virtual_economy::{
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn setup_economy(env: &Env) -> (VirtualEconomyContractClient, Address) {
+fn setup_economy(env: &Env) -> (VirtualEconomyContractClient<'_>, Address) {
     let contract_id = env.register(VirtualEconomyContract, ());
     let client = VirtualEconomyContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
@@ -50,7 +49,7 @@ fn setup_economy(env: &Env) -> (VirtualEconomyContractClient, Address) {
 /// (SAC). Mints `initial_pool` tokens to the staking contract so it can pay
 /// out rewards, and returns the client along with the SAC admin address so
 /// callers can mint tokens to users.
-fn setup_staking(env: &Env) -> (StakingRewardsContractClient, Address, Address) {
+fn setup_staking(env: &Env) -> (StakingRewardsContractClient<'_>, Address, Address) {
     let token_admin = Address::generate(env);
     let sac = env.register_stellar_asset_contract_v2(token_admin.clone());
     let token_addr = sac.address();
@@ -138,7 +137,10 @@ fn test_mint_stake_earn_rewards() {
     env.ledger().set_timestamp(1_000 + ninety_days);
 
     let pending = staking.calculate_rewards(&user, &ninety_days);
-    assert!(pending > 0, "rewards should accrue after 90 days; got {pending}");
+    assert!(
+        pending > 0,
+        "rewards should accrue after 90 days; got {pending}"
+    );
 
     // 1d. Claim rewards
     let claimed = staking.claim_rewards(&user);
@@ -206,7 +208,11 @@ fn test_voting_power_execute_proposal() {
     // "Execute" — in this system the admin mints post-approval as the
     // on-chain execution step; verify it succeeds after the vote passed.
     let beneficiary = Address::generate(&env);
-    economy.mint_currency(&beneficiary, &1_000i128, &String::from_str(&env, "approved"));
+    economy.mint_currency(
+        &beneficiary,
+        &1_000i128,
+        &String::from_str(&env, "approved"),
+    );
     assert_eq!(economy.get_currency_balance(&beneficiary), 1_000);
 
     // Combined governance weight exceeds sum of raw principals
@@ -475,7 +481,10 @@ fn test_staking_early_exit_penalty() {
     env.ledger().set_timestamp(100);
 
     let staking = setup_staking(&env);
-    let pool_before = staking.0.get_staking_info(&Address::generate(&env)).reward_pool;
+    let pool_before = staking
+        .0
+        .get_staking_info(&Address::generate(&env))
+        .reward_pool;
     let user = Address::generate(&env);
 
     let lock: u64 = 365 * 24 * 3600; // 1-year lock
@@ -509,7 +518,10 @@ fn test_gas_mint_currency() {
     economy.mint_currency(&recipient, &10_000i128, &String::from_str(&env, "gas"));
 
     let used = env.cost_estimate().budget().cpu_instruction_cost();
-    assert!(used < 5_000_000, "mint_currency: {used} cpu instructions, expected < 5M");
+    assert!(
+        used < 5_000_000,
+        "mint_currency: {used} cpu instructions, expected < 5M"
+    );
 }
 
 #[test]
@@ -521,7 +533,10 @@ fn test_gas_mint_nft() {
     economy.mint_nft(&owner, &nft_metadata(&env, &owner), &None);
 
     let used = env.cost_estimate().budget().cpu_instruction_cost();
-    assert!(used < 10_000_000, "mint_nft: {used} cpu instructions, expected < 10M");
+    assert!(
+        used < 10_000_000,
+        "mint_nft: {used} cpu instructions, expected < 10M"
+    );
 }
 
 #[test]
@@ -544,7 +559,10 @@ fn test_gas_marketplace_list_and_trade() {
     economy.execute_marketplace_trade(&buyer, &order_id);
 
     let used = env.cost_estimate().budget().cpu_instruction_cost();
-    assert!(used < 30_000_000, "mint+list+trade: {used} cpu instructions, expected < 30M");
+    assert!(
+        used < 30_000_000,
+        "mint+list+trade: {used} cpu instructions, expected < 30M"
+    );
 }
 
 #[test]
@@ -563,5 +581,8 @@ fn test_gas_stake_and_claim() {
     staking.claim_rewards(&user);
 
     let used = env.cost_estimate().budget().cpu_instruction_cost();
-    assert!(used < 20_000_000, "stake+claim: {used} cpu instructions, expected < 20M");
+    assert!(
+        used < 20_000_000,
+        "stake+claim: {used} cpu instructions, expected < 20M"
+    );
 }

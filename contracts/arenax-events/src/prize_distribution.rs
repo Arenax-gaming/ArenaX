@@ -65,12 +65,7 @@ pub fn emit_pool_locked(env: &Env, pool_id: u64, amount_locked: i128) {
     .publish(env);
 }
 
-pub fn emit_payout_executed(
-    env: &Env,
-    pool_id: u64,
-    winners: &Vec<Address>,
-    weights: &Vec<u32>,
-) {
+pub fn emit_payout_executed(env: &Env, pool_id: u64, winners: &Vec<Address>, weights: &Vec<u32>) {
     PayoutExecuted {
         pool_id,
         winners: winners.clone(),

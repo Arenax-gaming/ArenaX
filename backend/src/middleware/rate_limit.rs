@@ -29,6 +29,17 @@
 //! | `read`         | Any other `GET`             | 100   | 60 s   |
 //! | `default`      | Everything else             | configurable (from env) |
 //!
+//! Every bucket — including the fixed tiers above — can be retuned at deploy
+//! time via the `RATE_LIMIT_OVERRIDES` env var, a comma-separated list of
+//! `bucket=limit:window` pairs, e.g.:
+//!
+//! ```text
+//! RATE_LIMIT_OVERRIDES=auth_strict=3:60,tournament=5:120,default=200:60
+//! ```
+//!
+//! Unknown bucket names are ignored; malformed entries are logged and skipped
+//! so a typo cannot break startup. When unset, the built-in limits apply.
+//!
 //! Requests carrying an `admin` role bypass the limiter entirely.
 //!
 //! Tournament writes are deliberately the tightest game bucket at 10/min:
@@ -76,7 +87,7 @@ use redis::aio::ConnectionManager;
 use tracing::warn;
 
 use crate::auth::jwt_service::Claims;
-use crate::config::RateLimitConfig;
+use crate::config::{EndpointLimitOverride, RateLimitConfig};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bucket definitions
@@ -103,6 +114,7 @@ fn resolve_bucket_for(
     path: &str,
     default_limit: u32,
     default_window: u64,
+    overrides: &std::collections::HashMap<String, EndpointLimitOverride>,
 ) -> Bucket {
     // Auth — strict (login, register, refresh are the highest-risk)
     if path == "/api/auth/login"
@@ -151,13 +163,38 @@ fn resolve_bucket_for(
     }
 
     // Default — driven by RateLimitConfig from env
-    Bucket { name: "default", limit: default_limit, window_secs: default_window }
+    let bucket =
+        Bucket { name: "default", limit: default_limit, window_secs: default_window };
+    apply_override(bucket, overrides)
+}
+
+/// Replace a bucket's limit/window with the configured override, if any.
+/// Bucket names are matched case-insensitively because the override map is
+/// lowercased at parse time.
+fn apply_override(
+    bucket: Bucket,
+    overrides: &std::collections::HashMap<String, EndpointLimitOverride>,
+) -> Bucket {
+    match overrides.get(bucket.name) {
+        Some(o) => Bucket { name: bucket.name, limit: o.limit, window_secs: o.window_secs },
+        None => bucket,
+    }
 }
 
 /// Path-only resolution, preserved for callers and tests that predate the
 /// method-aware tiers. Treated as a non-GET request.
-fn resolve_bucket(path: &str, default_limit: u32, default_window: u64) -> Bucket {
-    resolve_bucket_for("POST", path, default_limit, default_window)
+fn resolve_bucket(
+    path: &str,
+    default_limit: u32,
+    default_window: u64,
+) -> Bucket {
+    resolve_bucket_for(
+        "POST",
+        path,
+        default_limit,
+        default_window,
+        &std::collections::HashMap::new(),
+    )
 }
 
 /// Role that skips the limiter entirely.
@@ -332,7 +369,13 @@ where
             }
 
             // ── Resolve bucket ────────────────────────────────────────────────
-            let bucket = resolve_bucket_for(&method, &path, default_limit, default_window);
+            let bucket = resolve_bucket_for(
+                &method,
+                &path,
+                default_limit,
+                default_window,
+                &self.config.overrides,
+            );
 
             // ── Resolve identity (user ID > IP) ───────────────────────────────
             let identity = req
@@ -512,5 +555,54 @@ mod tests {
         let limit: u32 = 5;
         let count: u32 = 10;
         assert_eq!(limit.saturating_sub(count), 0);
+    }
+
+    #[test]
+    fn test_override_applies_to_fixed_bucket() {
+        use crate::config::EndpointLimitOverride;
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "auth_strict".to_string(),
+            EndpointLimitOverride { limit: 3, window_secs: 120 },
+        );
+        let b = resolve_bucket_for("POST", "/api/auth/login", 100, 60, &overrides);
+        assert_eq!(b.name, "auth_strict");
+        assert_eq!(b.limit, 3);
+        assert_eq!(b.window_secs, 120);
+    }
+
+    #[test]
+    fn test_override_applies_to_default_bucket() {
+        use crate::config::EndpointLimitOverride;
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "default".to_string(),
+            EndpointLimitOverride { limit: 250, window_secs: 30 },
+        );
+        let b = resolve_bucket_for("POST", "/api/health", 100, 60, &overrides);
+        assert_eq!(b.name, "default");
+        assert_eq!(b.limit, 250);
+        assert_eq!(b.window_secs, 30);
+    }
+
+    #[test]
+    fn test_unknown_override_names_are_ignored() {
+        use crate::config::EndpointLimitOverride;
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(
+            "nonexistent".to_string(),
+            EndpointLimitOverride { limit: 1, window_secs: 1 },
+        );
+        let b = resolve_bucket_for("POST", "/api/tournaments", 100, 60, &overrides);
+        assert_eq!(b.name, "tournament");
+        assert_eq!(b.limit, 10);
+    }
+
+    #[test]
+    fn test_no_overrides_keeps_builtin_limits() {
+        let overrides = std::collections::HashMap::new();
+        let b = resolve_bucket_for("POST", "/api/staking/stake", 100, 60, &overrides);
+        assert_eq!(b.name, "staking_mutate");
+        assert_eq!(b.limit, 10);
     }
 }

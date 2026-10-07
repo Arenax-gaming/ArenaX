@@ -24,6 +24,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMatchTabStatus } from "@/hooks/useMatchTabStatus";
 
 function isValidHttpUrl(value: string): boolean {
   try {
@@ -38,17 +39,29 @@ interface MatchDetailViewProps {
   match: MatchDetail;
   currentUserId?: string;
   onReportIssue?: () => void;
+  /** True when the current user must act; shown in the browser tab. */
+  isYourTurn?: boolean;
+  /** Unread notification count shown as a favicon badge. */
+  notificationCount?: number;
 }
 
 export function MatchDetailView({
   match,
   currentUserId,
   onReportIssue,
+  isYourTurn,
+  notificationCount,
 }: MatchDetailViewProps) {
   const isWinner = match.winnerId === currentUserId;
   const player1Won = match.winnerId === match.player1Id;
   const player2Won = match.winnerId === match.player2Id;
   const isDisputed = match.status === "disputed";
+
+  useMatchTabStatus({
+    active: match.status === "pending" || match.status === "in_progress",
+    isYourTurn,
+    notificationCount,
+  });
 
   const replayUrl = match.replayUrl?.trim() ?? "";
   const hasReplay = replayUrl.length > 0 && isValidHttpUrl(replayUrl);

@@ -107,8 +107,8 @@ impl PaymentProviderKind {
 
     pub fn build(self) -> Arc<dyn PaymentProvider> {
         match self {
-            Self::Paystack => Arc::new(PaystackProvider),
-            Self::Flutterwave => Arc::new(FlutterwaveProvider),
+            Self::Paystack => Arc::new(PaystackProvider::default()),
+            Self::Flutterwave => Arc::new(FlutterwaveProvider::default()),
         }
     }
 }

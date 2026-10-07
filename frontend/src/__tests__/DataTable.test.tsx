@@ -110,10 +110,12 @@ describe('DataTable', () => {
     render(<DataTable columns={columns} data={testData} pinnedColumns={['name']} />);
 
     const header = screen.getByRole('columnheader', { name: 'Name' });
-    expect(header).toHaveStyle({ position: 'sticky' });
+    // jsdom has no stylesheet, so assert on the utility class that produces
+    // `position: sticky` rather than the computed style.
+    expect(header.className).toContain('sticky');
 
     const cell = screen.getByText('Alice Johnson').closest('td')!;
-    expect(cell).toHaveStyle({ position: 'sticky' });
+    expect(cell.className).toContain('sticky');
   });
 
   it('does not pin columns that are not listed in pinnedColumns', () => {

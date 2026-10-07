@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   mockAuthHandlers,
+  mockAuthCookie,
   mockWalletHandlers,
   mockNotificationHandlers,
 } from "./mocks/handlers";
@@ -22,6 +23,9 @@ test.describe("Wallet journeys", () => {
     await mockAuthHandlers(page);
     await mockWalletHandlers(page);
     await mockNotificationHandlers(page);
+    // Middleware enforces auth server-side from the auth_token cookie (it
+    // cannot see localStorage) — seed it so protected routes load.
+    await mockAuthCookie(page);
   });
 
   test("wallet page loads and prompts to connect wallet when disconnected", async ({ page }) => {
@@ -90,7 +94,7 @@ test.describe("Wallet journeys", () => {
 
   test("initiate withdraw flow fills amount and submits", async ({ page }) => {
     let withdrawCalled = false;
-    await page.route("**/api/wallet/withdraw", (route) => {
+    await page.route("**/api/v1/wallet/withdraw", (route) => {
       withdrawCalled = true;
       return route.fulfill({
         status: 200,

@@ -353,11 +353,21 @@ pub struct LpPerformanceRecorded {
 }
 
 pub fn emit_lp_pool_created(env: &Env, pool_id: u32, reward_rate_bps: u32, il_protection_bps: u32) {
-    LpPoolCreated { pool_id, reward_rate_bps, il_protection_bps }.publish(env);
+    LpPoolCreated {
+        pool_id,
+        reward_rate_bps,
+        il_protection_bps,
+    }
+    .publish(env);
 }
 
 pub fn emit_lp_deposited(env: &Env, user: &Address, pool_id: u32, amount: i128) {
-    LpDeposited { user: user.clone(), pool_id, amount }.publish(env);
+    LpDeposited {
+        user: user.clone(),
+        pool_id,
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emit_lp_withdrawn(
@@ -381,21 +391,43 @@ pub fn emit_lp_withdrawn(
 }
 
 pub fn emit_lp_rewards_claimed(env: &Env, user: &Address, pool_id: u32, rewards: i128, fees: i128) {
-    LpRewardsClaimed { user: user.clone(), pool_id, rewards, fees }.publish(env);
+    LpRewardsClaimed {
+        user: user.clone(),
+        pool_id,
+        rewards,
+        fees,
+    }
+    .publish(env);
 }
 
 pub fn emit_lp_fee_deposited(env: &Env, pool_id: u32, amount: i128, cumulative_fees: i128) {
-    LpFeeDeposited { pool_id, amount, cumulative_fees }.publish(env);
+    LpFeeDeposited {
+        pool_id,
+        amount,
+        cumulative_fees,
+    }
+    .publish(env);
 }
 
 pub fn emit_lp_il_protection_paid(env: &Env, user: &Address, pool_id: u32, amount: i128) {
-    LpIlProtectionPaid { user: user.clone(), pool_id, amount }.publish(env);
+    LpIlProtectionPaid {
+        user: user.clone(),
+        pool_id,
+        amount,
+    }
+    .publish(env);
 }
 
 pub fn emit_lp_rate_changed(env: &Env, pool_id: u32, old_rate_bps: u32, new_rate_bps: u32) {
-    LpRateChanged { pool_id, old_rate_bps, new_rate_bps }.publish(env);
+    LpRateChanged {
+        pool_id,
+        old_rate_bps,
+        new_rate_bps,
+    }
+    .publish(env);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn emit_lp_performance_recorded(
     env: &Env,
     user: &Address,

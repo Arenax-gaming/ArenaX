@@ -2,17 +2,51 @@
 //!
 //! This module implements configurable slashing of validator stakes with:
 //! - Severity-based slash amounts (levels 0-4)
-//! - Burn/pool split of slashed tokens
-//! - Appeal window and resolution flow
+//! - Configurable burn/treasury split of slashed tokens
+//! - Treasury receives slash proceeds via on-chain token transfer (#920)
+//! - Human-readable slash rationale logged on-chain (#920)
+//! - Appeal window and resolution flow (recovery after period) (#920)
 //! - Immutable slash records stored per slash ID
-//! - Per-validator slash history
+//! - Per-validator slash history with total slashed counter
+//!
+//! # Economic penalty flow (issue #920)
+//!
+//! When a validator is slashed:
+//!   1. The `slash_amount` for the given severity is deducted from
+//!      `UserStakeInfo.total_staked` (capped at available stake).
+//!   2. `burn_bps` of that amount is transferred to the admin address
+//!      (to be burned by the AX-token contract) via `token::Client::transfer`.
+//!   3. The remainder is transferred to `SlashConfig.treasury_address` so
+//!      the DAO treasury contract receives real on-chain tokens (#920: treasury
+//!      receives slash).
+//!   4. A `SlashRecord` with a human-readable `rationale` string is written
+//!      to persistent storage (#920: slash rationale logged).
+//!   5. `ValidatorSlashHistory` totals are updated.
+//!   6. Events are emitted for off-chain indexers.
+//!
+//! # Recovery / appeal (#920: recovery after period)
+//!
+//! Within `appeal_window_seconds` of the slash, the validator may call
+//! `appeal_slash` providing a numeric reason code and a human-readable
+//! rationale string.  An admin then calls `resolve_appeal(grant=true)` to
+//! reverse all token movements (treasury sends tokens back to the contract,
+//! which credits the validator's `total_staked`) or
+//! `resolve_appeal(grant=false)` to deny and close the appeal permanently.
+//!
+//! # Appeal mechanism (#920: appeal mechanism)
+//!
+//! The appeal flow is:
+//!   validator → `appeal_slash(slash_id, reason, rationale)` → pending
+//!   admin    → `resolve_appeal(slash_id, grant=true|false)` → resolved
+//!
+//! If granted, tokens are restored; if denied, the slash stands permanently.
 
 use crate::{
     AppealRecord, DataKey, SlashConfig, SlashRecord, UserStakeInfo, ValidatorSlashHistory,
 };
 use arenax_events::slashing as slash_events;
 use arenax_events::staking as stake_events;
-use soroban_sdk::{Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{token, Address, Bytes, BytesN, Env, String, Vec};
 
 /// Provides all validator penalty operations. Methods are static helpers
 /// called from the `StakingManager` contract-impl block in `lib.rs`.
@@ -23,11 +57,19 @@ impl ValidatorPenaltyManager {
 
     /// Store a new slash configuration. Admin-only — caller must have
     /// already called `admin.require_auth()` in the contract-impl layer.
+    ///
+    /// # Parameters
+    /// - `config.enabled`           — master on/off switch
+    /// - `config.slash_amounts`     — one amount per severity level (0-4)
+    /// - `config.burn_bps`          — fraction burned (rest to treasury)
+    /// - `config.appeal_window_seconds` — time for validator to appeal
+    /// - `config.ax_token`          — AX token contract for real transfers
+    /// - `config.treasury_address`  — treasury contract that receives slash
     pub fn configure_slashing(env: &Env, config: SlashConfig) {
         if config.burn_bps > 10_000 {
             panic!("burn_bps exceeds 100%");
         }
-        if config.slash_amounts.len() == 0 {
+        if config.slash_amounts.is_empty() {
             panic!("slash_amounts must not be empty");
         }
         env.storage()
@@ -36,6 +78,9 @@ impl ValidatorPenaltyManager {
     }
 
     /// Read the current slash config. Returns `None` if not yet configured.
+    // Kept for upcoming admin query endpoints; not yet wired into the
+    // contract-impl block.
+    #[allow(dead_code)]
     pub fn get_slash_config(env: &Env) -> Option<SlashConfig> {
         env.storage().instance().get(&DataKey::ValidatorSlashConfig)
     }
@@ -45,18 +90,20 @@ impl ValidatorPenaltyManager {
     /// Slash a validator for the given `severity` (0-4) using the configured
     /// slash amount for that severity. Returns the `slash_id`.
     ///
-    /// - Deducts from `UserStakeInfo.total_staked`; if stake is
-    ///   insufficient, slashes what is available.
-    /// - Burns `amount * burn_bps / 10_000` (tracked via `DataKey::BurnedSupply`
-    ///   counter — no token-burn call because no token client is available here).
-    /// - Routes the rest into `DataKey::RewardPool`.
-    /// - Records a `SlashRecord` and updates `ValidatorSlashHistory`.
+    /// ### Token flow
+    /// The slashed tokens are transferred **out of this staking contract**:
+    /// - `burn_amount` → admin address (for the admin to call `ax_token.burn`)
+    /// - `treasury_amount` → `config.treasury_address` (real on-chain transfer)
+    ///
+    /// This satisfies the "treasury receives slash" acceptance criterion (#920).
     pub fn slash_validator(
         env: &Env,
         admin: Address,
         validator: Address,
         severity: u32,
         reason: u32,
+        rationale: String,
+        signers: Option<Vec<Address>>,
     ) -> BytesN<32> {
         admin.require_auth();
 
@@ -71,6 +118,63 @@ impl ValidatorPenaltyManager {
         }
         if severity as usize >= config.slash_amounts.len() as usize {
             panic!("invalid severity level");
+        }
+
+        // Severity 4 (maximum) requires 2-of-N multi-sig from registered governance signers (#1061)
+        if severity == 4 {
+            let multisig_signers = signers.expect("severity 4 requires 2-of-N multisig signers");
+            if multisig_signers.len() < 2 {
+                panic!("severity 4 requires at least 2 signers");
+            }
+
+            let registered: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::GovernanceSigners)
+                .unwrap_or_else(|| Vec::new(env));
+
+            let mut verified_count: u32 = 0;
+            let mut seen: Vec<Address> = Vec::new(env);
+
+            for i in 0..multisig_signers.len() {
+                let signer = multisig_signers.get(i).unwrap();
+                if seen.contains(&signer) {
+                    continue;
+                }
+                seen.push_back(signer.clone());
+
+                if registered.contains(&signer) {
+                    signer.require_auth();
+                    verified_count += 1;
+                }
+            }
+
+            if verified_count < 2 {
+                panic!("severity 4 requires at least 2 registered governance signers");
+            }
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Check slashing cooldown (#1061)
+        let mut history: ValidatorSlashHistory = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ValidatorSlashRecord(validator.clone()))
+            .unwrap_or(ValidatorSlashHistory {
+                validator: validator.clone(),
+                total_slashed: 0,
+                slash_count: 0,
+                slash_ids: Vec::new(env),
+                active_appeal: None,
+                last_slash_time: 0,
+            });
+
+        if history.slash_count > 0
+            && config.min_slash_interval_seconds > 0
+            && now < history.last_slash_time + config.min_slash_interval_seconds
+        {
+            panic!("slash cooldown active");
         }
 
         let requested_amount = config
@@ -101,32 +205,21 @@ impl ValidatorPenaltyManager {
 
         let now = env.ledger().timestamp();
 
-        // Split: burn portion tracked via counter; rest added to reward pool
+        // Split: burn_bps fraction goes to admin for burning; rest to treasury
         let burn_amount = actual_amount * config.burn_bps as i128 / 10_000;
-        let pool_amount = actual_amount - burn_amount;
+        let treasury_amount = actual_amount - burn_amount;
 
-        // Track burned supply (no token call — just accounting)
+        let contract_addr = env.current_contract_address();
+        let ax_client = token::Client::new(env, &config.ax_token);
+
+        // Transfer burn portion to admin address (admin burns via ax_token.burn)
         if burn_amount > 0 {
-            let burned: i128 = env
-                .storage()
-                .instance()
-                .get(&DataKey::BurnedSupply)
-                .unwrap_or(0);
-            env.storage()
-                .instance()
-                .set(&DataKey::BurnedSupply, &(burned + burn_amount));
+            ax_client.transfer(&contract_addr, &admin, &burn_amount);
         }
 
-        // Add pool portion to reward pool
-        if pool_amount > 0 {
-            let pool: i128 = env
-                .storage()
-                .instance()
-                .get(&DataKey::RewardPool)
-                .unwrap_or(0);
-            env.storage()
-                .instance()
-                .set(&DataKey::RewardPool, &(pool + pool_amount));
+        // Transfer treasury portion to the treasury contract (#920: treasury receives slash)
+        if treasury_amount > 0 {
+            ax_client.transfer(&contract_addr, &config.treasury_address, &treasury_amount);
         }
 
         // Generate a unique slash_id from the current counter
@@ -141,44 +234,57 @@ impl ValidatorPenaltyManager {
 
         let slash_id = Self::counter_to_bytes_n(env, counter);
 
-        // Persist the slash record keyed by slash_id
+        // Persist the slash record keyed by slash_id (#920: slash rationale logged)
         let record = SlashRecord {
             slash_id: slash_id.clone(),
             validator: validator.clone(),
             amount: actual_amount,
             severity,
             reason,
+            rationale,
             slashed_at: now,
             burned_amount: burn_amount,
-            pool_amount,
+            treasury_amount,
             appealed: false,
             appeal_resolved: false,
             appeal_granted: false,
         };
+
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Update the validator's slash history
-        let mut history: ValidatorSlashHistory = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ValidatorSlashRecord(validator.clone()))
-            .unwrap_or(ValidatorSlashHistory {
-                validator: validator.clone(),
-                total_slashed: 0,
-                slash_count: 0,
-                slash_ids: Vec::new(env),
-                active_appeal: None,
-            });
         history.total_slashed += actual_amount;
         history.slash_count += 1;
         history.slash_ids.push_back(slash_id.clone());
+        history.last_slash_time = now;
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorSlashRecord(validator.clone()), &history);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorSlashRecord(validator.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
-        // Emit events
+        // Emit staking-domain event
         stake_events::emit_slashed(
             env,
             &validator,
@@ -187,8 +293,7 @@ impl ValidatorPenaltyManager {
             &admin,
         );
 
-        // Emit a slashing-domain event with the slash_id as the case_id,
-        // and a zero evidence hash (no ZK proof at this layer)
+        // Emit slashing-domain event with the slash_id as the case_id
         slash_events::emit_case_opened(
             env,
             &slash_id,
@@ -204,8 +309,17 @@ impl ValidatorPenaltyManager {
     // ── Appeal ───────────────────────────────────────────────────────────────
 
     /// Submit an appeal for a slash. Only the slashed validator may appeal,
-    /// and only within the configured `appeal_window_seconds`.
-    pub fn appeal_slash(env: &Env, validator: Address, slash_id: BytesN<32>, reason: u32) {
+    /// and only within the configured `appeal_window_seconds` (#920: appeal mechanism).
+    ///
+    /// `reason` is a numeric code; `appeal_rationale` is a human-readable
+    /// justification stored immutably on-chain.
+    pub fn appeal_slash(
+        env: &Env,
+        validator: Address,
+        slash_id: BytesN<32>,
+        reason: u32,
+        appeal_rationale: String,
+    ) {
         validator.require_auth();
 
         let config: SlashConfig = env
@@ -227,22 +341,44 @@ impl ValidatorPenaltyManager {
             panic!("already appealed");
         }
 
+        // Zero appeal_window_seconds means appeals are disabled for this config
+        if config.appeal_window_seconds == 0 {
+            panic!("appeals are disabled");
+        }
+
         let now = env.ledger().timestamp();
         if now > record.slashed_at + config.appeal_window_seconds {
             panic!("appeal window expired");
         }
+
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
 
         // Mark the record as appealed
         record.appealed = true;
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
-        // Create the appeal record keyed by slash_id
+        // Create the appeal record keyed by slash_id (#920: appeal mechanism)
         let appeal = AppealRecord {
             slash_id: slash_id.clone(),
             appellant: validator.clone(),
             appeal_reason: reason,
+            appeal_rationale,
             submitted_at: now,
             resolved: false,
             granted: false,
@@ -250,6 +386,11 @@ impl ValidatorPenaltyManager {
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppeal(slash_id.clone()), &appeal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppeal(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
 
         // Update history: mark active appeal
         let mut history: ValidatorSlashHistory = env
@@ -261,14 +402,24 @@ impl ValidatorPenaltyManager {
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorSlashRecord(validator.clone()), &history);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorSlashRecord(validator.clone()),
+            min_ttl,
+            target_ttl,
+        );
     }
 
     // ── Resolve Appeal ───────────────────────────────────────────────────────
 
     /// Resolve an appeal for a slash. Admin-only.
-    /// If `grant = true`, the slashed amount is restored to the validator's
-    /// `UserStakeInfo.total_staked` and removed from the reward pool / burn
-    /// tracking.
+    ///
+    /// If `grant = true`, the slashed amount is restored to the validator
+    /// (#920: recovery after period):
+    ///   - Treasury sends back the `treasury_amount` to this contract
+    ///   - Admin sends back the `burned_amount` to this contract
+    ///   - `UserStakeInfo.total_staked` is increased by the full original amount
+    ///
+    /// If `grant = false`, the slash stands and the appeal is permanently closed.
     pub fn resolve_appeal(env: &Env, admin: Address, slash_id: BytesN<32>, grant: bool) {
         admin.require_auth();
 
@@ -297,11 +448,33 @@ impl ValidatorPenaltyManager {
         record.appeal_resolved = true;
         record.appeal_granted = grant;
 
-        // If the appeal is granted, reverse the slash accounting
+        // If the appeal is granted, reverse all token movements (#920: recovery after period)
         if grant {
-            let restored = record.amount;
+            let config: SlashConfig = env
+                .storage()
+                .instance()
+                .get(&DataKey::ValidatorSlashConfig)
+                .expect("slash config not set");
 
-            // Restore to the validator's total_staked
+            let restored = record.amount;
+            let contract_addr = env.current_contract_address();
+            let ax_client = token::Client::new(env, &config.ax_token);
+
+            // Treasury sends back the non-burned portion
+            if record.treasury_amount > 0 {
+                ax_client.transfer(
+                    &config.treasury_address,
+                    &contract_addr,
+                    &record.treasury_amount,
+                );
+            }
+
+            // Admin sends back the burned portion
+            if record.burned_amount > 0 {
+                ax_client.transfer(&admin, &contract_addr, &record.burned_amount);
+            }
+
+            // Restore the validator's total_staked
             let mut stake_info: UserStakeInfo = env
                 .storage()
                 .instance()
@@ -320,31 +493,6 @@ impl ValidatorPenaltyManager {
                 &stake_info,
             );
 
-            // Reverse burn supply counter
-            if record.burned_amount > 0 {
-                let burned: i128 = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::BurnedSupply)
-                    .unwrap_or(0);
-                env.storage().instance().set(
-                    &DataKey::BurnedSupply,
-                    &(burned - record.burned_amount).max(0),
-                );
-            }
-
-            // Remove pool portion from reward pool
-            if record.pool_amount > 0 {
-                let pool: i128 = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::RewardPool)
-                    .unwrap_or(0);
-                env.storage()
-                    .instance()
-                    .set(&DataKey::RewardPool, &(pool - record.pool_amount).max(0));
-            }
-
             // Update history totals
             let mut history: ValidatorSlashHistory = env
                 .storage()
@@ -357,7 +505,33 @@ impl ValidatorPenaltyManager {
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 &history,
             );
+            let min_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlMinLedgers)
+                .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+            let target_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlTargetLedgers)
+                .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+            env.storage().persistent().extend_ttl(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                min_ttl,
+                target_ttl,
+            );
         } else {
+            let min_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlMinLedgers)
+                .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+            let target_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlTargetLedgers)
+                .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
+
             // Denied — clear the active appeal on history
             let mut history: ValidatorSlashHistory = env
                 .storage()
@@ -369,14 +543,40 @@ impl ValidatorPenaltyManager {
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 &history,
             );
+            env.storage().persistent().extend_ttl(
+                &DataKey::ValidatorSlashRecord(record.validator.clone()),
+                min_ttl,
+                target_ttl,
+            );
         }
+
+        let min_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlMinLedgers)
+            .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+        let target_ttl = env
+            .storage()
+            .instance()
+            .get(&DataKey::TtlTargetLedgers)
+            .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
 
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppeal(slash_id.clone()), &appeal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppeal(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
         env.storage()
             .persistent()
             .set(&DataKey::ValidatorAppealRecord(slash_id.clone()), &record);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ValidatorAppealRecord(slash_id.clone()),
+            min_ttl,
+            target_ttl,
+        );
     }
 
     // ── Views ────────────────────────────────────────────────────────────────
@@ -405,6 +605,7 @@ impl ValidatorPenaltyManager {
                 slash_count: 0,
                 slash_ids: Vec::new(env),
                 active_appeal: None,
+                last_slash_time: 0,
             });
 
         let max_limit = 50u32;
@@ -443,14 +644,18 @@ impl ValidatorPenaltyManager {
             .get(&DataKey::ValidatorAppealRecord(slash_id))
     }
 
+    /// Return the `AppealRecord` for a given `slash_id`, or `None`.
+    pub fn get_appeal_record(env: &Env, slash_id: BytesN<32>) -> Option<AppealRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ValidatorAppeal(slash_id))
+    }
+
     // ── Internal helpers ─────────────────────────────────────────────────────
 
-    /// Encode a `u64` counter into a 32-byte identifier using a simple
-    /// SHA-256 hash so each counter value produces a unique, unpredictable
-    /// slash ID.
+    /// Encode a `u64` counter into a 32-byte identifier using a SHA-256 hash
+    /// so each counter value produces a unique, unpredictable slash ID.
     fn counter_to_bytes_n(env: &Env, counter: u64) -> BytesN<32> {
-        // Build an 8-byte Bytes value from the counter's big-endian
-        // representation, then hash it.
         let be = counter.to_be_bytes();
         let mut raw = Bytes::new(env);
         for b in be.iter() {

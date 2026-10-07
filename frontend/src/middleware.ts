@@ -1,25 +1,19 @@
+import createMiddleware from "next-intl/middleware";
 import { NextRequest, NextResponse } from "next/server";
+import { routing } from "./i18n/routing";
+import { NONCE_HEADER, buildContentSecurityPolicy, cspHeaderName, generateNonce } from "./lib/csp";
 
-/**
- * ArenaX Route Protection Middleware (Edge Runtime).
- *
- * Runs on every request matched by the config.matcher below.
- * Enforces authentication and role requirements before the page renders.
- *
- * Protection layers applied in order:
- *  1. Token absent            → redirect to /[locale]/login?redirect=<path>
- *  2. Token malformed         → redirect to /[locale]/login
- *  3. Token expired           → redirect to /[locale]/login?reason=expired
- *  4. Signature invalid       → redirect to /[locale]/login  (when JWT_SECRET set)
- *  5. Admin route, non-admin  → redirect to /[locale]/admin/access-denied
- *  6. All checks pass         → forward with x-user-id / x-user-roles headers
- *
- * The backend verifies signatures on every API call; this middleware is
- * defence-in-depth and UX (avoid a server round-trip before redirecting).
- */
+const intlMiddleware = createMiddleware(routing);
 
 // ---------------------------------------------------------------------------
 // JWT helpers (Edge-safe — no Node.js APIs)
+//
+// This file MUST live at src/middleware.ts (not the project root): with a
+// src/ app directory Next.js only loads middleware from src/, so the previous
+// root-level middleware (next-intl + CSP) never executed — locale routing
+// never ran ("Unable to find `next-intl` locale"), "/" never redirected to
+// "/en", and Playwright's webServer probe timed out. Both concerns now live
+// here: intl first, then auth.
 // ---------------------------------------------------------------------------
 
 function base64UrlDecode(input: string): string {
@@ -89,10 +83,6 @@ function extractToken(request: NextRequest): string | null {
   if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
   return request.cookies.get("auth_token")?.value ?? null;
 }
-
-// ---------------------------------------------------------------------------
-// Route classification (locale-agnostic)
-// ---------------------------------------------------------------------------
 
 /** Supported locale codes — keep in sync with src/i18n/routing.ts */
 const SUPPORTED_LOCALES = ["en", "es", "ar", "fr", "yo"] as const;
@@ -169,84 +159,163 @@ function classifyRoute(path: string): RouteType {
   return "auth";
 }
 
-// ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
+/**
+ * Combined next-intl + route-protection + CSP-nonce middleware.
+ *
+ * Order:
+ *  1. next-intl locale handling (redirects "/" → "/en", sets locale cookie).
+ *     Redirect responses are returned immediately (with CSP header).
+ *  2. Auth / role guards (previously in src/middleware.ts).
+ *  3. CSP nonce + user-context forwarding via request headers for Server
+ *     Components.
+ *
+ * Chaining note: next-intl communicates the resolved locale to the render via
+ * a REWRITE carrying an `X-NEXT-INTL-LOCALE` request header
+ * (`x-middleware-rewrite` + `x-middleware-request-*` response headers). Simply
+ * returning a fresh `NextResponse.next()` drops that rewrite, so
+ * `getRequestConfig` logs "Unable to find `next-intl` locale" and calls
+ * `notFound()`. We therefore re-issue intl's rewrite (when present) with our
+ * headers merged in, and set `X-NEXT-INTL-LOCALE` explicitly.
+ */
+export default async function middleware(request: NextRequest) {
+  const intlResponse = intlMiddleware(request);
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+  const nonce = generateNonce();
+  const isDev = process.env.NODE_ENV !== "production";
+  const csp = buildContentSecurityPolicy(nonce);
+  const headerName = cspHeaderName(isDev);
+
+  // A locale redirect (e.g. "/" -> "/en"): nothing renders on this response,
+  // so there's no nonce to forward — just carry the CSP header along.
+  if (intlResponse.status >= 300 && intlResponse.status < 400) {
+    intlResponse.headers.set(headerName, csp);
+    return intlResponse;
+  }
+
+  // ── Auth / role guards (locale-aware) ────────────────────────────────────
   const { pathname } = request.nextUrl;
   const locale = detectLocale(pathname);
   const strippedPath = stripLocale(pathname);
   const routeType = classifyRoute(strippedPath);
 
-  // Public routes pass straight through
-  if (routeType === "public") {
-    return NextResponse.next();
-  }
+  const authRedirect = async (): Promise<NextResponse | null> => {
+    if (routeType === "public") return null;
 
-  // Build locale-aware login redirect URL
-  const loginUrl = new URL(`/${locale}/login`, request.url);
-  loginUrl.searchParams.set("redirect", pathname);
+    const loginUrl = new URL(`/${locale}/login`, request.url);
+    loginUrl.searchParams.set("redirect", pathname);
 
-  // ── 1. Token extraction ───────────────────────────────────────────────────
-  const token = extractToken(request);
-  if (!token) {
-    return NextResponse.redirect(loginUrl);
-  }
+    const deny = (url: URL): NextResponse => {
+      const redirect = NextResponse.redirect(url);
+      redirect.headers.set(headerName, csp);
+      copyIntlMeaningfulHeaders(intlResponse, redirect, headerName);
+      return redirect;
+    };
 
-  // ── 2. Payload parsing ────────────────────────────────────────────────────
-  const payload = parseJwtPayload(token);
-  if (!payload) {
-    return NextResponse.redirect(loginUrl);
-  }
+    const token = extractToken(request);
+    if (!token) return deny(loginUrl);
 
-  // ── 3. Expiry check ───────────────────────────────────────────────────────
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp !== undefined && payload.exp < now) {
-    loginUrl.searchParams.set("reason", "expired");
-    return NextResponse.redirect(loginUrl);
-  }
+    const payload = parseJwtPayload(token);
+    if (!payload) return deny(loginUrl);
 
-  // ── 4. Signature verification (optional, requires env var) ────────────────
-  const jwtSecret = process.env.JWT_SECRET ?? process.env.ADMIN_JWT_SECRET;
-  if (jwtSecret) {
-    const valid = await verifyJwtSignature(token, jwtSecret);
-    if (!valid) {
-      return NextResponse.redirect(loginUrl);
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp !== undefined && payload.exp < now) {
+      loginUrl.searchParams.set("reason", "expired");
+      return deny(loginUrl);
     }
-  }
 
-  // ── 5. Role enforcement for admin routes ──────────────────────────────────
-  const roles: string[] = Array.isArray(payload.roles) ? payload.roles : [];
+    const jwtSecret = process.env.JWT_SECRET ?? process.env.ADMIN_JWT_SECRET;
+    if (jwtSecret) {
+      const valid = await verifyJwtSignature(token, jwtSecret);
+      if (!valid) return deny(loginUrl);
+    }
 
-  if (routeType === "admin" && !roles.includes("admin")) {
-    const deniedUrl = new URL(`/${locale}/admin/access-denied`, request.url);
-    return NextResponse.redirect(deniedUrl);
-  }
+    const roles: string[] = Array.isArray(payload.roles) ? payload.roles : [];
+    if (routeType === "admin" && !roles.includes("admin")) {
+      return deny(new URL(`/${locale}/admin/access-denied`, request.url));
+    }
 
-  // ── 6. Forward with user context headers ─────────────────────────────────
-  const response = NextResponse.next();
-  response.headers.set("x-user-id", String(payload.sub ?? ""));
+    return null;
+  };
+
+  const redirect = await authRedirect();
+  if (redirect) return redirect;
+
+  // Auth passed (or public route) — forward locale + nonce + user context.
+  const token = routeType === "public" ? null : extractToken(request);
+  const payload = token ? parseJwtPayload(token) : null;
+  const roles: string[] =
+    payload && Array.isArray(payload.roles) ? payload.roles : [];
+
+  // Prefer the locale next-intl itself resolved (forwarded on its rewrite);
+  // fall back to the pathname prefix (identical for localePrefix: "always").
+  const intlLocale = intlResponse.headers.get(
+    "x-middleware-request-x-next-intl-locale"
+  );
+  const requestLocale =
+    intlLocale && (SUPPORTED_LOCALES as readonly string[]).includes(intlLocale)
+      ? intlLocale
+      : locale;
+
+  const requestHeaders = new Headers(request.headers);
+  // Preserve the locale resolved by next-intl so getRequestConfig finds it.
+  requestHeaders.set("X-NEXT-INTL-LOCALE", requestLocale);
+  requestHeaders.set(NONCE_HEADER, nonce);
+  requestHeaders.set(headerName, csp);
+  requestHeaders.set("x-user-id", String(payload?.sub ?? ""));
+  requestHeaders.set("x-user-roles", roles.join(","));
+  requestHeaders.set("x-locale", locale);
+
+  // Re-issue intl's rewrite (if any) with our merged headers so the locale
+  // header actually reaches the render; otherwise plain pass-through.
+  const rewriteTarget = intlResponse.headers.get("x-middleware-rewrite");
+  const response = rewriteTarget
+    ? NextResponse.rewrite(new URL(rewriteTarget, request.url), {
+        request: { headers: requestHeaders },
+      })
+    : NextResponse.next({ request: { headers: requestHeaders } });
+
+  copyIntlMeaningfulHeaders(intlResponse, response, headerName);
+  response.headers.set(headerName, csp);
+  response.headers.set("x-user-id", String(payload?.sub ?? ""));
   response.headers.set("x-user-roles", roles.join(","));
   response.headers.set("x-locale", locale);
   return response;
 }
 
-// ---------------------------------------------------------------------------
-// Route matcher — run on all non-static paths
-// Note: this file is src/middleware.ts and is distinct from the top-level
-// middleware.ts which handles next-intl locale routing. Both are composed
-// by Next.js automatically since src/ middleware takes precedence.
-// ---------------------------------------------------------------------------
+/**
+ * Copy next-intl's meaningful response headers (locale cookie, alternate
+ * links) onto our chained response. The `x-middleware-*` internals are
+ * regenerated from the request headers we pass to `next()`/`rewrite()`, so
+ * they must NOT be copied (they would describe intl's header set, not ours).
+ */
+function copyIntlMeaningfulHeaders(
+  from: NextResponse,
+  to: NextResponse,
+  cspHeaderName: string
+): void {
+  from.headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (lower.startsWith("x-middleware-")) return;
+    if (lower === cspHeaderName.toLowerCase()) return;
+    // set-cookie is handled below via getSetCookie() (forEach would join
+    // multiple cookies with commas, corrupting them).
+    if (lower === "set-cookie") return;
+    if (!to.headers.has(key)) to.headers.set(key, value);
+  });
+  const getSetCookie =
+    typeof (from.headers as Headers & { getSetCookie?: () => string[] })
+      .getSetCookie === "function"
+      ? (
+          from.headers as Headers & { getSetCookie: () => string[] }
+        ).getSetCookie()
+      : [];
+  for (const cookie of getSetCookie) {
+    if (!to.headers.get("set-cookie")?.includes(cookie.split(";")[0])) {
+      to.headers.append("set-cookie", cookie);
+    }
+  }
+}
+
 export const config = {
-  matcher: [
-    /*
-     * Match all paths EXCEPT:
-     *  - _next/static  (static assets)
-     *  - _next/image   (image optimisation)
-     *  - favicon.ico, manifest.json, icons/, public assets
-     *  - API routes (handled by backend guards)
-     */
-    "/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|icons/|api/).*)",
-  ],
+  matcher: ["/((?!api|_next|_vercel|.*\\..*).*)"],
 };

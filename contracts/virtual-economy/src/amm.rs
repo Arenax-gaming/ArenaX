@@ -49,6 +49,7 @@ pub const MINIMUM_LIQUIDITY: i128 = 1_000;
 
 /// Cap on `slippage_bps` so a caller cannot disable slippage protection by
 /// passing a nonsensical tolerance.
+#[allow(dead_code)] // referenced by future slippage guards; kept public for API stability
 pub const MAX_SLIPPAGE_BPS: i128 = 5_000; // 50%
 
 /// A two-asset constant-product pool.

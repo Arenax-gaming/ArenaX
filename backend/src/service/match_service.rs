@@ -530,7 +530,13 @@ impl MatchService {
 
         Ok(PlayerInfo {
             id: user.id,
-            username: user.username,
+            // Deleted (GDPR-erased) users surface as "Deleted Player" so match
+            // history stays readable without leaking a personal identifier.
+            username: if user.deleted_at.is_some() {
+                "Deleted Player".to_string()
+            } else {
+                user.username
+            },
             elo_rating,
             avatar_url: user.avatar_url,
         })

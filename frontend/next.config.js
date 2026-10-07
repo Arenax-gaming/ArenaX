@@ -10,6 +10,17 @@ try {
   console.warn("[next.config] next-pwa unavailable, running without PWA");
 }
 
+// next-intl App Router plugin: wires ./src/i18n/request.ts so `next build`
+// can resolve the request config (without this, builds fail with
+// "Couldn't find next-intl config file").
+let withNextIntl = (config) => config;
+try {
+  const createNextIntlPlugin = require("next-intl/plugin");
+  withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+} catch {
+  console.warn("[next.config] next-intl plugin unavailable, running without i18n");
+}
+
 // Content-Security-Policy is no longer set here (#1091): a static policy
 // can't carry a per-request nonce, so it had to allow 'unsafe-inline'
 // 'unsafe-eval' in script-src — defeating CSP's script protection entirely.
@@ -206,4 +217,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withPWA(nextConfig);
+module.exports = withNextIntl(withPWA(nextConfig));
