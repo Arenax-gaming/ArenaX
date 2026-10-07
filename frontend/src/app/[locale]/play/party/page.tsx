@@ -16,7 +16,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import PartyManager from '@/components/game/PartyManager';
 import CountdownTimer from '@/components/game/CountdownTimer';
-import ChatPanel from '@/components/game/ChatPanel';
+import { PartyChat } from '@/components/social/PartyChat';
 import PlayerList from '@/components/game/PlayerList';
 import type { PartyPlayer } from '@/types/player';
 
@@ -141,7 +141,7 @@ export default function PlayPartyPage() {
                             <PlayerList players={players} />
                         </div>
                         <aside aria-label="Party chat" className="space-y-4">
-                            <ChatPanel roomId="party-session" />
+                            <PartyChat partyId="party-session" />
                             <button
                                 type="button"
                                 disabled={!canLaunch}

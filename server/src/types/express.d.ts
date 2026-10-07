@@ -15,6 +15,12 @@ declare global {
             correlationId: string;
             log: Logger;
             user?: User;
+            /**
+             * Raw request body captured by the JSON parser's `verify` hook.
+             * Required to re-compute provider webhook signatures (Paystack /
+             * Flutterwave) over the exact bytes the provider signed.
+             */
+            rawBody?: Buffer;
         }
     }
 }

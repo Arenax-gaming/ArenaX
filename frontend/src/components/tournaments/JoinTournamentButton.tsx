@@ -11,6 +11,8 @@ import { api } from "@/lib/api";
 
 interface JoinTournamentButtonProps {
   tournament: Tournament;
+  /** When present, registers the whole party (issue #1102). */
+  partyId?: string;
 }
 
 /** Per-tournament "has this browser joined?" cache entry (#1088). */
@@ -20,6 +22,7 @@ function joinedQueryKey(tournamentId: string) {
 
 export function JoinTournamentButton({
   tournament,
+  partyId,
 }: JoinTournamentButtonProps) {
   const router = useRouter();
   const { notify, addToast } = useNotifications();

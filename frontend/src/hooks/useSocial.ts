@@ -4,6 +4,7 @@ import {
   Message,
   Conversation,
   Party,
+  PartyInvite,
   OnlineStatus,
   FriendsListResponse,
   SocialUser,
@@ -76,5 +77,72 @@ export const useOnlineStatus = (userId: string) => {
   return useQuery({
     queryKey: ['onlineStatus', userId],
     queryFn: () => api.getOnlineStatus(userId),
+  })
+}
+
+// ─── Party (issue #1102) ─────────────────────────────────────────────────────
+
+export const useMyParty = () => {
+  return useQuery<Party | null>({
+    queryKey: ['myParty'],
+    queryFn: () => api.getMyParty(),
+  })
+}
+
+export const usePartyInvites = () => {
+  return useQuery<PartyInvite[]>({
+    queryKey: ['partyInvites'],
+    queryFn: () => api.getPartyInvites(),
+  })
+}
+
+export const useInviteToParty = () => {
+  return useMutation({
+    mutationFn: ({ partyId, userId }: { partyId: string; userId: string }) =>
+      api.inviteToParty(partyId, userId),
+  })
+}
+
+export const useKickFromParty = () => {
+  return useMutation({
+    mutationFn: ({ partyId, userId }: { partyId: string; userId: string }) =>
+      api.kickFromParty(partyId, userId),
+  })
+}
+
+export const useLeaveParty = () => {
+  return useMutation({
+    mutationFn: (partyId: string) => api.leaveParty(partyId),
+  })
+}
+
+export const useDisbandParty = () => {
+  return useMutation({
+    mutationFn: (partyId: string) => api.disbandParty(partyId),
+  })
+}
+
+export const useSetPartyReady = () => {
+  return useMutation({
+    mutationFn: ({ partyId, isReady }: { partyId: string; isReady: boolean }) =>
+      api.setPartyReady(partyId, isReady),
+  })
+}
+
+export const useTogglePartyVoiceChat = () => {
+  return useMutation({
+    mutationFn: (partyId: string) => api.togglePartyVoiceChat(partyId),
+  })
+}
+
+export const useAcceptPartyInvite = () => {
+  return useMutation({
+    mutationFn: (inviteId: string) => api.acceptPartyInvite(inviteId),
+  })
+}
+
+export const useDeclinePartyInvite = () => {
+  return useMutation({
+    mutationFn: (inviteId: string) => api.declinePartyInvite(inviteId),
   })
 }

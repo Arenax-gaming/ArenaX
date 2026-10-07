@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import type { PartyPlayer } from '@/types/player';
 
 interface PartyManagerProps {
@@ -26,7 +27,8 @@ export default function PartyManager({
 
   const isFull = players.length >= maxPlayers;
   const allReady = players.every(p => p.isReady);
-  const currentUserId = 'current-user-id'; // Get from auth context
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? 'current-user-id';
   const isHost = players.find(p => p.id === currentUserId)?.isHost;
 
   return (

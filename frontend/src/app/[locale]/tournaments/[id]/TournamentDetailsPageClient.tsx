@@ -31,6 +31,8 @@ export function TournamentDetailsPageClient() {
   // branch below rather than rendering a hardcoded fallback.
   const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
+  const searchParams = useSearchParams();
+  const partyId = searchParams.get("party") ?? undefined;
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -206,7 +208,7 @@ export function TournamentDetailsPageClient() {
         </div>
 
         <div className="space-y-6">
-          <JoinTournamentButton tournament={tournament} />
+          <JoinTournamentButton tournament={tournament} partyId={partyId} />
           <div className="sticky top-24 rounded-[32px] border border-border bg-white p-6 shadow-sm">
             <h3 className="font-semibold text-foreground">Quick Stats</h3>
             <div className="mt-5 space-y-4">

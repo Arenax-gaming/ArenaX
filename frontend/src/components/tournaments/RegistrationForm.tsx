@@ -60,12 +60,15 @@ function readStoredPaymentMethod(): RegistrationPaymentMethod {
 
 interface RegistrationFormProps {
   tournament: Tournament;
+  /** When present, registers the whole party (issue #1102). */
+  partyId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
 }
 
 export function RegistrationForm({
   tournament,
+  partyId,
   onSuccess,
   onCancel,
 }: RegistrationFormProps) {
