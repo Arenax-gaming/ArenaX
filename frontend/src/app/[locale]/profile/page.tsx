@@ -291,7 +291,7 @@ export default function ProfilePage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column - Stats & Bio */}
           <div className="lg:col-span-2 space-y-8">
-            {eloHistory.length > 0 && <EloChart data={eloHistory} />}
+            {eloHistory.length > 0 && <EloChart initialData={eloHistory} />}
             <ProfileBio user={user} onSave={handleUpdateUser} />
           </div>
 

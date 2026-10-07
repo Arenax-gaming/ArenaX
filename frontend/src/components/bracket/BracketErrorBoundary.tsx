@@ -198,8 +198,8 @@ export class BracketErrorBoundary extends Component<
             size="sm"
             variant="outline"
             onClick={this.handleRetry}
-            aria-label={`Retry loading the tournament bracket (attempt ${retryCount + 1})`}
-            className="gap-2"
+            aria-label={`Retry (${retryCount}/${MAX_BRACKET_RETRIES}) — reload the tournament bracket`}
+            className="h-[36px] px-4 py-2 gap-2"
           >
             <RefreshCw
               className="h-3.5 w-3.5"
@@ -210,7 +210,7 @@ export class BracketErrorBoundary extends Component<
         )}
 
         {/* Tournament info fallback — visible even when bracket fails */}
-        {(tournamentName || tournamentInfo) && (
+        {(tournamentName || tournamentId || tournamentInfo) && (
           <div
             className="mt-4 w-full rounded-lg bg-muted/40 p-4 text-left"
             aria-label="Tournament information"

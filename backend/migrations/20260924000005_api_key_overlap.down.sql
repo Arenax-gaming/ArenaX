@@ -1,7 +1,10 @@
 -- Revert zero-downtime API key rotation overlap (Issue #1080)
 
 -- Restore the original summary view (without the overlap fields).
-CREATE OR REPLACE VIEW api_key_summaries AS
+-- DROP+CREATE (not OR REPLACE): column positions differ from the overlap
+-- view, which Postgres forbids via OR REPLACE.
+DROP VIEW IF EXISTS api_key_summaries;
+CREATE VIEW api_key_summaries AS
 SELECT
     ak.id,
     ak.name,

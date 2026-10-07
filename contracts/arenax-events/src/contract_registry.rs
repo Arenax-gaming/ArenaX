@@ -174,11 +174,7 @@ pub fn emit_contract_status_changed(env: &Env, name: &Symbol, status: &Symbol) {
     .publish(env);
 }
 
-pub fn emit_contract_deprecated(
-    env: &Env,
-    address: &Address,
-    successor: &Option<Address>,
-) {
+pub fn emit_contract_deprecated(env: &Env, address: &Address, successor: &Option<Address>) {
     ContractDeprecated {
         address: address.clone(),
         successor: successor.clone(),
@@ -186,11 +182,7 @@ pub fn emit_contract_deprecated(
     .publish(env);
 }
 
-pub fn emit_successor_linked(
-    env: &Env,
-    old_address: &Address,
-    successor: &Address,
-) {
+pub fn emit_successor_linked(env: &Env, old_address: &Address, successor: &Address) {
     SuccessorLinked {
         old_address: old_address.clone(),
         successor: successor.clone(),

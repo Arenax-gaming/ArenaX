@@ -148,14 +148,18 @@ impl VirtualEconomyContract {
 
         // Check minting limits
         let current_supply = Self::get_total_currency_supply(env.clone());
-        let new_supply = current_supply.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_supply = current_supply
+            .checked_add(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
         if new_supply > config.max_supply {
             return Err(VirtualEconomyError::SupplyLimitExceeded);
         }
 
         // Update recipient balance
         let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
-        let new_balance = current_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_balance = current_balance
+            .checked_add(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
         env.storage()
             .persistent()
             .set(&DataKey::CurrencyBalance(recipient.clone()), &new_balance);
@@ -198,18 +202,20 @@ impl VirtualEconomyContract {
 
         let to_balance = Self::get_currency_balance(env.clone(), to.clone());
 
-        let new_from_balance = from_balance.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
-        let new_to_balance = to_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_from_balance = from_balance
+            .checked_sub(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
+        let new_to_balance = to_balance
+            .checked_add(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
 
         // Update balances
-        env.storage().persistent().set(
-            &DataKey::CurrencyBalance(from.clone()),
-            &new_from_balance,
-        );
-        env.storage().persistent().set(
-            &DataKey::CurrencyBalance(to.clone()),
-            &new_to_balance,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(from.clone()), &new_from_balance);
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(to.clone()), &new_to_balance);
 
         events::emit_currency_transferred(&env, &from, &to, amount);
         Ok(())
@@ -234,14 +240,17 @@ impl VirtualEconomyContract {
         }
 
         let current_supply = Self::get_total_currency_supply(env.clone());
-        let new_balance = balance.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
-        let new_supply = current_supply.checked_sub(amount).ok_or(VirtualEconomyError::Overflow)?;
+        let new_balance = balance
+            .checked_sub(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
+        let new_supply = current_supply
+            .checked_sub(amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
 
         // Update balance and supply
-        env.storage().persistent().set(
-            &DataKey::CurrencyBalance(owner.clone()),
-            &new_balance,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(owner.clone()), &new_balance);
         env.storage()
             .persistent()
             .set(&DataKey::TotalCurrencySupply, &new_supply);
@@ -307,7 +316,9 @@ impl VirtualEconomyContract {
 
         let config = Self::get_currency_config(&env);
         let current_supply = Self::get_total_currency_supply(env.clone());
-        let new_supply = current_supply.checked_add(total_mint).ok_or(VirtualEconomyError::Overflow)?;
+        let new_supply = current_supply
+            .checked_add(total_mint)
+            .ok_or(VirtualEconomyError::Overflow)?;
         if new_supply > config.max_supply {
             return Err(VirtualEconomyError::SupplyLimitExceeded);
         }
@@ -316,11 +327,12 @@ impl VirtualEconomyContract {
             let recipient = recipients.get_unchecked(i);
             let amount = amounts.get_unchecked(i);
             let current_balance = Self::get_currency_balance(env.clone(), recipient.clone());
-            let new_balance = current_balance.checked_add(amount).ok_or(VirtualEconomyError::Overflow)?;
-            env.storage().persistent().set(
-                &DataKey::CurrencyBalance(recipient.clone()),
-                &new_balance,
-            );
+            let new_balance = current_balance
+                .checked_add(amount)
+                .ok_or(VirtualEconomyError::Overflow)?;
+            env.storage()
+                .persistent()
+                .set(&DataKey::CurrencyBalance(recipient.clone()), &new_balance);
             events::emit_currency_minted(&env, &recipient, amount, &reason);
         }
 
@@ -357,7 +369,9 @@ impl VirtualEconomyContract {
                 return Err(VirtualEconomyError::InvalidAmount);
             }
             Self::validate_address(&env, &item.to)?;
-            total_amount = total_amount.checked_add(item.amount).ok_or(VirtualEconomyError::Overflow)?;
+            total_amount = total_amount
+                .checked_add(item.amount)
+                .ok_or(VirtualEconomyError::Overflow)?;
         }
 
         let from_balance = Self::get_currency_balance(env.clone(), from.clone());
@@ -367,19 +381,21 @@ impl VirtualEconomyContract {
 
         for item in items.iter() {
             let to_balance = Self::get_currency_balance(env.clone(), item.to.clone());
-            let new_to_balance = to_balance.checked_add(item.amount).ok_or(VirtualEconomyError::Overflow)?;
-            env.storage().persistent().set(
-                &DataKey::CurrencyBalance(item.to.clone()),
-                &new_to_balance,
-            );
+            let new_to_balance = to_balance
+                .checked_add(item.amount)
+                .ok_or(VirtualEconomyError::Overflow)?;
+            env.storage()
+                .persistent()
+                .set(&DataKey::CurrencyBalance(item.to.clone()), &new_to_balance);
             events::emit_currency_transferred(&env, &from, &item.to, item.amount);
         }
 
-        let new_from_balance = from_balance.checked_sub(total_amount).ok_or(VirtualEconomyError::Overflow)?;
-        env.storage().persistent().set(
-            &DataKey::CurrencyBalance(from.clone()),
-            &new_from_balance,
-        );
+        let new_from_balance = from_balance
+            .checked_sub(total_amount)
+            .ok_or(VirtualEconomyError::Overflow)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::CurrencyBalance(from.clone()), &new_from_balance);
 
         Ok(BatchResult {
             items_processed: items.len(),
@@ -600,6 +616,29 @@ impl VirtualEconomyContract {
             .ok_or(VirtualEconomyError::TokenNotFound)
     }
 
+    /// Update collection market data after a settled sale (#917).
+    ///
+    /// Collections are opt-in: if `category` does not match a registered
+    /// collection, this is a no-op. Otherwise updates floor price (lowest
+    /// sale ever), last sale price, cumulative volume, sale count and
+    /// timestamp.
+    fn update_collection_on_sale(env: &Env, category: &String, price: i128) {
+        let key = DataKey::Collection(category.clone());
+        if let Some(mut collection) = env.storage().persistent().get::<_, NFTCollection>(&key) {
+            if collection.sale_count == 0
+                || collection.floor_price == 0
+                || price < collection.floor_price
+            {
+                collection.floor_price = price;
+            }
+            collection.last_sale_price = price;
+            collection.total_volume += price;
+            collection.sale_count += 1;
+            collection.last_sale_at = env.ledger().timestamp();
+            env.storage().persistent().set(&key, &collection);
+        }
+    }
+
     /// ERC-721-style alias for the number of NFTs an address owns (#913).
     pub fn balance_of(env: Env, owner: Address) -> u32 {
         Self::get_owned_nfts(env, owner).len()
@@ -726,7 +765,7 @@ impl VirtualEconomyContract {
         if let Some(order_id) = env
             .storage()
             .persistent()
-            .get::<_, BytesN<32>>(&DataKey::NftActiveOrder(token_id.clone()))
+            .get::<_, BytesN<32>>(&ExtendedDataKey::NftActiveOrder(token_id.clone()))
         {
             if let Some(mut order) = env
                 .storage()
@@ -750,7 +789,7 @@ impl VirtualEconomyContract {
             }
             env.storage()
                 .persistent()
-                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+                .remove(&ExtendedDataKey::NftActiveOrder(token_id.clone()));
         }
 
         // Fetch metadata before removing it
@@ -905,9 +944,10 @@ impl VirtualEconomyContract {
         );
 
         if let MarketplaceAsset::NFT(ref token_id) = asset {
-            env.storage()
-                .persistent()
-                .set(&DataKey::NftActiveOrder(token_id.clone()), &order_id);
+            env.storage().persistent().set(
+                &ExtendedDataKey::NftActiveOrder(token_id.clone()),
+                &order_id,
+            );
         }
 
         // Update analytics
@@ -1076,7 +1116,7 @@ impl VirtualEconomyContract {
         if let MarketplaceAsset::NFT(ref token_id) = order.asset {
             env.storage()
                 .persistent()
-                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+                .remove(&ExtendedDataKey::NftActiveOrder(token_id.clone()));
         }
 
         // Update analytics
@@ -1145,7 +1185,7 @@ impl VirtualEconomyContract {
         if let MarketplaceAsset::NFT(ref token_id) = order.asset {
             env.storage()
                 .persistent()
-                .remove(&DataKey::NftActiveOrder(token_id.clone()));
+                .remove(&ExtendedDataKey::NftActiveOrder(token_id.clone()));
         }
 
         // Update analytics
@@ -1677,7 +1717,9 @@ impl VirtualEconomyContract {
             }
             previous = tier.min_volume;
         }
-        env.storage().instance().set(&DataKey::ReferralConfig, &config);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReferralConfig, &config);
         Ok(())
     }
 
@@ -1724,15 +1766,16 @@ impl VirtualEconomyContract {
                 flagged: false,
             },
         );
-        let mut account = Self::referral_account(&env, referrer.clone()).unwrap_or(ReferralAccount {
-            referrer: None,
-            qualifying_volume: 0,
-            pending_rewards: 0,
-            total_rewards: 0,
-            referred_count: 0,
-            last_activity: 0,
-            flagged: false,
-        });
+        let mut account =
+            Self::referral_account(&env, referrer.clone()).unwrap_or(ReferralAccount {
+                referrer: None,
+                qualifying_volume: 0,
+                pending_rewards: 0,
+                total_rewards: 0,
+                referred_count: 0,
+                last_activity: 0,
+                flagged: false,
+            });
         account.referred_count += 1;
         env.storage()
             .persistent()
@@ -1793,10 +1836,9 @@ impl VirtualEconomyContract {
         referee_account.last_activity = now;
         referrer_account.pending_rewards += referrer_reward;
         referrer_account.total_rewards += referrer_reward;
-        env.storage().persistent().set(
-            &DataKey::ReferralAccount(referee),
-            &referee_account,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReferralAccount(referee), &referee_account);
         env.storage()
             .persistent()
             .set(&DataKey::ReferralAccount(referrer), &referrer_account);
@@ -1804,10 +1846,7 @@ impl VirtualEconomyContract {
     }
 
     /// Claim all pending referral rewards for `account`.
-    pub fn claim_referral_rewards(
-        env: Env,
-        account: Address,
-    ) -> Result<i128, VirtualEconomyError> {
+    pub fn claim_referral_rewards(env: Env, account: Address) -> Result<i128, VirtualEconomyError> {
         account.require_auth();
         let mut referral = Self::referral_account(&env, account.clone())
             .ok_or(VirtualEconomyError::ReferralNotFound)?;
@@ -1907,7 +1946,9 @@ impl VirtualEconomyContract {
             tier3_bps: 500,
             period_seconds,
         };
-        env.storage().instance().set(&DataKey::RebateConfig, &config);
+        env.storage()
+            .instance()
+            .set(&DataKey::RebateConfig, &config);
         Ok(())
     }
 
@@ -1983,7 +2024,11 @@ impl VirtualEconomyContract {
             .ok_or(VirtualEconomyError::InvalidConfig)?;
 
         let now = env.ledger().timestamp();
-        if let Some(last_run) = env.storage().instance().get::<_, u64>(&DataKey::LastRebateRun) {
+        if let Some(last_run) = env
+            .storage()
+            .instance()
+            .get::<_, u64>(&DataKey::LastRebateRun)
+        {
             if now < last_run + config.period_seconds {
                 return Err(VirtualEconomyError::ReferralCooldown);
             }
@@ -2011,9 +2056,10 @@ impl VirtualEconomyContract {
                 // configured max supply.
                 if amount > 0 && supply + amount <= currency_config.max_supply {
                     let balance = Self::get_currency_balance(env.clone(), trader.clone());
-                    env.storage()
-                        .persistent()
-                        .set(&DataKey::CurrencyBalance(trader.clone()), &(balance + amount));
+                    env.storage().persistent().set(
+                        &DataKey::CurrencyBalance(trader.clone()),
+                        &(balance + amount),
+                    );
                     supply += amount;
 
                     let mut history: Vec<RebatePayout> = env
@@ -2021,7 +2067,12 @@ impl VirtualEconomyContract {
                         .persistent()
                         .get(&DataKey::RebateHistory(trader.clone()))
                         .unwrap_or_else(|| Vec::new(&env));
-                    history.push_back(RebatePayout { volume, bps, amount, paid_at: now });
+                    history.push_back(RebatePayout {
+                        volume,
+                        bps,
+                        amount,
+                        paid_at: now,
+                    });
                     env.storage()
                         .persistent()
                         .set(&DataKey::RebateHistory(trader.clone()), &history);
@@ -2065,7 +2116,10 @@ impl VirtualEconomyContract {
     }
 
     pub fn get_last_rebate_run(env: Env) -> u64 {
-        env.storage().instance().get(&DataKey::LastRebateRun).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::LastRebateRun)
+            .unwrap_or(0)
     }
 
     // -------------------------------------------------------------------------
@@ -3556,12 +3610,12 @@ impl VirtualEconomyContract {
         let min_ttl = env
             .storage()
             .instance()
-            .get(&DataKey::TtlNftMinLedgers)
+            .get(&ExtendedDataKey::TtlNftMinLedgers)
             .unwrap_or(contract_utils::ttl::MIN_TTL_NFT_OWNERSHIP);
         let target_ttl = env
             .storage()
             .instance()
-            .get(&DataKey::TtlNftTargetLedgers)
+            .get(&ExtendedDataKey::TtlNftTargetLedgers)
             .unwrap_or(contract_utils::ttl::TTL_NFT_OWNERSHIP);
         (min_ttl, target_ttl)
     }
@@ -3570,24 +3624,24 @@ impl VirtualEconomyContract {
         let min_ttl = env
             .storage()
             .instance()
-            .get(&DataKey::TtlOrderMinLedgers)
+            .get(&ExtendedDataKey::TtlOrderMinLedgers)
             .unwrap_or(contract_utils::ttl::MIN_TTL_ORDERS);
         let target_ttl = env
             .storage()
             .instance()
-            .get(&DataKey::TtlOrderTargetLedgers)
+            .get(&ExtendedDataKey::TtlOrderTargetLedgers)
             .unwrap_or(contract_utils::ttl::TTL_ORDERS);
         (min_ttl, target_ttl)
     }
 
     pub fn set_ttl_config(env: Env, order_target_ttl: u32, nft_target_ttl: u32) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         env.storage()
             .instance()
-            .set(&DataKey::TtlOrderTargetLedgers, &order_target_ttl);
+            .set(&ExtendedDataKey::TtlOrderTargetLedgers, &order_target_ttl);
         env.storage()
             .instance()
-            .set(&DataKey::TtlNftTargetLedgers, &nft_target_ttl);
+            .set(&ExtendedDataKey::TtlNftTargetLedgers, &nft_target_ttl);
     }
 
     pub fn get_ttl_config(env: Env) -> (u32, u32) {
@@ -3597,15 +3651,21 @@ impl VirtualEconomyContract {
     }
 
     pub fn bump_entry_ttl(env: Env, key: DataKey) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         let (min_ttl, target_ttl) = match &key {
-            DataKey::NFTOwner(_) | DataKey::NFTMetadata(_) | DataKey::OwnedNFTs(_) | DataKey::NFTLicense(_) => {
-                Self::get_nft_ttl_config(&env)
-            }
+            DataKey::NFTOwner(_)
+            | DataKey::NFTMetadata(_)
+            | DataKey::OwnedNFTs(_)
+            | DataKey::NFTLicense(_) => Self::get_nft_ttl_config(&env),
             DataKey::MarketplaceOrder(_) => Self::get_order_ttl_config(&env),
-            _ => (contract_utils::ttl::MIN_TTL_ORDERS, contract_utils::ttl::TTL_ORDERS),
+            _ => (
+                contract_utils::ttl::MIN_TTL_ORDERS,
+                contract_utils::ttl::TTL_ORDERS,
+            ),
         };
-        env.storage().persistent().extend_ttl(&key, min_ttl, target_ttl);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, min_ttl, target_ttl);
     }
 
     // ── Upgrade & Migration (#1064) ──────────────────────────────────────────
@@ -3616,7 +3676,7 @@ impl VirtualEconomyContract {
         min_compatible_schema: u32,
         delay_seconds: Option<u64>,
     ) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         let now = env.ledger().timestamp();
         let delay = delay_seconds.unwrap_or(86_400);
         let scheduled = ScheduledUpgrade {
@@ -3627,15 +3687,15 @@ impl VirtualEconomyContract {
         };
         env.storage()
             .instance()
-            .set(&DataKey::ScheduledUpgrade, &scheduled);
+            .set(&ExtendedDataKey::ScheduledUpgrade, &scheduled);
     }
 
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         let scheduled: ScheduledUpgrade = env
             .storage()
             .instance()
-            .get(&DataKey::ScheduledUpgrade)
+            .get(&ExtendedDataKey::ScheduledUpgrade)
             .expect("no scheduled upgrade");
 
         if scheduled.new_wasm_hash != new_wasm_hash {
@@ -3650,7 +3710,7 @@ impl VirtualEconomyContract {
         let current_schema: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::StorageSchemaVersion)
+            .get(&ExtendedDataKey::StorageSchemaVersion)
             .unwrap_or(1);
 
         if current_schema < scheduled.min_compatible_schema {
@@ -3660,11 +3720,11 @@ impl VirtualEconomyContract {
         let current_hash = env
             .storage()
             .instance()
-            .get(&DataKey::PreviousWasmHash)
+            .get(&ExtendedDataKey::PreviousWasmHash)
             .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]));
         env.storage()
             .instance()
-            .set(&DataKey::PreviousWasmHash, &current_hash);
+            .set(&ExtendedDataKey::PreviousWasmHash, &current_hash);
 
         env.deployer().update_current_contract_wasm(new_wasm_hash);
 
@@ -3673,15 +3733,17 @@ impl VirtualEconomyContract {
             panic!("post upgrade check failed, reverted");
         }
 
-        env.storage().instance().remove(&DataKey::ScheduledUpgrade);
+        env.storage()
+            .instance()
+            .remove(&ExtendedDataKey::ScheduledUpgrade);
     }
 
     pub fn rollback_upgrade(env: Env) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         let prev_hash: BytesN<32> = env
             .storage()
             .instance()
-            .get(&DataKey::PreviousWasmHash)
+            .get(&ExtendedDataKey::PreviousWasmHash)
             .expect("no prior version for rollback");
         env.deployer().update_current_contract_wasm(prev_hash);
     }
@@ -3693,14 +3755,14 @@ impl VirtualEconomyContract {
     pub fn get_storage_schema_version(env: Env) -> u32 {
         env.storage()
             .instance()
-            .get(&DataKey::StorageSchemaVersion)
+            .get(&ExtendedDataKey::StorageSchemaVersion)
             .unwrap_or(1)
     }
 
     pub fn set_storage_schema_version(env: Env, version: u32) {
-        Self::require_admin(&env);
+        Self::require_admin(&env).expect("not admin");
         env.storage()
             .instance()
-            .set(&DataKey::StorageSchemaVersion, &version);
+            .set(&ExtendedDataKey::StorageSchemaVersion, &version);
     }
 }

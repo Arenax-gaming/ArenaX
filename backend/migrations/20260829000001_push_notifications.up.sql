@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id) WH
 -- A user's registered push-capable devices, each subscribed to zero or more
 -- topics (e.g. "tournament:{id}", "match:{id}") for topic fan-out alongside
 -- direct per-token sends.
-CREATE TABLE push_subscriptions (
+CREATE TABLE IF NOT EXISTS push_subscriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_token TEXT NOT NULL,
@@ -36,11 +36,11 @@ CREATE TABLE push_subscriptions (
     UNIQUE (device_token)
 );
 
-CREATE INDEX idx_push_subscriptions_user ON push_subscriptions(user_id) WHERE active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id) WHERE active = TRUE;
 
 -- Per-attempt delivery log, for the delivery-tracking acceptance criterion:
 -- one row per (subscription, send), recording whether FCM accepted it.
-CREATE TABLE push_deliveries (
+CREATE TABLE IF NOT EXISTS push_deliveries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     subscription_id UUID REFERENCES push_subscriptions(id) ON DELETE SET NULL,
@@ -50,4 +50,4 @@ CREATE TABLE push_deliveries (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_push_deliveries_user ON push_deliveries(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_deliveries_user ON push_deliveries(user_id);

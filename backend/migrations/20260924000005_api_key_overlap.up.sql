@@ -24,7 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_old_key_expires_at
 
 -- Extend the summary view so `GET /api/api-keys/:id` can expose the overlap
 -- deadline (`old_key_expires_at`) and a `key_preview` for integrators.
-CREATE OR REPLACE VIEW api_key_summaries AS
+-- DROP+CREATE (not OR REPLACE): the new columns sit mid-list, which
+-- Postgres forbids via OR REPLACE ("cannot change name of view column").
+DROP VIEW IF EXISTS api_key_summaries;
+CREATE VIEW api_key_summaries AS
 SELECT
     ak.id,
     ak.name,

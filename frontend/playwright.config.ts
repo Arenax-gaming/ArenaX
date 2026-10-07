@@ -16,7 +16,10 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev",
-    url: "http://localhost:3000",
+    // NOTE: with next-intl `localePrefix: "always"`, "/" is a 307 redirect to
+    // "/en", so probing "/" never yields a 200 and Playwright waits until
+    // timeout. Probe the default-locale home (public, renders 200) instead.
+    url: "http://localhost:3000/en",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

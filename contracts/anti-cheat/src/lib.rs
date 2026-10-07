@@ -1292,8 +1292,11 @@ impl AntiCheatContract {
             if seen.get(signature.public_key.clone()).unwrap_or(false) {
                 panic!("duplicate signature");
             }
-            env.crypto()
-                .ed25519_verify(&signature.public_key, &digest_message, &signature.signature);
+            env.crypto().ed25519_verify(
+                &signature.public_key,
+                &digest_message,
+                &signature.signature,
+            );
             seen.set(signature.public_key, true);
         }
 
@@ -1326,7 +1329,9 @@ impl AntiCheatContract {
 
     /// Read a stored match result attestation, if any.
     pub fn get_attestation(env: Env, match_id: u64) -> Option<MatchResultAttestation> {
-        env.storage().persistent().get(&DataKey::Attestation(match_id))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Attestation(match_id))
     }
 
     /// Record a blocked spam attempt in analytics. Called by off-chain indexers

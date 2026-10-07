@@ -13,8 +13,13 @@ module.exports = {
     "\\.(jpg|jpeg|png|gif|svg|webp)$": "<rootDir>/__mocks__/fileMock.js",
   },
   transform: {
-    "^.+\\.(js|jsx|ts|tsx)$": ["babel-jest", { configFile: "./babel.config.js" }],
+    "^.+\\.(js|jsx|ts|tsx)$": ["babel-jest", { configFile: "./babel-jest.config.js" }],
   },
+  // Ship ESM-only packages (react-dnd and its ecosystem) must be transformed
+  // too — babel-jest compiles their `export` syntax to CommonJS.
+  transformIgnorePatterns: [
+    "/node_modules/(?!(?:react-dnd|react-dnd-html5-backend|dnd-core)/|@react-dnd/)",
+  ],
   // Node 24 treats unhandled promise rejections as fatal by default.
   // Tests that intentionally throw async errors (e.g. ApiError tests) need
   // this flag so the jest worker process isn't killed before results are reported.

@@ -172,9 +172,10 @@ impl ContractRegistry {
         env.storage()
             .instance()
             .remove(&DataKey::ContractByAddress(old_address.clone()));
-        env.storage()
-            .instance()
-            .set(&DataKey::ContractByAddress(new_address.clone()), &contract_info);
+        env.storage().instance().set(
+            &DataKey::ContractByAddress(new_address.clone()),
+            &contract_info,
+        );
 
         events::emit_contract_updated(
             &env,

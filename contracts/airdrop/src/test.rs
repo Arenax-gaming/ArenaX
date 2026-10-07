@@ -22,7 +22,9 @@ fn setup() -> (
     let claimant = Address::generate(&env);
     let recovery = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token_addr = env.register_stellar_asset_contract_v2(token_admin).address();
+    let token_addr = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
 
     let contract_id = env.register(AirdropContract, ());
     let client = AirdropContractClient::new(&env, &contract_id);
@@ -68,7 +70,10 @@ fn valid_proof_claims_tokens() {
     let result = client.claim(&claimant, &Vec::new(&env), &amount);
     assert_eq!(result.amount, amount);
     assert!(client.has_claimed(&claimant));
-    assert_eq!(token::Client::new(&env, &token_addr).balance(&claimant), amount);
+    assert_eq!(
+        token::Client::new(&env, &token_addr).balance(&claimant),
+        amount
+    );
     assert_eq!(client.get_claimed_amount(), amount);
 }
 

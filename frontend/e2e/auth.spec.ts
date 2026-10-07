@@ -10,12 +10,16 @@ test.describe("Auth journeys", () => {
   test.beforeEach(async ({ page }) => {
     await mockAuthHandlers(page);
     await mockNotificationHandlers(page);
-    // Mock username-availability check so it doesn't block submission
-    await page.route("**/api/auth/username-available**", (route) =>
+    // Mock username-availability check so it doesn't block submission.
+    // NOTE: the app calls /api/auth/check-username (see
+    // useUsernameAvailability -> api.checkUsernameAvailability); an outdated
+    // `username-available` pattern here never matched, leaving the check in
+    // "error" state and blocking submit.
+    await page.route("**/api/v1/auth/check-username**", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ available: true }),
+        body: JSON.stringify({ data: { available: true } }),
       })
     );
   });
@@ -31,6 +35,8 @@ test.describe("Auth journeys", () => {
     // Wait for username availability check to settle
     await page.waitForTimeout(500);
 
+    await page.check("#agreeToTerms");
+
     await page.click('button[type="submit"]');
 
     await expect(page).toHaveURL(/verify-email/, { timeout: 10_000 });
@@ -39,7 +45,9 @@ test.describe("Auth journeys", () => {
   test("verify email with token in URL → redirects home", async ({ page }) => {
     await page.goto(`/${LOCALE}/auth/verify-email?token=mock-verification-token`);
     // Auto-verifies via useEffect; should redirect to /
-    await expect(page).toHaveURL(/^\/(en\/)?$/, { timeout: 10_000 });
+    // NOTE: toHaveURL matches against the full URL, so the pattern must not
+    // be ^-anchored to the path.
+    await expect(page).toHaveURL(/\/(en\/)?$/, { timeout: 10_000 });
   });
 
   test("login with valid credentials → redirects home", async ({ page }) => {
@@ -49,11 +57,13 @@ test.describe("Auth journeys", () => {
     await page.fill("#password", "Password1!");
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL(/^\/(en\/?)?$/, { timeout: 10_000 });
+    // NOTE: toHaveURL matches against the full URL, so the pattern must not
+    // be ^-anchored to the path.
+    await expect(page).toHaveURL(/\/(en\/?)?$/, { timeout: 10_000 });
   });
 
   test("login shows error on invalid credentials", async ({ page }) => {
-    await page.route("**/api/auth/login", (route) =>
+    await page.route("**/api/v1/auth/login", (route) =>
       route.fulfill({
         status: 401,
         contentType: "application/json",
