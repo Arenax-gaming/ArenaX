@@ -12,21 +12,25 @@ struct TestSetup<'a> {
     admin: Address,
     signers: Vec<Address>,
     token: Address,
-    token_admin: StellarAssetClient<'a>,
-    token_client: TokenClient<'a>,
+    token_admin: token::StellarAssetClient<'a>,
+    token_client: token::Client<'a>,
 }
 
 fn setup(env: &Env) -> TestSetup<'_> {
     env.mock_all_auths();
-
-    let contract_id = env.register(Treasury, ());
-    let client = TreasuryClient::new(env, &contract_id);
     let admin = Address::generate(env);
 
     let token_sac = env.register_stellar_asset_contract_v2(admin.clone());
     let token = token_sac.address();
-    let token_admin = StellarAssetClient::new(env, &token);
-    let token_client = TokenClient::new(env, &token);
+    let token_admin = token::StellarAssetClient::new(env, &token);
+    let token_client = token::Client::new(env, &token);
+
+    let timelock_id = env.register(TimeLock, ());
+    let timelock = TimeLockClient::new(env, &timelock_id);
+    timelock.initialize(&admin, &3600, &86400, &1);
+
+    let contract_id = env.register(Treasury, ());
+    let client = TreasuryClient::new(env, &contract_id);
 
     let mut signers = Vec::new(env);
     signers.push_back(admin.clone());
@@ -316,4 +320,56 @@ fn spending_proposal_exceeding_real_balance_fails() {
     let now = env.ledger().timestamp();
     env.ledger().with_mut(|l| l.timestamp = now + 3600);
     s.client.execute_proposal(&s.admin, &proposal_id);
+}
+
+#[test]
+fn timelock_integration_duration_change_preserves_execute_after() {
+    let env = Env::default();
+    let s = setup(&env);
+
+    let depositor = Address::generate(&env);
+    s.token_admin.mint(&depositor, &10000);
+    s.client.deposit(&depositor, &10000);
+
+    let category = Symbol::new(&env, "ops");
+    let alloc_id = s
+        .client
+        .propose_budget_allocation(&s.admin, &category, &10000);
+    s.client
+        .vote_budget_allocation(&s.signers.get(1).unwrap(), &alloc_id, &true);
+    s.client.finalize_budget_allocation(&s.admin, &alloc_id);
+
+    let recipient = Address::generate(&env);
+    let proposal_id = s.client.create_spending_proposal(
+        &s.admin,
+        &recipient,
+        &1000,
+        &category,
+        &String::from_str(&env, "high-value spend"),
+    );
+    let original = s.client.get_spending_proposal(&proposal_id).unwrap();
+    assert_eq!(original.execute_after, 3600);
+    s.client
+        .approve_proposal(&s.signers.get(1).unwrap(), &proposal_id);
+
+    let duration_id = s.client.propose_time_lock_update(&s.admin, &0);
+    s.client
+        .vote_time_lock_update(&s.signers.get(1).unwrap(), &duration_id, &true);
+    s.client.finalize_time_lock_update(&s.admin, &duration_id);
+    assert_eq!(s.client.get_dashboard().time_lock_duration, 0);
+
+    let preserved = s.client.get_spending_proposal(&proposal_id).unwrap();
+    assert_eq!(preserved.execute_after, 3600);
+
+    env.ledger().with_mut(|l| l.timestamp = 100);
+    assert!(s
+        .client
+        .try_execute_proposal(&s.admin, &proposal_id)
+        .is_err());
+
+    env.ledger().with_mut(|l| l.timestamp = 3600);
+    s.client.execute_proposal(&s.admin, &proposal_id);
+    let executed = s.client.get_spending_proposal(&proposal_id).unwrap();
+    assert!(executed.executed);
+    assert_eq!(s.client.get_balance(), 9000);
 }
