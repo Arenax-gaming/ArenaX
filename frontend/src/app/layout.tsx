@@ -5,7 +5,11 @@ import { NONCE_HEADER } from "@/lib/csp";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
-import { AppLayout } from "@/components/layout/AppLayout";
+// NOTE: No AppLayout here on purpose. The locale layout
+// (src/app/[locale]/layout.tsx) renders <AppLayout> INSIDE
+// <NextIntlClientProvider>. Rendering it here too would (a) duplicate the
+// header/footer and (b) crash with "No intl context found" because this root
+// layout has no intl provider — which broke E2E dev-server readiness.
 import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
@@ -71,7 +75,7 @@ export default function RootLayout({
                     <NotificationProvider>
                       <AnalyticsProvider>
                         <WebVitalsInit />
-                        <AppLayout>{children}</AppLayout>
+                        {children}
                         <ConsentBanner />
                       </AnalyticsProvider>
                     </NotificationProvider>

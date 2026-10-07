@@ -177,10 +177,22 @@ pub enum DataKey {
     TotalAllocated,
     TotalSpent,
     Paused,
+    /// Immutable log of executed treasury payouts (#918).
     TransactionLog,
+    // Upgrade and state migration (#1064)
+    StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
-    StorageSchemaVersion,
+}
+
+/// Scheduled upgrade details (#1064).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ScheduledUpgrade {
+    pub new_wasm_hash: soroban_sdk::BytesN<32>,
+    pub min_compatible_schema: u32,
+    pub scheduled_at: u64,
+    pub executable_at: u64,
 }
 
 #[contract]
@@ -634,9 +646,15 @@ impl Treasury {
 
         // Pay out the custodied tokens. If the contract is underfunded the
         // transfer panics and the whole execution reverts, leaving the
-        // proposal unexecuted and storage untouched.
-        let token = Self::token(&env);
-        token::Client::new(&env, &token).transfer(
+        // proposal unexecuted and storage untouched. Prefer the explicitly
+        // configured TokenAddress (#918) and fall back to the legacy Token
+        // key so older deployments keep working. Exactly one transfer.
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenAddress)
+            .unwrap_or_else(|| Self::token(&env));
+        token::Client::new(&env, &token_addr).transfer(
             &env.current_contract_address(),
             &proposal.recipient,
             &proposal.amount,
@@ -665,19 +683,6 @@ impl Treasury {
         env.storage()
             .instance()
             .set(&DataKey::SpendingProposal(proposal_id), &proposal);
-
-        // Real on-chain token transfer to recipient (#918: 2-of-N multisig)
-        if let Some(token_addr) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::TokenAddress)
-        {
-            token::Client::new(&env, &token_addr).transfer(
-                &env.current_contract_address(),
-                &proposal.recipient,
-                &proposal.amount,
-            );
-        }
 
         // Append to the on-chain transaction log (#918: treasury operations logged)
         let mut logs: Vec<TreasuryTxLog> = env

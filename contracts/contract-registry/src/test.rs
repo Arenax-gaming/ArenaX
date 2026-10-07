@@ -1114,4 +1114,3 @@ fn test_chained_deprecation_eventually_fails_when_all_deprecated() {
     client.deprecate_contract(&contract2, &None);
     client.get_current(&name);
 }
-

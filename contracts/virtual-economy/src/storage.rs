@@ -27,7 +27,6 @@ pub enum DataKey {
 
     // Marketplace
     MarketplaceOrder(BytesN<32>),
-    NftActiveOrder(BytesN<32>),
 
     // Royalty & Licensing
     NFTLicense(BytesN<32>),
@@ -95,9 +94,6 @@ pub enum DataKey {
     // NFTMetadata.category at mint time.
     Collection(String),
 
-    // Collection floor price history (#917) — ring-buffer of recent sales per collection.
-    CollectionPriceHistory(String),
-
     // Trading Rebates (#916)
     /// Tiered rebate configuration (thresholds + bps, distribution period).
     RebateConfig,
@@ -112,6 +108,26 @@ pub enum DataKey {
     /// Rebate payout history for an address (most recent last), for
     /// dashboard visibility.
     RebateHistory(Address),
+
+    // Re-entrancy guard for marketplace trades (#1056).
+    ReentrancyGuard,
+}
+
+/// Extended storage keys for features added after the 50-variant
+/// `contracttype` cap was reached on `DataKey`.
+///
+/// Soroban `#[contracttype]` enums are limited in variant count
+/// (the SDK rejects oversized enums with `LengthExceedsMax`), so new
+/// keys live here instead of growing `DataKey`. Both enums are valid
+/// storage keys — Soroban storage is schemaless over XDR values.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExtendedDataKey {
+    // Per-NFT active order tracking (token_id -> order_id).
+    NftActiveOrder(BytesN<32>),
+
+    // Collection floor price history (#917) — ring-buffer of recent sales per collection.
+    CollectionPriceHistory(String),
 
     // Storage TTL config (#1060)
     TtlOrderMinLedgers,

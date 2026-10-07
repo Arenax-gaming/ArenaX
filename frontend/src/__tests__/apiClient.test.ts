@@ -366,8 +366,12 @@ describe("EnhancedApiClient — 503 retry with exponential backoff", () => {
         retryBaseDelayMs: 50,
         retryMaxDelayMs: 400,
       }).get("/net");
+      // Attach the rejection handler up front so the promise is never
+      // momentarily unhandled while fake timers advance (Node would report
+      // it as an unhandled rejection and fail the test).
+      const settled = promise.catch((e) => { caught = e; });
       await jest.advanceTimersByTimeAsync(10_000);
-      try { await promise; } catch (e) { caught = e; }
+      await settled;
 
       // 1 initial attempt + 3 backoff retries = 4 requests
       expect(fetchCalls).toBe(4);
@@ -464,8 +468,10 @@ describe("EnhancedApiClient — request timeout", () => {
         retryBaseDelayMs: 0,
         retryMaxDelayMs: 0,
       }).get("/slow");
+      // Handler attached immediately — see note in the test above.
+      const settled = promise.catch((e) => { caught = e; });
       await jest.advanceTimersByTimeAsync(5_000);
-      try { await promise; } catch (e) { caught = e; }
+      await settled;
 
       // First attempt times out, one retry also times out, then NetworkError.
       expect(attempts()).toBe(2);
@@ -489,8 +495,10 @@ describe("EnhancedApiClient — request timeout", () => {
         retryBaseDelayMs: 0,
         retryMaxDelayMs: 0,
       }).get("/slow", { noRetry: true });
+      // Handler attached immediately — see note in the test above.
+      const settled = promise.catch((e) => { caught = e; });
       await jest.advanceTimersByTimeAsync(5_000);
-      try { await promise; } catch (e) { caught = e; }
+      await settled;
 
       expect(attempts()).toBe(1);
       expect(caught).toBeInstanceOf(NetworkError);

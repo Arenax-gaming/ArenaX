@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 
 //! Governed upgrade lifecycle for ArenaX Soroban contracts.
 //!

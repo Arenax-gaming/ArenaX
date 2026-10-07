@@ -2,10 +2,10 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
-    token, Env, Vec,
+    testutils::{Address as _, Ledger},
+    token::{StellarAssetClient, TokenClient},
+    Env, Vec,
 };
-use time_lock::{TimeLock, TimeLockClient};
 
 struct TestSetup<'a> {
     client: TreasuryClient<'a>,
@@ -37,9 +37,7 @@ fn setup(env: &Env) -> TestSetup<'_> {
     let signer2 = Address::generate(env);
     signers.push_back(signer2);
 
-    client.initialize(&admin, &token, &signers, &2, &3600, &timelock_id, &None);
-    timelock.add_governor(&admin, &contract_id);
-
+    client.initialize(&admin, &token, &signers, &2, &3600, &Some(token.clone()));
     TestSetup {
         client,
         admin,
@@ -53,7 +51,7 @@ fn setup(env: &Env) -> TestSetup<'_> {
 /// Mint `amount` treasury tokens to a fresh depositor.
 fn funded_depositor(env: &Env, client: &TreasuryClient, amount: i128) -> Address {
     let depositor = Address::generate(env);
-    token::StellarAssetClient::new(env, &client.get_token()).mint(&depositor, &amount);
+    StellarAssetClient::new(env, &client.get_token()).mint(&depositor, &amount);
     depositor
 }
 
@@ -62,7 +60,7 @@ fn deposit_moves_tokens_and_updates_counter() {
     let env = Env::default();
     let s = setup(&env);
     let depositor = funded_depositor(&env, &s.client, 1_000);
-    let tok = token::Client::new(&env, &s.client.get_token());
+    let tok = TokenClient::new(&env, &s.client.get_token());
 
     s.client.deposit(&depositor, &400);
 
@@ -80,7 +78,7 @@ fn deposit_with_insufficient_tokens_fails_and_leaves_storage_unchanged() {
     assert!(s.client.try_deposit(&depositor, &500).is_err());
     assert_eq!(s.client.get_balance(), 0);
     assert_eq!(
-        token::Client::new(&env, &s.client.get_token()).balance(&depositor),
+        TokenClient::new(&env, &s.client.get_token()).balance(&depositor),
         100
     );
 }
@@ -274,7 +272,7 @@ fn spending_proposal_executes_against_real_deposits() {
 
     // Fast-forward past the time-lock, then execute.
     let now = env.ledger().timestamp();
-    env.ledger().set_timestamp(now + 3600);
+    env.ledger().with_mut(|l| l.timestamp = now + 3600);
     s.client.execute_proposal(&s.admin, &proposal_id);
 
     // Real tokens paid out; internal ledger stays in sync.
@@ -320,7 +318,7 @@ fn spending_proposal_exceeding_real_balance_fails() {
         .approve_proposal(&s.signers.get(1).unwrap(), &proposal_id);
 
     let now = env.ledger().timestamp();
-    env.ledger().set_timestamp(now + 3600);
+    env.ledger().with_mut(|l| l.timestamp = now + 3600);
     s.client.execute_proposal(&s.admin, &proposal_id);
 }
 

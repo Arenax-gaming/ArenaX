@@ -46,7 +46,7 @@ use crate::{
 };
 use arenax_events::slashing as slash_events;
 use arenax_events::staking as stake_events;
-use soroban_sdk::{token, Address, Bytes, BytesN, Env, String};
+use soroban_sdk::{token, Address, Bytes, BytesN, Env, String, Vec};
 
 /// Provides all validator penalty operations. Methods are static helpers
 /// called from the `StakingManager` contract-impl block in `lib.rs`.
@@ -69,7 +69,7 @@ impl ValidatorPenaltyManager {
         if config.burn_bps > 10_000 {
             panic!("burn_bps exceeds 100%");
         }
-        if config.slash_amounts.len() == 0 {
+        if config.slash_amounts.is_empty() {
             panic!("slash_amounts must not be empty");
         }
         env.storage()
@@ -78,6 +78,9 @@ impl ValidatorPenaltyManager {
     }
 
     /// Read the current slash config. Returns `None` if not yet configured.
+    // Kept for upcoming admin query endpoints; not yet wired into the
+    // contract-impl block.
+    #[allow(dead_code)]
     pub fn get_slash_config(env: &Env) -> Option<SlashConfig> {
         env.storage().instance().get(&DataKey::ValidatorSlashConfig)
     }
@@ -100,6 +103,7 @@ impl ValidatorPenaltyManager {
         severity: u32,
         reason: u32,
         rationale: String,
+        signers: Option<Vec<Address>>,
     ) -> BytesN<32> {
         admin.require_auth();
 
@@ -166,10 +170,11 @@ impl ValidatorPenaltyManager {
                 last_slash_time: 0,
             });
 
-        if history.last_slash_time > 0 && config.min_slash_interval_seconds > 0 {
-            if now < history.last_slash_time + config.min_slash_interval_seconds {
-                panic!("slash cooldown active");
-            }
+        if history.slash_count > 0
+            && config.min_slash_interval_seconds > 0
+            && now < history.last_slash_time + config.min_slash_interval_seconds
+        {
+            panic!("slash cooldown active");
         }
 
         let requested_amount = config
@@ -500,6 +505,16 @@ impl ValidatorPenaltyManager {
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 &history,
             );
+            let min_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlMinLedgers)
+                .unwrap_or(contract_utils::ttl::MIN_TTL_FINANCIAL_POSITIONS);
+            let target_ttl = env
+                .storage()
+                .instance()
+                .get(&DataKey::TtlTargetLedgers)
+                .unwrap_or(contract_utils::ttl::TTL_FINANCIAL_POSITIONS);
             env.storage().persistent().extend_ttl(
                 &DataKey::ValidatorSlashRecord(record.validator.clone()),
                 min_ttl,

@@ -20,14 +20,18 @@ pub struct FlashLoanGuard;
 impl FlashLoanGuard {
     /// Check if the address has performed an operation in the current ledger sequence.
     /// Returns true if a flash loan is detected (same sequence).
+    ///
+    /// A missing record must NOT be treated as sequence `0`: the ledger starts
+    /// at sequence 0, so a `unwrap_or(0)` sentinel would flag the *first*
+    /// protected operation as a flash loan.  `None` (no record) means no prior
+    /// operation, regardless of the current sequence.
     pub fn is_flash_loan_attempt(env: &Env, addr: &Address) -> bool {
         let current_seq = env.ledger().sequence();
-        let last_seq: u32 = env
+        let last_seq: Option<u32> = env
             .storage()
             .temporary()
-            .get(&DataKey::LastOpSequence(addr.clone()))
-            .unwrap_or(0);
-        last_seq == current_seq
+            .get(&DataKey::LastOpSequence(addr.clone()));
+        last_seq == Some(current_seq)
     }
 
     /// Record that this address performed a protected operation this sequence.
@@ -43,12 +47,8 @@ impl FlashLoanGuard {
     /// Returns true if a global protected operation already occurred this sequence.
     pub fn check_global_sequence(env: &Env) -> bool {
         let current_seq = env.ledger().sequence();
-        let last_seq: u32 = env
-            .storage()
-            .temporary()
-            .get(&DataKey::GlobalLastSequence)
-            .unwrap_or(0);
-        last_seq == current_seq
+        let last_seq: Option<u32> = env.storage().temporary().get(&DataKey::GlobalLastSequence);
+        last_seq == Some(current_seq)
     }
 
     /// Record a global price-sensitive operation.

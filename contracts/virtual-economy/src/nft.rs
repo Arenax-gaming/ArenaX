@@ -147,11 +147,7 @@ impl NFTManager {
     }
 
     /// Remove token from an owner's list
-    pub fn remove_from_ownership_list(
-        env: &Env,
-        owner: &Address,
-        token_id: &BytesN<32>,
-    ) {
+    pub fn remove_from_ownership_list(env: &Env, owner: &Address, token_id: &BytesN<32>) {
         let owned_nfts: Vec<BytesN<32>> = env
             .storage()
             .persistent()

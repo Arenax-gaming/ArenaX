@@ -11,6 +11,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
   usePathname: () => '/profile',
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({ locale: 'en' }),
 }));
 
 // Mutable user so the save test can simulate the auth-context refetch that

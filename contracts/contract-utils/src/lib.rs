@@ -90,7 +90,9 @@ pub mod ttl {
         min_ttl: u32,
         target_ttl: u32,
     ) {
-        env.storage().persistent().extend_ttl(key, min_ttl, target_ttl);
+        env.storage()
+            .persistent()
+            .extend_ttl(key, min_ttl, target_ttl);
     }
 }
 

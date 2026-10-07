@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(unused_variables)]
 
 use super::*;
 use soroban_sdk::{
@@ -784,7 +785,7 @@ fn test_lp_reward_allocation_proportional() {
     client.add_liquidity(&user2, &pool_id, &3_000i128, &0i128, &0i128);
 
     // Advance time by half a year
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 15_768_000);
+    env.ledger().with_mut(|l| l.timestamp += 15_768_000);
 
     let r1 = client.pending_lp_rewards(&user1, &pool_id);
     let r2 = client.pending_lp_rewards(&user2, &pool_id);
@@ -810,7 +811,7 @@ fn test_lp_reward_allocation_sole_provider() {
     client.add_liquidity(&user1, &pool_id, &10_000i128, &0i128, &0i128);
 
     // Advance 1 year
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 31_536_000);
+    env.ledger().with_mut(|l| l.timestamp += 31_536_000);
 
     let pending = client.pending_lp_rewards(&user1, &pool_id);
     // 20 % APY on 10_000 for 1 year = 2_000
@@ -831,7 +832,7 @@ fn test_lp_reward_paid_on_remove() {
     mint_ax_tokens(&env, &ax_token, &admin, &user1, 10_000);
     client.add_liquidity(&user1, &pool_id, &10_000i128, &0i128, &0i128);
 
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 31_536_000);
+    env.ledger().with_mut(|l| l.timestamp += 31_536_000);
 
     let before = token_client.balance(&user1);
     client.remove_liquidity(&user1, &pool_id, &0i128, &0i128);
@@ -859,18 +860,18 @@ fn test_lp_dynamic_rate_change_preserves_accrued() {
     client.add_liquidity(&user1, &pool_id, &10_000i128, &0i128, &0i128);
 
     // Earn at 20 % for half a year
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 15_768_000);
+    env.ledger().with_mut(|l| l.timestamp += 15_768_000);
 
     // Change rate to 10 %
     client.set_lp_reward_rate(&pool_id, &1_000u32);
 
     // Advance another half year at 10 %
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 15_768_000);
+    env.ledger().with_mut(|l| l.timestamp += 15_768_000);
 
     // Claim rewards
     let (rewards, _fees) = client.claim_lp_rewards(&user1, &pool_id);
     // ~1_000 from first half + ~500 from second half = ~1_500
-    assert!(rewards >= 1_400 && rewards <= 1_600,
+    assert!((1_400..=1_600).contains(&rewards),
         "rewards should be ~1500, got {rewards}");
 }
 
@@ -1065,7 +1066,7 @@ fn test_lp_history_deposit_and_withdraw() {
     mint_ax_tokens(&env, &ax_token, &admin, &user1, 5_000);
 
     client.add_liquidity(&user1, &pool_id, &5_000i128, &0i128, &0i128);
-    env.ledger().with_mut(|l| l.timestamp = l.timestamp + 31_536_000);
+    env.ledger().with_mut(|l| l.timestamp += 31_536_000);
     client.remove_liquidity(&user1, &pool_id, &0i128, &0i128);
 
     let history = client.get_lp_history(&user1, &pool_id);
@@ -1215,11 +1216,17 @@ fn test_validator_slash_history_pagination() {
     let contract_id = initialize_contract(&env, &admin);
     let client = StakingManagerClient::new(&env, &contract_id);
 
+    let ax_token = client.get_ax_token();
+    let treasury = Address::generate(&env);
+    mint_ax_tokens(&env, &ax_token, &admin, &contract_id, 10_000);
+
     let config = SlashConfig {
         enabled: true,
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        ax_token: ax_token.clone(),
+        treasury_address: treasury.clone(),
         min_slash_interval_seconds: 0,
     };
 
@@ -1241,11 +1248,11 @@ fn test_validator_slash_history_pagination() {
 
     let mut slash_ids = Vec::new(&env);
     for severity in [0u32, 1u32, 2u32] {
-        let slash_id = client.slash_validator(&admin, &validator, &severity, &1u32, &None);
+        let slash_id = client.slash_validator(&admin, &validator, &severity, &1u32, &String::from_str(&env, "test"), &None);
         slash_ids.push_back(slash_id);
     }
 
-    let history = client.get_slash_history(&validator);
+    let history = client.get_slash_history(&validator).unwrap();
     assert_eq!(history.slash_count, 3);
     assert_eq!(history.slash_ids.len(), 3);
 
@@ -1268,11 +1275,17 @@ fn test_rapid_repeat_slash_rejected() {
     let contract_id = initialize_contract(&env, &admin);
     let client = StakingManagerClient::new(&env, &contract_id);
 
+    let ax_token = client.get_ax_token();
+    let treasury = Address::generate(&env);
+    mint_ax_tokens(&env, &ax_token, &admin, &contract_id, 10_000);
+
     let config = SlashConfig {
         enabled: true,
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        ax_token: ax_token.clone(),
+        treasury_address: treasury.clone(),
         min_slash_interval_seconds: 3600, // 1 hour cooldown
     };
 
@@ -1293,10 +1306,10 @@ fn test_rapid_repeat_slash_rejected() {
     });
 
     // First slash succeeds
-    client.slash_validator(&admin, &validator, &0u32, &1u32, &None);
+    client.slash_validator(&admin, &validator, &0u32, &1u32, &String::from_str(&env, "test"), &None);
 
     // Second slash immediately without time advancement must panic
-    client.slash_validator(&admin, &validator, &0u32, &1u32, &None);
+    client.slash_validator(&admin, &validator, &0u32, &1u32, &String::from_str(&env, "test"), &None);
 }
 
 #[test]
@@ -1307,11 +1320,17 @@ fn test_slash_beyond_stake_clamped() {
     let contract_id = initialize_contract(&env, &admin);
     let client = StakingManagerClient::new(&env, &contract_id);
 
+    let ax_token = client.get_ax_token();
+    let treasury = Address::generate(&env);
+    mint_ax_tokens(&env, &ax_token, &admin, &contract_id, 10_000);
+
     let config = SlashConfig {
         enabled: true,
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        ax_token: ax_token.clone(),
+        treasury_address: treasury.clone(),
         min_slash_interval_seconds: 0,
     };
 
@@ -1332,9 +1351,9 @@ fn test_slash_beyond_stake_clamped() {
             .set(&DataKey::UserStakeInfo(validator.clone()), &stake_info);
     });
 
-    client.slash_validator(&admin, &validator, &2u32, &1u32, &None);
+    client.slash_validator(&admin, &validator, &2u32, &1u32, &String::from_str(&env, "test"), &None);
 
-    let history = client.get_slash_history(&validator);
+    let history = client.get_slash_history(&validator).unwrap();
     assert_eq!(history.total_slashed, 150i128); // clamped to available stake
 }
 
@@ -1347,11 +1366,17 @@ fn test_severity_4_without_multisig_rejected() {
     let contract_id = initialize_contract(&env, &admin);
     let client = StakingManagerClient::new(&env, &contract_id);
 
+    let ax_token = client.get_ax_token();
+    let treasury = Address::generate(&env);
+    mint_ax_tokens(&env, &ax_token, &admin, &contract_id, 10_000);
+
     let config = SlashConfig {
         enabled: true,
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        ax_token: ax_token.clone(),
+        treasury_address: treasury.clone(),
         min_slash_interval_seconds: 0,
     };
 
@@ -1372,7 +1397,7 @@ fn test_severity_4_without_multisig_rejected() {
     });
 
     // Calling severity 4 without multisig signers must fail
-    client.slash_validator(&admin, &validator, &4u32, &1u32, &None);
+    client.slash_validator(&admin, &validator, &4u32, &1u32, &String::from_str(&env, "test"), &None);
 }
 
 #[test]
@@ -1385,11 +1410,17 @@ fn test_severity_4_with_multisig_succeeds() {
     let contract_id = initialize_contract(&env, &admin);
     let client = StakingManagerClient::new(&env, &contract_id);
 
+    let ax_token = client.get_ax_token();
+    let treasury = Address::generate(&env);
+    mint_ax_tokens(&env, &ax_token, &admin, &contract_id, 10_000);
+
     let config = SlashConfig {
         enabled: true,
         slash_amounts: Vec::from_array(&env, [100i128, 200i128, 300i128, 400i128, 500i128]),
         burn_bps: 0,
         appeal_window_seconds: 10_000,
+        ax_token: ax_token.clone(),
+        treasury_address: treasury.clone(),
         min_slash_interval_seconds: 0,
     };
 
@@ -1418,8 +1449,8 @@ fn test_severity_4_with_multisig_succeeds() {
     signers.push_back(signer1);
     signers.push_back(signer2);
 
-    let slash_id = client.slash_validator(&admin, &validator, &4u32, &1u32, &Some(signers));
-    let history = client.get_slash_history(&validator);
+    let slash_id = client.slash_validator(&admin, &validator, &4u32, &1u32, &String::from_str(&env, "test"), &Some(signers));
+    let history = client.get_slash_history(&validator).unwrap();
     assert_eq!(history.slash_count, 1);
     assert_eq!(history.total_slashed, 500i128);
     assert_eq!(history.slash_ids.get(0).unwrap(), slash_id);

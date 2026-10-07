@@ -30,6 +30,7 @@ export default function RegisterPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    agreeToTerms: false,
   });
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof RegisterFormData, string>>>({});
 
@@ -54,7 +55,11 @@ export default function RegisterPage() {
   }, [user, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({ ...prev, [e.target.id]: e.target.value }));
+    const { id, type, checked, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [id]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -93,6 +98,11 @@ export default function RegisterPage() {
       password: result.data.password,
       confirmPassword: result.data.confirmPassword,
     });
+
+    // register() intentionally does not populate the full user profile until
+    // the email is verified, so the `user` effect above won't fire — navigate
+    // explicitly on success.
+    router.replace("/auth/verify-email");
   };
 
   const isSubmitDisabled =
@@ -261,6 +271,33 @@ export default function RegisterPage() {
             </div>
 
             <FormError message={error ?? ""} />
+
+            <div className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                id="agreeToTerms"
+                checked={formData.agreeToTerms}
+                onChange={handleChange}
+                disabled={loading}
+                className="mt-0.5 h-4 w-4 rounded border-input bg-background text-primary focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-invalid={!!fieldErrors.agreeToTerms}
+              />
+              <label htmlFor="agreeToTerms" className="text-sm text-muted-foreground">
+                I agree to the{" "}
+                <Link href="/terms" className="text-primary hover:underline">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link href="/privacy" className="text-primary hover:underline">
+                  Privacy Policy
+                </Link>
+              </label>
+            </div>
+            {fieldErrors.agreeToTerms && (
+              <p className="text-sm text-destructive" role="alert">
+                {fieldErrors.agreeToTerms}
+              </p>
+            )}
 
             <Button
               className="w-full"

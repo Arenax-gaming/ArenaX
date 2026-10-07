@@ -4,7 +4,10 @@
 //!
 //! Provides on-chain event indexing, filtering, analytics, monitoring, and archiving.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, Env, Error, IntoVal, Map, Symbol, Val, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, Address, Bytes, Env, Error, IntoVal, Map, Symbol, Val,
+    Vec,
+};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -421,7 +424,7 @@ impl EventManagerContract {
             payload.push_back(event_data.clone().into_val(&env));
 
             let invocation: Result<
-                Result<(), core::convert::Infallible>,
+                Result<(), soroban_sdk::ConversionError>,
                 Result<Error, soroban_sdk::InvokeError>,
             > = env.try_invoke_contract(&sub.callback_contract, &sub.callback_function, payload);
 
@@ -839,7 +842,10 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(subs.get(0).unwrap().subscriber, subscriber);
         assert_eq!(subs.get(0).unwrap().callback_contract, cb_id);
-        assert_eq!(subs.get(0).unwrap().callback_function, Symbol::new(&env, "on_event"));
+        assert_eq!(
+            subs.get(0).unwrap().callback_function,
+            Symbol::new(&env, "on_event")
+        );
 
         client.unsubscribe(&subscriber, &topic);
         assert_eq!(client.get_subscribers(&topic).len(), 0);
@@ -939,11 +945,7 @@ mod tests {
             &Bytes::new(&env),
         );
 
-        client.dispatch_event(
-            &caller,
-            &Symbol::new(&env, "match_lose"),
-            &id,
-        );
+        client.dispatch_event(&caller, &Symbol::new(&env, "match_lose"), &id);
     }
 
     #[test]

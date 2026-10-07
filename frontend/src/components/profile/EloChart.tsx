@@ -28,14 +28,14 @@ const DATE_RANGE_OPTIONS: { value: EloDateRange; label: string }[] = [
 
 interface EloChartProps {
   /** Games this player has ELO history for — populates the game dropdown (#1096). */
-  games: string[];
+  games?: string[];
   /** Falls back to the first entry in `games`, or ALL_GAMES if empty. */
   defaultGame?: string;
   /** Used only if the initial fetch hasn't resolved yet — avoids a blank chart on first paint. */
   initialData?: EloPoint[];
 }
 
-export function EloChart({ games, defaultGame, initialData }: EloChartProps) {
+export function EloChart({ games = [], defaultGame, initialData }: EloChartProps) {
   const [dateRange, setDateRange] = useState<EloDateRange>("30d");
   const [game, setGame] = useState<string>(defaultGame ?? (games[0] ?? ALL_GAMES));
 
@@ -158,7 +158,7 @@ export function EloChart({ games, defaultGame, initialData }: EloChartProps) {
                       year: "numeric",
                     });
                   }}
-                  formatter={(value: number) => [value, "Elo"]}
+                  formatter={(value: number | undefined) => [value ?? 0, "Elo"]}
                 />
                 <ReferenceLine
                   y={ELO_BASELINE}

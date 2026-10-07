@@ -275,12 +275,7 @@ impl AirdropContract {
     /// record, and token transfer), not a wasm CPU trace:
     /// `instructions = 2_012_264`, `memory_read_entries = 7`,
     /// `write_entries = 5`, `write_bytes = 1_296`.
-    pub fn claim(
-        env: Env,
-        claimant: Address,
-        proof: Vec<BytesN<32>>,
-        amount: i128,
-    ) -> ClaimResult {
+    pub fn claim(env: Env, claimant: Address, proof: Vec<BytesN<32>>, amount: i128) -> ClaimResult {
         claimant.require_auth();
         Self::require_not_paused(&env);
         Self::require_not_expired(&env);

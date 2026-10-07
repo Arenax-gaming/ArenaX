@@ -1,7 +1,7 @@
-/// Integration tests for cross-contract interactions
 #![cfg(test)]
-
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env};
+/// Integration tests for cross-contract interactions
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, BytesN, Env};
 
 /// Test complete match flow with escrow
 #[test]
@@ -14,15 +14,15 @@ fn test_match_with_escrow_integration() {
     // let match_contract_id = env.register(MatchContract, ());
     // let escrow_contract_id = env.register(EscrowContract, ());
     // let token_contract_id = env.register(TokenContract, ());
-    
+
     // let match_client = MatchContractClient::new(&env, &match_contract_id);
     // let escrow_client = EscrowContractClient::new(&env, &escrow_contract_id);
     // let token_client = TokenContractClient::new(&env, &token_contract_id);
 
-    let player_a = Address::generate(&env);
-    let player_b = Address::generate(&env);
-    let match_id = BytesN::from_array(&env, &[1u8; 32]);
-    let stake_amount = 1000i128;
+    let _player_a = Address::generate(&env);
+    let _player_b = Address::generate(&env);
+    let _match_id = BytesN::from_array(&env, &[1u8; 32]);
+    let _stake_amount = 1000i128;
 
     // 1. Players deposit stake into escrow
     // token_client.transfer(&player_a, &escrow_contract_id, &stake_amount);
@@ -56,10 +56,10 @@ fn test_match_with_dispute_resolution() {
     // let dispute_contract_id = env.register(DisputeContract, ());
     // let oracle_contract_id = env.register(OracleContract, ());
 
-    let player_a = Address::generate(&env);
-    let player_b = Address::generate(&env);
-    let referee = Address::generate(&env);
-    let match_id = BytesN::from_array(&env, &[2u8; 32]);
+    let _player_a = Address::generate(&env);
+    let _player_b = Address::generate(&env);
+    let _referee = Address::generate(&env);
+    let _match_id = BytesN::from_array(&env, &[2u8; 32]);
 
     // 1. Create and start match
     // match_client.create_match(&match_id, &player_a, &player_b);
@@ -94,8 +94,8 @@ fn test_tournament_integration() {
     // let match_contract_id = env.register(MatchContract, ());
     // let escrow_contract_id = env.register(EscrowContract, ());
 
-    let players: Vec<Address> = (0..8).map(|_| Address::generate(&env)).collect();
-    let tournament_id = BytesN::from_array(&env, &[3u8; 32]);
+    let _players: Vec<Address> = (0..8).map(|_| Address::generate(&env)).collect();
+    let _tournament_id = BytesN::from_array(&env, &[3u8; 32]);
 
     // 1. Create tournament
     // tournament_client.create(&tournament_id, &players, &prize_pool);
@@ -126,8 +126,8 @@ fn test_staking_reputation_integration() {
     // let reputation_contract_id = env.register(ReputationContract, ());
     // let match_contract_id = env.register(MatchContract, ());
 
-    let player = Address::generate(&env);
-    let stake_amount = 10000i128;
+    let _player = Address::generate(&env);
+    let _stake_amount = 10000i128;
 
     // 1. Stake tokens
     // staking_client.stake(&player, &stake_amount);
@@ -156,7 +156,7 @@ fn test_governance_protocol_params() {
     // let governance_contract_id = env.register(GovernanceContract, ());
     // let params_contract_id = env.register(ProtocolParamsContract, ());
 
-    let admin = Address::generate(&env);
+    let _admin = Address::generate(&env);
 
     // 1. Propose parameter change
     // governance_client.propose(&admin, &proposal_id, &new_params);
@@ -182,9 +182,9 @@ fn test_anti_cheat_oracle_integration() {
     // let match_contract_id = env.register(MatchContract, ());
     // let oracle_contract_id = env.register(AntiCheatOracle, ());
 
-    let player_a = Address::generate(&env);
-    let player_b = Address::generate(&env);
-    let match_id = BytesN::from_array(&env, &[4u8; 32]);
+    let _player_a = Address::generate(&env);
+    let _player_b = Address::generate(&env);
+    let _match_id = BytesN::from_array(&env, &[4u8; 32]);
 
     // 1. Create and start match
     // match_client.create_match(&match_id, &player_a, &player_b);
@@ -214,7 +214,7 @@ fn test_upgrade_system_integration() {
     // let upgrade_contract_id = env.register(UpgradeContract, ());
     // let match_contract_id = env.register(MatchContract, ());
 
-    let admin = Address::generate(&env);
+    let _admin = Address::generate(&env);
 
     // 1. Deploy new version
     // let new_contract_id = env.register(MatchContractV2, ());
@@ -239,7 +239,7 @@ fn test_auth_gateway_integration() {
     // let auth_contract_id = env.register(AuthGateway, ());
     // let match_contract_id = env.register(MatchContract, ());
 
-    let user = Address::generate(&env);
+    let _user = Address::generate(&env);
 
     // 1. Register user
     // auth_client.register(&user);
@@ -283,8 +283,8 @@ fn test_complete_end_to_end_flow() {
     // Setup all contracts
     // Register: Match, Escrow, Token, Reputation, Staking, Oracle
 
-    let player_a = Address::generate(&env);
-    let player_b = Address::generate(&env);
+    let _player_a = Address::generate(&env);
+    let _player_b = Address::generate(&env);
 
     // 1. Players register and stake
     // 2. Create match with escrow

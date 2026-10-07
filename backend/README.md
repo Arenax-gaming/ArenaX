@@ -171,18 +171,25 @@ REDIS_URL=redis://localhost:6379
 # Storage
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
-S3_SECRET_KEY=secret
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# Every secret must be at least 32 characters long and must not be a known
+# placeholder (`supersecretkey`, `changeme`, ...). The backend refuses to start
+# otherwise. Generate real values with `openssl rand -base64 48`.
+S3_SECRET_KEY=dev-only-s3-secret-replace-me-0123456789
 
 # Payments
-PAYSTACK_SECRET=sk_test_xxx
-FLUTTERWAVE_SECRET=FLWSECK_TEST-xxx
+PAYSTACK_SECRET=dev-only-paystack-secret-replace-me-0123456789
+FLUTTERWAVE_SECRET=dev-only-flutterwave-secret-replace-me-0123456789
 
 # Authentication
-JWT_SECRET=supersecretkey
+JWT_SECRET=dev-only-jwt-secret-replace-me-0123456789abcdef
+# Optional: dedicated refresh-token secret (falls back to JWT_SECRET when unset)
+JWT_REFRESH_SECRET=
 
 # Stellar Configuration
 STELLAR_NETWORK_URL=https://horizon-testnet.stellar.org
-STELLAR_ADMIN_SECRET=SBXXX...
+STELLAR_ADMIN_SECRET=dev-only-stellar-admin-secret-replace-me
 SOROBAN_CONTRACT_PRIZE=CAXXX...
 SOROBAN_CONTRACT_REPUTATION=CBXXX...
 
