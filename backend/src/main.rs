@@ -230,6 +230,30 @@ async fn main() -> io::Result<()> {
         });
     }
 
+    // Each process consumes the full leaderboard stream into its own cache
+    // (Issue #1255). A separate consumer group per process is what makes
+    // every instance see every update.
+    let leaderboard_sync = Arc::new(crate::service::leaderboard_sync::LeaderboardSync::new(
+        format!("backend-{}", std::process::id()),
+        crate::realtime::event_stream::EventStream::redis(
+            redis_conn.clone(),
+            crate::service::leaderboard_sync::LEADERBOARD_STREAM,
+            5,
+        ),
+    ));
+    {
+        let sync = leaderboard_sync.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                ticker.tick().await;
+                if let Err(error) = sync.consume_pending().await {
+                    tracing::warn!(%error, "leaderboard sync consume failed");
+                }
+            }
+        });
+    }
+
     // Initialize Auth Services for Realtime
     let jwt_config = crate::auth::jwt_service::JwtConfig::from_config(
         config.auth.jwt_secret.clone(),
@@ -276,6 +300,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
+            .app_data(web::Data::new(leaderboard_sync.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
             .app_data(web::Data::new(jwt_service.clone()))

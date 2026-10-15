@@ -13,6 +13,7 @@ pub mod governance_service;
 pub mod idempotency_service;
 pub mod idempotency_tests;
 pub mod leaderboard_service;
+pub mod leaderboard_sync;
 pub mod match_authority_service;
 pub mod match_authority_service_test;
 pub mod match_service;
