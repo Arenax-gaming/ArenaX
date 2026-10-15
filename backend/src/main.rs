@@ -173,11 +173,20 @@ async fn main() -> io::Result<()> {
     // The protocol signer secret is the Stellar admin key; the match
     // lifecycle contract address is read from SOROBAN_CONTRACT_MATCH
     // (falls back to SOROBAN_CONTRACT_PRIZE for backwards compatibility).
-    let match_authority_service = Arc::new(MatchAuthorityService::new(
-        db_pool.clone(),
-        soroban_service.clone(),
-        config.stellar.soroban_contract_match.clone(),
-    ));
+    let match_events = crate::realtime::event_stream::EventStream::redis(
+        redis_conn.clone(),
+        crate::realtime::event_stream::MATCH_STATE_STREAM,
+        5,
+    );
+
+    let match_authority_service = Arc::new(
+        MatchAuthorityService::new(
+            db_pool.clone(),
+            soroban_service.clone(),
+            config.stellar.soroban_contract_match.clone(),
+        )
+        .with_match_events(match_events.clone()),
+    );
     // Store the signer secret in app_data using the SignerSecret newtype so
     // it doesn't collide with any other web::Data<String> entries.
     let protocol_signer_secret =
@@ -279,6 +288,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
+            .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))

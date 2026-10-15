@@ -17,6 +17,7 @@ use crate::service::evidence_storage::{
     evidence_object_key, hash_evidence, validate_content_type, validate_evidence_size,
     validate_magic_bytes, EvidenceStore,
 };
+use crate::realtime::event_stream::EventStream;
 use crate::service::match_service::MatchService;
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Serialize;
@@ -34,6 +35,7 @@ pub async fn upload_dispute_evidence(
     req: HttpRequest,
     db: web::Data<DbPool>,
     store: web::Data<Arc<dyn EvidenceStore>>,
+    events: Option<web::Data<EventStream>>,
     path: web::Path<Uuid>,
     body: web::Bytes,
 ) -> Result<HttpResponse, ApiError> {
@@ -57,7 +59,10 @@ pub async fn upload_dispute_evidence(
     let s3_key = evidence_object_key(user_id, match_id, &content_type, &hash_hex);
     store.put(&s3_key, &content_type, &body).await?;
 
-    let svc = MatchService::new(db.get_ref().clone());
+    let mut svc = MatchService::new(db.get_ref().clone());
+    if let Some(events) = events {
+        svc = svc.with_match_events(events.get_ref().clone());
+    }
     let dispute = svc
         .attach_dispute_evidence(match_id, user_id, &hash_hex, &s3_key)
         .await?;

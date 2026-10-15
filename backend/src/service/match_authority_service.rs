@@ -15,6 +15,8 @@ pub struct MatchAuthorityService {
     db_pool: DbPool,
     soroban_service: Arc<SorobanService>,
     match_lifecycle_contract: String,
+    /// Optional match-state stream (Issue #1254).
+    match_events: Option<crate::realtime::event_stream::EventStream>,
 }
 
 impl MatchAuthorityService {
@@ -28,6 +30,37 @@ impl MatchAuthorityService {
             db_pool,
             soroban_service,
             match_lifecycle_contract,
+            match_events: None,
+        }
+    }
+
+    pub fn with_match_events(mut self, stream: crate::realtime::event_stream::EventStream) -> Self {
+        self.match_events = Some(stream);
+        self
+    }
+
+    fn authority_state_name(state: crate::models::match_authority::MatchAuthorityState) -> &'static str {
+        use crate::models::match_authority::MatchAuthorityState;
+        match state {
+            MatchAuthorityState::Created => "CREATED",
+            MatchAuthorityState::Started => "STARTED",
+            MatchAuthorityState::Completed => "COMPLETED",
+            MatchAuthorityState::Disputed => "DISPUTED",
+            MatchAuthorityState::Finalized => "FINALIZED",
+        }
+    }
+
+    async fn emit_match_state(&self, match_id: Uuid, from_status: &str, to_status: &str) {
+        let Some(stream) = &self.match_events else {
+            return;
+        };
+        let event = crate::realtime::event_stream::MatchStateEvent::new(
+            match_id,
+            from_status,
+            to_status,
+        );
+        if let Err(error) = stream.publish_match_state(&event).await {
+            warn!(%match_id, %error, "failed to publish match authority state event");
         }
     }
 
@@ -182,6 +215,7 @@ impl MatchAuthorityService {
             })
         }).await?;
 
+        self.emit_match_state(match_id, "none", "CREATED").await;
         self.get_match_with_transitions(match_id).await
     }
 
@@ -318,6 +352,7 @@ impl MatchAuthorityService {
             })
         }).await?;
 
+        self.emit_match_state(match_id, "CREATED", "STARTED").await;
         self.get_match_with_transitions(match_id).await
     }
 
@@ -405,6 +440,12 @@ impl MatchAuthorityService {
 
         info!(match_id = %match_id, "Match completed successfully");
 
+        self.emit_match_state(
+            match_id,
+            Self::authority_state_name(match_entity.state),
+            "COMPLETED",
+        )
+        .await;
         self.get_match_with_transitions(match_id).await
     }
 
@@ -484,6 +525,12 @@ impl MatchAuthorityService {
 
         info!(match_id = %match_id, "Dispute raised successfully");
 
+        self.emit_match_state(
+            match_id,
+            Self::authority_state_name(match_entity.state),
+            "DISPUTED",
+        )
+        .await;
         self.get_match_with_transitions(match_id).await
     }
 
@@ -557,6 +604,12 @@ impl MatchAuthorityService {
 
         info!(match_id = %match_id, "Match finalized successfully");
 
+        self.emit_match_state(
+            match_id,
+            Self::authority_state_name(match_entity.state),
+            "FINALIZED",
+        )
+        .await;
         self.get_match_with_transitions(match_id).await
     }
 

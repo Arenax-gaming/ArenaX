@@ -1,5 +1,6 @@
 pub mod events;
 pub mod event_bus;
+pub mod event_stream;
 pub mod ws_broadcaster;
 pub mod leaderboard_broadcaster;
 pub mod user_ws;
