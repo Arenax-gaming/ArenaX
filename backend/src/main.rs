@@ -208,6 +208,7 @@ async fn main() -> io::Result<()> {
     let gameplay_analysis = Arc::new(crate::service::gameplay_analysis::GameplayAnalysis::new(Some(
         event_bus.clone(),
     )));
+    let platform_links = Arc::new(crate::service::platform_links::PlatformLinks::new());
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
@@ -280,6 +281,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(event_bus.clone()))
             .app_data(web::Data::new(community_leaderboard.clone()))
             .app_data(web::Data::new(gameplay_analysis.clone()))
+            .app_data(web::Data::new(platform_links.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
             .app_data(web::Data::new(session_registry.clone()))
@@ -494,6 +496,7 @@ async fn main() -> io::Result<()> {
             .configure(crate::realtime::user_ws::configure_ws_route)
             .configure(crate::service::community_leaderboard::configure)
             .configure(crate::service::gameplay_analysis::configure)
+            .configure(crate::service::platform_links::configure)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();

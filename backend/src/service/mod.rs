@@ -23,6 +23,7 @@ pub mod matchmaker;
 pub mod matchmaker_tests;
 pub mod notification_service;
 pub mod payment_provider;
+pub mod platform_links;
 pub mod player_stats_service;
 pub mod push_notification_service;
 pub mod reaper_service;
