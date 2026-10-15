@@ -209,6 +209,7 @@ async fn main() -> io::Result<()> {
         event_bus.clone(),
     )));
     let platform_links = Arc::new(crate::service::platform_links::PlatformLinks::new());
+    let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
@@ -282,6 +283,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(community_leaderboard.clone()))
             .app_data(web::Data::new(gameplay_analysis.clone()))
             .app_data(web::Data::new(platform_links.clone()))
+            .app_data(web::Data::new(sponsored_tokens.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
             .app_data(web::Data::new(session_registry.clone()))
@@ -497,6 +499,7 @@ async fn main() -> io::Result<()> {
             .configure(crate::service::community_leaderboard::configure)
             .configure(crate::service::gameplay_analysis::configure)
             .configure(crate::service::platform_links::configure)
+            .configure(crate::service::sponsored_tokens::configure)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();

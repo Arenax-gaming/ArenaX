@@ -31,6 +31,7 @@ pub mod reputation_service;
 pub mod reward_settlement_service;
 pub mod social_service;
 pub mod soroban_service;
+pub mod sponsored_tokens;
 pub mod staking_service;
 pub mod stellar_service;
 pub mod suspension_service;
