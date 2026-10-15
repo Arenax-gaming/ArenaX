@@ -214,6 +214,9 @@ pub struct TournamentService {
     soroban_service: Option<Arc<SorobanService>>,
     prize_contract_id: Option<String>,
     admin_secret: Option<String>,
+    /// Distributed lock and versioned status (Issue #1253).
+    state_backend: Option<crate::service::distributed_tournament_state::TournamentStateBackend>,
+    instance_id: String,
 }
 
 impl TournamentService {
@@ -225,7 +228,17 @@ impl TournamentService {
             soroban_service: None,
             prize_contract_id: None,
             admin_secret: None,
+            state_backend: None,
+            instance_id: format!("tournament-{}", Uuid::new_v4()),
         }
+    }
+
+    pub fn with_state_backend(
+        mut self,
+        backend: crate::service::distributed_tournament_state::TournamentStateBackend,
+    ) -> Self {
+        self.state_backend = Some(backend);
+        self
     }
 
     pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
@@ -685,6 +698,65 @@ impl TournamentService {
         Ok(participant)
     }
 
+    async fn lock_tournament(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<
+        Option<crate::service::distributed_tournament_state::StateLock>,
+        ApiError,
+    > {
+        let Some(backend) = &self.state_backend else {
+            return Ok(None);
+        };
+        use crate::service::distributed_tournament_state::StateError;
+        match backend.acquire(&self.instance_id, tournament_id).await {
+            Ok(lock) => Ok(Some(lock)),
+            Err(StateError::Held { owner }) => Err(ApiError::conflict(format!(
+                "Tournament {tournament_id} is locked by {owner}"
+            ))),
+            Err(StateError::Redis(message)) => Err(ApiError::RedisError(message)),
+            Err(error) => Err(ApiError::conflict(error.to_string())),
+        }
+    }
+
+    async fn state_version(&self, tournament_id: Uuid) -> Result<u64, ApiError> {
+        let Some(backend) = &self.state_backend else {
+            return Ok(0);
+        };
+        use crate::service::distributed_tournament_state::StateError;
+        match backend.read(tournament_id).await {
+            Ok(Some(snapshot)) => Ok(snapshot.version),
+            Ok(None) => Ok(0),
+            Err(StateError::Redis(message)) => Err(ApiError::RedisError(message)),
+            Err(error) => Err(ApiError::conflict(error.to_string())),
+        }
+    }
+
+    async fn finish_tournament_lock(
+        &self,
+        lock: Option<&crate::service::distributed_tournament_state::StateLock>,
+        tournament_id: Uuid,
+        expected_version: u64,
+        status: &str,
+        committed: bool,
+    ) {
+        let (Some(backend), Some(lock)) = (&self.state_backend, lock) else {
+            return;
+        };
+        if committed {
+            if let Err(error) = backend.commit(lock, expected_version, status).await {
+                tracing::warn!(
+                    %tournament_id,
+                    %error,
+                    "distributed tournament state commit failed"
+                );
+            }
+        }
+        if let Err(error) = backend.release(lock).await {
+            tracing::warn!(%tournament_id, %error, "distributed tournament lock release failed");
+        }
+    }
+
     /// Update tournament status
     pub async fn update_tournament_status(
         &self,
@@ -722,30 +794,67 @@ impl TournamentService {
             )));
         }
 
-        let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
+        let state_lock = match self.lock_tournament(tournament_id).await {
+            Ok(lock) => lock,
+            Err(error) => return Err(error),
+        };
+        let expected_version = match self.state_version(tournament_id).await {
+            Ok(version) => version,
+            Err(error) => {
+                self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                    .await;
+                return Err(error);
+            }
+        };
 
-        let tournament = sqlx::query_as!(
+        let mut tx = match self.db_pool.begin().await {
+            Ok(tx) => tx,
+            Err(error) => {
+                self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                    .await;
+                return Err(ApiError::database_error(error));
+            }
+        };
+
+        // The status predicate closes the race between the read above and this
+        // write: a second instance that already moved the row updates zero rows.
+        let tournament = match sqlx::query_as!(
             Tournament,
             r#"
             UPDATE tournaments
             SET status = $1, updated_at = $2
-            WHERE id = $3
+            WHERE id = $3 AND status = $4
             RETURNING *
             "#,
             new_status as _,
             Utc::now(),
-            tournament_id
+            tournament_id,
+            old_status as _
         )
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(ApiError::database_error)?;
+        {
+            Ok(Some(tournament)) => tournament,
+            Ok(None) => {
+                self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                    .await;
+                return Err(ApiError::conflict(
+                    "Tournament status was updated concurrently",
+                ));
+            }
+            Err(error) => {
+                self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                    .await;
+                return Err(ApiError::database_error(error));
+            }
+        };
 
         // Audit log
         let details = serde_json::json!({
             "old_status": old_status,
             "new_status": new_status,
         });
-        sqlx::query!(
+        match sqlx::query!(
             r#"
             INSERT INTO audit_logs (action, resource_type, resource_id, details)
             VALUES ($1, $2, $3, $4)
@@ -757,9 +866,28 @@ impl TournamentService {
         )
         .execute(&mut *tx)
         .await
-        .map_err(ApiError::database_error)?;
+        {
+            Ok(_) => {}
+            Err(error) => {
+                self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                    .await;
+                return Err(ApiError::database_error(error));
+            }
+        };
 
-        tx.commit().await.map_err(ApiError::database_error)?;
+        if let Err(error) = tx.commit().await {
+            self.finish_tournament_lock(state_lock.as_ref(), tournament_id, 0, "", false)
+                .await;
+            return Err(ApiError::database_error(error));
+        }
+        self.finish_tournament_lock(
+            state_lock.as_ref(),
+            tournament_id,
+            expected_version,
+            &new_status.to_string(),
+            true,
+        )
+        .await;
 
         // Handle status-specific logic
         match new_status {

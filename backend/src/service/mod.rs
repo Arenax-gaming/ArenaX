@@ -6,6 +6,7 @@ pub mod audit_service;
 pub mod auth_service;
 pub mod batch_service;
 pub mod dispute_service;
+pub mod distributed_tournament_state;
 pub mod email_service;
 pub mod evidence_storage;
 pub mod feature_flags;

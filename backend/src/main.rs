@@ -162,11 +162,17 @@ async fn main() -> io::Result<()> {
     // Shared TournamentService wired with Soroban so distribute_prizes can
     // execute real on-chain transfers via the prize contract.
     let tournament_service = Arc::new(
-        TournamentService::new(db_pool.clone()).with_soroban(
-            soroban_service.clone(),
-            config.stellar.soroban_contract_prize.clone(),
-            config.stellar.admin_secret.clone(),
-        ),
+        TournamentService::new(db_pool.clone())
+            .with_state_backend(
+                crate::service::distributed_tournament_state::TournamentStateBackend::redis(
+                    redis_conn.clone(),
+                ),
+            )
+            .with_soroban(
+                soroban_service.clone(),
+                config.stellar.soroban_contract_prize.clone(),
+                config.stellar.admin_secret.clone(),
+            ),
     );
 
     // MatchAuthorityService — handles the on-chain match lifecycle FSM.
