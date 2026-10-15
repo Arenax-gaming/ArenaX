@@ -15,6 +15,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { CommunityFeed } from "@/components/social";
+import { CommunityLeaderboard } from "@/components/community/CommunityLeaderboard";
 import { currentUser } from "@/data/user";
 import type { CommunityPost } from "@/types/social";
 
@@ -165,6 +166,8 @@ export default function CommunityPage() {
           More Filters
         </Button>
       </div>
+
+      <CommunityLeaderboard />
 
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

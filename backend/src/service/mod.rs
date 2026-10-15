@@ -5,6 +5,7 @@ pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
 pub mod batch_service;
+pub mod community_leaderboard;
 pub mod dispute_service;
 pub mod email_service;
 pub mod evidence_storage;

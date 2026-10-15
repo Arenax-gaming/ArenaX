@@ -108,6 +108,23 @@ impl WsBroadcaster {
             .await;
         }));
 
+        // Community reputation boards (Issue #1257). Same subscription routing
+        // as match channels: a client receives a board only after it joins
+        // `community:{id}`.
+        let redis_url = self.redis_url.clone();
+        let registry = self.registry.clone();
+        let address_book = self.address_book.clone();
+        handles.push(tokio::spawn(async move {
+            Self::subscribe_loop(
+                &redis_url,
+                channels::COMMUNITY_CHANNEL_PATTERN,
+                &registry,
+                &address_book,
+                Self::route_match_event,
+            )
+            .await;
+        }));
+
         info!("WsBroadcaster started — listening to Redis Pub/Sub");
         handles
     }
