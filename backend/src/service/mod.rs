@@ -10,6 +10,7 @@ pub mod dispute_service;
 pub mod email_service;
 pub mod evidence_storage;
 pub mod feature_flags;
+pub mod gameplay_analysis;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod idempotency_tests;
