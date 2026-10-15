@@ -5,6 +5,7 @@ pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
 pub mod batch_service;
+pub mod chat;
 pub mod dispute_service;
 pub mod distributed_tournament_state;
 pub mod email_service;

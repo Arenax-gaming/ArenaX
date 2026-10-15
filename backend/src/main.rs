@@ -210,6 +210,10 @@ async fn main() -> io::Result<()> {
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
+    let chat_service = Arc::new(crate::service::chat::ChatService::redis(
+        redis_conn.clone(),
+        Some(event_bus.clone()),
+    ));
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
@@ -304,6 +308,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(Arc::new(redis_client.clone())))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
+            .app_data(web::Data::new(chat_service.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
             .app_data(web::Data::new(leaderboard_sync.clone()))
@@ -518,6 +523,7 @@ async fn main() -> io::Result<()> {
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
+            .configure(crate::service::chat::configure)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();
