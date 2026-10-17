@@ -364,6 +364,15 @@ export function useUserPreferences(): UserPreferencesContextValue {
   return ctx;
 }
 
+/**
+ * Non-throwing variant. Returns `null` when no provider is mounted so
+ * standalone components (e.g. the wallet currency selector) can degrade to
+ * local state instead of crashing outside the app shell.
+ */
+export function useOptionalUserPreferences(): UserPreferencesContextValue | null {
+  return useContext(UserPreferencesContext);
+}
+
 /** Sliced selector — only re-renders when selected slice changes */
 export function usePrefsSelector<T>(selector: (prefs: UserPreferences) => T): T {
   const { prefs } = useUserPreferences();

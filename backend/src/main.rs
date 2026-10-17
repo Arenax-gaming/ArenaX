@@ -34,6 +34,8 @@ use crate::middleware::tracing_middleware::RequestTracing;
 use crate::models::idempotency::IdempotencyPolicy;
 use crate::service::batch_service::BatchService;
 use crate::service::evidence_storage::{EvidenceStore, S3EvidenceStore};
+use crate::service::gameplay_analysis::GameplayAnalysis;
+use crate::service::{AntiCheatService, LoggingStellarReporter};
 use crate::service::match_authority_service::MatchAuthorityService;
 use crate::service::ReaperService;
 use crate::realtime::event_bus::EventBus;
@@ -301,6 +303,18 @@ async fn main() -> io::Result<()> {
     // Tamper-evident dispute evidence storage (#1081, #1076).
     let evidence_store: Arc<dyn EvidenceStore> = Arc::new(S3EvidenceStore::new(&config.storage));
 
+    // Anti-cheat microservice (#1281): screenshot + telemetry analysis,
+    // suspicious-activity flagging, and PostgreSQL/Stellar result logging.
+    let gameplay_analysis = Arc::new(GameplayAnalysis::new(Some(event_bus.clone())));
+    let stellar_reporter: Arc<dyn crate::service::StellarReporter> =
+        Arc::new(LoggingStellarReporter::new());
+    let anti_cheat_service = Arc::new(AntiCheatService::new(
+        db_pool.clone(),
+        Some(evidence_store.clone()),
+        gameplay_analysis.clone(),
+        stellar_reporter,
+    ));
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
@@ -326,6 +340,8 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
+            .app_data(web::Data::new(evidence_store.clone()))
+            .app_data(web::Data::new(anti_cheat_service.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
@@ -364,6 +380,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::docs_handler::configure_routes)
                     // Anti-bot detection endpoints — Issue #903
                     .configure(crate::http::anti_bot_handler::configure_routes)
+                    // Anti-cheat microservice endpoints — Issue #1281
+                    .configure(crate::http::anti_cheat_handler::configure_routes)
                     // IP whitelist/blacklist admin endpoints — Issue #975
                     .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
