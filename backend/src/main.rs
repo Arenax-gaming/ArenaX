@@ -162,22 +162,37 @@ async fn main() -> io::Result<()> {
     // Shared TournamentService wired with Soroban so distribute_prizes can
     // execute real on-chain transfers via the prize contract.
     let tournament_service = Arc::new(
-        TournamentService::new(db_pool.clone()).with_soroban(
-            soroban_service.clone(),
-            config.stellar.soroban_contract_prize.clone(),
-            config.stellar.admin_secret.clone(),
-        ),
+        TournamentService::new(db_pool.clone())
+            .with_state_backend(
+                crate::service::distributed_tournament_state::TournamentStateBackend::redis(
+                    redis_conn.clone(),
+                ),
+            )
+            .with_soroban(
+                soroban_service.clone(),
+                config.stellar.soroban_contract_prize.clone(),
+                config.stellar.admin_secret.clone(),
+            ),
     );
 
     // MatchAuthorityService — handles the on-chain match lifecycle FSM.
     // The protocol signer secret is the Stellar admin key; the match
     // lifecycle contract address is read from SOROBAN_CONTRACT_MATCH
     // (falls back to SOROBAN_CONTRACT_PRIZE for backwards compatibility).
-    let match_authority_service = Arc::new(MatchAuthorityService::new(
-        db_pool.clone(),
-        soroban_service.clone(),
-        config.stellar.soroban_contract_match.clone(),
-    ));
+    let match_events = crate::realtime::event_stream::EventStream::redis(
+        redis_conn.clone(),
+        crate::realtime::event_stream::MATCH_STATE_STREAM,
+        5,
+    );
+
+    let match_authority_service = Arc::new(
+        MatchAuthorityService::new(
+            db_pool.clone(),
+            soroban_service.clone(),
+            config.stellar.soroban_contract_match.clone(),
+        )
+        .with_match_events(match_events.clone()),
+    );
     // Store the signer secret in app_data using the SignerSecret newtype so
     // it doesn't collide with any other web::Data<String> entries.
     let protocol_signer_secret =
@@ -195,21 +210,10 @@ async fn main() -> io::Result<()> {
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
-    let community_leaderboard = Arc::new(
-        crate::service::community_leaderboard::CommunityLeaderboard::open(
-            redis_conn.clone(),
-            Some(event_bus.clone()),
-            config.stellar.network_url.clone(),
-            std::env::var("STELLAR_REPUTATION_ASSET").unwrap_or_else(|_| "REP".to_string()),
-            std::env::var("STELLAR_REPUTATION_ISSUER").unwrap_or_default(),
-        )
-        .await,
-    );
-    let gameplay_analysis = Arc::new(crate::service::gameplay_analysis::GameplayAnalysis::new(Some(
-        event_bus.clone(),
-    )));
-    let platform_links = Arc::new(crate::service::platform_links::PlatformLinks::new());
-    let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
+    let chat_service = Arc::new(crate::service::chat::ChatService::redis(
+        redis_conn.clone(),
+        Some(event_bus.clone()),
+    ));
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
@@ -232,6 +236,30 @@ async fn main() -> io::Result<()> {
             loop {
                 ticker.tick().await;
                 broadcaster.flush_all().await;
+            }
+        });
+    }
+
+    // Each process consumes the full leaderboard stream into its own cache
+    // (Issue #1255). A separate consumer group per process is what makes
+    // every instance see every update.
+    let leaderboard_sync = Arc::new(crate::service::leaderboard_sync::LeaderboardSync::new(
+        format!("backend-{}", std::process::id()),
+        crate::realtime::event_stream::EventStream::redis(
+            redis_conn.clone(),
+            crate::service::leaderboard_sync::LEADERBOARD_STREAM,
+            5,
+        ),
+    ));
+    {
+        let sync = leaderboard_sync.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                ticker.tick().await;
+                if let Err(error) = sync.consume_pending().await {
+                    tracing::warn!(%error, "leaderboard sync consume failed");
+                }
             }
         });
     }
@@ -280,12 +308,10 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(Arc::new(redis_client.clone())))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
-            .app_data(web::Data::new(community_leaderboard.clone()))
-            .app_data(web::Data::new(gameplay_analysis.clone()))
-            .app_data(web::Data::new(platform_links.clone()))
-            .app_data(web::Data::new(sponsored_tokens.clone()))
+            .app_data(web::Data::new(chat_service.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
+            .app_data(web::Data::new(leaderboard_sync.clone()))
             .app_data(web::Data::new(session_registry.clone()))
             .app_data(web::Data::new(address_book.clone()))
             .app_data(web::Data::new(jwt_service.clone()))
@@ -298,6 +324,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
+            .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
@@ -496,10 +523,7 @@ async fn main() -> io::Result<()> {
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
-            .configure(crate::service::community_leaderboard::configure)
-            .configure(crate::service::gameplay_analysis::configure)
-            .configure(crate::service::platform_links::configure)
-            .configure(crate::service::sponsored_tokens::configure)
+            .configure(crate::service::chat::configure)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();

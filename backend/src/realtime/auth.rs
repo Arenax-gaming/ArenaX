@@ -37,9 +37,16 @@ impl RealtimeAuth {
             self.authorize_user_channel(user_id, channel)
         } else if channel.starts_with("match:") {
             self.authorize_match_channel(user_id, channel).await
-        } else if channel.starts_with("community:") {
-            crate::service::community_leaderboard::authorize_community_channel(channel)
-                .map_err(AuthError::InvalidChannel)
+        } else if channel.starts_with("chat:") {
+            match crate::service::chat::authorize_chat_channel(user_id, channel) {
+                Ok(()) => Ok(()),
+                Err(crate::service::chat::ChatAuthError::Forbidden(reason)) => {
+                    Err(AuthError::Unauthorized(reason))
+                }
+                Err(crate::service::chat::ChatAuthError::Invalid(reason)) => {
+                    Err(AuthError::InvalidChannel(reason))
+                }
+            }
         } else {
             Err(AuthError::InvalidChannel(format!("Unknown channel prefix: {}", channel)))
         }

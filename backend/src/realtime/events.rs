@@ -75,29 +75,14 @@ pub enum RealtimeEvent {
         changes: Vec<RankChange>,
         timestamp: String,
     },
-    /// Full community board after a Stellar reputation balance changes (Issue #1257).
-    ///
-    /// `tournament_id` is `None` for the community-wide ranking and `Some` for
-    /// the same update filtered to one tournament. Clients apply an event only
-    /// when both ids match the board they are showing, and only when `version`
-    /// is not older than the board they already have.
-    CommunityLeaderboard {
-        community_id: String,
-        tournament_id: Option<String>,
-        version: u64,
-        entries: Vec<CommunityRankEntry>,
+    /// In-app chat message delivered to one room (Issue #1256).
+    ChatMessage {
+        room_id: String,
+        message_id: Uuid,
+        sender_id: Uuid,
+        body: String,
         timestamp: String,
     },
-}
-
-/// One row of the community reputation leaderboard.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommunityRankEntry {
-    pub rank: i32,
-    pub user_id: Uuid,
-    pub username: String,
-    pub reputation: String,
-    pub reputation_stroops: i64,
 }
 
 /// One player's movement on the leaderboard.
@@ -146,7 +131,7 @@ pub mod channels {
     pub const USER_CHANNEL_PATTERN: &str = "user:*";
     pub const MATCH_CHANNEL_PATTERN: &str = "match:*";
     pub const LEADERBOARD_CHANNEL_PATTERN: &str = "leaderboard:*";
-    pub const COMMUNITY_CHANNEL_PATTERN: &str = "community:*";
+    pub const CHAT_CHANNEL_PATTERN: &str = "chat:*";
     pub const MATCHMAKING_METRICS_CHANNEL: &str = "matchmaking:metrics";
 
     pub fn user_channel(user_id: Uuid) -> String {

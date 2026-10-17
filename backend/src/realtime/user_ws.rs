@@ -385,13 +385,20 @@ pub async fn ws_handler(
     let query_string = req.query_string();
 
     // Extract token from query string
-    let token = query_string.split('&').find_map(|pair| {
-        let mut parts = pair.splitn(2, '=');
-        match (parts.next(), parts.next()) {
-            (Some("token"), Some(value)) => Some(value.to_string()),
-            _ => None,
-        }
-    }).ok_or_else(|| actix_web::error::ErrorUnauthorized("Missing token parameter"))?;
+    let token = query_string
+        .split('&')
+        .find_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            match (parts.next(), parts.next()) {
+                (Some("token"), Some(value)) => Some(value.to_string()),
+                _ => None,
+            }
+        })
+        .or_else(|| {
+            req.cookie(crate::http::auth_handler::ACCESS_TOKEN_COOKIE)
+                .map(|cookie| cookie.value().to_string())
+        })
+        .ok_or_else(|| actix_web::error::ErrorUnauthorized("Missing token parameter"))?;
 
     // Validate token
     let claims = jwt_service.validate_token(&token).await.map_err(|e| {

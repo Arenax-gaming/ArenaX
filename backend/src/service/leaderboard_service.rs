@@ -19,6 +19,9 @@ pub struct LeaderboardService {
     /// migrations, batch jobs and tests have no WebSocket clients to notify,
     /// and rank updates must not depend on Redis being reachable.
     broadcaster: Option<Arc<LeaderboardBroadcaster>>,
+    /// Publishes rank changes so other instances can refresh their cache
+    /// (Issue #1255).
+    sync: Option<Arc<crate::service::leaderboard_sync::LeaderboardSync>>,
     /// Response cache for the read path (Issue #910).
     ///
     /// Optional for the same reason as `broadcaster`: the service must stay
@@ -32,6 +35,7 @@ impl LeaderboardService {
         Self {
             db_pool,
             broadcaster: None,
+            sync: None,
             cache: None,
         }
     }
@@ -45,6 +49,11 @@ impl LeaderboardService {
     /// Attaches a broadcaster so rank updates are pushed in real time.
     pub fn with_broadcaster(mut self, broadcaster: Arc<LeaderboardBroadcaster>) -> Self {
         self.broadcaster = Some(broadcaster);
+        self
+    }
+
+    pub fn with_sync(mut self, sync: Arc<crate::service::leaderboard_sync::LeaderboardSync>) -> Self {
+        self.sync = Some(sync);
         self
     }
 
@@ -408,6 +417,15 @@ impl LeaderboardService {
             },
         )
         .await;
+
+        if let Some(sync) = &self.sync {
+            if let Err(error) = sync
+                .publish_rank(category, player_id, new_ranking, elo_rating)
+                .await
+            {
+                tracing::warn!(%error, "failed to publish leaderboard update");
+            }
+        }
 
         Ok(())
     }
