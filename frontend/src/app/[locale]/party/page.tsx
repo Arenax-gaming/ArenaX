@@ -252,7 +252,7 @@ export default function PartyPage() {
     setJoiningTournamentId(tournamentId);
     try {
       const tournament = tournamentData?.find((t) => t.id === tournamentId);
-      await api.joinTournament(tournamentId, party.id);
+      await api.joinTournament(tournamentId);
       setShowTournamentModal(false);
       notify({
         type: "match",
