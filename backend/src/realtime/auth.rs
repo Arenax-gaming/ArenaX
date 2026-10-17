@@ -37,6 +37,9 @@ impl RealtimeAuth {
             self.authorize_user_channel(user_id, channel)
         } else if channel.starts_with("match:") {
             self.authorize_match_channel(user_id, channel).await
+        } else if channel.starts_with("community:") {
+            crate::service::community_leaderboard::authorize_community_channel(channel)
+                .map_err(AuthError::InvalidChannel)
         } else {
             Err(AuthError::InvalidChannel(format!("Unknown channel prefix: {}", channel)))
         }

@@ -195,6 +195,21 @@ async fn main() -> io::Result<()> {
 
     // Initialize real-time infrastructure
     let event_bus = EventBus::new(redis_conn.clone());
+    let community_leaderboard = Arc::new(
+        crate::service::community_leaderboard::CommunityLeaderboard::open(
+            redis_conn.clone(),
+            Some(event_bus.clone()),
+            config.stellar.network_url.clone(),
+            std::env::var("STELLAR_REPUTATION_ASSET").unwrap_or_else(|_| "REP".to_string()),
+            std::env::var("STELLAR_REPUTATION_ISSUER").unwrap_or_default(),
+        )
+        .await,
+    );
+    let gameplay_analysis = Arc::new(crate::service::gameplay_analysis::GameplayAnalysis::new(Some(
+        event_bus.clone(),
+    )));
+    let platform_links = Arc::new(crate::service::platform_links::PlatformLinks::new());
+    let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
 
@@ -265,6 +280,10 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(Arc::new(redis_client.clone())))
             .app_data(web::Data::new(auth_service.clone()))
             .app_data(web::Data::new(event_bus.clone()))
+            .app_data(web::Data::new(community_leaderboard.clone()))
+            .app_data(web::Data::new(gameplay_analysis.clone()))
+            .app_data(web::Data::new(platform_links.clone()))
+            .app_data(web::Data::new(sponsored_tokens.clone()))
             .app_data(web::Data::new(response_cache.clone()))
             .app_data(web::Data::new(leaderboard_broadcaster.clone()))
             .app_data(web::Data::new(session_registry.clone()))
@@ -477,6 +496,10 @@ async fn main() -> io::Result<()> {
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
             .configure(crate::realtime::user_ws::configure_ws_route)
+            .configure(crate::service::community_leaderboard::configure)
+            .configure(crate::service::gameplay_analysis::configure)
+            .configure(crate::service::platform_links::configure)
+            .configure(crate::service::sponsored_tokens::configure)
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();
