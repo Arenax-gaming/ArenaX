@@ -150,4 +150,8 @@ pub mod channels {
     pub fn leaderboard_channel(category: &str) -> String {
         format!("leaderboard:{}", category)
     }
+
+    pub fn community_channel(community_id: &str) -> String {
+        format!("community:{}", community_id)
+    }
 }

@@ -97,23 +97,7 @@ cargo build 2>&1 | grep "error\[E" | grep -E "(match_authority|match_ws)" | wc -
 To resolve the SQLx errors, set up the database:
 
 ```bash
-# 1. Start PostgreSQL
-# 2. Create database
-createdb arenax_dev
 
-# 3. Set environment variable
-export DATABASE_URL="postgresql://username:password@localhost/arenax_dev"
-
-# 4. Run migrations
-cd backend
-sqlx migrate run
-
-# 5. Generate offline query metadata
-cargo sqlx prepare
-
-# 6. Now cargo build should work
-cargo build
-```
 
 ## Files Created/Modified
 
