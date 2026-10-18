@@ -8,6 +8,7 @@ export type NotificationType =
   | 'payment_received'
   | 'friend_request'
   | 'tournament_started'
+  | 'dispute_resolved'
   | 'system_alert'
 
 export interface Notification {

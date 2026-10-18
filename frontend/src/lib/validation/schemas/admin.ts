@@ -12,7 +12,7 @@ import { defineSchema } from "../schema";
 export const resolveDisputeSchema = defineSchema(
   "resolveDispute",
   {
-    status: Field.enum(["RESOLVED", "DISMISSED", "VOIDED"] as const, {
+    status: Field.enum(["RESOLVED", "DISMISSED", "VOIDED", "REPLAY"] as const, {
       message: "Select a valid resolution status",
     }),
     resolution: Field.text({
