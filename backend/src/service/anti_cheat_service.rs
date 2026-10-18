@@ -34,6 +34,9 @@ use uuid::Uuid;
 /// Score at or above which a finding is considered suspicious.
 pub const ALERT_THRESHOLD: u8 = 70;
 
+/// Upper bound on one page of the admin review queue.
+pub const REVIEW_QUEUE_MAX_LIMIT: i64 = 200;
+
 /// A suspicious-activity finding produced by either pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Finding {
@@ -436,6 +439,45 @@ impl AntiCheatService {
             "#,
         )
         .bind(match_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows.into_iter().map(Finding::from).collect())
+    }
+
+    /// Flag history for one player (Issue #1233): every flagged finding
+    /// recorded against them, newest first.
+    pub async fn list_player_flags(&self, player_id: Uuid) -> Result<Vec<Finding>, ApiError> {
+        let rows = sqlx::query_as::<_, FindingRow>(
+            r#"
+            SELECT id, match_id, player_id, source, score, flagged, reasons,
+                   evidence_key, evidence_hash, transaction_hash, created_at
+            FROM anticheat_findings
+            WHERE player_id = $1 AND flagged
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(player_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows.into_iter().map(Finding::from).collect())
+    }
+
+    /// Admin review queue (Issue #1233): flagged findings no admin has
+    /// reviewed yet, oldest first so nothing waits indefinitely.
+    pub async fn list_review_queue(&self, limit: i64) -> Result<Vec<Finding>, ApiError> {
+        let rows = sqlx::query_as::<_, FindingRow>(
+            r#"
+            SELECT id, match_id, player_id, source, score, flagged, reasons,
+                   evidence_key, evidence_hash, transaction_hash, created_at
+            FROM anticheat_findings
+            WHERE flagged AND reviewed_at IS NULL
+            ORDER BY created_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit.clamp(1, REVIEW_QUEUE_MAX_LIMIT))
         .fetch_all(&self.db)
         .await?;
 
