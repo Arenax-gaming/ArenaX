@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BalanceCards } from "@/components/wallet/BalanceCards";
-import { DepositModal } from "@/components/wallet/DepositModal";
+import { DepositModal, FiatProvider } from "@/components/wallet/DepositModal";
 import { TransactionHistory } from "@/components/wallet/TransactionHistory";
 import { TransactionToasts } from "@/components/wallet/TransactionToasts";
 import { WalletConnectCard } from "@/components/wallet/WalletConnectCard";
@@ -27,6 +27,29 @@ export function WalletDashboard() {
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [isSessionExpiredOpen, setIsSessionExpiredOpen] = useState(false);
+
+  // Return URL validation state (#39)
+  const [initialReference, setInitialReference] = useState<string | null>(null);
+  const [initialProvider, setInitialProvider] = useState<FiatProvider | null>(null);
+
+  // Inspect return URLs on load — never treat return URL as proof of payment (#39)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("reference") || params.get("tx_ref");
+    const prov = (params.get("provider") as FiatProvider) || "paystack";
+
+    if (ref) {
+      setInitialReference(ref);
+      setInitialProvider(prov);
+      setIsDepositOpen(true);
+
+      // Clean the query parameter without reload so refresh doesn't replay
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, []);
 
   const balancesQuery = useQuery({
     queryKey: ["wallet-balances", publicKey, walletConfig.network],
@@ -62,6 +85,13 @@ export function WalletDashboard() {
       status: "pending",
       kind: "classic",
     });
+    balancesQuery.refetch();
+  };
+
+  const handleVerifyHistoryItem = (reference: string, provider?: string) => {
+    setInitialReference(reference);
+    setInitialProvider((provider as FiatProvider) ?? "paystack");
+    setIsDepositOpen(true);
   };
 
   const handleSubmitWithdraw = async (request: WithdrawRequest) => {
@@ -111,22 +141,28 @@ export function WalletDashboard() {
     }
   };
 
+  const activeWalletAddress = publicKey || "G_ARENAX_USER_WALLET";
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-28 sm:pb-12">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Wallet</h1>
-        <p className="text-muted-foreground">
-          Connect your Stellar wallet, track balances, and review transaction status.
+        <p className="text-muted-foreground text-sm sm:text-base">
+          Connect your Stellar wallet, track balances, deposit with fiat or crypto, and review transaction status.
         </p>
       </div>
 
       <WalletConnectCard
-        onOpenDeposit={() => setIsDepositOpen(true)}
+        onOpenDeposit={() => {
+          setInitialReference(null);
+          setInitialProvider(null);
+          setIsDepositOpen(true);
+        }}
         onOpenWithdraw={() => setIsWithdrawOpen(true)}
       />
 
       {balancesQuery.error && isConnected && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
           {balancesQuery.error instanceof Error
             ? balancesQuery.error.message
             : "Unable to load balances."}
@@ -139,24 +175,35 @@ export function WalletDashboard() {
         balances={balances}
       />
 
-      <TransactionHistory items={history} onClear={clearHistory} />
+      <TransactionHistory
+        items={history}
+        onClear={clearHistory}
+        onVerifyItem={handleVerifyHistoryItem}
+      />
 
-      {isConnected && publicKey && (
-        <>
-          <DepositModal
-            open={isDepositOpen}
-            walletAddress={publicKey}
-            onClose={() => setIsDepositOpen(false)}
-            onRecordDeposit={handleRecordDeposit}
-          />
-          <WithdrawModal
-            open={isWithdrawOpen}
-            balances={balances}
-            isSubmitting={withdrawSubmitting}
-            onClose={() => setIsWithdrawOpen(false)}
-            onSubmit={handleSubmitWithdraw}
-          />
-        </>
+      {/* Deposit Modal (Fiat & Stellar rails) */}
+      <DepositModal
+        open={isDepositOpen}
+        walletAddress={activeWalletAddress}
+        onClose={() => {
+          setIsDepositOpen(false);
+          setInitialReference(null);
+          setInitialProvider(null);
+        }}
+        onRecordDeposit={handleRecordDeposit}
+        initialReference={initialReference}
+        initialProvider={initialProvider}
+      />
+
+      {/* Withdraw Modal with explicit confirmation before irreversible action (#39) */}
+      {isConnected && (
+        <WithdrawModal
+          open={isWithdrawOpen}
+          balances={balances}
+          isSubmitting={withdrawSubmitting}
+          onClose={() => setIsWithdrawOpen(false)}
+          onSubmit={handleSubmitWithdraw}
+        />
       )}
 
       <TransactionToasts />

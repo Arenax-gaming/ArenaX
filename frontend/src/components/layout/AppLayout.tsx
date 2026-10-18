@@ -70,7 +70,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             <MobileHeaderActions />
           </div>
         </header>
-        <main id="main-content" className="container py-6 md:py-10 flex-1 pb-20 md:pb-10" role="main">
+        <main id="main-content" className="container py-6 md:py-10 flex-1 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-10" role="main">
           <PageTransition>{children}</PageTransition>
         </main>
         <ToastContainer />
