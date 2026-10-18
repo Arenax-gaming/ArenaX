@@ -42,7 +42,9 @@ use crate::realtime::event_bus::EventBus;
 use crate::realtime::session_registry::SessionRegistry;
 use crate::realtime::ws_broadcaster::{WsAddressBook, WsBroadcaster};
 use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine};
+use crate::service::match_service::MatchService;
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
+use crate::service::stellar_service::StellarService;
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
@@ -151,15 +153,26 @@ async fn main() -> io::Result<()> {
 
     // Build the shared Soroban service used for on-chain prize distribution.
     // The network URL from config drives testnet vs mainnet selection.
+    let stellar_network_passphrase = if config.stellar.network_url.contains("testnet") {
+        "Test SDF Network ; September 2015".to_string()
+    } else {
+        "Public Global Stellar Network ; September 2015".to_string()
+    };
     let soroban_network = NetworkConfig::custom(
         config.stellar.network_url.clone(),
-        if config.stellar.network_url.contains("testnet") {
-            "Test SDF Network ; September 2015".to_string()
-        } else {
-            "Public Global Stellar Network ; September 2015".to_string()
-        },
+        stellar_network_passphrase.clone(),
     );
     let soroban_service = Arc::new(SorobanService::new(soroban_network));
+
+    // Stellar integration microservice (Issue #1282) — account management,
+    // token transfers, escrow/prize payouts and transaction inspection.
+    let stellar_service = Arc::new(StellarService::new(
+        Arc::new(db_pool.clone()),
+        Some(Arc::new(redis_client.clone())),
+        config.stellar.network_url.clone(),
+        stellar_network_passphrase.clone(),
+        Some(config.stellar.admin_secret.clone()),
+    ));
 
     // Shared TournamentService wired with Soroban so distribute_prizes can
     // execute real on-chain transfers via the prize contract.
@@ -218,6 +231,14 @@ async fn main() -> io::Result<()> {
     ));
     let session_registry = Arc::new(SessionRegistry::new());
     let address_book = Arc::new(WsAddressBook::new());
+
+    // Database-backed match microservice (Issue #1280) — creation, score
+    // reporting, disputes, Elo ratings and matchmaking-queue management.
+    let match_service = Arc::new(
+        MatchService::new(db_pool.clone())
+            .with_event_bus(event_bus.clone())
+            .with_match_events(match_events.clone()),
+    );
 
     // Response cache for read-heavy endpoints — Issue #910
     let response_cache = crate::middleware::cache::ResponseCache::new(redis_conn.clone());
@@ -470,6 +491,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::tournament_handler::configure_routes)
                     // Match authority endpoints — on-chain match FSM
                     .configure(crate::http::match_authority_handler::configure_routes)
+                    // Stellar integration microservice — Issue #1282
+                    .configure(crate::http::stellar_handler::configure_routes)
                     // Dispute resolution endpoints — ticketed, escalatable disputes (Issue #909)
                     .configure(crate::http::dispute_handler::configure_routes)
                     // Gas endpoints

@@ -31,7 +31,6 @@ export function TournamentDetailsPageClient() {
   // branch below rather than rendering a hardcoded fallback.
   const tournamentId = Array.isArray(params.id) ? params.id[0] : params.id;
   const currentUserId = user?.id ?? "user-123";
-  const searchParams = useSearchParams();
   const partyId = searchParams.get("party") ?? undefined;
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);

@@ -1,9 +1,15 @@
 {
+  "id": "/",
   "name": "ArenaX",
   "short_name": "ArenaX",
   "description": "Competitive Gaming Platform - Play, compete, and win in the ultimate gaming arena",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games", "entertainment", "sports"],
   "background_color": "#111827",
   "theme_color": "#111827",
   "icons": [
