@@ -4,12 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BalanceCards } from "@/components/wallet/BalanceCards";
 import { DepositModal, FiatProvider } from "@/components/wallet/DepositModal";
+import { CurrencySelector } from "@/components/wallet/CurrencySelector";
+import { DepositModal } from "@/components/wallet/DepositModal";
+import { ExchangeRateDisplay } from "@/components/wallet/ExchangeRateDisplay";
 import { TransactionHistory } from "@/components/wallet/TransactionHistory";
 import { TransactionToasts } from "@/components/wallet/TransactionToasts";
 import { WalletConnectCard } from "@/components/wallet/WalletConnectCard";
 import { WithdrawModal } from "@/components/wallet/WithdrawModal";
 import { useTxStatus } from "@/hooks/useTxStatus";
 import { useWallet } from "@/hooks/useWallet";
+import { useCurrencyPreference } from "@/hooks/useCurrency";
 import { useTokenExpiry, SessionExpiredError } from "@/hooks/useTokenExpiry";
 import { SessionExpiredModal } from "@/components/wallet/SessionExpiredModal";
 import { createEmptyBalances, fetchWalletBalances } from "@/lib/wallet/balances";
@@ -20,6 +24,7 @@ import { WalletAssetCode, WithdrawRequest } from "@/lib/wallet/types";
 export function WalletDashboard() {
   const { session, isConnected, publicKey } = useWallet();
   const { history, appendHistory, clearHistory, trackTx } = useTxStatus();
+  const { currency, setCurrency } = useCurrencyPreference();
 
   const { ensureValidToken } = useTokenExpiry();
 
@@ -160,6 +165,15 @@ export function WalletDashboard() {
         }}
         onOpenWithdraw={() => setIsWithdrawOpen(true)}
       />
+
+      {/* Multi-currency support (#1263) */}
+      <section className="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 sm:grid-cols-2">
+        <CurrencySelector value={currency} onChange={setCurrency} />
+        <div>
+          <h2 className="mb-1 text-xs font-medium text-muted-foreground">Exchange rates</h2>
+          <ExchangeRateDisplay base={currency} />
+        </div>
+      </section>
 
       {balancesQuery.error && isConnected && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">

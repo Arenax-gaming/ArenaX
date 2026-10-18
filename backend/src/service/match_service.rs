@@ -16,6 +16,8 @@ pub struct MatchService {
     pub redis_client: Option<Arc<RedisClient>>,
     pub reputation_service: Option<Arc<ReputationService>>,
     pub event_bus: Option<crate::realtime::event_bus::EventBus>,
+    /// Match state stream (Issue #1254). Absent when Redis is not configured.
+    pub match_events: Option<crate::realtime::event_stream::EventStream>,
 }
 
 impl MatchService {
@@ -25,12 +27,32 @@ impl MatchService {
             redis_client: None,
             reputation_service: None,
             event_bus: None,
+            match_events: None,
         }
     }
 
     pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
         self.event_bus = Some(event_bus);
         self
+    }
+
+    pub fn with_match_events(mut self, stream: crate::realtime::event_stream::EventStream) -> Self {
+        self.match_events = Some(stream);
+        self
+    }
+
+    async fn emit_match_state(&self, match_id: Uuid, from_status: &str, to_status: &str) {
+        let Some(stream) = &self.match_events else {
+            return;
+        };
+        let event = crate::realtime::event_stream::MatchStateEvent::new(
+            match_id,
+            from_status,
+            to_status,
+        );
+        if let Err(error) = stream.publish_match_state(&event).await {
+            tracing::warn!(%match_id, %error, "failed to publish match state event");
+        }
     }
 
     pub fn with_reputation_service(mut self, reputation_service: ReputationService) -> Self {
@@ -245,7 +267,7 @@ impl MatchService {
         .map_err(|e| ApiError::database_error(e))?;
 
         // Update match status to disputed
-        self.update_match_status(match_id, MatchStatus::Disputed)
+        self.update_match_status(match_id, match_record.status, MatchStatus::Disputed)
             .await?;
 
         // Publish dispute event
@@ -331,7 +353,7 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        self.update_match_status(match_id, MatchStatus::Disputed)
+        self.update_match_status(match_id, match_record.status, MatchStatus::Disputed)
             .await?;
 
         self.publish_match_event(serde_json::json!({
@@ -788,6 +810,13 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "completed",
+        )
+        .await;
+
         // Update Elo ratings
         self.update_elo_ratings(&match_record, winner_id).await?;
 
@@ -1198,9 +1227,23 @@ impl MatchService {
         Ok(())
     }
 
+    fn match_status_name(status: MatchStatus) -> &'static str {
+        match status {
+            MatchStatus::Pending => "pending",
+            MatchStatus::Scheduled => "scheduled",
+            MatchStatus::InProgress => "in_progress",
+            MatchStatus::Completed => "completed",
+            MatchStatus::Conflict => "conflict",
+            MatchStatus::Disputed => "disputed",
+            MatchStatus::Cancelled => "cancelled",
+            MatchStatus::Abandoned => "abandoned",
+        }
+    }
+
     async fn update_match_status(
         &self,
         match_id: Uuid,
+        from_status: MatchStatus,
         status: MatchStatus,
     ) -> Result<(), ApiError> {
         if status == MatchStatus::InProgress {
@@ -1233,6 +1276,13 @@ impl MatchService {
             .await
             .map_err(|e| ApiError::database_error(e))?;
         }
+
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(from_status),
+            Self::match_status_name(status),
+        )
+        .await;
 
         Ok(())
     }
@@ -2044,6 +2094,13 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "in_progress",
+        )
+        .await;
+
         // Publish match started event
         self.publish_match_event(serde_json::json!({
             "type": "started",
@@ -2092,6 +2149,13 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "scheduled",
+        )
+        .await;
+
         // Publish match scheduled event
         self.publish_match_event(serde_json::json!({
             "type": "scheduled",
@@ -2135,6 +2199,13 @@ impl MatchService {
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
+
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "cancelled",
+        )
+        .await;
 
         tracing::info!("Match {} cancelled. Reason: {:?}", match_id, reason);
         Ok(updated_match)

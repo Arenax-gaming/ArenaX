@@ -1,18 +1,23 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
 pub mod analytics_service;
+pub mod anti_cheat_service;
 pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
 pub mod batch_service;
+pub mod chat;
 pub mod dispute_service;
+pub mod distributed_tournament_state;
 pub mod email_service;
 pub mod evidence_storage;
 pub mod feature_flags;
+pub mod gameplay_analysis;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod idempotency_tests;
 pub mod leaderboard_service;
+pub mod leaderboard_sync;
 pub mod match_authority_service;
 pub mod match_authority_service_test;
 pub mod match_service;
@@ -21,6 +26,7 @@ pub mod matchmaker;
 pub mod matchmaker_tests;
 pub mod notification_service;
 pub mod payment_provider;
+pub mod platform_links;
 pub mod player_stats_service;
 pub mod push_notification_service;
 pub mod reaper_service;
@@ -28,6 +34,7 @@ pub mod reputation_service;
 pub mod reward_settlement_service;
 pub mod social_service;
 pub mod soroban_service;
+pub mod sponsored_tokens;
 pub mod staking_service;
 pub mod stellar_service;
 pub mod suspension_service;
@@ -37,6 +44,9 @@ pub mod wallet_service;
 
 pub use crate::realtime::event_bus::EventBus;
 pub use achievement_service::AchievementService;
+pub use anti_cheat_service::{
+    AntiCheatService, LoggingStellarReporter, StellarReporter, StellarServiceReporter,
+};
 pub use audit_service::{AuditAction, AuditEntryInput, AuditFilter, AuditService};
 pub use dispute_service::DisputeService;
 pub use feature_flags::FeatureFlagService;

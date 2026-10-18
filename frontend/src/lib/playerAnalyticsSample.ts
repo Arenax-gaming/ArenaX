@@ -1,0 +1,115 @@
+import type { PlayerAnalytics } from "@/types/playerAnalytics";
+
+/**
+ * Deterministic sample analytics used by the dashboard preview and tests when
+ * no live player is selected. Mirrors the shape returned by the API (#1266).
+ */
+export const samplePlayerAnalytics: PlayerAnalytics = {
+  playerId: "sample-player",
+  peerCohort: "Gold III",
+  summary: {
+    matches: 187,
+    wins: 112,
+    losses: 68,
+    draws: 7,
+    winRate: 59.9,
+    currentElo: 1842,
+    peakElo: 1910,
+    currentStreak: 3,
+    bestStreak: 11,
+  },
+  winLossTrend: [
+    { date: "W1", wins: 9, losses: 5 },
+    { date: "W2", wins: 12, losses: 4 },
+    { date: "W3", wins: 7, losses: 8 },
+    { date: "W4", wins: 11, losses: 6 },
+    { date: "W5", wins: 14, losses: 3 },
+    { date: "W6", wins: 10, losses: 7 },
+  ],
+  eloProgression: [
+    { date: "W1", elo: 1680 },
+    { date: "W2", elo: 1724 },
+    { date: "W3", elo: 1701 },
+    { date: "W4", elo: 1768 },
+    { date: "W5", elo: 1826 },
+    { date: "W6", elo: 1842 },
+  ],
+  matchHistory: [
+    {
+      id: "m-1041",
+      game: "Valorant",
+      mode: "Ranked",
+      opponent: "GhostPepper",
+      result: "win",
+      score: 13,
+      opponentScore: 9,
+      eloDelta: 21,
+      playedAt: "2026-03-18T19:20:00.000Z",
+    },
+    {
+      id: "m-1038",
+      game: "EA FC",
+      mode: "Tournament",
+      opponent: "NairobiRocket",
+      result: "win",
+      score: 3,
+      opponentScore: 1,
+      eloDelta: 18,
+      tournamentId: "t-88",
+      tournamentName: "Naija Cup",
+      playedAt: "2026-03-17T15:05:00.000Z",
+    },
+    {
+      id: "m-1035",
+      game: "Valorant",
+      mode: "Ranked",
+      opponent: "SilverVale",
+      result: "loss",
+      score: 8,
+      opponentScore: 13,
+      eloDelta: -16,
+      playedAt: "2026-03-16T20:40:00.000Z",
+    },
+    {
+      id: "m-1030",
+      game: "Chess",
+      mode: "Casual",
+      opponent: "KofiMate",
+      result: "win",
+      score: 1,
+      opponentScore: 0,
+      eloDelta: 9,
+      playedAt: "2026-03-15T11:10:00.000Z",
+    },
+    {
+      id: "m-1022",
+      game: "EA FC",
+      mode: "Tournament",
+      opponent: "LagosLegend",
+      result: "loss",
+      score: 2,
+      opponentScore: 3,
+      eloDelta: -14,
+      tournamentId: "t-88",
+      tournamentName: "Naija Cup",
+      playedAt: "2026-03-14T09:30:00.000Z",
+    },
+  ],
+  gameBreakdown: [
+    { game: "Valorant", matches: 82, wins: 51, losses: 28, winRate: 62.2, avgEloDelta: 8.4 },
+    { game: "EA FC", matches: 64, wins: 38, losses: 22, winRate: 59.4, avgEloDelta: 6.1 },
+    { game: "Chess", matches: 41, wins: 23, losses: 18, winRate: 56.1, avgEloDelta: 3.9 },
+  ],
+  tournamentBreakdown: [
+    { id: "t-88", name: "Naija Cup", matches: 6, wins: 4, placement: 2, prize: 250 },
+    { id: "t-75", name: "West Africa Open", matches: 9, wins: 5, placement: 5, prize: 60 },
+  ],
+  peerComparison: [
+    { metric: "Win Rate", player: 59.9, peerAverage: 52.4, percentile: 78 },
+    { metric: "Avg K/D", player: 1.34, peerAverage: 1.02, percentile: 84 },
+    { metric: "Matches", player: 187, peerAverage: 141, percentile: 71 },
+    { metric: "Peak Elo", player: 1910, peerAverage: 1742, percentile: 88 },
+  ],
+};
+
+export default samplePlayerAnalytics;

@@ -16,6 +16,7 @@ members = [
     "lp-incentives",
     "staking-manager",
     "staking-rewards",
+    "sponsored-token",
     "virtual-economy",
     "access-control",
     "time-lock",

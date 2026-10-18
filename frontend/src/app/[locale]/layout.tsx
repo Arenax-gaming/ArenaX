@@ -15,6 +15,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { TxStatusProvider } from "@/hooks/useTxStatus";
 import { WalletProvider } from "@/hooks/useWallet";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { UserPreferencesProvider } from "@/contexts/UserPreferencesContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { DragAndDropProvider } from "@/components/providers/DragAndDropProvider";
 import { RumProvider } from "@/components/providers/RumProvider";
@@ -94,8 +95,10 @@ export default async function RootLayout({
                             <NotificationProvider>
                               <RumProvider>
                                 <DragAndDropProvider>
-                                  <RouteChangeMonitor />
-                                  <AppLayout>{children}</AppLayout>
+                                  <UserPreferencesProvider>
+                                    <RouteChangeMonitor />
+                                    <AppLayout>{children}</AppLayout>
+                                  </UserPreferencesProvider>
                                 </DragAndDropProvider>
                               </RumProvider>
                               <ConsentBanner />

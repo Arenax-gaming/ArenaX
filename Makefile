@@ -140,17 +140,4 @@ docker-down:
 	@echo "Stopping Docker services..."
 	@docker-compose down
 
-# Utilities
-clean:
-	@echo "Cleaning build artifacts..."
-	@if [ -d "frontend" ]; then cd frontend && rm -rf .next node_modules; fi
-	@if [ -f "backend/Cargo.toml" ]; then cd backend && cargo clean; fi
-	@if [ -f "contracts/Cargo.toml" ]; then cd contracts && cargo clean; fi
-	@rm -rf target
 
-setup: install
-	@echo "Setting up environment files..."
-	@if [ -f "frontend/env.example" ] && [ ! -f "frontend/.env.local" ]; then cp frontend/env.example frontend/.env.local; fi
-	@if [ -f "backend/env.example" ] && [ ! -f "backend/.env" ]; then cp backend/env.example backend/.env; fi
-	@if [ -f "contracts/env.example" ] && [ ! -f "contracts/.env" ]; then cp contracts/env.example contracts/.env; fi
-	@echo "Setup complete! Edit the .env files with your configuration."

@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useDevice } from "@/hooks/useMobile";
-import { Gamepad2, Trophy, User, Home } from "lucide-react";
+import { Gamepad2, Trophy, User, Home, Wallet } from "lucide-react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 // ─── Navigation items ─────────────────────────────────────────────────────────
@@ -31,6 +31,13 @@ const NAV_ITEMS = [
     href: "/tournaments",
     icon: (active: boolean) => (
       <Trophy className={cn("w-6 h-6", active && "fill-primary")} aria-hidden="true" />
+    ),
+  },
+  {
+    label: "Wallet",
+    href: "/wallet",
+    icon: (active: boolean) => (
+      <Wallet className={cn("w-6 h-6", active && "fill-primary")} aria-hidden="true" />
     ),
   },
   {

@@ -16,6 +16,7 @@ import { SessionTimeoutProvider } from "@/contexts/SessionTimeoutContext";
 import { NotificationBadgeEffect } from "@/hooks/useNotificationBadge";
 import { SessionExpiryWarningModal } from "@/components/ui/SessionExpiryWarningModal";
 import { OPEN_CONSENT_MODAL_EVENT } from "@/components/providers/ConsentBanner";
+import { SplashScreen } from "@/components/pwa/SplashScreen";
 // #759: next-intl's Link, not next/link. It prefixes the active locale
 // automatically, so "/about" resolves to "/en/about" and following a footer
 // link never resets the user's language.
@@ -58,8 +59,9 @@ export function AppLayout({ children }: AppLayoutProps) {
     useKeyboardShortcuts(handleShortcutAction);
 
   return (
-    <SessionTimeoutProvider>
+      <SessionTimeoutProvider>
       <NotificationBadgeEffect />
+      <SplashScreen />
       <div className="min-h-screen bg-background font-sans antialiased flex flex-col">
         <OfflineBanner />
         <SkipLink targetId="main-content" />

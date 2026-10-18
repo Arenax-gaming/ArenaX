@@ -1,11 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { MessageSquare } from "lucide-react";
-import { ChatInterface } from "@/components/social/ChatInterface";
 import { useConversations, useSendMessage } from "@/hooks/useSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { AvatarSkeleton, Skeleton } from "@/components/common/PageSkeleton";
+import {
+  blockedWord,
+  directRoom,
+  loadHistory,
+  postChatMessage,
+  remember,
+  type ChatLine,
+} from "@/lib/inAppChat";
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -13,6 +20,8 @@ export default function MessagesPage() {
     string | null
   >(null);
   const [messageContent, setMessageContent] = useState("");
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [directLines, setDirectLines] = useState<ChatLine[]>([]);
 
   const { data: conversations, isLoading: conversationsLoading } =
     useConversations();
@@ -22,16 +31,43 @@ export default function MessagesPage() {
     (c) => c.id === selectedConversationId,
   );
   const selectedParticipant = selectedConversation?.participants[0];
+  const me = user?.id ?? "me";
+  const room =
+    selectedParticipant?.id ? directRoom(me, selectedParticipant.id) : null;
+
+  useEffect(() => {
+    setDirectLines(room ? loadHistory(room) : []);
+  }, [room]);
 
   const handleSendMessage = async () => {
-    if (!selectedConversation || !messageContent.trim()) return;
+    const content = messageContent.trim();
+    if (!selectedConversation || !selectedParticipant?.id || !content || !room) return;
 
+    const blocked = blockedWord(content);
+    if (blocked) {
+      setChatError(`That message was blocked (${blocked}).`);
+      return;
+    }
+
+    setChatError(null);
+    const saved = await postChatMessage({
+      content,
+      toUserId: selectedParticipant.id,
+    }).catch(() => null);
+    const line: ChatLine = saved ?? {
+      id: `local-${Date.now()}`,
+      roomId: room,
+      senderId: me,
+      body: content,
+      createdAt: new Date().toISOString(),
+    };
+    setDirectLines(remember({ ...line, roomId: room }));
+    setMessageContent("");
     try {
       await sendMessageMutation.mutateAsync({
-        toUserId: selectedConversation.participants[0]?.id ?? "",
-        content: messageContent,
+        toUserId: selectedParticipant.id,
+        content,
       });
-      setMessageContent("");
     } catch (error) {
       console.error("Failed to send message:", error);
     }
@@ -120,11 +156,17 @@ export default function MessagesPage() {
                 </div>
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4" role="log" aria-live="polite">
                   <div className="text-center text-muted-foreground text-sm">
                     Start of conversation with{" "}
                     {selectedParticipant?.username ?? "Unknown"}
                   </div>
+                  {directLines.map((line) => (
+                    <p key={line.id} className="text-sm text-white break-words">
+                      {line.body}
+                    </p>
+                  ))}
+                  {chatError && <p className="text-sm text-red-300">{chatError}</p>}
                 </div>
 
                 {/* Message Input */}

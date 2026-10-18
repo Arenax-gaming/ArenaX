@@ -75,6 +75,14 @@ pub enum RealtimeEvent {
         changes: Vec<RankChange>,
         timestamp: String,
     },
+    /// In-app chat message delivered to one room (Issue #1256).
+    ChatMessage {
+        room_id: String,
+        message_id: Uuid,
+        sender_id: Uuid,
+        body: String,
+        timestamp: String,
+    },
 }
 
 /// One player's movement on the leaderboard.
@@ -123,6 +131,7 @@ pub mod channels {
     pub const USER_CHANNEL_PATTERN: &str = "user:*";
     pub const MATCH_CHANNEL_PATTERN: &str = "match:*";
     pub const LEADERBOARD_CHANNEL_PATTERN: &str = "leaderboard:*";
+    pub const CHAT_CHANNEL_PATTERN: &str = "chat:*";
     pub const MATCHMAKING_METRICS_CHANNEL: &str = "matchmaking:metrics";
 
     pub fn user_channel(user_id: Uuid) -> String {
@@ -140,5 +149,9 @@ pub mod channels {
     /// everyone is the cost this whole delta scheme exists to avoid.
     pub fn leaderboard_channel(category: &str) -> String {
         format!("leaderboard:{}", category)
+    }
+
+    pub fn community_channel(community_id: &str) -> String {
+        format!("community:{}", community_id)
     }
 }

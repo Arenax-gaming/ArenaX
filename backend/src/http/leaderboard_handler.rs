@@ -9,6 +9,7 @@ use crate::api_error::ApiError;
 use crate::middleware::cache::ResponseCache;
 use crate::models::{PaginatedResponse, PaginationParams};
 use crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster;
+use crate::service::leaderboard_sync::LeaderboardSync;
 use crate::service::LeaderboardService;
 
 /// Builds the service with whatever optional infrastructure is registered.
@@ -22,6 +23,7 @@ fn leaderboard_service(
     pool: &web::Data<PgPool>,
     cache: Option<&web::Data<ResponseCache>>,
     broadcaster: Option<&web::Data<Arc<LeaderboardBroadcaster>>>,
+    sync: Option<&web::Data<Arc<LeaderboardSync>>>,
 ) -> LeaderboardService {
     let mut service = LeaderboardService::new(pool.get_ref().clone());
 
@@ -30,6 +32,9 @@ fn leaderboard_service(
     }
     if let Some(broadcaster) = broadcaster {
         service = service.with_broadcaster(broadcaster.get_ref().clone());
+    }
+    if let Some(sync) = sync {
+        service = service.with_sync(sync.get_ref().clone());
     }
 
     service
@@ -42,7 +47,7 @@ pub async fn get_leaderboard(
     category: web::Path<String>,
     query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
-    let service = leaderboard_service(&pool, cache.as_ref(), None);
+    let service = leaderboard_service(&pool, cache.as_ref(), None, None);
     let limit = query.resolved_limit();
     let offset = query.sql_offset();
 
@@ -142,9 +147,10 @@ pub async fn refresh_leaderboard(
     pool: web::Data<PgPool>,
     cache: Option<web::Data<ResponseCache>>,
     broadcaster: Option<web::Data<Arc<LeaderboardBroadcaster>>>,
+    sync: Option<web::Data<Arc<LeaderboardSync>>>,
     category: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
-    let service = leaderboard_service(&pool, cache.as_ref(), broadcaster.as_ref());
+    let service = leaderboard_service(&pool, cache.as_ref(), broadcaster.as_ref(), sync.as_ref());
 
     service.refresh_leaderboard(&category).await?;
 
