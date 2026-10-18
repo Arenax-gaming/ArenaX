@@ -1,49 +1,114 @@
-use actix_web::{web, HttpResponse, Responder};
-use serde::{Deserialize, Serialize};
+//! Anti-cheat microservice HTTP surface (Issue #1281).
+//!
+//! - `POST /api/anticheat/screenshot` — run the screenshot analysis pipeline
+//!   against evidence already stored in S3/MinIO.
+//! - `POST /api/anticheat/telemetry`  — run the telemetry analysis pipeline
+//!   against a single frame; suspicious frames produce a recorded finding.
+//! - `GET  /api/anticheat/findings/{match_id}` — list the findings recorded
+//!   for a match.
+//!
+//! All routes require authentication. A player may only submit analysis for
+//! themselves; admins may submit on behalf of any player.
 
-#[derive(Debug, Deserialize)]
-pub struct TelemetryAnalysisRequest {
-    pub player_id: String,
-    pub match_id: String,
-    pub reaction_time_ms: f64,
-    pub aim_snap_rate: f64,
-    pub input_variance: f64,
+use crate::api_error::ApiError;
+use crate::auth::jwt_service::{Claims, JwtService};
+use crate::http::auth_handler::ACCESS_TOKEN_COOKIE;
+use crate::service::anti_cheat_service::{
+    AntiCheatService, ScreenshotAnalysisRequest, TelemetryFrame,
+};
+use actix_web::{web, HttpRequest, HttpResponse};
+use std::sync::Arc;
+use uuid::Uuid;
+
+/// Extract and validate the caller's claims from the bearer token or the
+/// access-token cookie.
+async fn caller(req: &HttpRequest, jwt: &JwtService) -> Result<Claims, ApiError> {
+    let token = req
+        .headers()
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::to_owned)
+        .or_else(|| {
+            req.cookie(ACCESS_TOKEN_COOKIE)
+                .map(|cookie| cookie.value().to_string())
+        })
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+
+    jwt.validate_token(&token)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))
 }
 
-#[derive(Debug, Serialize)]
-pub struct TelemetryAnalysisResponse {
-    pub is_anomalous: bool,
-    pub anomaly_score: f64,
-    pub flagged_reasons: Vec<String>,
+fn assert_can_act_for(claims: &Claims, player_id: Uuid) -> Result<(), ApiError> {
+    let is_admin = claims.roles.iter().any(|role| role == "admin");
+    if claims.sub == player_id.to_string() || is_admin {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(
+            "You can only submit anti-cheat analysis for yourself",
+        ))
+    }
 }
 
-/// AI Anti-cheat telemetry analysis pipeline (Issue #1250)
-pub async fn analyze_telemetry(
-    req: web::Json<TelemetryAnalysisRequest>,
-) -> impl Responder {
-    let mut flagged_reasons = Vec::new();
-    let mut anomaly_score = 0.0;
+/// POST /api/anticheat/screenshot
+async fn post_screenshot(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    service: web::Data<Arc<AntiCheatService>>,
+    body: web::Json<ScreenshotAnalysisRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = caller(&req, jwt.get_ref()).await?;
+    let body = body.into_inner();
+    assert_can_act_for(&claims, body.player_id)?;
 
-    if req.reaction_time_ms < 50.0 {
-        flagged_reasons.push("Superhuman reaction time (<50ms)".to_string());
-        anomaly_score += 0.4;
-    }
+    let finding = service
+        .analyze_screenshot(
+            body.match_id,
+            body.player_id,
+            &body.evidence_key,
+            body.evidence_hash.as_deref(),
+            &body.content_type,
+        )
+        .await?;
 
-    if req.aim_snap_rate > 0.85 {
-        flagged_reasons.push("Abnormal aim snap rate (>85%)".to_string());
-        anomaly_score += 0.4;
-    }
+    Ok(HttpResponse::Ok().json(finding))
+}
 
-    if req.input_variance < 0.01 {
-        flagged_reasons.push("Zero input variance (scripted bot movement)".to_string());
-        anomaly_score += 0.3;
-    }
+/// POST /api/anticheat/telemetry
+async fn post_telemetry(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    service: web::Data<Arc<AntiCheatService>>,
+    body: web::Json<TelemetryFrame>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = caller(&req, jwt.get_ref()).await?;
+    let frame = body.into_inner();
+    assert_can_act_for(&claims, frame.player_id)?;
 
-    let is_anomalous = anomaly_score >= 0.5;
+    let (result, finding) = service.ingest_telemetry(frame).await?;
 
-    HttpResponse::Ok().json(TelemetryAnalysisResponse {
-        is_anomalous,
-        anomaly_score,
-        flagged_reasons,
-    })
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "result": result,
+        "finding": finding,
+    })))
+}
+
+/// GET /api/anticheat/findings/{match_id}
+async fn get_findings(
+    service: web::Data<Arc<AntiCheatService>>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let findings = service.list_findings(path.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(findings))
+}
+
+/// Mounted inside the `/api` scope in `main.rs`.
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/anticheat")
+            .route("/screenshot", web::post().to(post_screenshot))
+            .route("/telemetry", web::post().to(post_telemetry))
+            .route("/findings/{match_id}", web::get().to(get_findings)),
+    );
 }

@@ -103,6 +103,11 @@ pub fn evidence_object_key(user_id: Uuid, match_id: Uuid, content_type: &str, ha
 #[async_trait::async_trait]
 pub trait EvidenceStore: Send + Sync {
     async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError>;
+
+    /// Retrieve the raw bytes stored at `key` (#1281). Used by the anti-cheat
+    /// screenshot pipeline to re-hash and analyse evidence that was uploaded
+    /// earlier, without trusting anything the caller supplies beyond the key.
+    async fn get(&self, key: &str) -> Result<Vec<u8>, ApiError>;
 }
 
 /// Real S3/MinIO-compatible store: a single-shot `PUT` signed with AWS
@@ -133,9 +138,15 @@ impl S3EvidenceStore {
     }
 }
 
-#[async_trait::async_trait]
-impl EvidenceStore for S3EvidenceStore {
-    async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError> {
+/// SHA-256 of the empty string, the SigV4 payload hash for a bodyless
+/// request (e.g. `GET`).
+const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+impl S3EvidenceStore {
+    /// Build the SigV4 `Authorization` header and the request URL for a
+    /// path-style request against this store. Shared by `put` and `get` so
+    /// both sign identically.
+    fn sign(&self, method: &str, key: &str, payload_hash: &str) -> (String, String, String, String) {
         let url = format!("{}/{}/{}", self.endpoint, self.bucket, key);
         let host = url
             .split("//")
@@ -147,15 +158,14 @@ impl EvidenceStore for S3EvidenceStore {
         let now = Utc::now();
         let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
         let date_stamp = now.format("%Y%m%d").to_string();
-        let payload_hash = hex::encode(Sha256::digest(bytes));
 
         let canonical_headers = format!(
             "host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
         );
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
         let canonical_request = format!(
-            "PUT\n/{}/{}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}",
-            self.bucket, key
+            "{method}\n/{}/{key}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}",
+            self.bucket
         );
         let credential_scope = format!("{date_stamp}/{}/s3/aws4_request", self.region);
         let string_to_sign = format!(
@@ -169,6 +179,16 @@ impl EvidenceStore for S3EvidenceStore {
             "AWS4-HMAC-SHA256 Credential={}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}",
             self.access_key
         );
+
+        (url, host, amz_date, authorization)
+    }
+}
+
+#[async_trait::async_trait]
+impl EvidenceStore for S3EvidenceStore {
+    async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError> {
+        let payload_hash = hex::encode(Sha256::digest(bytes));
+        let (url, host, amz_date, authorization) = self.sign("PUT", key, &payload_hash);
 
         let response = self
             .http
@@ -190,6 +210,37 @@ impl EvidenceStore for S3EvidenceStore {
             )));
         }
         Ok(())
+    }
+
+    async fn get(&self, key: &str) -> Result<Vec<u8>, ApiError> {
+        let (url, host, amz_date, authorization) = self.sign("GET", key, EMPTY_SHA256);
+
+        let response = self
+            .http
+            .get(&url)
+            .header("host", host)
+            .header("x-amz-content-sha256", EMPTY_SHA256)
+            .header("x-amz-date", amz_date)
+            .header("Authorization", authorization)
+            .send()
+            .await
+            .map_err(|e| ApiError::ServiceUnavailable(format!("Evidence storage fetch failed: {e}")))?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(ApiError::not_found("Evidence object not found"));
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::ServiceUnavailable(format!(
+                "Evidence storage rejected fetch with status {}",
+                response.status()
+            )));
+        }
+
+        response
+            .bytes()
+            .await
+            .map(|bytes| bytes.to_vec())
+            .map_err(|e| ApiError::ServiceUnavailable(format!("Evidence storage read failed: {e}")))
     }
 }
 
@@ -295,6 +346,15 @@ mod tests {
                 .unwrap()
                 .insert(key.to_string(), bytes.to_vec());
             Ok(())
+        }
+
+        async fn get(&self, key: &str) -> Result<Vec<u8>, ApiError> {
+            self.objects
+                .lock()
+                .unwrap()
+                .get(key)
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("Evidence object not found"))
         }
     }
 

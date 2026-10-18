@@ -888,6 +888,85 @@ class ApiClient {
     );
   }
 
+  // ── Currency / Exchange rates (#1263) ─────────────────────────────────────────
+
+  /** GET /api/v1/currencies — supported currency catalogue. */
+  async getSupportedCurrencies(): Promise<
+    Array<{
+      code: string;
+      symbol: string;
+      name: string;
+      decimals: number;
+      locales: string[];
+      gateways: string[];
+    }>
+  > {
+    try {
+      return await this.request("/v1/currencies");
+    } catch {
+      return [];
+    }
+  }
+
+  /** GET /api/v1/currencies/rates?base=NGN — exchange rates for a base currency. */
+  async getExchangeRates(base = "NGN"): Promise<{
+    base: string;
+    rates: Record<string, number>;
+    asOf: string;
+  }> {
+    return this.request(`/v1/currencies/rates?base=${encodeURIComponent(base)}`);
+  }
+
+  /** GET /api/v1/currencies/convert — convert between two currencies. */
+  async convertCurrency(
+    from: string,
+    to: string,
+    amount: number,
+  ): Promise<{ converted: number; rate: number; formatted: string }> {
+    const params = new URLSearchParams({
+      from,
+      to,
+      amount: String(amount),
+    });
+    return this.request(`/v1/currencies/convert?${params.toString()}`);
+  }
+
+  // ── Player analytics (#1266) ──────────────────────────────────────────────────
+
+  /**
+   * GET /api/v1/analytics/player/{playerId}
+   *
+   * Advanced per-player analytics: win/loss trend, Elo progression, match
+   * history, per-game and per-tournament breakdowns and peer comparison.
+   * Swallows failures so the dashboard can fall back to its local demo data
+   * while the backend endpoint rolls out.
+   */
+  async getPlayerAnalytics(
+    playerId: string,
+    filters?: {
+      game?: string;
+      result?: string;
+      tournamentId?: string;
+      from?: string;
+      to?: string;
+    },
+  ): Promise<import("../types/playerAnalytics").PlayerAnalytics | null> {
+    const params = new URLSearchParams();
+    if (filters?.game) params.set("game", filters.game);
+    if (filters?.result) params.set("result", filters.result);
+    if (filters?.tournamentId) params.set("tournamentId", filters.tournamentId);
+    if (filters?.from) params.set("from", filters.from);
+    if (filters?.to) params.set("to", filters.to);
+    const qs = params.toString();
+    try {
+      return await this.request(
+        `/v1/analytics/player/${encodeURIComponent(playerId)}${qs ? `?${qs}` : ""}`,
+      );
+    } catch {
+      return null;
+    }
+  }
+
   // ── Settings ──────────────────────────────────────────────────────────────────
 
   async getSettings(): Promise<any> {

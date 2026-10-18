@@ -1,6 +1,7 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
 pub mod analytics_service;
+pub mod anti_cheat_service;
 pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
@@ -43,6 +44,9 @@ pub mod wallet_service;
 
 pub use crate::realtime::event_bus::EventBus;
 pub use achievement_service::AchievementService;
+pub use anti_cheat_service::{
+    AntiCheatService, LoggingStellarReporter, StellarReporter, StellarServiceReporter,
+};
 pub use audit_service::{AuditAction, AuditEntryInput, AuditFilter, AuditService};
 pub use dispute_service::DisputeService;
 pub use feature_flags::FeatureFlagService;
