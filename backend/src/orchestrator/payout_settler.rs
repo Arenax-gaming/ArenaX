@@ -36,6 +36,35 @@ impl PayoutSettler {
             ));
         }
 
+        // Step 1b: Auto-hold (Issue #1233). A flagged anti-cheat finding on any
+        // of this tournament's matches holds every payout until an admin has
+        // reviewed it; the poller retries on its next pass.
+        let held_row = sqlx::query(
+            r#"
+            SELECT COUNT(*) AS cnt
+            FROM anticheat_findings f
+            JOIN tournament_matches m ON m.id = f.match_id
+            JOIN tournament_rounds r ON r.id = m.round_id
+            WHERE r.tournament_id = $1
+              AND f.flagged
+              AND f.reviewed_at IS NULL
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let unreviewed_flags: i64 = held_row.try_get("cnt").map_err(ApiError::database_error)?;
+        if unreviewed_flags > 0 {
+            tracing::warn!(
+                tournament_id = %tournament_id,
+                unreviewed_flags,
+                "Payouts held: tournament has unreviewed anti-cheat flags"
+            );
+            return Ok(());
+        }
+
         // Step 2: Begin transaction and lock the tournament row to prevent concurrent payout races.
         let mut tx = self.db_pool.begin().await.map_err(ApiError::database_error)?;
 
