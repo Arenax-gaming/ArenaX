@@ -20,6 +20,7 @@ import type { Dispute, ResolveDisputePayload } from "@/types/admin";
 import { PageHeaderSkeleton, ListItemSkeleton } from "@/components/common/PageSkeleton";
 import { PageError } from "@/components/common/PageError";
 import { EmptyState } from "@/components/common/EmptyState";
+import { sortDisputes, type DisputeSort } from "@/lib/disputes";
 import {
   ShieldAlert,
   ChevronDown,
@@ -47,6 +48,7 @@ function StatusBadge({ status }: { status: string }) {
     RESOLVED: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
     DISMISSED: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
     VOIDED: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+    REPLAY: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   };
   return (
     <span
@@ -103,7 +105,7 @@ interface ResolveFormProps {
 }
 
 function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
-  const [winner, setWinner] = useState<"A" | "B" | "void" | null>(null);
+  const [winner, setWinner] = useState<"A" | "B" | "void" | "replay" | null>(null);
   const [note, setNote] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -112,7 +114,7 @@ function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
   const playerBLabel =
     dispute.match.playerBUsername ?? `Player B (${dispute.match.playerBId.slice(0, 8)}…)`;
 
-  const options: Array<{ value: "A" | "B" | "void"; label: string; colour: string }> = [
+  const options: Array<{ value: "A" | "B" | "void" | "replay"; label: string; colour: string }> = [
     {
       value: "A",
       label: `${playerALabel} wins`,
@@ -137,14 +139,25 @@ function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
           ? "border-destructive bg-destructive/10 text-destructive"
           : "border-border hover:border-destructive/50",
     },
+    {
+      value: "replay",
+      label: "Order a replay",
+      colour:
+        winner === "replay"
+          ? "border-primary bg-primary/10 text-primary"
+          : "border-border hover:border-primary/50",
+    },
   ];
 
-  const resolvedStatus = winner === "void" ? "VOIDED" : "RESOLVED";
+  const resolvedStatus =
+    winner === "void" ? "VOIDED" : winner === "replay" ? "REPLAY" : "RESOLVED";
   const winnerLabel =
     winner === "A"
       ? playerALabel
       : winner === "B"
       ? playerBLabel
+      : winner === "replay"
+      ? "N/A (match will be replayed)"
       : "N/A (match voided)";
 
   const confirmDescription = (
@@ -188,6 +201,8 @@ function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
     const payload: ResolveDisputePayload =
       winner === "void"
         ? { status: "VOIDED", resolution: note || "Match voided by admin" }
+        : winner === "replay"
+        ? { status: "REPLAY", resolution: note || "Replay ordered by admin" }
         : {
             status: "RESOLVED",
             resolution: note || `Admin declared winner`,
@@ -210,7 +225,7 @@ function ResolveForm({ dispute, onResolve, isPending }: ResolveFormProps) {
         <div
           role="radiogroup"
           aria-label="Select outcome"
-          className="grid sm:grid-cols-3 gap-2"
+          className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2"
         >
           {options.map((opt) => (
             <button
@@ -480,6 +495,7 @@ function DisputeRow({ dispute, onResolve, resolvingId }: DisputeRowProps) {
 export default function DisputeDashboard() {
   const queryClient = useQueryClient();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [sort, setSort] = useState<DisputeSort>("priority");
 
   const {
     data: disputes = [],
@@ -533,6 +549,7 @@ export default function DisputeDashboard() {
   );
 
   const openCount = disputes.filter((d) => d.status === "OPEN").length;
+  const queue = sortDisputes(disputes, sort);
 
   if (isLoading) {
     return (
@@ -586,6 +603,22 @@ export default function DisputeDashboard() {
           </p>
         </header>
 
+        <div className="flex items-center gap-2">
+          <label htmlFor="dispute-sort" className="text-sm font-medium text-muted-foreground">
+            Sort by:
+          </label>
+          <select
+            id="dispute-sort"
+            className="bg-background border border-input h-10 px-3 py-2 rounded-md text-sm"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as DisputeSort)}
+          >
+            <option value="priority">Priority</option>
+            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </div>
+
         {/* Dispute list */}
         <div className="grid gap-4" role="list" aria-label="Disputes">
           {disputes.length === 0 ? (
@@ -596,7 +629,7 @@ export default function DisputeDashboard() {
               size="lg"
             />
           ) : (
-            disputes.map((dispute) => (
+            queue.map((dispute) => (
               <div key={dispute.id} role="listitem">
                 <DisputeRow
                   dispute={dispute}
