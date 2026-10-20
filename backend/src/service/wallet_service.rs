@@ -32,6 +32,13 @@ pub enum WalletError {
 
 pub type DbPool = Arc<PgPool>;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserDepositInfo {
+    pub user_id: Uuid,
+    pub memo: String,
+    pub stellar_public_key: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct WalletService {
     db_pool: DbPool,
@@ -303,6 +310,69 @@ impl WalletService {
         self.publish_balance_update(user_id).await;
 
         Ok(())
+    }
+
+    /// Add XLM balance (in stroops) with transaction isolation (#1432)
+    pub async fn add_xlm_balance(&self, user_id: Uuid, amount_stroops: i64) -> Result<(), WalletError> {
+        if amount_stroops <= 0 {
+            return Err(WalletError::InvalidAmount(
+                "Amount must be positive".to_string(),
+            ));
+        }
+
+        let config = TransactionConfig {
+            isolation_level: IsolationLevel::Serializable,
+            max_retries: 3,
+            ..Default::default()
+        };
+
+        let user_id_clone = user_id;
+        let amount_clone = amount_stroops;
+        let db_pool = self.db_pool.clone();
+
+        execute_transaction(&db_pool, &config, move |tx| {
+            Box::pin(async move {
+                sqlx::query!(
+                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    user_id_clone
+                )
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                sqlx::query!(
+                    r#"
+                    UPDATE wallets
+                    SET balance_xlm = COALESCE(balance_xlm, 0) + $1, updated_at = $2
+                    WHERE user_id = $3
+                    "#,
+                    amount_clone,
+                    Utc::now(),
+                    user_id_clone
+                )
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| WalletError::DatabaseError(e))?;
+
+                Ok::<(), WalletError>(())
+            })
+        })
+        .await?;
+
+        self.publish_balance_update(user_id).await;
+
+        Ok(())
+    }
+
+    /// Retrieve the deposit memo and address for a user (#1432)
+    pub async fn get_deposit_instructions(&self, user_id: Uuid) -> Result<UserDepositInfo, WalletError> {
+        let wallet = self.get_wallet(user_id).await?;
+        let memo = crate::service::stellar_service::get_user_deposit_memo(user_id);
+        Ok(UserDepositInfo {
+            user_id,
+            memo,
+            stellar_public_key: wallet.stellar_public_key,
+        })
     }
 
     /// Deduct ArenaX tokens with transaction isolation

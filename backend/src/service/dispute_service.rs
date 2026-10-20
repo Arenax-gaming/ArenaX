@@ -217,8 +217,8 @@ impl DisputeService {
         let evidence = sqlx::query_as::<_, DisputeEvidence>(
             r#"
             INSERT INTO dispute_evidence
-                (dispute_id, uploaded_by, file_url, file_name, content_type, size_bytes, description)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (dispute_id, uploaded_by, file_url, file_name, content_type, size_bytes, description, ipfs_cid)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
         )
@@ -229,6 +229,7 @@ impl DisputeService {
         .bind(&request.content_type)
         .bind(request.size_bytes)
         .bind(&request.description)
+        .bind(&request.ipfs_cid)
         .fetch_one(&mut *tx)
         .await
         .map_err(ApiError::database_error)?;
@@ -249,6 +250,30 @@ impl DisputeService {
         tx.commit().await.map_err(ApiError::database_error)?;
 
         Ok(evidence)
+    }
+
+    /// Verify that raw bytes match the persisted IPFS CID for a piece of evidence (#1423).
+    pub async fn verify_evidence_cid(
+        &self,
+        dispute_id: Uuid,
+        evidence_id: Uuid,
+        bytes: &[u8],
+    ) -> Result<bool, ApiError> {
+        let evidence = sqlx::query_as::<_, DisputeEvidence>(
+            "SELECT * FROM dispute_evidence WHERE id = $1 AND dispute_id = $2",
+        )
+        .bind(evidence_id)
+        .bind(dispute_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(ApiError::database_error)?
+        .ok_or_else(|| ApiError::not_found("Evidence record not found"))?;
+
+        let Some(stored_cid) = evidence.ipfs_cid else {
+            return Ok(false);
+        };
+
+        Ok(crate::service::evidence_storage::verify_ipfs_cid(bytes, &stored_cid))
     }
 
     // ─── Assignment ─────────────────────────────────────────────────────────

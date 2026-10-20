@@ -336,6 +336,8 @@ async fn main() -> io::Result<()> {
         stellar_reporter,
     ));
 
+    let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
@@ -355,6 +357,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
+            .app_data(web::Data::new(sponsored_tokens.clone()))
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
@@ -563,6 +566,9 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::cache_handler::configure)
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
+            // Tournament sponsorship packages and admin endpoints — Issue #1419
+            .configure(crate::service::sponsored_tokens::configure)
+            .configure(crate::service::sponsored_tokens::configure_admin)
             .configure(crate::realtime::user_ws::configure_ws_route)
             .configure(crate::service::chat::configure)
     })
