@@ -36,6 +36,7 @@ pub mod social_service;
 pub mod soroban_service;
 pub mod sponsored_tokens;
 pub mod staking_service;
+pub mod stellar_sdk_service;
 pub mod stellar_service;
 pub mod suspension_service;
 pub mod tournament_service;
@@ -66,6 +67,7 @@ pub use soroban_service::{
     DecodedEvent, NetworkConfig, RetryConfig, SorobanError, SorobanService, SorobanTxResult,
     TxStatus,
 };
+pub use stellar_sdk_service::{StellarSdkError, StellarSdkService};
 pub use stellar_service::StellarService;
 pub use tournament_service::TournamentService;
 pub use user_service::UserService;
