@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 // Every event in this contract is published via the raw `env.events().publish`
 // API; migrating them all to `#[contractevent]` is out of scope. Silenced at
 // crate level so the deprecation warning doesn't fail `-D warnings` CI runs
@@ -9,7 +10,33 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
-use time_lock::{TimeLockClient, CATEGORY_TREASURY, PRIORITY_MEDIUM};
+
+/// Mirrors `time_lock::CATEGORY_TREASURY`.
+const CATEGORY_TREASURY: u32 = 1;
+/// Mirrors `time_lock::PRIORITY_MEDIUM`.
+const PRIORITY_MEDIUM: u32 = 1;
+
+/// Client for the time-lock contract. Declared locally instead of depending
+/// on the `time-lock` crate, whose contract exports would otherwise be linked
+/// into this wasm and collide with Treasury's own (e.g. `get_admin`).
+#[soroban_sdk::contractclient(name = "TimeLockClient")]
+#[allow(dead_code)]
+pub trait TimeLockInterface {
+    fn schedule_operation(
+        env: Env,
+        caller: Address,
+        operation_id: BytesN<32>,
+        target: Address,
+        function_name: Symbol,
+        args: Bytes,
+        delay: u64,
+        description: Symbol,
+        category: u32,
+        priority: u32,
+        custom_grace_period: u64,
+    );
+    fn execute_operation(env: Env, caller: Address, operation_id: BytesN<32>);
+}
 
 // ---------------------------------------------------------------------------
 // Issue #918: Multi-sig treasury
@@ -183,16 +210,6 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
-}
-
-/// Scheduled upgrade details (#1064).
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct ScheduledUpgrade {
-    pub new_wasm_hash: soroban_sdk::BytesN<32>,
-    pub min_compatible_schema: u32,
-    pub scheduled_at: u64,
-    pub executable_at: u64,
 }
 
 #[contract]

@@ -40,6 +40,9 @@ export type DatabaseTransactionClient = Pick<
     | 'featureFlag'
     | 'featureFlagAuditLog'
     | 'apiKey'
+    | 'tournamentPrizeAccount'
+    | 'prizePoolDeposit'
+    | 'prizePayoutRequest'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

@@ -528,6 +528,11 @@ mod integration_tests {
         assert_eq!(response.total_queue_depth, 0);
         assert_eq!(response.hourly_aggregates.len(), 24);
     }
+}
+
+#[cfg(test)]
+mod elo_queue_tests {
+    use super::*;
 
     #[test]
     fn elo_gap_expands_with_wait_time() {
