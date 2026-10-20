@@ -186,11 +186,12 @@ export const createApp = (): Express => {
     const graphql = getGraphQLExecutor();
     graphql.mount(app);
 
-    // Mount Swagger UI
-    setupSwagger(app);
-
-    // Mount Redoc
-    setupRedoc(app);
+    // API documentation (Issue #1404) — Swagger UI at /docs, disabled in
+    // production so the full API surface isn't publicly browsable.
+    if (!env.isProduction) {
+        setupSwagger(app, '/docs');
+        setupRedoc(app);
+    }
 
     app.use(errorHandler);
 

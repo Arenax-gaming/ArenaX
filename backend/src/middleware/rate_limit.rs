@@ -345,6 +345,7 @@ where
         let redis = self.redis.clone();
         let default_limit = self.config.requests;
         let default_window = self.config.window;
+        let config = self.config.clone();
 
         Box::pin(async move {
             // Skip rate limiting for whitelisted IPs
@@ -374,7 +375,7 @@ where
                 &path,
                 default_limit,
                 default_window,
-                &self.config.overrides,
+                &config.overrides,
             );
 
             // ── Resolve identity (user ID > IP) ───────────────────────────────

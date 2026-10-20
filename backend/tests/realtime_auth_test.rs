@@ -1,11 +1,20 @@
-use crate::realtime::auth::RealtimeAuth;
-use crate::auth::jwt_service::{Claims, TokenType};
+use arenax_backend::auth::jwt_service::{Claims, TokenType};
+use arenax_backend::db::DbPool;
+use arenax_backend::realtime::auth::RealtimeAuth;
 use uuid::Uuid;
 use chrono::{Duration, Utc};
 
+/// User-channel authorization is decided from the claims alone, so the pool
+/// is created lazily and never connects.
+fn lazy_pool() -> DbPool {
+    sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://localhost/arenax")
+        .expect("lazy pool construction does not connect")
+}
+
 #[tokio::test]
 async fn test_authorize_user_channel_success() {
-    let db_pool = crate::db::DbPool::new_test().await; // Assuming this exists or I'll mock it
+    let db_pool = lazy_pool();
     let auth = RealtimeAuth::new(db_pool);
 
     let user_id = Uuid::new_v4();
@@ -27,7 +36,7 @@ async fn test_authorize_user_channel_success() {
 
 #[tokio::test]
 async fn test_authorize_user_channel_denied() {
-    let db_pool = crate::db::DbPool::new_test().await;
+    let db_pool = lazy_pool();
     let auth = RealtimeAuth::new(db_pool);
 
     let user_id = Uuid::new_v4();

@@ -9,7 +9,10 @@ mod tests {
 
     /// Helper to create a test service instance
     fn create_test_service() -> MatchAuthorityService {
-        let db_pool = DbPool::default(); // Mock pool for unit tests
+        // Lazy pool: never connects, since these tests only exercise the FSM.
+        let db_pool: DbPool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/arenax")
+            .unwrap();
         let soroban_service = Arc::new(SorobanService::new(NetworkConfig::testnet()));
         let contract_id = "CTEST123".to_string();
 

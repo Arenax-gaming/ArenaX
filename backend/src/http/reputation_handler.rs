@@ -65,20 +65,17 @@ pub async fn get_player_reputation(
 ) -> Result<HttpResponse, ApiError> {
     let user_id = path.into_inner();
     
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
-        r#"
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(r#"
         SELECT 
             id as user_id,
-            COALESCE(skill_score, 1000) as skill_score,
-            COALESCE(fair_play_score, 100) as fair_play_score,
+            skill_score,
+            fair_play_score,
             reputation_last_updated,
-            COALESCE(is_bad_actor, false) as is_bad_actor
+            is_bad_actor
         FROM users
         WHERE id = $1
-        "#,
-        user_id
-    )
+        "#)
+        .bind(user_id)
     .fetch_optional(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?
@@ -98,7 +95,7 @@ pub async fn get_player_reputation(
     Ok(HttpResponse::Ok().json(ApiResponse::success(reputation)))
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, serde::Serialize)]
 struct PlayerReputationData {
     user_id: Uuid,
     skill_score: i32,
@@ -114,20 +111,17 @@ pub async fn get_my_reputation(
 ) -> Result<HttpResponse, ApiError> {
     let uid = user_id.into_inner();
     
-    let reputation = sqlx::query_as!(
-        PlayerReputationData,
-        r#"
+    let reputation = sqlx::query_as::<_, PlayerReputationData>(r#"
         SELECT 
             id as user_id,
-            COALESCE(skill_score, 1000) as skill_score,
-            COALESCE(fair_play_score, 100) as fair_play_score,
+            skill_score,
+            fair_play_score,
             reputation_last_updated,
-            COALESCE(is_bad_actor, false) as is_bad_actor
+            is_bad_actor
         FROM users
         WHERE id = $1
-        "#,
-        uid
-    )
+        "#)
+        .bind(uid)
     .fetch_one(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -164,9 +158,7 @@ pub async fn get_reputation_history(
     .await
     .map_err(|e| ApiError::database_error(e))?;
 
-    let history = sqlx::query_as!(
-        ReputationEventResponse,
-        r#"
+    let history = sqlx::query_as::<_, ReputationEventResponse>(r#"
         SELECT 
             id,
             user_id,
@@ -180,11 +172,10 @@ pub async fn get_reputation_history(
         WHERE user_id = $1
         ORDER BY created_at DESC
         LIMIT $2 OFFSET $3
-        "#,
-        user_id,
-        limit,
-        offset,
-    )
+        "#)
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
     .fetch_all(pool.get_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -283,8 +274,8 @@ pub async fn get_reputation_stats(
             COUNT(*) FILTER (WHERE is_bad_actor = true) as bad_actors_count,
             COUNT(*) FILTER (WHERE COALESCE(fair_play_score, 100) < 50) as low_fair_play_count,
             COUNT(*) FILTER (WHERE COALESCE(skill_score, 1000) >= 1500) as high_skill_count,
-            AVG(COALESCE(skill_score, 1000)) as avg_skill,
-            AVG(COALESCE(fair_play_score, 100)) as avg_fair_play
+            AVG(skill_score)::float8 as avg_skill,
+            AVG(fair_play_score)::float8 as avg_fair_play
         FROM users
         WHERE is_active = true
         "#

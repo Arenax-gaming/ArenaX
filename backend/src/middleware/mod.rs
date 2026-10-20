@@ -112,7 +112,7 @@ pub(crate) fn extract_ip(req: &ServiceRequest) -> String {
         .map(|s| s.trim().to_string())
         .or_else(|| {
             req.connection_info()
-                .realip_remote_address()
+                .realip_remote_addr()
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())

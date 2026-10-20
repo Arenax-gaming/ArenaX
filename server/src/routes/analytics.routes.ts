@@ -19,26 +19,285 @@ const router: Router = Router();
 
 router.use(authenticateJWT);
 
+/**
+ * @openapi
+ * /v1/analytics/events:
+ *   post:
+ *     summary: Track Event
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               eventType:
+ *                 type: string
+ *               data:
+ *                 type: object
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/events',
     paymentRateLimiter,
     defaultAnalyticsController.trackEvent.bind(defaultAnalyticsController)
 );
+/**
+ * @openapi
+ * /v1/analytics/dashboard:
+ *   get:
+ *     summary: Get Dashboard
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: period
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/dashboard',
     publicRateLimiter,
     defaultAnalyticsController.getDashboard.bind(defaultAnalyticsController)
 );
+/**
+ * @openapi
+ * /v1/analytics/players/{id}:
+ *   get:
+ *     summary: Get Player Analytics
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: period
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/players/:id',
     publicRateLimiter,
     defaultAnalyticsController.getPlayerAnalytics.bind(defaultAnalyticsController)
 );
+/**
+ * @openapi
+ * /v1/analytics/games/metrics:
+ *   get:
+ *     summary: Get Game Metrics
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: period
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/games/metrics',
     publicRateLimiter,
     defaultAnalyticsController.getGameMetrics.bind(defaultAnalyticsController)
 );
+/**
+ * @openapi
+ * /v1/analytics/reports/{type}:
+ *   get:
+ *     summary: Get Report
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: period
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/reports/:type',
     publicRateLimiter,
@@ -47,6 +306,52 @@ router.get(
 
 // ── Data Aggregation Endpoints (#689) ──────────────────────────────────────
 
+/**
+ * @openapi
+ * /v1/analytics/aggregated:
+ *   get:
+ *     summary: ── Data Aggregation Endpoints (Issue 689) ──────────────────────────────────────
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: period
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/aggregated',
     requirePermission('analytics:read'),
@@ -57,6 +362,52 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/analytics/cohorts:
+ *   get:
+ *     summary: Get analytics cohorts
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/cohorts',
     requirePermission('analytics:read'),
@@ -67,6 +418,57 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/analytics/privacy:
+ *   get:
+ *     summary: Get analytics privacy
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: metrics
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: epsilon
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/privacy',
     requirePermission('analytics:read'),
@@ -82,6 +484,40 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/analytics/health:
+ *   get:
+ *     summary: Get analytics health
+ *     tags: [Analytics]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/health',
     requirePermission('analytics:read'),

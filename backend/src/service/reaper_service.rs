@@ -96,7 +96,7 @@ impl ReaperService {
         // We deliberately fetch only the columns the Reaper needs.
         let expired = sqlx::query!(
             r#"
-            SELECT id, player1_id, player2_id
+            SELECT id, player1_id AS "player1_id!", player2_id
             FROM   matches
             WHERE  status         = $1
               AND  report_deadline < NOW()

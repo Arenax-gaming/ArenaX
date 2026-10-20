@@ -11,6 +11,11 @@ use crate::models::{
 };
 use crate::service::WalletService;
 
+/// The amount's unscaled integer value, as the wallet service stores it.
+fn smallest_unit(amount: rust_decimal::Decimal) -> Result<i64, ApiError> {
+    i64::try_from(amount.mantissa()).map_err(|_| ApiError::bad_request("Amount is out of range"))
+}
+
 #[derive(Deserialize)]
 pub struct PaymentVerificationRequest {
     pub reference: String,
@@ -25,14 +30,11 @@ pub async fn get_wallet(
         .user_id()
         .ok_or_else(|| ApiError::unauthorized("User not authenticated"))?;
 
-    let wallet = sqlx::query_as!(
-        crate::models::Wallet,
-        r#"
+    let wallet = sqlx::query_as::<_, crate::models::Wallet>(r#"
         SELECT * FROM wallets
         WHERE user_id = $1
-        "#,
-        user_id
-    )
+        "#)
+        .bind(user_id)
     .fetch_optional(pool.get_ref())
     .await?
     .ok_or_else(|| ApiError::not_found("Wallet not found"))?;
@@ -96,7 +98,7 @@ pub async fn initiate_deposit(
         .create_transaction(
             user_id,
             TransactionType::Deposit,
-            amount.mantissa(),
+            smallest_unit(amount)?,
             body.currency.clone(),
             format!("Wallet deposit via {}", body.payment_method),
             None,
@@ -139,7 +141,7 @@ pub async fn verify_deposit(
     // The active gateway comes from PAYMENT_PROVIDER (#1069); a provider
     // that isn't enabled verifies as false, as an unknown one always did.
     let verified = service
-        .verify_payment(&body.provider, &body.reference, transaction.amount.mantissa())
+        .verify_payment(&body.provider, &body.reference, smallest_unit(transaction.amount)?)
         .await?;
 
     if verified {
@@ -181,16 +183,16 @@ pub async fn initiate_withdrawal(
     })?;
 
     let available_balance = match body.currency.as_str() {
-        "NGN" => wallet.balance_ngn.unwrap_or(0),
-        "XLM" => wallet.balance_xlm.unwrap_or(0),
-        "ARENAX_TOKEN" => wallet.balance_arenax_tokens.unwrap_or(0),
+        "NGN" => wallet.balance_ngn,
+        "XLM" => wallet.balance_xlm,
+        "ARENAX_TOKEN" => wallet.balance_arenax_tokens,
         _ => 0,
     };
 
     let amount_in_smallest_unit = match body.currency.as_str() {
-        "NGN" | "ARENAX_TOKEN" => amount.mantissa(),
-        "XLM" => amount.mantissa() / 1_000_000,
-        _ => amount.mantissa(),
+        "NGN" | "ARENAX_TOKEN" => smallest_unit(amount)?,
+        "XLM" => smallest_unit(amount)? / 1_000_000,
+        _ => smallest_unit(amount)?,
     };
 
     if available_balance < amount_in_smallest_unit {
@@ -204,7 +206,7 @@ pub async fn initiate_withdrawal(
         .create_transaction(
             user_id,
             TransactionType::Withdrawal,
-            amount.mantissa(),
+            smallest_unit(amount)?,
             body.currency.clone(),
             format!("Withdrawal to {}", body.destination),
             None,

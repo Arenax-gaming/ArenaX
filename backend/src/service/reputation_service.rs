@@ -85,10 +85,10 @@ impl ReputationService {
             r#"
             SELECT 
                 id as user_id,
-                COALESCE(skill_score, 1000) as skill_score,
-                COALESCE(fair_play_score, 100) as fair_play_score,
+                skill_score,
+                fair_play_score,
                 reputation_last_updated,
-                COALESCE(is_bad_actor, false) as is_bad_actor
+                is_bad_actor
             FROM users
             WHERE id = $1
             "#,
@@ -301,7 +301,7 @@ impl ReputationService {
 
         warn!(
             "Applied anti-cheat penalty {} to user {} (new fair_play: {})",
-            penalty, user_id, result.fair_play_score.unwrap_or(0)
+            penalty, user_id, result.fair_play_score
         );
 
         Ok(())
@@ -384,8 +384,8 @@ impl ReputationService {
                 COUNT(*) FILTER (WHERE is_bad_actor = true) as bad_actors_count,
                 COUNT(*) FILTER (WHERE COALESCE(fair_play_score, 100) < 50) as low_fair_play_count,
                 COUNT(*) FILTER (WHERE COALESCE(skill_score, 1000) >= 1500) as high_skill_count,
-                AVG(COALESCE(skill_score, 1000)) as avg_skill,
-                AVG(COALESCE(fair_play_score, 100)) as avg_fair_play
+                AVG(skill_score)::float8 as avg_skill,
+                AVG(fair_play_score)::float8 as avg_fair_play
             FROM users
             WHERE is_active = true
             "#

@@ -14,6 +14,11 @@ const QUEUE_ENTRY_PREFIX: &str = "queue_entry";
 /// Sorted-set key that tracks all active (game, game_mode) pairs so the
 /// background worker never has to query the database on every tick.
 const ACTIVE_MODES_KEY: &str = "matchmaking:active_modes";
+/// Hash per game holding `user_id -> current Elo` for low-latency lookups.
+pub const ELO_CACHE_PREFIX: &str = "elo";
+/// Marker set when a player is evicted from the queue for waiting too long.
+const QUEUE_TIMEOUT_PREFIX: &str = "matchmaking:timeout";
+const QUEUE_TIMEOUT_MARKER_TTL_SECS: u64 = 300;
 const ELO_BUCKET_SIZE: i32 = 100;
 const MAX_ELO_GAP: i32 = 500;
 const MATCHMAKER_INTERVAL: Duration = Duration::from_secs(5);
@@ -147,6 +152,15 @@ impl MatchmakerService {
         game_mode: &str,
     ) -> Result<(), ApiError> {
         let queue_entries = self.get_queue_entries(conn, game, game_mode).await?;
+
+        // Evict players who have waited longer than the configured timeout.
+        let now = Utc::now();
+        let (expired, queue_entries): (Vec<_>, Vec<_>) = queue_entries
+            .into_iter()
+            .partition(|e| is_queue_entry_expired(e, now, self.config.max_wait_time));
+        for entry in &expired {
+            self.handle_queue_timeout(conn, entry).await?;
+        }
 
         if queue_entries.len() < self.config.min_players_per_match {
             return Ok(());
@@ -558,29 +572,26 @@ impl MatchmakerService {
         let match_id = Uuid::new_v4();
         let now = Utc::now();
 
-        let match_record: Match = sqlx::query_as!(
-            Match,
-            r#"
+        let match_record: Match = sqlx::query_as::<_, Match>(r#"
             INSERT INTO matches (
                 id, tournament_id, round_id, match_type, status, player1_id, player2_id,
                 player1_elo_before, player2_elo_before, game_mode, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
             ) RETURNING *
-            "#,
-            match_id,
-            None::<Uuid>,
-            None::<Uuid>,
-            MatchType::Ranked as _,
-            MatchStatus::Pending as _,
-            candidate.player1.user_id,
-            Some(candidate.player2.user_id),
-            candidate.player1.current_elo,
-            candidate.player2.current_elo,
-            candidate.player1.game_mode,
-            now,
-            now
-        )
+            "#)
+            .bind(match_id)
+            .bind(None::<Uuid>)
+            .bind(None::<Uuid>)
+            .bind(MatchType::Ranked)
+            .bind(MatchStatus::Pending)
+            .bind(candidate.player1.user_id)
+            .bind(Some(candidate.player2.user_id))
+            .bind(candidate.player1.current_elo)
+            .bind(candidate.player2.current_elo)
+            .bind(&candidate.player1.game_mode)
+            .bind(now)
+            .bind(now)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -595,6 +606,88 @@ impl MatchmakerService {
         );
 
         Ok(match_record)
+    }
+
+    /// Remove a timed-out player from the queue and leave a marker so the
+    /// status endpoint can report why they were dropped.
+    async fn handle_queue_timeout(
+        &self,
+        conn: &mut RedisConn,
+        entry: &QueueEntry,
+    ) -> Result<(), ApiError> {
+        self.remove_from_queue(conn, &entry.user_id, &entry.game, &entry.game_mode)
+            .await?;
+
+        let marker_key = format!("{}:{}", QUEUE_TIMEOUT_PREFIX, entry.user_id);
+        let marker = serde_json::json!({
+            "game": entry.game,
+            "game_mode": entry.game_mode,
+            "joined_at": entry.joined_at,
+            "timed_out_at": Utc::now(),
+        })
+        .to_string();
+        let _: () = conn
+            .set_ex(&marker_key, marker, QUEUE_TIMEOUT_MARKER_TTL_SECS)
+            .await
+            .map_err(|e| ApiError::internal_error(&format!("Redis SET error: {}", e)))?;
+
+        let _ = sqlx::query(
+            "UPDATE matchmaking_queue SET status = 'expired' WHERE user_id = $1 AND game = $2 AND game_mode = $3 AND status = 'waiting'",
+        )
+        .bind(entry.user_id)
+        .bind(&entry.game)
+        .bind(&entry.game_mode)
+        .execute(&self.db_pool)
+        .await;
+
+        tracing::info!(user_id = %entry.user_id, game = %entry.game, "matchmaking queue timeout");
+        Ok(())
+    }
+
+    /// Return the most recent timeout marker for a player, if any.
+    pub async fn get_timeout_marker(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<serde_json::Value>, ApiError> {
+        let mut conn = self.redis.clone();
+        let key = format!("{}:{}", QUEUE_TIMEOUT_PREFIX, user_id);
+        let raw: Option<String> = conn
+            .get(&key)
+            .await
+            .map_err(|e| ApiError::internal_error(&format!("Redis GET error: {}", e)))?;
+        Ok(raw.and_then(|r| serde_json::from_str(&r).ok()))
+    }
+
+    /// Return every queue entry the player currently holds across all games.
+    pub async fn get_user_queue_entries(&self, user_id: Uuid) -> Result<Vec<QueueEntry>, ApiError> {
+        let mut conn = self.redis.clone();
+        let pattern = format!("{}:*:*:{}", QUEUE_ENTRY_PREFIX, user_id);
+        let keys = scan_keys(&mut conn, &pattern).await?;
+        let mut entries = Vec::with_capacity(keys.len());
+        for key in keys {
+            let raw: Option<String> = conn
+                .get(&key)
+                .await
+                .map_err(|e| ApiError::internal_error(&format!("Redis GET error: {}", e)))?;
+            if let Some(entry) = raw.and_then(|r| serde_json::from_str(&r).ok()) {
+                entries.push(entry);
+            }
+        }
+        Ok(entries)
+    }
+
+    /// Read a player's Elo from the Redis cache.
+    pub async fn get_cached_elo(&self, user_id: Uuid, game: &str) -> Result<Option<i32>, ApiError> {
+        let mut conn = self.redis.clone();
+        conn.hget(elo_cache_key(game), user_id.to_string())
+            .await
+            .map_err(|e| ApiError::internal_error(&format!("Redis HGET error: {}", e)))
+    }
+
+    /// Write a player's Elo to the Redis cache.
+    pub async fn cache_elo(&self, user_id: Uuid, game: &str, elo: i32) -> Result<(), ApiError> {
+        let mut conn = self.redis.clone();
+        cache_elo_rating(&mut conn, user_id, game, elo).await
     }
 
     fn calculate_initial_elo_range(&self, current_elo: i32) -> (i32, i32) {
@@ -646,11 +739,44 @@ fn find_best_match_for_player(
     best_candidate
 }
 
-fn calculate_max_elo_gap(entry: &QueueEntry) -> i32 {
-    let wait_seconds = Utc::now()
-        .signed_duration_since(entry.joined_at)
-        .num_seconds() as u64;
+pub fn elo_cache_key(game: &str) -> String {
+    format!("{}:{}", ELO_CACHE_PREFIX, game)
+}
 
+/// Write a rating into the Redis Elo cache using any async connection.
+pub async fn cache_elo_rating<C: redis::aio::ConnectionLike + Send>(
+    conn: &mut C,
+    user_id: Uuid,
+    game: &str,
+    elo: i32,
+) -> Result<(), ApiError> {
+    redis::cmd("HSET")
+        .arg(elo_cache_key(game))
+        .arg(user_id.to_string())
+        .arg(elo)
+        .query_async::<()>(conn)
+        .await
+        .map_err(|e| ApiError::internal_error(&format!("Redis HSET error: {}", e)))
+}
+
+/// A queue entry is expired once it has waited longer than `max_wait`.
+pub fn is_queue_entry_expired(entry: &QueueEntry, now: DateTime<Utc>, max_wait: Duration) -> bool {
+    let waited = now.signed_duration_since(entry.joined_at).num_seconds();
+    waited >= 0 && waited as u64 >= max_wait.as_secs()
+}
+
+pub fn calculate_max_elo_gap(entry: &QueueEntry) -> i32 {
+    elo_gap_for_wait(
+        Utc::now()
+            .signed_duration_since(entry.joined_at)
+            .num_seconds()
+            .max(0) as u64,
+    )
+}
+
+/// Allowed Elo gap for a player who has waited `wait_seconds`; doubles at
+/// each expansion interval up to `MAX_ELO_GAP`.
+pub fn elo_gap_for_wait(wait_seconds: u64) -> i32 {
     let mut max_gap = ELO_BUCKET_SIZE;
     for interval in EXPANSION_INTERVALS {
         if wait_seconds > interval.as_secs() {
@@ -660,7 +786,7 @@ fn calculate_max_elo_gap(entry: &QueueEntry) -> i32 {
     max_gap
 }
 
-fn calculate_match_quality(player1: &QueueEntry, player2: &QueueEntry, elo_gap: i32) -> f64 {
+pub fn calculate_match_quality(player1: &QueueEntry, player2: &QueueEntry, elo_gap: i32) -> f64 {
     let elo_score = 1.0 - (elo_gap as f64 / MAX_ELO_GAP as f64);
 
     let wait1 = Utc::now()
@@ -755,44 +881,71 @@ impl EloEngine {
         (new_p1, new_p2)
     }
 
+    /// Update ratings in the database and refresh the Redis Elo cache.
+    pub async fn update_elo_ratings_cached(
+        &self,
+        db_pool: &DbPool,
+        redis: &mut RedisConn,
+        match_id: Uuid,
+        winner_id: Option<Uuid>,
+    ) -> Result<(), ApiError> {
+        self.update_elo_ratings(db_pool, match_id, winner_id).await?;
+
+        let rows = sqlx::query_as::<_, (Uuid, String, i32)>(
+            r#"
+            SELECT e.user_id, e.game, e.current_rating
+            FROM user_elo e
+            JOIN matches m ON m.id = $1
+            WHERE e.game = m.game_mode
+              AND (e.user_id = m.player1_id OR e.user_id = m.player2_id)
+            "#,
+        )
+        .bind(match_id)
+        .fetch_all(db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        for (user_id, game, rating) in rows {
+            cache_elo_rating(redis, user_id, &game, rating).await?;
+        }
+        Ok(())
+    }
+
     pub async fn update_elo_ratings(
         &self,
         db_pool: &DbPool,
         match_id: Uuid,
         winner_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
-        let match_record = sqlx::query_as!(Match, "SELECT * FROM matches WHERE id = $1", match_id)
+        let match_record = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
             .fetch_one(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
         let (new_elo1, new_elo2) = self.calculate_elo_change(
-            match_record.player1_elo_before,
+            match_record.player1_elo_before.unwrap_or(1200),
             match_record.player2_elo_before.unwrap_or(1200),
             winner_id,
             match_record.player1_id,
             match_record.player2_id.unwrap_or_default(),
         );
 
-        sqlx::query!(
-            "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-            new_elo1,
-            Utc::now(),
-            match_record.player1_id,
-            match_record.game_mode
-        )
+        sqlx::query("UPDATE user_elo SET current_rating = $1, last_updated = $2 WHERE user_id = $3 AND game = $4")
+            .bind(new_elo1)
+            .bind(Utc::now())
+            .bind(match_record.player1_id)
+            .bind(&match_record.game_mode)
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
         if let Some(p2_id) = match_record.player2_id {
-            sqlx::query!(
-                "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-                new_elo2,
-                Utc::now(),
-                p2_id,
-                match_record.game_mode
-            )
+            sqlx::query("UPDATE user_elo SET current_rating = $1, last_updated = $2 WHERE user_id = $3 AND game = $4")
+                .bind(new_elo2)
+                .bind(Utc::now())
+                .bind(p2_id)
+                .bind(&match_record.game_mode)
             .execute(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -802,7 +955,7 @@ impl EloEngine {
             db_pool,
             match_record.player1_id,
             &match_record.game_mode,
-            match_record.player1_elo_before,
+            match_record.player1_elo_before.unwrap_or(1200),
             new_elo1,
             match_id,
         )
@@ -832,17 +985,15 @@ impl EloEngine {
         new_elo: i32,
         match_id: Uuid,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            user_id,
-            game,
-            old_elo,
-            new_elo,
-            new_elo - old_elo,
-            match_id,
-            Utc::now()
-        )
+        sqlx::query("INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)")
+            .bind(user_id)
+            .bind(game)
+            .bind(old_elo)
+            .bind(new_elo)
+            .bind(new_elo - old_elo)
+            .bind(match_id)
+            .bind(Utc::now())
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

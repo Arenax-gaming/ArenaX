@@ -1,106 +1,30 @@
-import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import { Express, Request, Response } from 'express';
 
-const options: swaggerJsdoc.Options = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'ArenaX API',
-      version: '1.0.0',
-      description: `
-ArenaX Gaming Platform API — comprehensive endpoints for match management,
-tournaments, user profiles, wallets, governance, and blockchain interactions.
+/**
+ * The shared OpenAPI base definition and source globs live in
+ * `openapi.config.js` so `scripts/openapi.js` (which generates and checks the
+ * committed `openapi.json`) builds exactly the same spec as the running server.
+ */
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { buildSpec } = require('../../openapi.config.js') as { buildSpec: () => object };
 
-## Authentication
-Most endpoints require a Bearer JWT token in the Authorization header.
-\`\`\`
-Authorization: Bearer <token>
-\`\`\`
+const swaggerSpec = buildSpec();
 
-## Rate Limiting
-API requests are rate-limited using Token Bucket algorithm. Limits vary by endpoint type:
-- Auth endpoints: 5 req/min
-- Payment endpoints: 10 req/min
-- Game actions: 30 req/min
-- General API: 100 req/min
+// Swagger UI ships an inline <style> block, which the app-wide Helmet CSP
+// (`style-src 'self'`) would strip — relax style-src for the docs page only.
+function docsCsp(_req: Request, res: Response, next: () => void): void {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+  );
+  next();
+}
 
-Rate limit headers are returned with every response.
-      `,
-      contact: {
-        name: 'ArenaX Support',
-        url: 'https://arenax.gg/support',
-        email: 'support@arenax.gg',
-      },
-      license: {
-        name: 'MIT',
-        url: 'https://opensource.org/licenses/MIT',
-      },
-    },
-    servers: [
-      {
-        url: 'http://localhost:3001/api',
-        description: 'Development server',
-      },
-      {
-        url: 'https://api.arenax.gg/api',
-        description: 'Production server',
-      },
-    ],
-    components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Enter your JWT token',
-        },
-        apiKey: {
-          type: 'apiKey',
-          in: 'header',
-          name: 'x-api-key',
-          description: 'API key for public endpoints',
-        },
-      },
-      schemas: {
-        Error: {
-          type: 'object',
-          properties: {
-            error: { type: 'string' },
-            code: { type: 'string' },
-          },
-        },
-        RateLimitError: {
-          type: 'object',
-          properties: {
-            error: { type: 'string', example: 'Rate limit exceeded' },
-            code: { type: 'string', example: 'TOKEN_BUCKET_RATE_LIMIT' },
-            retryAfter: { type: 'integer', example: 12 },
-          },
-        },
-      },
-    },
-    security: [{ bearerAuth: [] }],
-    tags: [
-      { name: 'Auth', description: 'Authentication endpoints' },
-      { name: 'Users', description: 'User profile management' },
-      { name: 'Matches', description: 'Match operations' },
-      { name: 'Tournaments', description: 'Tournament management' },
-      { name: 'Wallet', description: 'Wallet and payment operations' },
-      { name: 'Governance', description: 'DAO governance proposals' },
-      { name: 'Admin', description: 'Admin-only operations' },
-      { name: 'Leaderboard', description: 'Leaderboard queries' },
-      { name: 'Health', description: 'Health check endpoints' },
-    ],
-  },
-  apis: ['./src/routes/*.ts', './src/controllers/*.ts'],
-};
-
-const swaggerSpec = swaggerJsdoc(options);
-
-export function setupSwagger(app: Express, path = '/api-docs'): void {
+export function setupSwagger(app: Express, path = '/docs'): void {
   app.use(
     path,
+    docsCsp,
     swaggerUi.serve,
     swaggerUi.setup(swaggerSpec, {
       explorer: true,
@@ -115,8 +39,8 @@ export function setupSwagger(app: Express, path = '/api-docs'): void {
     })
   );
 
-  // Expose raw OpenAPI spec at /api-docs.json
-  app.get('/api-docs.json', (_req, res) => {
+  // Expose raw OpenAPI spec at /docs.json (and the legacy /api-docs.json)
+  app.get(['/docs.json', '/api-docs.json'], (_req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(swaggerSpec);
   });
@@ -151,7 +75,7 @@ export function setupRedoc(app: Express, path = '/redoc'): void {
           <script src="https://cdn.jsdelivr.net/npm/redoc@2.0.0/bundles/redoc.standalone.js"></script>
           <script>
             Redoc.init(
-              "/api-docs.json",
+              "/docs.json",
               {
                 theme: {
                   colors: {

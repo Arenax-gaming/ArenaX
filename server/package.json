@@ -14,6 +14,8 @@
         "prisma:seed": "ts-node prisma/seed.ts",
         "prisma:studio": "prisma studio",
         "lint": "tsc --noEmit",
+        "openapi:generate": "node scripts/openapi.js",
+        "openapi:check": "node scripts/openapi.js --check",
         "test:api": "node test/newman/run-all.js",
         "test:api:report": "node test/newman/run-all.js --reporter htmlextra",
         "test:security": "./test/security/run-zap-scan.sh",

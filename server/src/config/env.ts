@@ -139,6 +139,11 @@ const envSchema = z.object({
         .string()
         .url()
         .optional(),
+    /** System co-signer secret for tournament prize-pool multisig accounts. */
+    STELLAR_PRIZE_SYSTEM_SECRET: z.string().optional(),
+    /** Admin co-signer public key for tournament prize-pool multisig accounts. */
+    STELLAR_PRIZE_ADMIN_PUBLIC_KEY: z.string().optional(),
+    STELLAR_PRIZE_STARTING_BALANCE: z.string().default('5'),
     SOROBAN_RPC_URL: z
         .string()
         .url()

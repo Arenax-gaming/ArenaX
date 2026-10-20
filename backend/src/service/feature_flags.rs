@@ -144,13 +144,13 @@ pub struct EvaluationResult {
     pub bucket: u8,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ReasonCount {
     pub reason: String,
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct VariantCount {
     pub variant: String,
     pub count: i64,

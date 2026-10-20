@@ -118,22 +118,20 @@ impl AuthService {
         let user_id = Uuid::new_v4();
         let now = Utc::now();
 
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO users (
                 id, username, email, phone_number, password_hash,
                 is_active, is_verified, role, created_at, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, true, false, 'user', $6, $7)
-            "#,
-            user_id,
-            request.username,
-            request.email,
-            request.phone_number,
-            password_hash,
-            now,
-            now,
-        )
+            "#)
+            .bind(user_id)
+            .bind(&request.username)
+            .bind(&request.email)
+            .bind(request.phone_number)
+            .bind(password_hash)
+            .bind(now)
+            .bind(now)
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -172,9 +170,7 @@ impl AuthService {
             return Err(ApiError::bad_request("Email and password are required"));
         }
 
-        let user = sqlx::query_as!(
-            User,
-            r#"
+        let user = sqlx::query_as::<_, User>(r#"
             SELECT id, username, email, phone_number, display_name, avatar_url, bio,
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
@@ -182,9 +178,8 @@ impl AuthService {
                    banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE email = $1
-            "#,
-            request.email,
-        )
+            "#)
+            .bind(request.email)
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
@@ -318,9 +313,7 @@ impl AuthService {
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {
-        let user = sqlx::query_as!(
-            User,
-            r#"
+        let user = sqlx::query_as::<_, User>(r#"
             SELECT id, username, email, phone_number, display_name, avatar_url, bio,
                    country_code, is_verified, is_active, role, created_at, updated_at,
                    last_login_at, password_hash, profile_image_url, reputation_score,
@@ -328,9 +321,8 @@ impl AuthService {
                    banned_until, device_fingerprint, deleted_at
             FROM users
             WHERE id = $1
-            "#,
-            user_id,
-        )
+            "#)
+            .bind(user_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
@@ -380,12 +372,10 @@ impl AuthService {
         let new_hash = hash(new_password, DEFAULT_COST)
             .map_err(|e| ApiError::internal_error(format!("Password hashing failed: {}", e)))?;
 
-        sqlx::query!(
-            "UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3",
-            new_hash,
-            Utc::now(),
-            user_id,
-        )
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3")
+            .bind(new_hash)
+            .bind(Utc::now())
+            .bind(user_id)
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;

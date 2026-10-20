@@ -75,7 +75,7 @@ pub async fn list_ips(
 ) -> Result<HttpResponse, ApiError> {
     require_admin(&req)?;
 
-    let mut conn = (**redis).clone();
+    let mut conn = redis.get_ref().as_ref().clone();
     let list_type = query.r#type.as_deref().unwrap_or("whitelist");
 
     match list_type {
@@ -109,11 +109,12 @@ pub async fn add_ip(
 ) -> Result<HttpResponse, ApiError> {
     require_admin(&req)?;
 
-    let mut conn = (**redis).clone();
+    let mut conn = redis.get_ref().as_ref().clone();
 
     match body.list.as_str() {
         "whitelist" => {
             add_to_whitelist(&mut conn, &body.ip)
+                .await
                 .map_err(|e| ApiError::RedisError(e.to_string()))?;
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "action": "added",
@@ -124,6 +125,7 @@ pub async fn add_ip(
         "blacklist" => {
             let ttl = body.ttl_secs.unwrap_or(0);
             add_to_blacklist(&mut conn, &body.ip, ttl)
+                .await
                 .map_err(|e| ApiError::RedisError(e.to_string()))?;
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "action": "added",
@@ -146,15 +148,17 @@ pub async fn remove_ip(
 ) -> Result<HttpResponse, ApiError> {
     require_admin(&req)?;
 
-    let mut conn = (**redis).clone();
+    let mut conn = redis.get_ref().as_ref().clone();
 
     match body.list.as_str() {
         "whitelist" => {
             remove_from_whitelist(&mut conn, &body.ip)
+                .await
                 .map_err(|e| ApiError::RedisError(e.to_string()))?;
         }
         "blacklist" => {
             remove_from_blacklist(&mut conn, &body.ip)
+                .await
                 .map_err(|e| ApiError::RedisError(e.to_string()))?;
         }
         _ => return Err(ApiError::bad_request("Invalid list type; use 'whitelist' or 'blacklist'")),
@@ -177,7 +181,7 @@ pub async fn check_ip(
 ) -> Result<HttpResponse, ApiError> {
     require_admin(&req)?;
 
-    let mut conn = (**redis).clone();
+    let mut conn = redis.get_ref().as_ref().clone();
     let whitelisted = is_whitelisted(&mut conn, &query.ip).await;
     let blacklisted = is_blacklisted(&mut conn, &query.ip).await;
 

@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { TournamentService } from '../services/tournament.service';
 import { TournamentFormat, TournamentStatus } from '@prisma/client';
 
+import tournamentMultisigService from '../services/tournament-multisig.service';
+
 const tournamentService = new TournamentService();
 
 export class TournamentController {
@@ -251,6 +253,81 @@ export class TournamentController {
         data: standings,
       });
     } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/tournaments/:id/prize-pool - Initialize multisig prize pool account
+   */
+  async initializePrizePool(req: Request, res: Response, next: NextFunction) {
+    try {
+      const account = await tournamentMultisigService.initializePrizePoolAccount(req.params.id);
+      res.status(201).json({ success: true, data: account });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/v1/tournaments/:id/prize-pool - On-chain prize pool state
+   */
+  async getPrizePool(req: Request, res: Response, next: NextFunction) {
+    try {
+      const pool = await tournamentMultisigService.getPrizePool(req.params.id);
+      res.json({ success: true, data: pool });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/tournaments/:id/prize-pool/sync - Record new on-chain deposits
+   */
+  async syncPrizePoolDeposits(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await tournamentMultisigService.syncDeposits(req.params.id);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/tournaments/:id/payouts - Create a system-signed payout request
+   */
+  async createPayout(req: Request, res: Response, next: NextFunction) {
+    try {
+      const requestedBy = req.user?.id;
+      if (!requestedBy) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      const { payouts } = req.body;
+      const request = await tournamentMultisigService.createPayoutRequest(req.params.id, payouts, requestedBy);
+      res.status(201).json({ success: true, data: request });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/tournaments/:id/payouts/:requestId/sign - Add admin co-signature
+   */
+  async signPayout(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { signedEnvelopeXdr } = req.body;
+      if (!signedEnvelopeXdr) {
+        res.status(400).json({ error: 'signedEnvelopeXdr is required' });
+        return;
+      }
+      const request = await tournamentMultisigService.addSignature(
+        req.params.id,
+        req.params.requestId,
+        signedEnvelopeXdr,
+      );
+      res.json({ success: true, data: request });
+    } catch (error) {
       next(error);
     }
   }

@@ -35,11 +35,95 @@ const webhookLimiter = rateLimit({
  *   POST /api/webhooks/paystack
  *   POST /api/webhooks/flutterwave
  */
+/**
+ * @openapi
+ * /webhooks/paystack:
+ *   post:
+ *     summary: Handle Paystack Webhook
+ *     tags: [PaymentWebhook]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/paystack', webhookLimiter, verifyPaystackSignature, handlePaystackWebhook);
+/**
+ * @openapi
+ * /webhooks/flutterwave:
+ *   post:
+ *     summary: Handle Flutterwave Webhook
+ *     tags: [PaymentWebhook]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/flutterwave', webhookLimiter, verifyFlutterwaveSignature, handleFlutterwaveWebhook);
 
 // Ping endpoints for dashboard/webhook setup verification.
+/**
+ * @openapi
+ * /webhooks/paystack:
+ *   get:
+ *     summary: Ping endpoints for dashboard/webhook setup verification
+ *     tags: [PaymentWebhook]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/paystack', handleWebhookVerificationPing);
+/**
+ * @openapi
+ * /webhooks/flutterwave:
+ *   get:
+ *     summary: Handle Webhook Verification Ping
+ *     tags: [PaymentWebhook]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/flutterwave', handleWebhookVerificationPing);
 
 export default router;

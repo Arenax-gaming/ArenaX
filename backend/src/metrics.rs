@@ -153,6 +153,114 @@ pub static DB_QUERY_DURATION_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     histogram
 });
 
+fn register<T: prometheus::core::Collector + Clone + 'static>(metric: T) -> T {
+    REGISTRY
+        .register(Box::new(metric.clone()))
+        .expect("metric can be registered");
+    metric
+}
+
+/// Profile cache lookups, labeled `result` = `hit` | `miss` (#1073).
+pub static PROFILE_CACHE_REQUESTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register(
+        IntCounterVec::new(
+            Opts::new("profile_cache_requests_total", "Profile cache lookups by result"),
+            &["result"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+/// Profile cache hit rate as a percentage of all reads since start-up.
+pub static CACHE_HIT_RATE: Lazy<IntGauge> = Lazy::new(|| {
+    register(
+        IntGauge::new("cache_hit_rate", "Profile cache hit rate (percent)")
+            .expect("metric can be created"),
+    )
+});
+
+static PROFILE_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static PROFILE_CACHE_READS: AtomicU64 = AtomicU64::new(0);
+
+/// Readiness of each external dependency: 1 = healthy, 0 = unhealthy (#1079).
+pub static DEPENDENCY_HEALTH: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register(
+        IntGaugeVec::new(
+            Opts::new("dependency_health", "Dependency health (1 = ok, 0 = error)"),
+            &["dependency"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_TX_SUBMITTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register(
+        IntCounterVec::new(
+            Opts::new("soroban_tx_submitted_total", "Soroban contract invocations attempted"),
+            &["contract", "method"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_TX_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register(
+        IntCounterVec::new(
+            Opts::new("soroban_tx_success_total", "Soroban transactions confirmed successful"),
+            &["contract", "method"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_TX_FAILED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register(
+        IntCounterVec::new(
+            Opts::new("soroban_tx_failed_total", "Soroban invocations that did not succeed"),
+            &["contract", "method", "reason"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_TX_RETRIES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register(
+        IntCounterVec::new(
+            Opts::new("soroban_tx_retries_total", "Extra Soroban status polls before settlement"),
+            &["contract", "method"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_TX_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    register(
+        HistogramVec::new(
+            prometheus::HistogramOpts::new(
+                "soroban_tx_latency_seconds",
+                "Time from Soroban invocation to confirmed success",
+            )
+            .buckets(vec![0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0]),
+            &["contract", "method"],
+        )
+        .expect("metric can be created"),
+    )
+});
+
+pub static SOROBAN_DLQ_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
+    register(
+        IntGauge::new("soroban_dlq_depth", "Soroban dead-letter queue depth")
+            .expect("metric can be created"),
+    )
+});
+
+/// Record a dependency readiness result.
+pub fn record_dependency_health(dependency: &str, healthy: bool) {
+    DEPENDENCY_HEALTH
+        .with_label_values(&[dependency])
+        .set(healthy as i64);
+}
+
 /// Same default as `DatabaseConfig::slow_query_threshold_ms` (#1084);
 /// duplicated here (rather than threading `Config` into every service) so
 /// `time_query` call sites don't need config access, just the pool they

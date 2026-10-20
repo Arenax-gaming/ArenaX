@@ -5,6 +5,27 @@ import { logger } from '../services/logger.service';
 const router: Router = Router();
 
 // Prometheus metrics endpoint for scraping
+/**
+ * @openapi
+ * /metrics/metrics:
+ *   get:
+ *     summary: Prometheus metrics endpoint for scraping
+ *     tags: [Metrics]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/metrics', async (_req: Request, res: Response) => {
   try {
     const metrics = await metricsService.getMetrics();
@@ -17,6 +38,27 @@ router.get('/metrics', async (_req: Request, res: Response) => {
 });
 
 // Metrics summary endpoint for dashboard
+/**
+ * @openapi
+ * /metrics/summary:
+ *   get:
+ *     summary: Metrics summary endpoint for dashboard
+ *     tags: [Metrics]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/summary', async (_req: Request, res: Response) => {
   try {
     const summary = await metricsService.getMetricSummary();

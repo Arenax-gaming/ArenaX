@@ -21,6 +21,7 @@ pub async fn generate_key(
     
     // Store the key with placeholder data (will be updated when actually used)
     let placeholder_response = CachedResponse::new(
+        "placeholder".to_string(),
         200,
         serde_json::json!({}),
         serde_json::json!({}),
@@ -193,8 +194,8 @@ pub async fn get_framework_info() -> Result<HttpResponse> {
     let info = IdempotencyInfo {
         enabled: true,
         key_header: policy.key_header_name,
-        default_ttl: policy.default_ttl_seconds,
-        max_response_size_kb: policy.max_response_size_kb,
+        default_ttl: policy.ttl_seconds as i32,
+        max_response_size_kb: policy.max_response_size_kb as i32,
         enabled_routes: policy.enabled_routes,
     };
     

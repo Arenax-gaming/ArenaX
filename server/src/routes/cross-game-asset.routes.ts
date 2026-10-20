@@ -8,6 +8,40 @@ const router: Router = Router();
 
 router.use(authenticateJWT);
 
+/**
+ * @openapi
+ * /v1/assets/assets:
+ *   get:
+ *     summary: Get assets assets
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/assets',
     restrictToScope('GAMES:READ'),
@@ -17,6 +51,58 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/assets/{assetId}:
+ *   get:
+ *     summary: Get assets assets
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: assetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/assets/:assetId',
     restrictToScope('GAMES:READ'),
@@ -29,6 +115,69 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/assets:
+ *   post:
+ *     summary: Create assets assets
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               kind:
+ *                 type: string
+ *               rarity:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               compatibleGames:
+ *                 type: string
+ *               maxSupply:
+ *                 type: string
+ *               isTransferable:
+ *                 type: boolean
+ *               isTradeable:
+ *                 type: boolean
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/assets',
     restrictToScope('GAMES:WRITE'),
@@ -53,6 +202,62 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/mint:
+ *   post:
+ *     summary: Create assets mint
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               to:
+ *                 type: string
+ *                 format: date-time
+ *               amount:
+ *                 type: number
+ *               sourceGameId:
+ *                 type: string
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/mint',
     restrictToScope('GAMES:WRITE'),
@@ -69,6 +274,67 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/transfer:
+ *   post:
+ *     summary: Create assets transfer
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               from:
+ *                 type: string
+ *                 format: date-time
+ *               to:
+ *                 type: string
+ *                 format: date-time
+ *               assetId:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *               fromGameId:
+ *                 type: string
+ *               toGameId:
+ *                 type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/transfer',
     restrictToScope('GAMES:WRITE'),
@@ -87,6 +353,58 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/inventory/{player}:
+ *   get:
+ *     summary: Get assets inventory
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: player
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/inventory/:player',
     restrictToScope('GAMES:READ'),
@@ -96,6 +414,40 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/chains:
+ *   get:
+ *     summary: Get assets chains
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/chains',
     restrictToScope('GAMES:READ'),
@@ -105,6 +457,65 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/chains:
+ *   post:
+ *     summary: Create assets chains
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               chainId:
+ *                 type: string
+ *               chainName:
+ *                 type: string
+ *               bridgeContract:
+ *                 type: string
+ *               maxBridgeAmount:
+ *                 type: number
+ *               bridgeFeeBps:
+ *                 type: string
+ *               cooldownSecs:
+ *                 type: string
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/chains',
     restrictToScope('SYSTEM:WRITE'),
@@ -126,6 +537,63 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/bridge:
+ *   post:
+ *     summary: Create assets bridge
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *               targetChain:
+ *                 type: string
+ *               sourceGameId:
+ *                 type: string
+ *               targetGameId:
+ *                 type: string
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/bridge',
     restrictToScope('ASSETS:BRIDGE'),
@@ -145,6 +613,58 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/bridge/{requestId}/complete:
+ *   post:
+ *     summary: Create bridge complete
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/bridge/:requestId/complete',
     restrictToScope('SYSTEM:WRITE'),
@@ -157,6 +677,58 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/bridge/{requestId}/fail:
+ *   post:
+ *     summary: Create bridge fail
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/bridge/:requestId/fail',
     restrictToScope('SYSTEM:WRITE'),
@@ -169,6 +741,58 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/bridge/{requestId}/cancel:
+ *   post:
+ *     summary: Create bridge cancel
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/bridge/:requestId/cancel',
     restrictToScope('ASSETS:BRIDGE'),
@@ -182,6 +806,40 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/assets/analytics:
+ *   get:
+ *     summary: Get assets analytics
+ *     tags: [CrossGameAsset]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/analytics',
     restrictToScope('ANALYTICS:READ'),

@@ -15,9 +15,9 @@ pub struct Wallet {
     pub escrow_balance: Decimal,
     pub currency: String,
     // Stellar integration fields
-    pub balance_ngn: Option<i64>, // in kobo
-    pub balance_arenax_tokens: Option<i64>,
-    pub balance_xlm: Option<i64>, // in stroops
+    pub balance_ngn: i64, // in kobo
+    pub balance_arenax_tokens: i64,
+    pub balance_xlm: i64, // in stroops
     pub stellar_account_id: Option<String>,
     pub stellar_public_key: Option<String>,
     pub is_active: bool,
@@ -147,9 +147,9 @@ pub struct WalletResponse {
     pub balance: Decimal,
     pub escrow_balance: Decimal,
     pub currency: String,
-    pub balance_ngn: Option<i64>,
-    pub balance_arenax_tokens: Option<i64>,
-    pub balance_xlm: Option<i64>,
+    pub balance_ngn: i64,
+    pub balance_arenax_tokens: i64,
+    pub balance_xlm: i64,
     pub stellar_public_key: Option<String>,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,

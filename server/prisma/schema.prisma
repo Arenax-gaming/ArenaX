@@ -989,3 +989,65 @@ model ApiKey {
   @@index([userId])
 }
 
+
+// ── Tournament prize-pool multi-signature accounts (Issue #1214) ──────────────
+
+enum PrizePayoutStatus {
+  AWAITING_SIGNATURES
+  READY
+  SUBMITTED
+  FAILED
+}
+
+model TournamentPrizeAccount {
+  id                String   @id @default(uuid())
+  tournamentId      String   @unique
+  publicKey         String   @unique
+  adminSigner       String
+  systemSigner      String
+  lowThreshold      Int
+  medThreshold      Int
+  highThreshold     Int
+  creationTxHash    String?
+  depositCursor     String?
+  totalDeposited    Decimal  @default(0) @db.Decimal(20, 7)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deposits          PrizePoolDeposit[]
+  payouts           PrizePayoutRequest[]
+}
+
+model PrizePoolDeposit {
+  id            String                 @id @default(uuid())
+  accountId     String
+  account       TournamentPrizeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  operationId   String                 @unique
+  txHash        String
+  fromAccount   String
+  amount        Decimal                @db.Decimal(20, 7)
+  assetCode     String
+  assetIssuer   String?
+  ledgerAt      DateTime
+  createdAt     DateTime               @default(now())
+
+  @@index([accountId])
+}
+
+model PrizePayoutRequest {
+  id            String                 @id @default(uuid())
+  accountId     String
+  account       TournamentPrizeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  envelopeXdr   String
+  txHash        String
+  payouts       Json
+  signedBy      String[]               @default([])
+  status        PrizePayoutStatus      @default(AWAITING_SIGNATURES)
+  requestedBy   String
+  error         String?
+  submittedAt   DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([accountId])
+  @@index([status])
+}

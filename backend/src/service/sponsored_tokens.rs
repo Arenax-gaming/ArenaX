@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn brand_metadata_rejects_a_bad_color_and_logo() {
         let mut sample = brand();
-        sample.color = "red";
+        sample.color = "red".to_string();
         assert!(validate_brand(sample).is_err());
         let mut sample = brand();
         sample.logo_url = "http://cdn.example/acme.png".into();

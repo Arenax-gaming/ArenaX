@@ -484,7 +484,7 @@ impl JwtService {
         let blacklist_key = format!("blacklist:{}", claims.jti);
 
         let mut conn = self.redis.clone();
-        conn.set_ex(&blacklist_key, reason, exp_duration as u64)
+        conn.set_ex::<_, _, ()>(&blacklist_key, reason, exp_duration as u64)
             .await?;
 
         // Increment analytics
@@ -547,7 +547,7 @@ impl JwtService {
             .map_err(|e| JwtError::RedisError(e.to_string()))?;
 
         let mut conn = self.redis.clone();
-        conn.set_ex(
+        conn.set_ex::<_, _, ()>(
             &session_key,
             session_json,
             self.config.access_token_expiry.num_seconds() as u64,
@@ -557,8 +557,8 @@ impl JwtService {
         // Add to user's active sessions set; expire the set with the refresh TTL
         // so it outlives individual access token sessions.
         let user_sessions_key = format!("user_sessions:{}", user_id);
-        conn.sadd(&user_sessions_key, session_id).await?;
-        conn.expire(
+        conn.sadd::<_, _, ()>(&user_sessions_key, session_id).await?;
+        conn.expire::<_, ()>(
             &user_sessions_key,
             self.config.refresh_token_expiry.num_seconds() as i64,
         )
@@ -593,7 +593,7 @@ impl JwtService {
                 serde_json::to_string(&session).map_err(|e| JwtError::RedisError(e.to_string()))?;
 
             // Refresh the TTL using access_token_expiry (consistent with store_session).
-            conn.set_ex(
+            conn.set_ex::<_, _, ()>(
                 &session_key,
                 updated_json,
                 self.config.access_token_expiry.num_seconds() as u64,
@@ -652,7 +652,7 @@ impl JwtService {
     pub async fn revoke_session(&self, session_id: &str) -> Result<(), JwtError> {
         let session_key = format!("session:{}", session_id);
         let mut conn = self.redis.clone();
-        conn.del(&session_key).await?;
+        conn.del::<_, ()>(&session_key).await?;
 
         info!(session_id = %session_id, "Session revoked");
 
@@ -806,7 +806,7 @@ impl JwtService {
     async fn increment_analytics(&self, metric: &str) -> Result<(), JwtError> {
         let analytics_key = format!("analytics:jwt:{}", metric);
         let mut conn = self.redis.clone();
-        conn.incr(&analytics_key, 1).await?;
+        conn.incr::<_, _, ()>(&analytics_key, 1).await?;
         Ok(())
     }
 
@@ -908,7 +908,7 @@ impl JwtService {
             let ttl: i64 = conn.ttl(&key).await.unwrap_or(-2);
             if ttl == -2 {
                 // Key doesn't exist or expired
-                conn.del(&key).await?;
+                conn.del::<_, ()>(&key).await?;
                 cleaned += 1;
             }
         }

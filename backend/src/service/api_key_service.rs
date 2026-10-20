@@ -3,7 +3,7 @@ use crate::db::DbPool;
 use crate::models::api_key::{
     ApiKey, ApiKeyRotationHistory, ApiKeySummary, ApiKeyUsageLog, CreateApiKeyRequest,
     CreateApiKeyResponse, GenerateApiKeyRequest, GenerateApiKeyResponse, GetApiKeyResponse,
-    KeyStatus, RevokeApiKeyRequest, RotateApiKeyRequest, RotateApiKeyResponse,
+    ApiKeyStats, KeyStatus, RevokeApiKeyRequest, RotateApiKeyRequest, RotateApiKeyResponse,
     UpdateApiKeyRequest,
 };
 use chrono::{Duration, Utc};
@@ -64,21 +64,22 @@ impl ApiKeyService {
     // ── Key Generation ───────────────────────────────────────────────────────
 
     /// Generate a cryptographically secure API key
-    fn generate_key() -> String {
+    fn generate_raw_key() -> String {
+        use rand::RngCore;
         let mut bytes = [0u8; 32];
-        getrandom::getrandom(&mut bytes).expect("Failed to generate random bytes");
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
         // Use URL-safe base64 encoding without padding
         URL_SAFE_NO_PAD.encode(&bytes)
     }
 
     /// Create a new API key
-    #[tracing::instrument(skip(self, request), fields(user_id = %request.user_id, key_name = %request.name))]
+    #[tracing::instrument(skip(self, request), fields(user_id = %user_id, key_name = %request.name))]
     pub async fn create_key(
         &self,
         request: CreateApiKeyRequest,
         user_id: Uuid,
     ) -> Result<CreateApiKeyResponse, ApiError> {
-        let key = Self::generate_key();
+        let key = Self::generate_raw_key();
         let key_hash_value = key_hash(&key);
 
         // Parse expiration date if provided
@@ -114,33 +115,31 @@ impl ApiKeyService {
         let key_id = Uuid::new_v4();
 
         // Insert the API key
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO api_keys (
                 id, key, name, description, user_id, key_type, scopes,
                 expiration_date, is_active, rotation_enabled, rotation_interval,
                 next_rotation_date, max_uses, metadata, overlap_duration_seconds, webhook_url
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13, $14, $15)
-            "#,
-            key_id,
-            &key_hash_value,
-            request.name,
-            request.description,
-            user_id,
-            "api_key",
-            request.scopes.as_slice(),
-            expiration_date,
-            request.rotation_enabled.unwrap_or(false),
-            rotation_interval,
-            next_rotation_date,
-            request.max_uses,
-            request.metadata
+            "#)
+            .bind(key_id)
+            .bind(&key_hash_value)
+            .bind(&request.name)
+            .bind(request.description)
+            .bind(user_id)
+            .bind("api_key")
+            .bind(request.scopes.as_slice())
+            .bind(expiration_date)
+            .bind(request.rotation_enabled.unwrap_or(false))
+            .bind(rotation_interval)
+            .bind(next_rotation_date)
+            .bind(request.max_uses)
+            .bind(request.metadata
                 .map(|m| serde_json::to_value(m).unwrap_or_default())
-                .unwrap_or_default(),
-            overlap_duration_seconds,
-            request.webhook_url,
-        )
+                .unwrap_or_default())
+            .bind(overlap_duration_seconds)
+            .bind(request.webhook_url)
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -163,7 +162,7 @@ impl ApiKeyService {
         request: GenerateApiKeyRequest,
         user_id: Uuid,
     ) -> Result<GenerateApiKeyResponse, ApiError> {
-        let key = Self::generate_key();
+        let key = Self::generate_raw_key();
         let key_hash_value = key_hash(&key);
 
         let expiration_date = request
@@ -196,33 +195,31 @@ impl ApiKeyService {
 
         let key_id = Uuid::new_v4();
 
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO api_keys (
                 id, key, name, description, user_id, key_type, scopes,
                 expiration_date, is_active, rotation_enabled, rotation_interval,
                 next_rotation_date, max_uses, metadata, overlap_duration_seconds, webhook_url
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13, $14, $15)
-            "#,
-            key_id,
-            &key_hash_value,
-            request.name,
-            request.description,
-            user_id,
-            "api_key",
-            request.scopes.as_slice(),
-            expiration_date,
-            request.rotation_enabled.unwrap_or(false),
-            rotation_interval,
-            next_rotation_date,
-            request.max_uses,
-            request.metadata
+            "#)
+            .bind(key_id)
+            .bind(&key_hash_value)
+            .bind(&request.name)
+            .bind(request.description)
+            .bind(user_id)
+            .bind("api_key")
+            .bind(request.scopes.as_slice())
+            .bind(expiration_date)
+            .bind(request.rotation_enabled.unwrap_or(false))
+            .bind(rotation_interval)
+            .bind(next_rotation_date)
+            .bind(request.max_uses)
+            .bind(request.metadata
                 .map(|m| serde_json::to_value(m).unwrap_or_default())
-                .unwrap_or_default(),
-            overlap_duration_seconds,
-            request.webhook_url,
-        )
+                .unwrap_or_default())
+            .bind(overlap_duration_seconds)
+            .bind(request.webhook_url)
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -242,9 +239,7 @@ impl ApiKeyService {
 
     /// Get API key by ID
     pub async fn get_key_by_id(&self, key_id: Uuid, user_id: Uuid) -> Result<ApiKey, ApiError> {
-        let key = sqlx::query_as!(
-            ApiKey,
-            r#"
+        let key = sqlx::query_as::<_, ApiKey>(r#"
             SELECT 
                 id,
                 key,
@@ -272,10 +267,9 @@ impl ApiKeyService {
                 webhook_url
             FROM api_keys
             WHERE id = $1 AND user_id = $2
-            "#,
-            key_id,
-            user_id,
-        )
+            "#)
+            .bind(key_id)
+            .bind(user_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
@@ -300,9 +294,7 @@ impl ApiKeyService {
         key_id: Uuid,
         user_id: Uuid,
     ) -> Result<ApiKeySummary, ApiError> {
-        let summary = sqlx::query_as!(
-            ApiKeySummary,
-            r#"
+        let summary = sqlx::query_as::<_, ApiKeySummary>(r#"
             SELECT 
                 id,
                 name,
@@ -326,10 +318,9 @@ impl ApiKeyService {
                 status
             FROM api_key_summaries
             WHERE id = $1 AND user_id = $2
-            "#,
-            key_id,
-            user_id,
-        )
+            "#)
+            .bind(key_id)
+            .bind(user_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
@@ -340,9 +331,7 @@ impl ApiKeyService {
 
     /// List all API keys for a user
     pub async fn list_keys(&self, user_id: Uuid) -> Result<Vec<ApiKeySummary>, ApiError> {
-        let keys = sqlx::query_as!(
-            ApiKeySummary,
-            r#"
+        let keys = sqlx::query_as::<_, ApiKeySummary>(r#"
             SELECT 
                 id,
                 name,
@@ -367,9 +356,8 @@ impl ApiKeyService {
             FROM api_key_summaries
             WHERE user_id = $1
             ORDER BY created_at DESC
-            "#,
-            user_id,
-        )
+            "#)
+            .bind(user_id)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -384,9 +372,7 @@ impl ApiKeyService {
     ) -> Result<ApiKey, ApiError> {
         let key_hash_value = key_hash(key_string);
 
-        let key = sqlx::query_as!(
-            ApiKey,
-            r#"
+        let key = sqlx::query_as::<_, ApiKey>(r#"
             SELECT 
                 id,
                 key,
@@ -414,9 +400,8 @@ impl ApiKeyService {
                 webhook_url
             FROM api_keys
             WHERE key = $1
-            "#,
-            &key_hash_value,
-        )
+            "#)
+            .bind(&key_hash_value)
         .fetch_optional(&self.pool)
         .await
         .map_err(ApiError::database_error)?
@@ -468,8 +453,8 @@ impl ApiKeyService {
         let expiration_date = if let Some(date_str) = request.expiration_date {
             Some(
                 chrono::DateTime::parse_from_rfc3339(&date_str)
-                    .map(|dt| dt.with_timezone(&Utc))?
-                    .into(),
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .map_err(|_| ApiError::bad_request("Invalid expiration date format"))?,
             )
         } else {
             None
@@ -487,9 +472,7 @@ impl ApiKeyService {
             existing_key.next_rotation_date
         };
 
-        let updated_key = sqlx::query_as!(
-            ApiKey,
-            r#"
+        let updated_key = sqlx::query_as::<_, ApiKey>(r#"
             UPDATE api_keys
             SET 
                 name = COALESCE($1, name),
@@ -505,22 +488,21 @@ impl ApiKeyService {
                 updated_at = NOW()
             WHERE id = $11 AND user_id = $12
             RETURNING *
-            "#,
-            request.name,
-            request.description,
-            request.scopes.as_deref(),
-            expiration_date,
-            request.rotation_enabled,
-            rotation_interval,
-            next_rotation_date,
-            request.max_uses,
-            request
+            "#)
+            .bind(request.name)
+            .bind(request.description)
+            .bind(request.scopes.as_deref())
+            .bind(expiration_date)
+            .bind(request.rotation_enabled)
+            .bind(rotation_interval)
+            .bind(next_rotation_date)
+            .bind(request.max_uses)
+            .bind(request
                 .overlap_duration_seconds
-                .map(|v| v.clamp(0, MAX_API_KEY_OVERLAP_SECONDS)),
-            request.webhook_url,
-            key_id,
-            user_id,
-        )
+                .map(|v| v.clamp(0, MAX_API_KEY_OVERLAP_SECONDS)))
+            .bind(request.webhook_url)
+            .bind(key_id)
+            .bind(user_id)
         .fetch_one(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -564,7 +546,7 @@ impl ApiKeyService {
 
         info!(
             key_id = %key_id,
-            reason = %request.reason.unwrap_or("No reason provided"),
+            reason = %request.reason.as_deref().unwrap_or("No reason provided"),
             "API key revoked"
         );
 
@@ -596,7 +578,7 @@ impl ApiKeyService {
             normalized_overlap(request.overlap_duration_seconds, existing_key.overlap_duration_seconds);
 
         // Generate new key
-        let new_key = Self::generate_key();
+        let new_key = Self::generate_raw_key();
         let new_key_hash_value = key_hash(&new_key);
         let old_key_hash_value = existing_key.key.clone();
 
@@ -796,23 +778,21 @@ impl ApiKeyService {
     #[tracing::instrument(skip(self, usage))]
     pub async fn record_usage(&self, usage: ApiKeyUsageLog) -> Result<(), ApiError> {
         // Record the usage log
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO api_key_usage_logs (
                 api_key_id, endpoint, method, client_ip, user_agent,
                 response_status, request_duration_ms, scopes_used
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-            usage.api_key_id,
-            usage.endpoint,
-            usage.method,
-            usage.client_ip,
-            usage.user_agent,
-            usage.response_status,
-            usage.request_duration_ms,
-            usage.scopes_used.as_slice(),
-        )
+            "#)
+            .bind(usage.api_key_id)
+            .bind(usage.endpoint)
+            .bind(usage.method)
+            .bind(usage.client_ip)
+            .bind(usage.user_agent)
+            .bind(usage.response_status)
+            .bind(usage.request_duration_ms)
+            .bind(usage.scopes_used.as_slice())
         .execute(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -843,9 +823,7 @@ impl ApiKeyService {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ApiKeyUsageLog>, ApiError> {
-        let logs = sqlx::query_as!(
-            ApiKeyUsageLog,
-            r#"
+        let logs = sqlx::query_as::<_, ApiKeyUsageLog>(r#"
             SELECT 
                 id,
                 api_key_id,
@@ -861,11 +839,10 @@ impl ApiKeyService {
             WHERE api_key_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-            key_id,
-            limit,
-            offset,
-        )
+            "#)
+            .bind(key_id)
+            .bind(limit)
+            .bind(offset)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::database_error)?;
@@ -875,9 +852,7 @@ impl ApiKeyService {
 
     /// Get API key statistics
     pub async fn get_stats(&self) -> Result<ApiKeyStats, ApiError> {
-        let stats = sqlx::query_as!(
-            ApiKeyStats,
-            r#"
+        let stats = sqlx::query_as::<_, ApiKeyStats>(r#"
             SELECT 
                 COUNT(*) AS total_keys,
                 COUNT(*) FILTER (WHERE is_active AND 
@@ -888,11 +863,10 @@ impl ApiKeyService {
                 COUNT(*) FILTER (WHERE rotation_enabled AND 
                     next_rotation_date IS NOT NULL AND 
                     next_rotation_date < NOW()) AS keys_needing_rotation,
-                COALESCE(SUM(use_count), 0) AS total_uses,
+                COALESCE(SUM(use_count), 0)::int8 AS total_uses,
                 COUNT(*) FILTER (WHERE max_uses IS NOT NULL) AS keys_with_max_uses
             FROM api_keys
-            "#,
-        )
+            "#)
         .fetch_one(&self.pool)
         .await
         .map_err(ApiError::database_error)?;

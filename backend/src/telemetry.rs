@@ -73,8 +73,11 @@ fn init_sentry() -> Option<ClientInitGuard> {
 
     let guard = sentry::init((
         dsn,
-        sentry::ClientOptions::default()
-            .release(sentry::release_name!())
+        {
+            let mut options = sentry::ClientOptions::default();
+            options.release = sentry::release_name!();
+            options
+        }
             .environment(environment)
             .max_breadcrumbs(10)
             .attach_stacktrace(true)

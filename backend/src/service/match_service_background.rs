@@ -68,18 +68,15 @@ impl crate::service::match_service::MatchService {
         game_mode: &str,
     ) -> Result<(), ApiError> {
         // Find potential matches - get more candidates to find better matches
-        let candidates = sqlx::query_as!(
-            MatchmakingQueue,
-            r#"
+        let candidates = sqlx::query_as::<_, MatchmakingQueue>(r#"
             SELECT * FROM matchmaking_queue
             WHERE game = $1 AND game_mode = $2 AND status = $3
             ORDER BY joined_at ASC
             LIMIT 50
-            "#,
-            game,
-            game_mode,
-            QueueStatus::Waiting as _
-        )
+            "#)
+            .bind(game)
+            .bind(game_mode)
+            .bind(QueueStatus::Waiting)
         .fetch_all(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -211,29 +208,26 @@ impl crate::service::match_service::MatchService {
             None
         };
 
-        let match_record = sqlx::query_as!(
-            Match,
-            r#"
+        let match_record = sqlx::query_as::<_, Match>(r#"
             INSERT INTO matches (
                 id, tournament_id, round_id, match_type, status, player1_id, player2_id,
                 player1_elo_before, player2_elo_before, game_mode, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
             ) RETURNING *
-            "#,
-            match_id,
-            tournament_id,
-            round_id,
-            match_type as _,
-            crate::models::MatchStatus::Pending as _,
-            player1_id,
-            player2_id,
-            player1_elo,
-            player2_elo,
-            game_mode,
-            Utc::now(),
-            Utc::now()
-        )
+            "#)
+            .bind(match_id)
+            .bind(tournament_id)
+            .bind(round_id)
+            .bind(match_type)
+            .bind(crate::models::MatchStatus::Pending)
+            .bind(player1_id)
+            .bind(player2_id)
+            .bind(player1_elo)
+            .bind(player2_elo)
+            .bind(game_mode)
+            .bind(Utc::now())
+            .bind(Utc::now())
         .fetch_one(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -243,12 +237,9 @@ impl crate::service::match_service::MatchService {
 
     /// Static helper to get user Elo (for use in static context)
     async fn get_user_elo_static(db_pool: &DbPool, user_id: Uuid, game_mode: &str) -> Result<i32, ApiError> {
-        let elo = sqlx::query_as!(
-            UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game_mode = $2",
-            user_id,
-            game_mode
-        )
+        let elo = sqlx::query_as::<_, UserElo>("SELECT * FROM user_elo WHERE user_id = $1 AND game_mode = $2")
+            .bind(user_id)
+            .bind(game_mode)
         .fetch_optional(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?

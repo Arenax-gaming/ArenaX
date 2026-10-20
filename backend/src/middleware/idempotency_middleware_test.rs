@@ -23,7 +23,7 @@ mod idempotency_middleware_tests {
                 Ok(conn) => {
                     // Test the connection
                     if redis::cmd("PING")
-                        .query_async::<_, String>(&mut conn.clone())
+                        .query_async::<String>(&mut conn.clone())
                         .await
                         .is_ok()
                     {

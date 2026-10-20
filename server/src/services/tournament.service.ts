@@ -1,5 +1,6 @@
 import { PrismaClient, TournamentFormat, TournamentStatus, TournamentRound } from '@prisma/client';
 import { logger } from './logger.service';
+import tournamentMultisigService from './tournament-multisig.service';
 
 const prisma = new PrismaClient();
 
@@ -88,7 +89,21 @@ export class TournamentService {
         maxPlayers: tournament.maxPlayers,
       });
 
-      return tournament;
+      // Every tournament gets its own Admin + System multisig prize pool
+      // account (Issue #1214). Network failures are logged rather than
+      // rolling back the tournament; the account can be re-initialised via
+      // POST /tournaments/:id/prize-pool.
+      let prizePoolAccount = null;
+      try {
+        prizePoolAccount = await tournamentMultisigService.initializePrizePoolAccount(tournament.id);
+      } catch (error) {
+        logger.error('Failed to initialize prize pool multisig account', {
+          tournamentId: tournament.id,
+          error,
+        });
+      }
+
+      return { ...tournament, prizePoolAccount: prizePoolAccount?.publicKey ?? null };
     } catch (error) {
       logger.error('Failed to create tournament', { error, organizerId, config });
       throw error;
