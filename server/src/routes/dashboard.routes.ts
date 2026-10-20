@@ -5,6 +5,27 @@ import { logger } from '../services/logger.service';
 const router: Router = Router();
 
 // Serve the metrics dashboard HTML
+/**
+ * @openapi
+ * /dashboard:
+ *   get:
+ *     summary: Serve the metrics dashboard HTML
+ *     tags: [Dashboard]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/', (_req: Request, res: Response) => {
   res.send(`
 <!DOCTYPE html>

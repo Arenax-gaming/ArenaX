@@ -21,6 +21,8 @@ import i18nRoutes from './i18n.routes';
 import paymentWebhookRoutes from './payment-webhook.routes';
 import currencyRoutes from './currency.routes';
 import anchorRoutes from './anchor.routes';
+import featureFlagRoutes from './feature-flag.routes';
+import queryAnalyticsRoutes from './query-analytics.routes';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
@@ -28,6 +30,7 @@ import { auditMiddleware } from '../middleware/audit.middleware';
 import { maintenanceMiddleware } from '../middleware/maintenance.middleware';
 import { MaintenanceService } from '../services/maintenance.service';
 import { apiVersionRegistry } from '../config/api-versions';
+import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
 
 const router: Router = Router();
 
@@ -35,10 +38,64 @@ router.use(publicRateLimiter);
 router.use(auditMiddleware);
 
 // Public maintenance status endpoint
+/**
+ * @openapi
+ * /maintenance/status:
+ *   get:
+ *     summary: Public maintenance status endpoint
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/maintenance/status', (req, res) => {
     res.status(200).json(MaintenanceService.getInstance().getStatus());
 });
 
+/**
+ * @openapi
+ * /versions:
+ *   get:
+ *     summary: Get versions
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '429':
+ *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/RateLimitError'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/versions', (req, res) => {
     res.status(200).json({
         current: apiVersionRegistry.getDefault().name,
@@ -82,6 +139,9 @@ router.use('/v1/i18n', i18nRoutes);
 // Multi-currency catalogue/conversion (#1263) and Stellar anchors (#1262).
 router.use('/v1/currencies', currencyRoutes);
 router.use('/v1/anchors', anchorRoutes);
+router.use('/v1/feature-flags', featureFlagRoutes);
+// Query diagnostics can clear caches — admin only.
+router.use('/v1/query-analytics', authenticateJWT, restrictTo('ADMIN'), queryAnalyticsRoutes);
 
 // Payment provider webhooks — unversioned, signature-verified (see
 // middleware/webhook-signature.middleware.ts).

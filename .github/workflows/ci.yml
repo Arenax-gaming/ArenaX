@@ -74,6 +74,9 @@ jobs:
     
     - name: Type check (Lint)
       run: npm run lint
+
+    - name: Verify openapi.json matches route annotations
+      run: npm run openapi:check
     
     - name: Build
       run: npm run build

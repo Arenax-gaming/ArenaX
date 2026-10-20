@@ -18,6 +18,8 @@ pub struct MatchService {
     pub event_bus: Option<crate::realtime::event_bus::EventBus>,
     /// Match state stream (Issue #1254). Absent when Redis is not configured.
     pub match_events: Option<crate::realtime::event_stream::EventStream>,
+    /// Async achievement evaluation bus (Issue #1405).
+    pub achievement_bus: Option<crate::service::achievement_service::AchievementEventBus>,
 }
 
 impl MatchService {
@@ -28,7 +30,33 @@ impl MatchService {
             reputation_service: None,
             event_bus: None,
             match_events: None,
+            achievement_bus: None,
         }
+    }
+
+    pub fn with_achievement_bus(
+        mut self,
+        bus: crate::service::achievement_service::AchievementEventBus,
+    ) -> Self {
+        self.achievement_bus = Some(bus);
+        self
+    }
+
+    /// Hand the resolved match to the achievement bus. Never blocks the caller.
+    fn publish_match_result(&self, match_record: &Match, winner_id: Option<Uuid>) {
+        let Some(bus) = &self.achievement_bus else {
+            return;
+        };
+        let mut player_ids = vec![match_record.player1_id];
+        player_ids.extend(match_record.player2_id);
+        bus.publish(crate::service::achievement_service::MatchResultEvent {
+            match_id: match_record.id,
+            tournament_id: match_record.tournament_id,
+            game_mode: match_record.game_mode.clone(),
+            player_ids,
+            winner_id,
+            completed_at: Utc::now(),
+        });
     }
 
     pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
@@ -838,6 +866,9 @@ impl MatchService {
             }
         }
 
+        // Achievements are evaluated asynchronously off the request path.
+        self.publish_match_result(&match_record, winner_id);
+
         // Publish match completed event
         self.publish_match_event(serde_json::json!({
             "type": "completed",
@@ -1003,6 +1034,33 @@ impl MatchService {
     }
 
     async fn update_user_elo(
+        &self,
+        user_id: Uuid,
+        game: &str,
+        new_elo: i32,
+        result: MatchResult,
+    ) -> Result<(), ApiError> {
+        self.update_user_elo_db(user_id, game, new_elo, result).await?;
+
+        // Keep the matchmaking Elo cache in sync (Issue #1215).
+        if let Some(client) = &self.redis_client {
+            match client.get_multiplexed_async_connection().await {
+                Ok(mut conn) => {
+                    if let Err(e) = crate::service::matchmaker::cache_elo_rating(
+                        &mut conn, user_id, game, new_elo,
+                    )
+                    .await
+                    {
+                        tracing::warn!(%user_id, error = ?e, "failed to cache Elo rating");
+                    }
+                }
+                Err(e) => tracing::warn!(%user_id, error = %e, "redis unavailable for Elo cache"),
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_user_elo_db(
         &self,
         user_id: Uuid,
         game: &str,

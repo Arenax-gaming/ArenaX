@@ -234,10 +234,15 @@ async fn main() -> io::Result<()> {
 
     // Database-backed match microservice (Issue #1280) — creation, score
     // reporting, disputes, Elo ratings and matchmaking-queue management.
+    // Async achievement evaluation — Issue #1405
+    let achievement_bus = crate::service::achievement_service::AchievementEventBus::spawn(
+        Arc::new(crate::service::AchievementService::new(db_pool.clone())),
+    );
     let match_service = Arc::new(
         MatchService::new(db_pool.clone())
             .with_event_bus(event_bus.clone())
-            .with_match_events(match_events.clone()),
+            .with_match_events(match_events.clone())
+            .with_achievement_bus(achievement_bus),
     );
 
     // Response cache for read-heavy endpoints — Issue #910
@@ -507,6 +512,7 @@ async fn main() -> io::Result<()> {
                         web::scope("/matchmaking")
                             .route("/join", web::post().to(crate::http::matchmaking::join_queue))
                             .route("/leave", web::post().to(crate::http::matchmaking::leave_queue))
+                            .route("/status", web::get().to(crate::http::matchmaking::get_matchmaking_status))
                             .route("/status/{game}/{game_mode}", web::get().to(crate::http::matchmaking::get_queue_status))
                             .route("/stats", web::get().to(crate::http::matchmaking::get_matchmaking_stats))
                             .route("/metrics", web::get().to(crate::http::matchmaking::get_matchmaking_metrics_dashboard))

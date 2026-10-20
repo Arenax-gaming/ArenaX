@@ -3,9 +3,110 @@ use crate::models::{
     Achievement, PlayerAchievement, AchievementProgress, PlayerAchievementsResponse,
     AchievementStats, AchievementUnlockedEvent,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
+
+/// Published by the match service when a match is resolved (Issue #1405).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchResultEvent {
+    pub match_id: Uuid,
+    pub tournament_id: Option<Uuid>,
+    pub game_mode: String,
+    pub player_ids: Vec<Uuid>,
+    pub winner_id: Option<Uuid>,
+    pub completed_at: DateTime<Utc>,
+}
+
+/// Evaluates achievements for a resolved match.
+pub trait MatchResultHandler: Send + Sync + 'static {
+    fn handle<'a>(
+        &'a self,
+        event: &'a MatchResultEvent,
+    ) -> BoxFuture<'a, Result<Vec<AchievementUnlockedEvent>, ApiError>>;
+}
+
+/// In-process async bus decoupling match resolution from achievement
+/// evaluation. Publishing never blocks; evaluation runs on a background task.
+#[derive(Clone)]
+pub struct AchievementEventBus {
+    sender: mpsc::UnboundedSender<MatchResultEvent>,
+    unlocked: broadcast::Sender<AchievementUnlockedEvent>,
+}
+
+impl AchievementEventBus {
+    /// Start the subscriber loop with `handler` and return the bus handle.
+    pub fn spawn(handler: Arc<dyn MatchResultHandler>) -> Self {
+        let (sender, mut receiver) = mpsc::unbounded_channel::<MatchResultEvent>();
+        let (unlocked, _) = broadcast::channel(256);
+        let unlocked_tx = unlocked.clone();
+
+        tokio::spawn(async move {
+            while let Some(event) = receiver.recv().await {
+                let handler = handler.clone();
+                let unlocked_tx = unlocked_tx.clone();
+                // Each event runs on its own task so one slow or failing
+                // evaluation never holds up the next.
+                tokio::spawn(async move {
+                    process_match_result(handler.as_ref(), &event, &unlocked_tx).await;
+                });
+            }
+            tracing::info!("achievement event bus closed");
+        });
+
+        Self { sender, unlocked }
+    }
+
+    /// Queue an event for asynchronous evaluation. Returns immediately.
+    pub fn publish(&self, event: MatchResultEvent) {
+        let match_id = event.match_id;
+        if self.sender.send(event).is_err() {
+            tracing::error!(%match_id, "achievement event bus is closed; event dropped");
+        }
+    }
+
+    /// Stream of achievements unlocked by processed events.
+    pub fn subscribe_unlocked(&self) -> broadcast::Receiver<AchievementUnlockedEvent> {
+        self.unlocked.subscribe()
+    }
+}
+
+async fn process_match_result(
+    handler: &dyn MatchResultHandler,
+    event: &MatchResultEvent,
+    unlocked_tx: &broadcast::Sender<AchievementUnlockedEvent>,
+) {
+    match AssertUnwindSafe(handler.handle(event)).catch_unwind().await {
+        Ok(Ok(unlocks)) => {
+            for unlock in unlocks {
+                tracing::info!(
+                    match_id = %event.match_id,
+                    user_id = %unlock.user_id,
+                    achievement = %unlock.achievement_name,
+                    "achievement unlocked"
+                );
+                let _ = unlocked_tx.send(unlock);
+            }
+        }
+        Ok(Err(error)) => {
+            tracing::error!(match_id = %event.match_id, ?error, "achievement evaluation failed");
+        }
+        Err(panic) => {
+            let reason = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            tracing::error!(match_id = %event.match_id, %reason, "achievement evaluation panicked");
+        }
+    }
+}
 
 pub struct AchievementService {
     db_pool: PgPool,
@@ -302,5 +403,119 @@ impl AchievementService {
         );
 
         Ok((share_url, share_text))
+    }
+}
+
+impl MatchResultHandler for AchievementService {
+    fn handle<'a>(
+        &'a self,
+        event: &'a MatchResultEvent,
+    ) -> BoxFuture<'a, Result<Vec<AchievementUnlockedEvent>, ApiError>> {
+        async move {
+            let mut unlocked = Vec::new();
+            let data = serde_json::to_value(event).unwrap_or_default();
+
+            if let Some(winner) = event.winner_id {
+                unlocked.extend(self.check_achievements(winner, "match_won", data.clone()).await?);
+            }
+            if event.tournament_id.is_some() {
+                for player in &event.player_ids {
+                    unlocked.extend(
+                        self.check_achievements(*player, "tournament_participated", data.clone())
+                            .await?,
+                    );
+                }
+            }
+            Ok(unlocked)
+        }
+        .boxed()
+    }
+}
+
+#[cfg(test)]
+mod event_bus_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// Unlocks a "First Win" achievement for the winner, panicking on matches
+    /// flagged with the `game_mode` "panic".
+    struct FirstWinHandler {
+        calls: AtomicUsize,
+    }
+
+    impl MatchResultHandler for FirstWinHandler {
+        fn handle<'a>(
+            &'a self,
+            event: &'a MatchResultEvent,
+        ) -> BoxFuture<'a, Result<Vec<AchievementUnlockedEvent>, ApiError>> {
+            async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                if event.game_mode == "panic" {
+                    panic!("evaluation exploded");
+                }
+                Ok(event
+                    .winner_id
+                    .map(|user_id| AchievementUnlockedEvent {
+                        user_id,
+                        achievement_id: Uuid::nil(),
+                        achievement_name: "First Win".to_string(),
+                        points: 10,
+                        timestamp: Utc::now(),
+                    })
+                    .into_iter()
+                    .collect())
+            }
+            .boxed()
+        }
+    }
+
+    fn event(game_mode: &str, winner: Uuid) -> MatchResultEvent {
+        MatchResultEvent {
+            match_id: Uuid::new_v4(),
+            tournament_id: None,
+            game_mode: game_mode.to_string(),
+            player_ids: vec![winner, Uuid::new_v4()],
+            winner_id: Some(winner),
+            completed_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn publishing_match_result_unlocks_achievement_asynchronously() {
+        let handler = Arc::new(FirstWinHandler { calls: AtomicUsize::new(0) });
+        let bus = AchievementEventBus::spawn(handler.clone());
+        let mut unlocked = bus.subscribe_unlocked();
+        let winner = Uuid::new_v4();
+
+        bus.publish(event("ranked", winner));
+        // publish returned before the handler (which sleeps) could finish.
+        assert!(unlocked.try_recv().is_err());
+
+        let unlock = tokio::time::timeout(Duration::from_secs(2), unlocked.recv())
+            .await
+            .expect("achievement should unlock")
+            .unwrap();
+        assert_eq!(unlock.user_id, winner);
+        assert_eq!(unlock.achievement_name, "First Win");
+    }
+
+    #[tokio::test]
+    async fn panicking_evaluation_does_not_disrupt_other_events() {
+        let handler = Arc::new(FirstWinHandler { calls: AtomicUsize::new(0) });
+        let bus = AchievementEventBus::spawn(handler.clone());
+        let mut unlocked = bus.subscribe_unlocked();
+        let winner = Uuid::new_v4();
+
+        bus.publish(event("panic", Uuid::new_v4()));
+        bus.publish(event("ranked", winner));
+
+        let unlock = tokio::time::timeout(Duration::from_secs(2), unlocked.recv())
+            .await
+            .expect("second event should still be processed")
+            .unwrap();
+        assert_eq!(unlock.user_id, winner);
+        assert_eq!(handler.calls.load(Ordering::SeqCst), 2);
     }
 }

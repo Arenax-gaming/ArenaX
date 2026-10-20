@@ -96,12 +96,21 @@ pub async fn join_queue(
         Err(e) => return Err(e.into()),
     }
 
-    // Get user's current ELO rating
-    let current_elo = match get_user_elo(&db_pool, user_id, &game).await {
-        Ok(elo) => elo.current_rating,
-        Err(_) => {
-            create_default_elo(&db_pool, user_id, &game).await?;
-            1200
+    // Get user's current ELO rating — Redis cache first, database fallback.
+    let current_elo = match matchmaker.get_cached_elo(user_id, &game).await.ok().flatten() {
+        Some(elo) => elo,
+        None => {
+            let elo = match get_user_elo(&db_pool, user_id, &game).await {
+                Ok(elo) => elo.current_rating,
+                Err(_) => {
+                    create_default_elo(&db_pool, user_id, &game).await?;
+                    1200
+                }
+            };
+            if let Err(e) = matchmaker.cache_elo(user_id, &game, elo).await {
+                tracing::warn!(%user_id, error = ?e, "failed to cache Elo rating");
+            }
+            elo
         }
     };
 
@@ -203,6 +212,61 @@ pub async fn get_queue_status(
         queue_size,
         estimated_wait_time,
         wait_time_so_far,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MatchmakingStateResponse {
+    /// One of `searching`, `timed_out` or `idle`.
+    pub state: String,
+    pub queues: Vec<QueueStatusResponse>,
+    pub timeout: Option<serde_json::Value>,
+}
+
+/// GET /matchmaking/status — current matchmaking state across all queues.
+pub async fn get_matchmaking_status(
+    matchmaker: web::Data<MatchmakerService>,
+    claims: web::ReqData<Claims>,
+) -> Result<HttpResponse> {
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
+
+    let entries = matchmaker.get_user_queue_entries(user_id).await?;
+    let mut queues = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let queue_size = matchmaker
+            .get_queue_size(&entry.game, &entry.game_mode)
+            .await
+            .unwrap_or(0);
+        queues.push(QueueStatusResponse {
+            in_queue: true,
+            estimated_wait_time: Some(MatchmakerService::estimate_wait_time_from_size(
+                queue_size,
+                entry.current_elo,
+            )),
+            wait_time_so_far: Some(Utc::now().signed_duration_since(entry.joined_at).num_seconds()),
+            queue_size,
+            queue_entry: Some(entry),
+        });
+    }
+
+    let timeout = if queues.is_empty() {
+        matchmaker.get_timeout_marker(user_id).await?
+    } else {
+        None
+    };
+    let state = if !queues.is_empty() {
+        "searching"
+    } else if timeout.is_some() {
+        "timed_out"
+    } else {
+        "idle"
+    };
+
+    Ok(HttpResponse::Ok().json(MatchmakingStateResponse {
+        state: state.to_string(),
+        queues,
+        timeout,
     }))
 }
 

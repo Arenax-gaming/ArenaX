@@ -528,4 +528,33 @@ mod integration_tests {
         assert_eq!(response.total_queue_depth, 0);
         assert_eq!(response.hourly_aggregates.len(), 24);
     }
+
+    #[test]
+    fn elo_gap_expands_with_wait_time() {
+        use crate::service::matchmaker::elo_gap_for_wait;
+        assert_eq!(elo_gap_for_wait(0), 100);
+        assert_eq!(elo_gap_for_wait(31), 200);
+        assert_eq!(elo_gap_for_wait(61), 400);
+        assert_eq!(elo_gap_for_wait(301), 500);
+    }
+
+    #[test]
+    fn queue_entry_expires_after_max_wait() {
+        use crate::service::matchmaker::{is_queue_entry_expired, QueueEntry};
+        let now = Utc::now();
+        let entry = QueueEntry {
+            user_id: Uuid::new_v4(),
+            game: "chess".into(),
+            game_mode: "ranked".into(),
+            current_elo: 1200,
+            min_elo: 1100,
+            max_elo: 1300,
+            joined_at: now - chrono::Duration::seconds(601),
+            wait_time_multiplier: 1.0,
+        };
+        let max_wait = std::time::Duration::from_secs(600);
+        assert!(is_queue_entry_expired(&entry, now, max_wait));
+        let fresh = QueueEntry { joined_at: now, ..entry };
+        assert!(!is_queue_entry_expired(&fresh, now, max_wait));
+    }
 }

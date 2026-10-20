@@ -9,6 +9,40 @@ const router: Router = Router();
 
 router.use(authenticateJWT);
 
+/**
+ * @openapi
+ * /v1/access-control/roles:
+ *   get:
+ *     summary: Get access control roles
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/roles',
     restrictToScope('SYSTEM:READ'),
@@ -18,6 +52,58 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/roles/{role}:
+ *   get:
+ *     summary: Get access control roles
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: role
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/roles/:role',
     restrictToScope('SYSTEM:READ'),
@@ -30,6 +116,55 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/check:
+ *   post:
+ *     summary: Create access control check
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               permission:
+ *                 type: string
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/check',
     restrictToScope('SYSTEM:READ'),
@@ -44,6 +179,56 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/check-multi:
+ *   post:
+ *     summary: Create access control check multi
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               permissions:
+ *                 type: array
+ *                 items: {}
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/check-multi',
     restrictToScope('SYSTEM:READ'),
@@ -58,6 +243,61 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/delegation:
+ *   post:
+ *     summary: Create access control delegation
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               delegateeId:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *               durationMs:
+ *                 type: string
+ *               maxUses:
+ *                 type: string
+ *     responses:
+ *       '201':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post(
     '/delegation',
     restrictToScope('SYSTEM:WRITE'),
@@ -81,6 +321,54 @@ router.post(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/delegation/{id}:
+ *   delete:
+ *     summary: Delete access control delegation
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '204':
+ *         description: Successful response
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '404':
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.delete(
     '/delegation/:id',
     restrictToScope('SYSTEM:WRITE'),
@@ -94,6 +382,40 @@ router.delete(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/delegation:
+ *   get:
+ *     summary: Get access control delegation
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/delegation',
     restrictToScope('SYSTEM:READ'),
@@ -104,6 +426,62 @@ router.get(
     }
 );
 
+/**
+ * @openapi
+ * /v1/access-control/audit:
+ *   get:
+ *     summary: Get access control audit
+ *     tags: [AccessControl]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: actorId
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: action
+ *         required: false
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       '200':
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       '400':
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '401':
+ *         description: Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '403':
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       '500':
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get(
     '/audit',
     restrictToScope('SYSTEM:READ'),
