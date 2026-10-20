@@ -196,25 +196,26 @@ impl RestrictionCheck {
 }
 
 /// Row shape returned by every query here.
-type SuspensionRow = (
-    Uuid,
-    Uuid,
-    String,
-    String,
-    String,
-    Option<Uuid>,
-    DateTime<Utc>,
-    Option<DateTime<Utc>>,
-    Option<DateTime<Utc>>,
-    Option<Uuid>,
-    Option<String>,
-    String,
-    Option<String>,
-    Option<DateTime<Utc>>,
-    Option<DateTime<Utc>>,
-    Option<Uuid>,
-    Option<String>,
-);
+#[derive(sqlx::FromRow)]
+struct SuspensionRow {
+    id: Uuid,
+    user_id: Uuid,
+    kind: String,
+    scope: String,
+    reason: String,
+    issued_by: Option<Uuid>,
+    issued_at: DateTime<Utc>,
+    expires_at: Option<DateTime<Utc>>,
+    lifted_at: Option<DateTime<Utc>>,
+    lifted_by: Option<Uuid>,
+    lift_reason: Option<String>,
+    appeal_status: String,
+    appeal_text: Option<String>,
+    appeal_submitted_at: Option<DateTime<Utc>>,
+    appeal_reviewed_at: Option<DateTime<Utc>>,
+    appeal_reviewed_by: Option<Uuid>,
+    appeal_response: Option<String>,
+}
 
 const SELECT_COLUMNS: &str = r#"
     id, user_id, kind, scope, reason, issued_by, issued_at, expires_at,
@@ -224,23 +225,23 @@ const SELECT_COLUMNS: &str = r#"
 
 fn row_to_suspension(row: SuspensionRow) -> Suspension {
     Suspension {
-        id: row.0,
-        user_id: row.1,
-        kind: SuspensionKind::from_str(&row.2),
-        scope: RestrictionScope::from_str(&row.3),
-        reason: row.4,
-        issued_by: row.5,
-        issued_at: row.6,
-        expires_at: row.7,
-        lifted_at: row.8,
-        lifted_by: row.9,
-        lift_reason: row.10,
-        appeal_status: AppealStatus::from_str(&row.11),
-        appeal_text: row.12,
-        appeal_submitted_at: row.13,
-        appeal_reviewed_at: row.14,
-        appeal_reviewed_by: row.15,
-        appeal_response: row.16,
+        id: row.id,
+        user_id: row.user_id,
+        kind: SuspensionKind::from_str(&row.kind),
+        scope: RestrictionScope::from_str(&row.scope),
+        reason: row.reason,
+        issued_by: row.issued_by,
+        issued_at: row.issued_at,
+        expires_at: row.expires_at,
+        lifted_at: row.lifted_at,
+        lifted_by: row.lifted_by,
+        lift_reason: row.lift_reason,
+        appeal_status: AppealStatus::from_str(&row.appeal_status),
+        appeal_text: row.appeal_text,
+        appeal_submitted_at: row.appeal_submitted_at,
+        appeal_reviewed_at: row.appeal_reviewed_at,
+        appeal_reviewed_by: row.appeal_reviewed_by,
+        appeal_response: row.appeal_response,
     }
 }
 

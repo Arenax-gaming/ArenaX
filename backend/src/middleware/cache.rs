@@ -358,9 +358,10 @@ impl ResponseCache {
         compute: F,
     ) -> Result<T, E>
     where
-        T: Serialize + DeserializeOwned + Send + Clone + 'static,
+        T: Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<T, E>> + Send,
+        E: Send + 'static,
     {
         if let Some(hit) = self.get::<T>(key, policy).await {
             if hit.status == CacheStatus::Stale {
@@ -382,9 +383,10 @@ impl ResponseCache {
         tags: Vec<String>,
         compute: F,
     ) where
-        T: Serialize + DeserializeOwned + Send + Clone + 'static,
+        T: Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<T, E>> + Send,
+        E: Send + 'static,
     {
         let cache = self.clone();
         tokio::spawn(async move {
@@ -461,6 +463,7 @@ pub mod keys {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
     use super::*;
 
     #[test]

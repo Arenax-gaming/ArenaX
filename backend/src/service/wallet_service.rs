@@ -30,6 +30,22 @@ pub enum WalletError {
     RedisError(String),
 }
 
+impl From<WalletError> for crate::api_error::ApiError {
+    fn from(err: WalletError) -> Self {
+        use crate::api_error::ApiError;
+        match err {
+            WalletError::WalletNotFound | WalletError::TransactionNotFound => {
+                ApiError::not_found(err.to_string())
+            }
+            WalletError::InsufficientBalance { .. }
+            | WalletError::InvalidAmount(_)
+            | WalletError::PaymentVerificationFailed => ApiError::bad_request(err.to_string()),
+            WalletError::DatabaseError(e) => ApiError::database_error(e),
+            WalletError::RedisError(msg) => ApiError::RedisError(msg),
+        }
+    }
+}
+
 pub type DbPool = Arc<PgPool>;
 
 #[derive(Clone)]
@@ -80,14 +96,11 @@ impl WalletService {
     /// Get wallet for a user
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     pub async fn get_wallet(&self, user_id: Uuid) -> Result<Wallet, WalletError> {
-        let wallet = sqlx::query_as!(
-            Wallet,
-            r#"
+        let wallet = sqlx::query_as::<_, Wallet>(r#"
             SELECT * FROM wallets
             WHERE user_id = $1
-            "#,
-            user_id
-        )
+            "#)
+            .bind(user_id)
         .fetch_optional(&*self.db_pool)
         .await?;
 
@@ -105,9 +118,7 @@ impl WalletService {
 
     /// Create a new wallet for a user
     pub async fn create_wallet(&self, user_id: Uuid) -> Result<Wallet, WalletError> {
-        let wallet = sqlx::query_as!(
-            Wallet,
-            r#"
+        let wallet = sqlx::query_as::<_, Wallet>(r#"
             INSERT INTO wallets (
                 id, user_id, balance, escrow_balance, currency,
                 balance_ngn, balance_arenax_tokens, balance_xlm,
@@ -115,19 +126,21 @@ impl WalletService {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
-            "#,
-            Uuid::new_v4(),
-            user_id,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            "NGN",
-            0i64, // balance_ngn
-            0i64, // balance_arenax_tokens
-            0i64, // balance_xlm
-            true,
-            Utc::now(),
-            Utc::now()
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(user_id)
+            .bind(Decimal::ZERO)
+            .bind(Decimal::ZERO)
+            .bind("NGN")
+            .bind(0i64)
+            .bind(// balance_ngn
+            0i64)
+            .bind(// balance_arenax_tokens
+            0i64)
+            .bind(// balance_xlm
+            true)
+            .bind(Utc::now())
+            .bind(Utc::now())
         .fetch_one(&*self.db_pool)
         .await?;
 
@@ -157,7 +170,7 @@ impl WalletService {
             Box::pin(async move {
                 // Lock the wallet row for update to prevent concurrent modifications
                 sqlx::query!(
-                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    "SELECT 1 AS locked FROM wallets WHERE user_id = $1 FOR UPDATE",
                     user_id_clone
                 )
                 .fetch_one(&mut **tx)
@@ -219,7 +232,7 @@ impl WalletService {
                 .await
                 .map_err(|e| WalletError::DatabaseError(e))?;
 
-                let current_balance = wallet.balance_ngn.unwrap_or(0);
+                let current_balance = wallet.balance_ngn;
                 if current_balance < amount_clone {
                     return Err(WalletError::InsufficientBalance {
                         required: amount_clone,
@@ -273,7 +286,7 @@ impl WalletService {
         execute_transaction(&db_pool, &config, move |tx| {
             Box::pin(async move {
                 sqlx::query!(
-                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    "SELECT 1 AS locked FROM wallets WHERE user_id = $1 FOR UPDATE",
                     user_id_clone
                 )
                 .fetch_one(&mut **tx)
@@ -337,7 +350,7 @@ impl WalletService {
                 .await
                 .map_err(|e| WalletError::DatabaseError(e))?;
 
-                let current_balance = wallet.balance_arenax_tokens.unwrap_or(0);
+                let current_balance = wallet.balance_arenax_tokens;
                 if current_balance < amount_clone {
                     return Err(WalletError::InsufficientBalance {
                         required: amount_clone,
@@ -399,7 +412,7 @@ impl WalletService {
                 .await
                 .map_err(|e| WalletError::DatabaseError(e))?;
 
-                let current_balance = wallet.balance_ngn.unwrap_or(0);
+                let current_balance = wallet.balance_ngn;
                 if current_balance < amount_clone {
                     return Err(WalletError::InsufficientBalance {
                         required: amount_clone,
@@ -454,7 +467,7 @@ impl WalletService {
         execute_transaction(&db_pool, &config, move |tx| {
             Box::pin(async move {
                 sqlx::query!(
-                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    "SELECT 1 AS locked FROM wallets WHERE user_id = $1 FOR UPDATE",
                     user_id_clone
                 )
                 .fetch_one(&mut **tx)
@@ -502,32 +515,29 @@ impl WalletService {
     ) -> Result<Transaction, WalletError> {
         let reference = reference.unwrap_or_else(|| format!("TXN-{}", Uuid::new_v4()));
 
-        let transaction = sqlx::query_as!(
-            Transaction,
-            r#"
+        let transaction = sqlx::query_as::<_, Transaction>(r#"
             INSERT INTO transactions (
                 id, user_id, transaction_type, amount, currency,
                 status, reference, description, created_at, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id, user_id,
-                transaction_type as "transaction_type: TransactionType",
+                transaction_type AS "transaction_type",
                 amount, currency,
-                status as "status: TransactionStatus",
+                status AS "status",
                 reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
-            "#,
-            Uuid::new_v4(),
-            user_id,
-            transaction_type as TransactionType,
-            Decimal::from(amount),
-            currency,
-            TransactionStatus::Pending as TransactionStatus,
-            reference,
-            description,
-            Utc::now(),
-            Utc::now()
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(user_id)
+            .bind(transaction_type as TransactionType)
+            .bind(Decimal::from(amount))
+            .bind(currency)
+            .bind(TransactionStatus::Pending as TransactionStatus)
+            .bind(reference)
+            .bind(description)
+            .bind(Utc::now())
+            .bind(Utc::now())
         .fetch_one(&*self.db_pool)
         .await?;
 
@@ -572,24 +582,21 @@ impl WalletService {
     ) -> Result<Vec<Transaction>, WalletError> {
         let offset = (page - 1) * per_page;
 
-        let transactions = sqlx::query_as!(
-            Transaction,
-            r#"
+        let transactions = sqlx::query_as::<_, Transaction>(r#"
             SELECT id, user_id,
-                transaction_type as "transaction_type: TransactionType",
+                transaction_type AS "transaction_type",
                 amount, currency,
-                status as "status: TransactionStatus",
+                status AS "status",
                 reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             FROM transactions
             WHERE user_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-            user_id,
-            per_page as i64,
-            offset as i64
-        )
+            "#)
+            .bind(user_id)
+            .bind(per_page as i64)
+            .bind(offset as i64)
         .fetch_all(&*self.db_pool)
         .await?;
 
@@ -613,24 +620,21 @@ impl WalletService {
         .fetch_one(&*self.db_pool)
         .await?;
 
-        let transactions = sqlx::query_as!(
-            Transaction,
-            r#"
+        let transactions = sqlx::query_as::<_, Transaction>(r#"
             SELECT id, user_id,
-                transaction_type as "transaction_type: TransactionType",
+                transaction_type AS "transaction_type",
                 amount, currency,
-                status as "status: TransactionStatus",
+                status AS "status",
                 reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             FROM transactions
             WHERE user_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-            user_id,
-            limit,
-            offset,
-        )
+            "#)
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
         .fetch_all(&*self.db_pool)
         .await?;
 
@@ -642,20 +646,17 @@ impl WalletService {
         &self,
         reference: &str,
     ) -> Result<Transaction, WalletError> {
-        let transaction = sqlx::query_as!(
-            Transaction,
-            r#"
+        let transaction = sqlx::query_as::<_, Transaction>(r#"
             SELECT id, user_id,
-                transaction_type as "transaction_type: TransactionType",
+                transaction_type AS "transaction_type",
                 amount, currency,
-                status as "status: TransactionStatus",
+                status AS "status",
                 reference, description, metadata,
                 stellar_transaction_id, created_at, updated_at, completed_at
             FROM transactions
             WHERE reference = $1
-            "#,
-            reference
-        )
+            "#)
+            .bind(reference)
         .fetch_optional(&*self.db_pool)
         .await?;
 
@@ -778,9 +779,9 @@ impl WalletService {
                 Ok(wallet) => {
                     let event = crate::realtime::events::RealtimeEvent::BalanceUpdate {
                         user_id,
-                        balance_ngn: wallet.balance_ngn.unwrap_or(0),
-                        balance_arenax_tokens: wallet.balance_arenax_tokens.unwrap_or(0),
-                        balance_xlm: wallet.balance_xlm.unwrap_or(0),
+                        balance_ngn: wallet.balance_ngn,
+                        balance_arenax_tokens: wallet.balance_arenax_tokens,
+                        balance_xlm: wallet.balance_xlm,
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     event_bus.publish_to_user(user_id, &event).await;

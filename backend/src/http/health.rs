@@ -200,7 +200,7 @@ async fn check_soroban_rpc(base_url: &str) -> bool {
 }
 
 #[derive(serde::Deserialize)]
-struct HealthQuery {
+pub struct HealthQuery {
     #[serde(default)]
     simple: bool,
 }

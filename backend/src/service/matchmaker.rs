@@ -572,29 +572,26 @@ impl MatchmakerService {
         let match_id = Uuid::new_v4();
         let now = Utc::now();
 
-        let match_record: Match = sqlx::query_as!(
-            Match,
-            r#"
+        let match_record: Match = sqlx::query_as::<_, Match>(r#"
             INSERT INTO matches (
                 id, tournament_id, round_id, match_type, status, player1_id, player2_id,
                 player1_elo_before, player2_elo_before, game_mode, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
             ) RETURNING *
-            "#,
-            match_id,
-            None::<Uuid>,
-            None::<Uuid>,
-            MatchType::Ranked as _,
-            MatchStatus::Pending as _,
-            candidate.player1.user_id,
-            Some(candidate.player2.user_id),
-            candidate.player1.current_elo,
-            candidate.player2.current_elo,
-            candidate.player1.game_mode,
-            now,
-            now
-        )
+            "#)
+            .bind(match_id)
+            .bind(None::<Uuid>)
+            .bind(None::<Uuid>)
+            .bind(MatchType::Ranked)
+            .bind(MatchStatus::Pending)
+            .bind(candidate.player1.user_id)
+            .bind(Some(candidate.player2.user_id))
+            .bind(candidate.player1.current_elo)
+            .bind(candidate.player2.current_elo)
+            .bind(&candidate.player1.game_mode)
+            .bind(now)
+            .bind(now)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -768,7 +765,7 @@ pub fn is_queue_entry_expired(entry: &QueueEntry, now: DateTime<Utc>, max_wait: 
     waited >= 0 && waited as u64 >= max_wait.as_secs()
 }
 
-fn calculate_max_elo_gap(entry: &QueueEntry) -> i32 {
+pub fn calculate_max_elo_gap(entry: &QueueEntry) -> i32 {
     elo_gap_for_wait(
         Utc::now()
             .signed_duration_since(entry.joined_at)
@@ -789,7 +786,7 @@ pub fn elo_gap_for_wait(wait_seconds: u64) -> i32 {
     max_gap
 }
 
-fn calculate_match_quality(player1: &QueueEntry, player2: &QueueEntry, elo_gap: i32) -> f64 {
+pub fn calculate_match_quality(player1: &QueueEntry, player2: &QueueEntry, elo_gap: i32) -> f64 {
     let elo_score = 1.0 - (elo_gap as f64 / MAX_ELO_GAP as f64);
 
     let wait1 = Utc::now()
@@ -920,38 +917,35 @@ impl EloEngine {
         match_id: Uuid,
         winner_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
-        let match_record = sqlx::query_as!(Match, "SELECT * FROM matches WHERE id = $1", match_id)
+        let match_record = sqlx::query_as::<_, Match>("SELECT * FROM matches WHERE id = $1")
+            .bind(match_id)
             .fetch_one(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
 
         let (new_elo1, new_elo2) = self.calculate_elo_change(
-            match_record.player1_elo_before,
+            match_record.player1_elo_before.unwrap_or(1200),
             match_record.player2_elo_before.unwrap_or(1200),
             winner_id,
             match_record.player1_id,
             match_record.player2_id.unwrap_or_default(),
         );
 
-        sqlx::query!(
-            "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-            new_elo1,
-            Utc::now(),
-            match_record.player1_id,
-            match_record.game_mode
-        )
+        sqlx::query("UPDATE user_elo SET current_rating = $1, last_updated = $2 WHERE user_id = $3 AND game = $4")
+            .bind(new_elo1)
+            .bind(Utc::now())
+            .bind(match_record.player1_id)
+            .bind(&match_record.game_mode)
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
         if let Some(p2_id) = match_record.player2_id {
-            sqlx::query!(
-                "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-                new_elo2,
-                Utc::now(),
-                p2_id,
-                match_record.game_mode
-            )
+            sqlx::query("UPDATE user_elo SET current_rating = $1, last_updated = $2 WHERE user_id = $3 AND game = $4")
+                .bind(new_elo2)
+                .bind(Utc::now())
+                .bind(p2_id)
+                .bind(&match_record.game_mode)
             .execute(db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -961,7 +955,7 @@ impl EloEngine {
             db_pool,
             match_record.player1_id,
             &match_record.game_mode,
-            match_record.player1_elo_before,
+            match_record.player1_elo_before.unwrap_or(1200),
             new_elo1,
             match_id,
         )
@@ -991,17 +985,15 @@ impl EloEngine {
         new_elo: i32,
         match_id: Uuid,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            user_id,
-            game,
-            old_elo,
-            new_elo,
-            new_elo - old_elo,
-            match_id,
-            Utc::now()
-        )
+        sqlx::query("INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)")
+            .bind(user_id)
+            .bind(game)
+            .bind(old_elo)
+            .bind(new_elo)
+            .bind(new_elo - old_elo)
+            .bind(match_id)
+            .bind(Utc::now())
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

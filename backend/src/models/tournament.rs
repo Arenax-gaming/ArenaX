@@ -51,15 +51,16 @@ impl std::fmt::Display for TournamentType {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum TournamentStatus {
-    Draft,
-    Upcoming,
-    RegistrationOpen,
-    RegistrationClosed,
-    InProgress,
-    Completed,
-    Cancelled,
+    Draft = 0,
+    Upcoming = 1,
+    RegistrationOpen = 2,
+    RegistrationClosed = 3,
+    InProgress = 4,
+    Completed = 5,
+    Cancelled = 6,
 }
 
 impl std::fmt::Display for TournamentStatus {
@@ -174,14 +175,15 @@ pub struct TournamentParticipant {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum ParticipantStatus {
-    Registered,
-    Paid,
-    Active,
-    Eliminated,
-    Disqualified,
-    Withdrawn,
+    Registered = 0,
+    Paid = 1,
+    Active = 2,
+    Eliminated = 3,
+    Disqualified = 4,
+    Withdrawn = 5,
 }
 
 impl std::fmt::Display for ParticipantStatus {
@@ -241,12 +243,13 @@ pub struct TournamentListResponse {
 // ===== Additional Types for Complete Tournament Management =====
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "bracket_type", rename_all = "lowercase")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum BracketType {
-    SingleElimination,
-    DoubleElimination,
-    RoundRobin,
-    Swiss,
+    SingleElimination = 0,
+    DoubleElimination = 1,
+    RoundRobin = 2,
+    Swiss = 3,
 }
 
 impl std::fmt::Display for BracketType {
@@ -399,6 +402,54 @@ impl std::str::FromStr for MatchStatus {
             "cancelled" => Ok(MatchStatus::Cancelled),
             "abandoned" => Ok(MatchStatus::Abandoned),
             _ => Ok(MatchStatus::Pending),
+        }
+    }
+}
+
+
+impl From<i32> for TournamentStatus {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `TournamentStatus::Draft`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => TournamentStatus::Draft,
+            1 => TournamentStatus::Upcoming,
+            2 => TournamentStatus::RegistrationOpen,
+            3 => TournamentStatus::RegistrationClosed,
+            4 => TournamentStatus::InProgress,
+            5 => TournamentStatus::Completed,
+            6 => TournamentStatus::Cancelled,
+            _ => TournamentStatus::Draft,
+        }
+    }
+}
+
+impl From<i32> for ParticipantStatus {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `ParticipantStatus::Registered`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => ParticipantStatus::Registered,
+            1 => ParticipantStatus::Paid,
+            2 => ParticipantStatus::Active,
+            3 => ParticipantStatus::Eliminated,
+            4 => ParticipantStatus::Disqualified,
+            5 => ParticipantStatus::Withdrawn,
+            _ => ParticipantStatus::Registered,
+        }
+    }
+}
+
+impl From<i32> for BracketType {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `BracketType::SingleElimination`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => BracketType::SingleElimination,
+            1 => BracketType::DoubleElimination,
+            2 => BracketType::RoundRobin,
+            3 => BracketType::Swiss,
+            _ => BracketType::SingleElimination,
         }
     }
 }

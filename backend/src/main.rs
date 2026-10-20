@@ -16,6 +16,8 @@ mod service;
 mod orchestrator;
 mod security;
 mod telemetry;
+mod transaction;
+mod transaction_monitor;
 mod validators;
 
 use crate::config::Config;
@@ -137,6 +139,7 @@ async fn main() -> io::Result<()> {
         ttl_seconds: config.idempotency.ttl_seconds,
         max_response_size_kb: config.idempotency.max_response_size_kb,
         conflict_status_code: 422,
+        enabled_routes: Vec::new(),
     };
 
     // Start background matchmaker worker

@@ -323,9 +323,7 @@ impl TournamentService {
         self.validate_tournament_creation(&request).await?;
 
         // Create tournament
-        let tournament = sqlx::query_as!(
-            Tournament,
-            r#"
+        let tournament = sqlx::query_as::<_, Tournament>(r#"
             INSERT INTO tournaments (
                 id, name, description, game, max_participants, entry_fee, entry_fee_currency,
                 prize_pool, prize_pool_currency, status, start_time, registration_deadline,
@@ -333,27 +331,26 @@ impl TournamentService {
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
             ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            request.name,
-            request.description,
-            request.game,
-            request.max_participants,
-            request.entry_fee,
-            request.entry_fee_currency,
-            0, // Initial prize pool
-            request.entry_fee_currency.clone(),
-            TournamentStatus::Draft as _,
-            request.start_time,
-            request.registration_deadline,
-            creator_id,
-            Utc::now(),
-            Utc::now(),
-            request.bracket_type as _,
-            request.rules,
-            request.min_skill_level,
-            request.max_skill_level
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(request.name)
+            .bind(request.description)
+            .bind(request.game)
+            .bind(request.max_participants)
+            .bind(request.entry_fee)
+            .bind(request.entry_fee_currency.clone())
+            .bind(0i64) // Initial prize pool
+            .bind(request.entry_fee_currency.clone())
+            .bind(TournamentStatus::Draft)
+            .bind(request.start_time)
+            .bind(request.registration_deadline)
+            .bind(creator_id)
+            .bind(Utc::now())
+            .bind(Utc::now())
+            .bind(request.bracket_type)
+            .bind(request.rules)
+            .bind(request.min_skill_level)
+            .bind(request.max_skill_level)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -409,7 +406,7 @@ impl TournamentService {
             params.push(Box::new(status as i32));
         }
 
-        if let Some(game) = game_filter {
+        if let Some(game) = &game_filter {
             param_count += 1;
             query.push_str(&format!(" AND t.game = ${}", param_count));
             params.push(Box::new(game));
@@ -431,7 +428,7 @@ impl TournamentService {
             SELECT t.*, COUNT(tp.id) as current_participants
             FROM tournaments t
             LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
-            WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
+            WHERE ($1::int4 IS NULL OR t.status = $1)
             AND ($2::text IS NULL OR t.game = $2)
             GROUP BY t.id
             ORDER BY t.created_at DESC
@@ -439,8 +436,8 @@ impl TournamentService {
             "#,
             status_filter.map(|s| s as i32),
             game_filter,
-            per_page,
-            offset
+            per_page as i64,
+            offset as i64
         )
         .fetch_all(&self.db_pool)
         .await
@@ -451,7 +448,7 @@ impl TournamentService {
             r#"
             SELECT COUNT(*) as count
             FROM tournaments t
-            WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
+            WHERE ($1::int4 IS NULL OR t.status = $1)
             AND ($2::text IS NULL OR t.game = $2)
             "#,
             status_filter.map(|s| s as i32),
@@ -601,7 +598,7 @@ impl TournamentService {
         // open a transaction so we fail fast without acquiring a connection.
         if request.payment_method == "arenax_token" {
             let wallet = self.get_user_wallet(user_id).await?;
-            let balance = wallet.balance_arenax_tokens.unwrap_or(0);
+            let balance = wallet.balance_arenax_tokens;
             if balance < tournament.entry_fee {
                 return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
             }
@@ -637,22 +634,19 @@ impl TournamentService {
             .await?;
 
         // Step 2: register the participant
-        let participant = sqlx::query_as!(
-            TournamentParticipant,
-            r#"
+        let participant = sqlx::query_as::<_, TournamentParticipant>(r#"
             INSERT INTO tournament_participants (
                 id, tournament_id, user_id, registered_at, entry_fee_paid, status
             ) VALUES (
                 $1, $2, $3, $4, $5, $6
             ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            tournament_id,
-            user_id,
-            Utc::now(),
-            true,
-            ParticipantStatus::Paid as _
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(tournament_id)
+            .bind(user_id)
+            .bind(Utc::now())
+            .bind(true)
+            .bind(ParticipantStatus::Paid)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -818,19 +812,16 @@ impl TournamentService {
 
         // The status predicate closes the race between the read above and this
         // write: a second instance that already moved the row updates zero rows.
-        let tournament = match sqlx::query_as!(
-            Tournament,
-            r#"
+        let tournament = match sqlx::query_as::<_, Tournament>(r#"
             UPDATE tournaments
             SET status = $1, updated_at = $2
             WHERE id = $3 AND status = $4
             RETURNING *
-            "#,
-            new_status as _,
-            Utc::now(),
-            tournament_id,
-            old_status as _
-        )
+            "#)
+            .bind(new_status)
+            .bind(Utc::now())
+            .bind(tournament_id)
+            .bind(old_status)
         .fetch_optional(&mut *tx)
         .await
         {
@@ -1089,7 +1080,7 @@ impl TournamentService {
         // Check user's ArenaX token balance
         let wallet = self.get_user_wallet(user_id).await?;
 
-        if wallet.balance_arenax_tokens.unwrap_or(0) < tournament.entry_fee {
+        if wallet.balance_arenax_tokens < tournament.entry_fee {
             return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
         }
 
@@ -1261,26 +1252,24 @@ impl TournamentService {
         description: String,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO transactions (
                 id, user_id, transaction_type, amount, currency, status,
                 reference, description, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             )
-            "#,
-            Uuid::new_v4(),
-            user_id,
-            transaction_type as _,
-            amount,
-            currency,
-            TransactionStatus::Completed as _,
-            Uuid::new_v4().to_string(),
-            description,
-            Utc::now(),
-            Utc::now()
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(user_id)
+            .bind(transaction_type)
+            .bind(amount)
+            .bind(currency)
+            .bind(TransactionStatus::Completed)
+            .bind(Uuid::new_v4().to_string())
+            .bind(description)
+            .bind(Utc::now())
+            .bind(Utc::now())
         .execute(&mut **tx)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1378,16 +1367,13 @@ impl TournamentService {
 
     async fn generate_tournament_bracket(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Get all participants
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            r#"
+        let participants = sqlx::query_as::<_, TournamentParticipant>(r#"
             SELECT * FROM tournament_participants
             WHERE tournament_id = $1 AND status = $2
             ORDER BY registered_at
-            "#,
-            tournament_id,
-            ParticipantStatus::Active as _
-        )
+            "#)
+            .bind(tournament_id)
+            .bind(ParticipantStatus::Active)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1433,26 +1419,23 @@ impl TournamentService {
 
         // Create rounds
         for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
+            let round = sqlx::query_as::<_, TournamentRound>(r#"
                 INSERT INTO tournament_rounds (
                     id, tournament_id, round_number, round_type, status, created_at
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6
                 ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                if round_num == rounds {
+                "#)
+                .bind(Uuid::new_v4())
+                .bind(tournament_id)
+                .bind(round_num)
+                .bind(if round_num == rounds {
                     RoundType::Final
                 } else {
                     RoundType::Elimination
-                } as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
+                })
+                .bind(RoundStatus::Pending)
+                .bind(Utc::now())
             .fetch_one(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -1504,11 +1487,8 @@ impl TournamentService {
     // For brevity, I'll include the essential ones and mark others as TODO
 
     async fn get_tournament_by_id(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
-        sqlx::query_as!(
-            Tournament,
-            "SELECT * FROM tournaments WHERE id = $1",
-            tournament_id
-        )
+        sqlx::query_as::<_, Tournament>("SELECT * FROM tournaments WHERE id = $1")
+            .bind(tournament_id)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
@@ -1616,7 +1596,8 @@ impl TournamentService {
     }
 
     async fn get_user_wallet(&self, user_id: Uuid) -> Result<Wallet, ApiError> {
-        sqlx::query_as!(Wallet, "SELECT * FROM wallets WHERE user_id = $1", user_id)
+        sqlx::query_as::<_, Wallet>("SELECT * FROM wallets WHERE user_id = $1")
+            .bind(user_id)
             .fetch_optional(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?
@@ -1644,25 +1625,23 @@ impl TournamentService {
         currency: String,
         description: String,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO transactions (
                 id, user_id, transaction_type, amount, currency, status, reference, description, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             )
-            "#,
-            Uuid::new_v4(),
-            user_id,
-            transaction_type as _,
-            amount,
-            currency,
-            TransactionStatus::Completed as _,
-            Uuid::new_v4().to_string(),
-            description,
-            Utc::now(),
-            Utc::now()
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(user_id)
+            .bind(transaction_type)
+            .bind(amount)
+            .bind(currency)
+            .bind(TransactionStatus::Completed)
+            .bind(Uuid::new_v4().to_string())
+            .bind(description)
+            .bind(Utc::now())
+            .bind(Utc::now())
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1772,12 +1751,9 @@ impl TournamentService {
 
     async fn calculate_final_rankings(&self, tournament_id: Uuid) -> Result<(), ApiError> {
         // Get all participants and their match results
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND status = $2",
-            tournament_id,
-            ParticipantStatus::Active as _
-        )
+        let participants = sqlx::query_as::<_, TournamentParticipant>("SELECT * FROM tournament_participants WHERE tournament_id = $1 AND status = $2")
+            .bind(tournament_id)
+            .bind(ParticipantStatus::Active)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1840,11 +1816,8 @@ impl TournamentService {
         }
 
         // Issue refunds for every participant who paid
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND entry_fee_paid = true",
-            tournament_id,
-        )
+        let participants = sqlx::query_as::<_, TournamentParticipant>("SELECT * FROM tournament_participants WHERE tournament_id = $1 AND entry_fee_paid = true")
+            .bind(tournament_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1886,13 +1859,10 @@ impl TournamentService {
         }
 
         // Update tournament status
-        let updated = sqlx::query_as!(
-            Tournament,
-            r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *"#,
-            TournamentStatus::Cancelled as _,
-            Utc::now(),
-            tournament_id,
-        )
+        let updated = sqlx::query_as::<_, Tournament>(r#"UPDATE tournaments SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *"#)
+            .bind(TournamentStatus::Cancelled)
+            .bind(Utc::now())
+            .bind(tournament_id)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2019,11 +1989,8 @@ impl TournamentService {
         .ok_or(ApiError::not_found("Prize pool not found"))?;
 
         // Get final rankings
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND final_rank IS NOT NULL ORDER BY final_rank",
-            tournament_id
-        )
+        let participants = sqlx::query_as::<_, TournamentParticipant>("SELECT * FROM tournament_participants WHERE tournament_id = $1 AND final_rank IS NOT NULL ORDER BY final_rank")
+            .bind(tournament_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2244,22 +2211,19 @@ impl TournamentService {
 
         // Winners bracket
         for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
+            let round = sqlx::query_as::<_, TournamentRound>(r#"
                 INSERT INTO tournament_rounds (
                     id, tournament_id, round_number, round_type, status, created_at
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6
                 ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                RoundType::Elimination as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
+                "#)
+                .bind(Uuid::new_v4())
+                .bind(tournament_id)
+                .bind(round_num)
+                .bind(RoundType::Elimination)
+                .bind(RoundStatus::Pending)
+                .bind(Utc::now())
             .fetch_one(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -2317,22 +2281,19 @@ impl TournamentService {
         }
 
         // Create a round for all matches
-        let round = sqlx::query_as!(
-            TournamentRound,
-            r#"
+        let round = sqlx::query_as::<_, TournamentRound>(r#"
             INSERT INTO tournament_rounds (
                 id, tournament_id, round_number, round_type, status, created_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6
             ) RETURNING *
-            "#,
-            Uuid::new_v4(),
-            tournament_id,
-            1,
-            RoundType::Elimination as _,
-            RoundStatus::Pending as _,
-            Utc::now()
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(tournament_id)
+            .bind(1)
+            .bind(RoundType::Elimination)
+            .bind(RoundStatus::Pending)
+            .bind(Utc::now())
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2391,22 +2352,19 @@ impl TournamentService {
         let rounds = ((participant_count as f64).log2() * 1.5).ceil() as i32; // Typically 1.5x log2(n) rounds
 
         for round_num in 1..=rounds {
-            let round = sqlx::query_as!(
-                TournamentRound,
-                r#"
+            let round = sqlx::query_as::<_, TournamentRound>(r#"
                 INSERT INTO tournament_rounds (
                     id, tournament_id, round_number, round_type, status, created_at
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6
                 ) RETURNING *
-                "#,
-                Uuid::new_v4(),
-                tournament_id,
-                round_num,
-                RoundType::Elimination as _,
-                RoundStatus::Pending as _,
-                Utc::now()
-            )
+                "#)
+                .bind(Uuid::new_v4())
+                .bind(tournament_id)
+                .bind(round_num)
+                .bind(RoundType::Elimination)
+                .bind(RoundStatus::Pending)
+                .bind(Utc::now())
             .fetch_one(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -2464,17 +2422,14 @@ impl TournamentService {
     ) -> Result<(), ApiError> {
         // For elimination tournaments, rank by elimination order
         // Get matches in reverse order to determine elimination sequence
-        let matches = sqlx::query_as!(
-            TournamentMatch,
-            r#"
+        let matches = sqlx::query_as::<_, TournamentMatch>(r#"
             SELECT tm.* FROM tournament_matches tm
             JOIN tournament_rounds tr ON tm.round_id = tr.id
             WHERE tm.tournament_id = $1 AND tm.status = $2
             ORDER BY tr.round_number DESC, tm.match_number
-            "#,
-            tournament_id,
-            MatchStatus::Completed as _
-        )
+            "#)
+            .bind(tournament_id)
+            .bind(MatchStatus::Completed)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2544,7 +2499,6 @@ impl TournamentService {
                 AND winner_id != $2 AND status = $3
                 "#,
                 tournament_id,
-                participant.user_id,
                 participant.user_id,
                 MatchStatus::Completed as _
             )
@@ -2668,11 +2622,8 @@ impl TournamentService {
         &self,
         tournament_id: Uuid,
     ) -> Result<Vec<TournamentParticipant>, ApiError> {
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 ORDER BY registered_at",
-            tournament_id
-        )
+        let participants = sqlx::query_as::<_, TournamentParticipant>("SELECT * FROM tournament_participants WHERE tournament_id = $1 ORDER BY registered_at")
+            .bind(tournament_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2686,11 +2637,8 @@ impl TournamentService {
         tournament_id: Uuid,
     ) -> Result<TournamentBracketResponse, ApiError> {
         // Get tournament rounds
-        let rounds = sqlx::query_as!(
-            TournamentRound,
-            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
-            tournament_id
-        )
+        let rounds = sqlx::query_as::<_, TournamentRound>("SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number")
+            .bind(tournament_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -2698,11 +2646,8 @@ impl TournamentService {
         // Get matches for each round
         let mut bracket_rounds = Vec::new();
         for round in rounds {
-            let matches = sqlx::query_as!(
-                TournamentMatch,
-                "SELECT * FROM tournament_matches WHERE round_id = $1 ORDER BY match_number",
-                round.id
-            )
+            let matches = sqlx::query_as::<_, TournamentMatch>("SELECT * FROM tournament_matches WHERE round_id = $1 ORDER BY match_number")
+                .bind(round.id)
             .fetch_all(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -2783,14 +2728,14 @@ impl TournamentService {
             .unwrap_or(0);
 
         // Get match statistics
-        let match_stats = sqlx::query!("SELECT 
-            COUNT(*) as total_matches,
-            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as completed_matches,
-            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
-            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
-            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches
+        let match_stats = sqlx::query!(r#"SELECT 
+            COUNT(*) as "total_matches!",
+            COUNT(CASE WHEN tm.status = 'completed' THEN 1 END) as "completed_matches!",
+            COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as "pending_matches!",
+            COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as "in_progress_matches!",
+            COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as "disputed_matches!"
             FROM tournament_matches tm
-            WHERE tm.tournament_id = $1",
+            WHERE tm.tournament_id = $1"#,
             tournament_id
         )
         .fetch_one(&self.db_pool)
@@ -2853,9 +2798,9 @@ impl TournamentService {
         let offset = (page - 1) * per_page;
 
         // Get tournament participants with their ELO ratings
-        let participants = sqlx::query!("SELECT 
+        let participants = sqlx::query!(r#"SELECT 
             tp.id as participant_id,
-            tp.user_id,
+            tp.user_id as "user_id!",
             tp.registered_at,
             tp.entry_fee_paid,
             tp.status as participant_status,
@@ -2864,11 +2809,11 @@ impl TournamentService {
             tp.prize_currency,
             u.username,
             u.display_name,
-            ue.current_rating as elo_rating,
-            COALESCE(wins.wins, 0) as wins,
-            COALESCE(losses.losses, 0) as losses,
-            COALESCE(draws.draws, 0) as draws,
-            COALESCE(matches.total_matches, 0) as total_matches
+            ue.current_rating as "elo_rating?",
+            COALESCE(wins.wins, 0) as "wins!",
+            COALESCE(losses.losses, 0) as "losses!",
+            COALESCE(draws.draws, 0) as "draws!",
+            COALESCE(matches.total_matches, 0) as "total_matches!"
             FROM tournament_participants tp
             JOIN users u ON tp.user_id = u.id
             LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = (SELECT game FROM tournaments WHERE id = $1)
@@ -2913,10 +2858,10 @@ impl TournamentService {
             ) matches ON tp.user_id = matches.user_id
             WHERE tp.tournament_id = $1
             ORDER BY tp.final_rank ASC, tp.registered_at ASC
-            LIMIT $2 OFFSET $3",
+            LIMIT $2 OFFSET $3"#,
             tournament_id,
-            per_page,
-            offset
+            per_page as i64,
+            offset as i64
         )
         .fetch_all(&self.db_pool)
         .await
@@ -2933,7 +2878,7 @@ impl TournamentService {
         // Convert to response format
         let mut leaderboard_entries = Vec::new();
         for row in participants {
-            let elo_rating = if row.elo_rating.is_some() { row.elo_rating.unwrap() } else { 1200 };
+            let elo_rating = row.elo_rating.unwrap_or(1200);
             let win_rate = if row.total_matches > 0 {
                 ((row.wins as f32 / row.total_matches as f32) * 100.0).round() as i32
             } else {
@@ -2954,7 +2899,7 @@ impl TournamentService {
                 win_rate_pct: win_rate,
                 prize_amount: row.prize_amount,
                 prize_currency: row.prize_currency,
-                participant_status: row.participant_status.parse().unwrap_or(ParticipantStatus::Registered),
+                participant_status: ParticipantStatus::from(row.participant_status),
             });
         }
 
@@ -2988,7 +2933,7 @@ impl TournamentService {
             COUNT(CASE WHEN tm.status = 'pending' OR tm.status = 'scheduled' THEN 1 END) as pending_matches,
             COUNT(CASE WHEN tm.status = 'in_progress' THEN 1 END) as in_progress_matches,
             COUNT(CASE WHEN tm.status = 'disputed' THEN 1 END) as disputed_matches,
-            AVG(EXTRACT(EPOCH FROM (tm.completed_at - tm.started_at))) as avg_duration_secs
+            AVG(EXTRACT(EPOCH FROM (tm.completed_at - tm.started_at)))::float8 as avg_duration_secs
             FROM tournament_rounds tr
             LEFT JOIN tournament_matches tm ON tr.id = tm.round_id AND tr.tournament_id = $1
             WHERE tr.tournament_id = $1
@@ -3006,7 +2951,7 @@ impl TournamentService {
             pp.total_amount as prize_pool_amount,
             pp.currency as prize_pool_currency,
             pp.distribution_percentages as distribution_percentages_json,
-            COALESCE(SUM(tp.prize_amount), 0) as distributed_amount
+            COALESCE(SUM(tp.prize_amount), 0)::int8 as distributed_amount
             FROM prize_pools pp
             LEFT JOIN tournament_participants tp ON pp.tournament_id = tp.tournament_id AND tp.prize_amount IS NOT NULL
             WHERE pp.tournament_id = $1
@@ -3024,7 +2969,7 @@ impl TournamentService {
             MIN(tp.registered_at) as first_registration,
             MAX(tp.registered_at) as last_registration,
             COUNT(CASE WHEN tp.entry_fee_paid THEN 1 END) as paid_registrations,
-            COUNT(CASE WHEN tp.status = 'active' THEN 1 END) as active_participants
+            COUNT(CASE WHEN tp.status = 2 THEN 1 END) as active_participants
             FROM tournament_participants tp
             WHERE tp.tournament_id = $1"#,
             tournament_id
@@ -3037,10 +2982,10 @@ impl TournamentService {
         let skill_distribution = sqlx::query!(
             r#"SELECT 
             COUNT(*) as total_participants,
-            AVG(ue.current_rating) as avg_elo,
-            MIN(ue.current_rating) as min_elo,
-            MAX(ue.current_rating) as max_elo,
-            STDDEV(ue.current_rating) as elo_stddev
+            AVG(ue.current_rating)::float8 as avg_elo,
+            MIN(ue.current_rating)::float8 as min_elo,
+            MAX(ue.current_rating)::float8 as max_elo,
+            STDDEV(ue.current_rating)::float8 as elo_stddev
             FROM tournament_participants tp
             LEFT JOIN user_elo ue ON tp.user_id = ue.user_id AND ue.game = $1
             WHERE tp.tournament_id = $2"#,
@@ -3054,12 +2999,12 @@ impl TournamentService {
         // Convert JSON distribution percentages
         let distribution_percentages: Vec<f64> = prize_distribution
             .as_ref()
-            .and_then(|p| p.distribution_percentages_json.as_ref())
+            .map(|p| p.distribution_percentages_json.as_str())
             .and_then(|json_str| serde_json::from_str(json_str).ok())
             .unwrap_or_default();
 
         let prize_pool_amount = prize_distribution.as_ref().map(|p| p.prize_pool_amount).unwrap_or(0);
-        let prize_pool_currency = prize_distribution.as_ref().and_then(|p| p.prize_pool_currency.clone()).unwrap_or_else(|| "USD".to_string());
+        let prize_pool_currency = prize_distribution.as_ref().map(|p| p.prize_pool_currency.clone()).unwrap_or_else(|| "USD".to_string());
         let distributed_amount = prize_distribution.as_ref().and_then(|p| p.distributed_amount).unwrap_or(0);
 
         Ok(TournamentAnalyticsResponse {
@@ -3078,14 +3023,14 @@ impl TournamentService {
             round_statistics: round_stats
                 .into_iter()
                 .map(|r| TournamentRoundStatistics {
-                    round_number: r.round_number.unwrap_or(0),
+                    round_number: r.round_number,
                     round_type: r.round_type,
                     total_matches: r.total_matches.unwrap_or(0),
                     completed_matches: r.completed_matches.unwrap_or(0),
                     pending_matches: r.pending_matches.unwrap_or(0),
                     in_progress_matches: r.in_progress_matches.unwrap_or(0),
                     disputed_matches: r.disputed_matches.unwrap_or(0),
-                    avg_duration_secs: r.avg_duration_secs.map(|d| d as f64).unwrap_or(0.0),
+                    avg_duration_secs: r.avg_duration_secs.unwrap_or(0.0),
                 })
                 .collect(),
             prize_pool: TournamentPrizePool {
@@ -3110,10 +3055,8 @@ impl TournamentService {
         tournament_id: Uuid,
     ) -> Result<TournamentBracketResponse, ApiError> {
         // Get tournament rounds
-        let rounds = sqlx::query_as!(TournamentRound,
-            "SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number",
-            tournament_id
-        )
+        let rounds = sqlx::query_as::<_, TournamentRound>("SELECT * FROM tournament_rounds WHERE tournament_id = $1 ORDER BY round_number")
+            .bind(tournament_id)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -3121,7 +3064,7 @@ impl TournamentService {
         // Get matches for each round with additional participant information
         let mut bracket_rounds = Vec::new();
         for round in rounds {
-            let matches = sqlx::query!("SELECT 
+            let matches = sqlx::query!(r#"SELECT 
                 tm.id as match_id,
                 tm.match_number,
                 tm.player1_id,
@@ -3133,8 +3076,8 @@ impl TournamentService {
                 tm.scheduled_time,
                 tm.started_at,
                 tm.completed_at,
-                u1.username as player1_username,
-                u2.username as player2_username,
+                u1.username as "player1_username?",
+                u2.username as "player2_username?",
                 u1.display_name as player1_display_name,
                 u2.display_name as player2_display_name,
                 tp1.final_rank as player1_final_rank,
@@ -3145,7 +3088,7 @@ impl TournamentService {
                 LEFT JOIN tournament_participants tp1 ON tm.player1_id = tp1.user_id AND tm.tournament_id = tp1.tournament_id
                 LEFT JOIN tournament_participants tp2 ON tm.player2_id = tp2.user_id AND tm.tournament_id = tp2.tournament_id
                 WHERE tm.round_id = $1
-                ORDER BY tm.match_number",
+                ORDER BY tm.match_number"#,
                 round.id
             )
             .fetch_all(&self.db_pool)
@@ -3157,14 +3100,14 @@ impl TournamentService {
                 // Get player names and display info
                 let player1_info = if let Some(username) = match_row.player1_username {
                     TournamentPlayerInfo {
-                        user_id: match_row.player1_id,
+                        user_id: match_row.player1_id.unwrap_or_default(),
                         username,
                         display_name: match_row.player1_display_name,
                         final_rank: match_row.player1_final_rank,
                     }
                 } else {
                     TournamentPlayerInfo {
-                        user_id: match_row.player1_id,
+                        user_id: match_row.player1_id.unwrap_or_default(),
                         username: "Unknown".to_string(),
                         display_name: None,
                         final_rank: None,
@@ -3189,7 +3132,7 @@ impl TournamentService {
 
                 round_matches.push(BracketMatch {
                     match_id: match_row.match_id,
-                    match_number: match_row.match_number.unwrap_or(0),
+                    match_number: match_row.match_number,
                     player1: player1_info,
                     player2: player2_info,
                     winner_id: match_row.winner_id,

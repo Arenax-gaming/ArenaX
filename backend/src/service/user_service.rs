@@ -369,7 +369,7 @@ impl UserService {
 }
 
 /// Data export job row (GDPR data portability).
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct DataExportJob {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -407,7 +407,7 @@ async fn build_user_export_archive(pool: &PgPool, user_id: Uuid) -> Result<Strin
         None => serde_json::json!(null),
     };
 
-    let transactions = sqlx::query_as::<_, serde_json::Value>(
+    let transactions = sqlx::query_scalar::<_, Option<serde_json::Value>>(
         r#"
         SELECT json_agg(t) AS agg FROM (
             SELECT id, transaction_type, amount, currency, status, reference,
@@ -421,7 +421,7 @@ async fn build_user_export_archive(pool: &PgPool, user_id: Uuid) -> Result<Strin
     .await
     .map_err(|e| e.to_string())?;
 
-    let match_history = sqlx::query_as::<_, serde_json::Value>(
+    let match_history = sqlx::query_scalar::<_, Option<serde_json::Value>>(
         r#"
         SELECT json_agg(m) AS agg FROM (
             SELECT id, match_type, status, game_mode, player1_id, player2_id,
@@ -441,8 +441,8 @@ async fn build_user_export_archive(pool: &PgPool, user_id: Uuid) -> Result<Strin
         "generated_at": Utc::now().to_rfc3339(),
         "user_id": user_id,
         "profile": profile_json,
-        "transactions": transactions,
-        "match_history": match_history,
+        "transactions": transactions.unwrap_or_else(|| serde_json::json!([])),
+        "match_history": match_history.unwrap_or_else(|| serde_json::json!([])),
     });
 
     Ok(serde_json::to_string_pretty(&archive).map_err(|e| e.to_string())?)

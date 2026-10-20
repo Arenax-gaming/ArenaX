@@ -58,13 +58,9 @@ where
 /// pattern, and finally to the raw path for unmatched (404) requests so the
 /// metric always has a `route` label.
 fn route_template(req: &ServiceRequest) -> String {
-    let matched = req.match_info().pattern().trim();
-    if matched.is_empty() || matched == "/" {
-        req.match_pattern()
-            .unwrap_or_else(|| req.path().to_string())
-    } else {
-        matched.to_string()
-    }
+    req.match_pattern()
+        .filter(|pattern| !pattern.trim().is_empty())
+        .unwrap_or_else(|| req.path().to_string())
 }
 
 pub struct RequestMetricsMiddleware<S> {

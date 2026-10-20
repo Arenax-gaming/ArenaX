@@ -11,7 +11,7 @@ use crate::service::notification_service::{NewNotification, NotificationRow, Not
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateNotificationRequest {
+pub struct CreateNotificationRequest {
     #[serde(rename = "type")]
     typ: Option<String>,
     title: String,

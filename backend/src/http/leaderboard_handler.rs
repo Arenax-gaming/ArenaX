@@ -1,4 +1,5 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
+use chrono::{Duration, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -7,7 +8,8 @@ use std::sync::Arc;
 
 use crate::api_error::ApiError;
 use crate::middleware::cache::ResponseCache;
-use crate::models::{PaginatedResponse, PaginationParams};
+use crate::auth::middleware::ClaimsExt;
+use crate::models::{CloseSeasonRequest, EloHistoryQuery, PaginatedResponse, PaginationParams};
 use crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster;
 use crate::service::leaderboard_sync::LeaderboardSync;
 use crate::service::LeaderboardService;
@@ -173,6 +175,17 @@ pub async fn get_leaderboard_stats(
 }
 
 // ─── Season close (#1075) ───────────────────────────────────────────────────
+
+fn require_admin(req: &HttpRequest) -> Result<(), ApiError> {
+    let claims = req
+        .claims()
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+    if claims.roles.contains(&"admin".to_string()) {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("ROLE_ADMIN required"))
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SeasonHistoryQuery {

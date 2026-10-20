@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use sqlx;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct IdempotencyService {
-    db_pool: DbPool,
+    pub(crate) db_pool: DbPool,
     policy: IdempotencyPolicy,
 }
 
@@ -35,26 +36,24 @@ impl IdempotencyService {
             )));
         }
 
-        let expires_at = Utc::now() + chrono::Duration::seconds(self.policy.default_ttl_seconds as i64);
+        let expires_at = Utc::now() + chrono::Duration::seconds(self.policy.ttl_seconds as i64);
 
-        sqlx::query!(
-            r#"
+        sqlx::query(r#"
             INSERT INTO idempotency_keys (
                 id, key, request_hash, response_status, 
                 response_headers, response_body, created_at, expires_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8
             ) ON CONFLICT (key) DO NOTHING
-            "#,
-            Uuid::new_v4(),
-            key,
-            request_hash,
-            response.status as i16,
-            response.headers,
-            response.body,
-            Utc::now(),
-            expires_at
-        )
+            "#)
+            .bind(Uuid::new_v4())
+            .bind(key)
+            .bind(request_hash)
+            .bind(response.status as i16)
+            .bind(response.headers)
+            .bind(response.body)
+            .bind(Utc::now())
+            .bind(expires_at)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -64,18 +63,15 @@ impl IdempotencyService {
 
     /// Get cached response for an idempotency key
     pub async fn get_cached_response(&self, key: &str) -> Result<Option<IdempotencyKey>, ApiError> {
-        let result = sqlx::query_as!(
-            IdempotencyKey,
-            r#"
+        let result = sqlx::query_as::<_, IdempotencyKey>(r#"
             SELECT * FROM idempotency_keys 
             WHERE key = $1 
             AND expires_at > NOW()
             AND used_at IS NOT NULL
             ORDER BY created_at DESC
             LIMIT 1
-            "#,
-            key
-        )
+            "#)
+            .bind(key)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -121,10 +117,8 @@ impl IdempotencyService {
 
     /// Mark an idempotency key as used
     pub async fn mark_key_used(&self, key: &str) -> Result<(), ApiError> {
-        sqlx::query!(
-            "UPDATE idempotency_keys SET used_at = NOW() WHERE key = $1",
-            key
-        )
+        sqlx::query("UPDATE idempotency_keys SET used_at = NOW() WHERE key = $1")
+            .bind(key)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -134,14 +128,12 @@ impl IdempotencyService {
 
     /// Clean up expired idempotency keys
     pub async fn cleanup_expired_keys(&self) -> Result<i64, ApiError> {
-        let result = sqlx::query!(
-            "DELETE FROM idempotency_keys WHERE expires_at <= NOW()"
-        )
+        let result = sqlx::query("DELETE FROM idempotency_keys WHERE expires_at <= NOW()")
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        Ok(result.rows_affected())
+        Ok(result.rows_affected() as i64)
     }
 
     /// Get statistics about idempotency key usage
@@ -190,19 +182,16 @@ impl IdempotencyService {
 
     /// Get idempotency keys for a specific user (for debugging/admin)
     pub async fn get_user_keys(&self, user_id: Uuid, limit: i64, offset: i64) -> Result<Vec<IdempotencyKey>, ApiError> {
-        let keys = sqlx::query_as!(
-            IdempotencyKey,
-            r#"
+        let keys = sqlx::query_as::<_, IdempotencyKey>(r#"
             SELECT ik.* FROM idempotency_keys ik
             JOIN request_logs rl ON ik.key = rl.idempotency_key
             WHERE rl.user_id = $1
             ORDER BY ik.created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-            user_id,
-            limit,
-            offset
-        )
+            "#)
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -212,10 +201,8 @@ impl IdempotencyService {
 
     /// Invalidate an idempotency key (admin function)
     pub async fn invalidate_key(&self, key: &str) -> Result<(), ApiError> {
-        sqlx::query!(
-            "DELETE FROM idempotency_keys WHERE key = $1",
-            key
-        )
+        sqlx::query("DELETE FROM idempotency_keys WHERE key = $1")
+            .bind(key)
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -227,8 +214,7 @@ impl IdempotencyService {
     pub async fn update_policy(&self, policy: IdempotencyPolicy) -> Result<(), ApiError> {
         // Update route configurations
         for route in &policy.enabled_routes {
-            sqlx::query!(
-                r#"
+            sqlx::query(r#"
                 INSERT INTO idempotency_configs (id, route_pattern, enabled, ttl_seconds, max_response_size_kb, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (route_pattern) 
@@ -237,15 +223,14 @@ impl IdempotencyService {
                     ttl_seconds = EXCLUDED.ttl_seconds,
                     max_response_size_kb = EXCLUDED.max_response_size_kb,
                     updated_at = EXCLUDED.updated_at
-                "#,
-                Uuid::new_v4(),
-                route,
-                true,
-                policy.default_ttl_seconds,
-                policy.max_response_size_kb,
-                Utc::now(),
-                Utc::now()
-            )
+                "#)
+                .bind(Uuid::new_v4())
+                .bind(route)
+                .bind(true)
+                .bind(policy.ttl_seconds as i32)
+                .bind(policy.max_response_size_kb as i32)
+                .bind(Utc::now())
+                .bind(Utc::now())
             .execute(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -256,11 +241,8 @@ impl IdempotencyService {
 
     /// Get route-specific configuration
     pub async fn get_route_config(&self, route_pattern: &str) -> Result<Option<IdempotencyConfig>, ApiError> {
-        let config = sqlx::query_as!(
-            IdempotencyConfig,
-            "SELECT * FROM idempotency_configs WHERE route_pattern = $1",
-            route_pattern
-        )
+        let config = sqlx::query_as::<_, IdempotencyConfig>("SELECT * FROM idempotency_configs WHERE route_pattern = $1")
+            .bind(route_pattern)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;

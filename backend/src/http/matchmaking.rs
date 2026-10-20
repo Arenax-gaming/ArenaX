@@ -330,7 +330,7 @@ pub async fn get_matchmaking_stats(
         FROM matchmaking_queue
         WHERE status = $1
           AND matched_at IS NOT NULL
-          AND created_at >= $2
+          AND joined_at >= $2
         GROUP BY game, game_mode
         "#,
         QueueStatus::Matched as _,
@@ -403,12 +403,9 @@ pub async fn get_elo(
         .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let game = path.into_inner();
 
-    let elo_record = sqlx::query_as!(
-        UserElo,
-        "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
-    )
+    let elo_record = sqlx::query_as::<_, UserElo>("SELECT * FROM user_elo WHERE user_id = $1 AND game = $2")
+        .bind(user_id)
+        .bind(&game)
     .fetch_optional(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -434,19 +431,16 @@ pub async fn get_elo_history(
     let (game, page, limit) = path.into_inner();
     let offset = (page - 1) * limit;
 
-    let history = sqlx::query_as!(
-        EloHistory,
-        r#"
+    let history = sqlx::query_as::<_, EloHistory>(r#"
         SELECT * FROM elo_history
         WHERE user_id = $1 AND game = $2
         ORDER BY created_at DESC
         LIMIT $3 OFFSET $4
-        "#,
-        user_id,
-        game,
-        limit,
-        offset
-    )
+        "#)
+        .bind(user_id)
+        .bind(game)
+        .bind(limit)
+        .bind(offset)
     .fetch_all(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -459,12 +453,9 @@ pub async fn get_elo_history(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn get_user_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<UserElo, ApiError> {
-    sqlx::query_as!(
-        UserElo,
-        "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
-    )
+    sqlx::query_as::<_, UserElo>("SELECT * FROM user_elo WHERE user_id = $1 AND game = $2")
+        .bind(user_id)
+        .bind(game)
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))
@@ -482,19 +473,17 @@ async fn create_default_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Resu
     let db_pool_clone = db_pool.clone();
 
     execute_transaction(&db_pool_clone, &config, move |tx| {
+        let game_clone = game_clone.clone();
         Box::pin(async move {
-            sqlx::query!(
-                "INSERT INTO user_elo (user_id, game, current_rating, wins, losses, draws, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, game) DO NOTHING",
-                user_id_clone,
-                game_clone,
-                1200i32,
-                0i32,
-                0i32,
-                0i32,
-                Utc::now(),
-                Utc::now()
-            )
+            sqlx::query("INSERT INTO user_elo (user_id, game, current_rating, wins, losses, draws, last_updated) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (user_id, game) DO NOTHING")
+                .bind(user_id_clone)
+                .bind(game_clone)
+                .bind(1200i32)
+                .bind(0i32)
+                .bind(0i32)
+                .bind(0i32)
+                .bind(Utc::now())
             .execute(&mut **tx)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -524,6 +513,8 @@ async fn add_to_database_queue(
     let db_pool_clone = db_pool.clone();
 
     execute_transaction(&db_pool_clone, &config, move |tx| {
+        let game_clone = game_clone.clone();
+        let game_mode_clone = game_mode_clone.clone();
         Box::pin(async move {
             // Check if user is already in queue (prevent duplicates)
             let existing = sqlx::query!(
@@ -588,6 +579,8 @@ async fn update_database_queue_status(
     let db_pool_clone = db_pool.clone();
 
     execute_transaction(&db_pool_clone, &config, move |tx| {
+        let game_clone = game_clone.clone();
+        let game_mode_clone = game_mode_clone.clone();
         Box::pin(async move {
             sqlx::query!(
                 "UPDATE matchmaking_queue SET status = $1 WHERE user_id = $2 AND game = $3 AND game_mode = $4 AND status = $5",
@@ -622,11 +615,11 @@ async fn get_matches_created_last_hour(db_pool: &DbPool) -> Result<i64, ApiError
 async fn get_overall_average_wait_time(db_pool: &DbPool) -> Result<f64, ApiError> {
     let result = sqlx::query!(
         r#"
-        SELECT AVG(EXTRACT(EPOCH FROM (matched_at - joined_at))::INTEGER) as avg_wait_seconds
+        SELECT AVG(EXTRACT(EPOCH FROM (matched_at - joined_at))::INTEGER)::float8 as avg_wait_seconds
         FROM matchmaking_queue
         WHERE status = $1
           AND matched_at IS NOT NULL
-          AND created_at >= $2
+          AND joined_at >= $2
         "#,
         QueueStatus::Matched as _,
         Utc::now() - chrono::Duration::hours(1)

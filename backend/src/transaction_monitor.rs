@@ -6,7 +6,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Transaction metrics for monitoring
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TransactionMetrics {
     pub transaction_id: Uuid,
     pub operation: String,
@@ -15,6 +15,7 @@ pub struct TransactionMetrics {
     pub completed_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<i64>,
     pub status: TransactionStatus,
+    #[sqlx(try_from = "i32")]
     pub retry_count: u32,
     pub error_message: Option<String>,
     pub metadata: serde_json::Value,
@@ -238,9 +239,7 @@ impl TransactionMonitor {
             return Ok(vec![]);
         }
 
-        let metrics = sqlx::query_as!(
-            TransactionMetrics,
-            r#"
+        let metrics = sqlx::query_as::<_, TransactionMetrics>(r#"
             SELECT
                 id as transaction_id,
                 operation,
@@ -248,17 +247,16 @@ impl TransactionMonitor {
                 started_at,
                 completed_at,
                 duration_ms,
-                status as "status: TransactionStatus",
+                status AS "status",
                 retry_count,
                 error_message,
                 metadata
             FROM transaction_monitor
             WHERE started_at >= $1 AND started_at <= $2
             ORDER BY started_at DESC
-            "#,
-            start_time,
-            end_time
-        )
+            "#)
+            .bind(start_time)
+            .bind(end_time)
         .fetch_all(&*self.db_pool)
         .await?;
 
@@ -283,10 +281,10 @@ impl TransactionMonitor {
                 COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_transactions,
                 COUNT(CASE WHEN status = 'retried' THEN 1 END) as retried_transactions,
                 COUNT(CASE WHEN status = 'rolled_back' THEN 1 END) as rolled_back_transactions,
-                AVG(duration_ms) as avg_duration_ms,
+                AVG(duration_ms)::float8 as avg_duration_ms,
                 MAX(duration_ms) as max_duration_ms,
                 MIN(duration_ms) as min_duration_ms,
-                AVG(retry_count) as avg_retry_count
+                AVG(retry_count)::float8 as avg_retry_count
             FROM transaction_monitor
             WHERE started_at >= $1 AND started_at <= $2
             "#,
@@ -321,9 +319,7 @@ impl TransactionMonitor {
         let threshold = chrono::Duration::seconds(threshold_seconds);
         let cutoff_time = Utc::now() - threshold;
 
-        let long_running = sqlx::query_as!(
-            TransactionMetrics,
-            r#"
+        let long_running = sqlx::query_as::<_, TransactionMetrics>(r#"
             SELECT
                 id as transaction_id,
                 operation,
@@ -331,7 +327,7 @@ impl TransactionMonitor {
                 started_at,
                 completed_at,
                 duration_ms,
-                status as "status: TransactionStatus",
+                status AS "status",
                 retry_count,
                 error_message,
                 metadata
@@ -340,9 +336,8 @@ impl TransactionMonitor {
               AND completed_at IS NULL
               AND status = 'started'
             ORDER BY started_at ASC
-            "#,
-            cutoff_time
-        )
+            "#)
+            .bind(cutoff_time)
         .fetch_all(&*self.db_pool)
         .await?;
 

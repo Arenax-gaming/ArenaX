@@ -134,53 +134,58 @@ pub struct EloHistory {
 
 // Enums
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum MatchType {
-    Tournament,
-    Casual,
-    Ranked,
-    Practice,
+    Tournament = 0,
+    Casual = 1,
+    Ranked = 2,
+    Practice = 3,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum MatchStatus {
-    Pending,
-    Scheduled,
-    InProgress,
-    Completed,
+    Pending = 0,
+    Scheduled = 1,
+    InProgress = 2,
+    Completed = 3,
     /// Automatically set when both players submit contradictory score reports.
     /// Requires manual or oracle-based resolution before the match can be finalized.
-    Conflict,
-    Disputed,
-    Cancelled,
-    Abandoned,
+    Conflict = 7,
+    Disputed = 4,
+    Cancelled = 5,
+    Abandoned = 6,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum DisputeStatus {
-    Pending,
-    UnderReview,
-    Resolved,
-    Rejected,
+    Pending = 0,
+    UnderReview = 1,
+    Resolved = 2,
+    Rejected = 3,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum QueueStatus {
-    Waiting,
-    Matched,
-    Expired,
-    Cancelled,
+    Waiting = 0,
+    Matched = 1,
+    Expired = 2,
+    Cancelled = 3,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[sqlx(type_name = "int4")]
+#[repr(i32)]
 pub enum MatchResult {
-    Win,
-    Loss,
-    Draw,
+    Win = 0,
+    Loss = 1,
+    Draw = 2,
 }
 
 // DTOs for API requests/responses
@@ -302,6 +307,80 @@ impl std::str::FromStr for MatchStatus {
             "cancelled" => Ok(MatchStatus::Cancelled),
             "abandoned" => Ok(MatchStatus::Abandoned),
             _ => Ok(MatchStatus::Pending),
+        }
+    }
+}
+
+
+impl From<i32> for MatchType {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `MatchType::Casual`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => MatchType::Tournament,
+            1 => MatchType::Casual,
+            2 => MatchType::Ranked,
+            3 => MatchType::Practice,
+            _ => MatchType::Casual,
+        }
+    }
+}
+
+impl From<i32> for MatchStatus {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `MatchStatus::Pending`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => MatchStatus::Pending,
+            1 => MatchStatus::Scheduled,
+            2 => MatchStatus::InProgress,
+            3 => MatchStatus::Completed,
+            7 => MatchStatus::Conflict,
+            4 => MatchStatus::Disputed,
+            5 => MatchStatus::Cancelled,
+            6 => MatchStatus::Abandoned,
+            _ => MatchStatus::Pending,
+        }
+    }
+}
+
+impl From<i32> for DisputeStatus {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `DisputeStatus::Pending`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => DisputeStatus::Pending,
+            1 => DisputeStatus::UnderReview,
+            2 => DisputeStatus::Resolved,
+            3 => DisputeStatus::Rejected,
+            _ => DisputeStatus::Pending,
+        }
+    }
+}
+
+impl From<i32> for QueueStatus {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `QueueStatus::Waiting`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => QueueStatus::Waiting,
+            1 => QueueStatus::Matched,
+            2 => QueueStatus::Expired,
+            3 => QueueStatus::Cancelled,
+            _ => QueueStatus::Waiting,
+        }
+    }
+}
+
+impl From<i32> for MatchResult {
+    /// Decodes the integer code stored in the database; unknown codes map to
+    /// `MatchResult::Draw`.
+    fn from(code: i32) -> Self {
+        match code {
+            0 => MatchResult::Win,
+            1 => MatchResult::Loss,
+            2 => MatchResult::Draw,
+            _ => MatchResult::Draw,
         }
     }
 }

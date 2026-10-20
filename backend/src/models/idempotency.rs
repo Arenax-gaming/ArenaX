@@ -67,6 +67,10 @@ pub struct IdempotencyPolicy {
     pub max_response_size_kb: u32,
     /// Status code returned on idempotency key conflict (default: 422)
     pub conflict_status_code: u16,
+    /// Route patterns with per-route idempotency configuration persisted to
+    /// `idempotency_configs`.
+    #[serde(default)]
+    pub enabled_routes: Vec<String>,
 }
 
 impl Default for IdempotencyPolicy {
@@ -77,6 +81,7 @@ impl Default for IdempotencyPolicy {
             ttl_seconds: 86400, // 24 hours
             max_response_size_kb: 1024, // 1MB
             conflict_status_code: 422,
+            enabled_routes: Vec::new(),
         }
     }
 }

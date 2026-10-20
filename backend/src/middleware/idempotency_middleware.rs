@@ -132,7 +132,7 @@ impl IdempotencyMiddleware {
         let mut conn = self.redis_conn.clone();
         match redis::cmd("GET")
             .arg(&redis_key)
-            .query_async::<_, Option<String>>(&mut conn)
+            .query_async::<Option<String>>(&mut conn)
             .await
         {
             Ok(Some(json_str)) => {
@@ -184,7 +184,7 @@ impl IdempotencyMiddleware {
             .arg(&json_value)
             .arg("EX")
             .arg(self.policy.ttl_seconds)
-            .query_async::<_, ()>(&mut conn)
+            .query_async::<()>(&mut conn)
             .await
         {
             Ok(()) => {

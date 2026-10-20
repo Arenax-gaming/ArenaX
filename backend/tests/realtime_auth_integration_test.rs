@@ -15,7 +15,9 @@ async fn test_ws_connection_requires_token() {
     let redis_client = redis::Client::open("redis://127.0.0.1/").unwrap();
     let redis_conn = redis::aio::ConnectionManager::new(redis_client).await.unwrap();
     let jwt_service = Arc::new(JwtService::new(jwt_config, redis_conn));
-    let db_pool = DbPool::default(); // Mock for test
+    let db_pool: DbPool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://localhost/arenax")
+        .unwrap();
     let auth_guard = Arc::new(RealtimeAuth::new(db_pool));
 
     let app = test::init_service(
@@ -39,7 +41,9 @@ async fn test_ws_connection_with_valid_token() {
     let redis_client = redis::Client::open("redis://127.0.0.1/").unwrap();
     let redis_conn = redis::aio::ConnectionManager::new(redis_client).await.unwrap();
     let jwt_service = Arc::new(JwtService::new(jwt_config, redis_conn));
-    let db_pool = DbPool::default();
+    let db_pool: DbPool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://localhost/arenax")
+        .unwrap();
     let auth_guard = Arc::new(RealtimeAuth::new(db_pool));
 
     let user_id = Uuid::new_v4();

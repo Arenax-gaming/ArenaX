@@ -212,7 +212,7 @@ impl AnalyticsService {
             active_players_30d: r.active_players_30d,
             total_staked: r.total_staked,
             total_volume: r.total_volume,
-            last_updated: r.last_updated.unwrap_or_else(Utc::now),
+            last_updated: r.last_updated,
         }).unwrap_or(PlatformMetricsResponse {
             total_matches_all_time: 0,
             active_players_30d: 0,

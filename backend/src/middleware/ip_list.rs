@@ -87,7 +87,7 @@ pub async fn add_to_blacklist(
     redis::cmd("SADD")
         .arg(BLACKLIST_KEY)
         .arg(ip)
-        .query_async(conn)
+        .query_async::<()>(conn)
         .await?;
 
     if ttl_secs > 0 {
@@ -96,7 +96,7 @@ pub async fn add_to_blacklist(
             .arg(&ttl_key)
             .arg(ttl_secs)
             .arg("1")
-            .query_async(conn)
+            .query_async::<()>(conn)
             .await?;
 
         // Schedule automatic removal from the set when the TTL expires.
@@ -130,7 +130,7 @@ pub async fn remove_from_blacklist(conn: &mut ConnectionManager, ip: &str) -> Re
     redis::cmd("SREM")
         .arg(BLACKLIST_KEY)
         .arg(ip)
-        .query_async(conn)
+        .query_async::<()>(conn)
         .await?;
 
     let ttl_key = format!("{}:{}", BLACKLIST_TTL_PREFIX, ip);
