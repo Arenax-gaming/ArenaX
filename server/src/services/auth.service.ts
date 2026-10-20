@@ -15,6 +15,7 @@ import {
     resolveTwitchProfileFromAuthorizationCode,
     validateTwitchToken
 } from './twitch-oauth.service';
+import { notificationService } from './notification.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -302,6 +303,15 @@ export const registerUser = async (input: RegisterInput) => {
                 // Don't fail registration if email fails
             }
 
+            try {
+                await notificationService.createDefaultPreferences(createdUser.id);
+            } catch (prefError) {
+                logger.warn('Failed to initialize default notification preferences', {
+                    userId: createdUser.id,
+                    error: prefError,
+                });
+            }
+
             const tokens = await issueSessionTokens(createdUser);
 
             logger.info('User registered', {
@@ -558,6 +568,9 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
                         await stellarWalletService.registerUserWallet(newUser.id, tx);
                         return newUser;
                     });
+                    try {
+                        await notificationService.createDefaultPreferences(createdUser.id);
+                    } catch {}
                     break;
                 } catch (error) {
                     if (isUniqueConstraintError(error, 'email')) {

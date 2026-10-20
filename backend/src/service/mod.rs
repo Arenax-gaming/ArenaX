@@ -39,6 +39,7 @@ pub mod staking_service;
 pub mod stellar_service;
 pub mod suspension_service;
 pub mod tournament_service;
+pub mod tournament_refund_tests;
 pub mod user_service;
 pub mod wallet_service;
 

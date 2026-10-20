@@ -7,6 +7,7 @@ import { getTournamentBannerUrl } from "@/lib/tournamentImageSizes";
 import { Card } from "@/components/ui/Card";
 import { Trophy, Users, Calendar, Zap } from "lucide-react";
 import { TournamentShareButton } from "@/components/tournaments/TournamentShareButton";
+import { getPrimarySponsor } from "@/components/sponsors/TournamentSponsorBadges";
 
 interface TournamentHeaderProps {
   tournament: Tournament;
@@ -51,6 +52,9 @@ const statusConfig: Record<
 
 export function TournamentHeader({ tournament, bannerSizes }: TournamentHeaderProps) {
   const status = statusConfig[tournament.status];
+  const primarySponsor = getPrimarySponsor(tournament);
+  const sponsorColor = primarySponsor?.brandColor || primarySponsor?.color;
+  const sponsorLogo = primarySponsor?.logoUrl || primarySponsor?.logo_url;
   const startDate = new Date(tournament.startTime);
   const participantPercentage = Math.round(
     (tournament.currentParticipants / tournament.maxParticipants) * 100,
@@ -87,12 +91,35 @@ export function TournamentHeader({ tournament, bannerSizes }: TournamentHeaderPr
       <div className="border-b p-6 md:p-8">
         <div className="space-y-4">
           {/* Status Badge */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span
               className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ${status.bgColor} ${status.color}`}
             >
               {status.label}
             </span>
+            {primarySponsor && (
+              <div
+                className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 border shadow-sm bg-background/90"
+                style={{
+                  borderColor: sponsorColor ? `${sponsorColor}80` : undefined,
+                  boxShadow: sponsorColor ? `0 0 10px ${sponsorColor}25` : undefined,
+                }}
+              >
+                {sponsorLogo && (
+                  <img
+                    src={sponsorLogo}
+                    alt={primarySponsor.name}
+                    className="h-5 w-5 rounded object-contain"
+                  />
+                )}
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: sponsorColor || "inherit" }}
+                >
+                  Presented by {primarySponsor.name}
+                </span>
+              </div>
+            )}
             {/* Share win button — only shown for completed tournaments (#897) */}
             {tournament.status === "completed" && (
               <TournamentShareButton

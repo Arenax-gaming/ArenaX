@@ -19,6 +19,26 @@ export const mockTournaments: Tournament[] = [
     createdBy: "admin",
     createdAt: "2026-01-20T10:00:00Z",
     updatedAt: "2026-03-25T17:30:00Z",
+    sponsors: [
+      {
+        id: "sponsor-1",
+        name: "HyperX",
+        logoUrl: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=64&h=64&fit=crop",
+        brandColor: "#e11d48",
+        tier: "title",
+        websiteUrl: "https://hyperx.com",
+        isActive: true,
+      },
+      {
+        id: "sponsor-2",
+        name: "Razer",
+        logoUrl: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=64&h=64&fit=crop",
+        brandColor: "#10b981",
+        tier: "presenting",
+        websiteUrl: "https://razer.com",
+        isActive: true,
+      },
+    ],
   },
   {
     id: "2",

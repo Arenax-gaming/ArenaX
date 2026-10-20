@@ -1,3 +1,15 @@
+export interface TournamentSponsor {
+  id?: string;
+  name: string;
+  logoUrl?: string;
+  logo_url?: string;
+  brandColor?: string;
+  color?: string;
+  websiteUrl?: string;
+  tier?: 'title' | 'presenting' | 'partner' | string;
+  isActive?: boolean;
+}
+
 // Tournament-related types
 export interface Tournament {
   id: string;
@@ -17,6 +29,8 @@ export interface Tournament {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  sponsors?: TournamentSponsor[];
+  sponsor?: TournamentSponsor;
 }
 
 export type TournamentStatus =
