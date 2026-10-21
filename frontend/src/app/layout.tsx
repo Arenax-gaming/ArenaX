@@ -17,6 +17,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { AnalyticsProvider } from "@/components/providers/AnalyticsProvider";
 import { ConsentBanner } from "@/components/providers/ConsentBanner";
+import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
 import { defaultMetadata, organizationStructuredData, websiteStructuredData } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -77,6 +78,10 @@ export default function RootLayout({
                         <WebVitalsInit />
                         {children}
                         <ConsentBanner />
+                        {/* Custom install banner (#1414): deferred
+                            beforeinstallprompt on Android/desktop, Share-sheet
+                            steps on iOS Safari, hidden 30 days after dismissal. */}
+                        <PwaInstallPrompt />
                       </AnalyticsProvider>
                     </NotificationProvider>
                   </TxStatusProvider>

@@ -96,3 +96,144 @@ fn test_submit_flag_and_get_confirmation() {
 // Integration with Reputation Index is tested by calling submit_flag with
 // set_reputation_contract set: the contract uses invoke_contract to call
 // apply_anticheat_penalty. See reputation-index tests for penalty capping and no underflow.
+
+// ── ZK proof batch verification (#1413) ──────────────────────────────────────
+
+mod mock_zk_verifier {
+    use crate::OracleBatchProof;
+    use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, Env, Vec};
+
+    /// Stand-in for the zk-proof contract: rejects (panics on) any proof whose
+    /// bytes are `b"invalid"`, and counts accepted batches so tests can check
+    /// that a failed batch left no trace.
+    #[contract]
+    pub struct MockZkVerifier;
+
+    #[contractimpl]
+    impl MockZkVerifier {
+        pub fn batch_verify(env: Env, verifier: Address, batch: Vec<OracleBatchProof>) -> u64 {
+            verifier.require_auth();
+            let invalid = Bytes::from_slice(&env, b"invalid");
+            for item in batch.iter() {
+                if item.proof_data == invalid {
+                    panic!("batch verification failed");
+                }
+            }
+            let calls: u64 = env
+                .storage()
+                .instance()
+                .get(&symbol_short!("calls"))
+                .unwrap_or(0)
+                + 1;
+            env.storage().instance().set(&symbol_short!("calls"), &calls);
+            calls
+        }
+
+        pub fn accepted_batches(env: Env) -> u64 {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("calls"))
+                .unwrap_or(0)
+        }
+    }
+}
+
+use mock_zk_verifier::{MockZkVerifier, MockZkVerifierClient};
+
+fn proof(env: &Env, bytes: &[u8]) -> crate::OracleBatchProof {
+    let mut inputs = soroban_sdk::Vec::new(env);
+    inputs.push_back(soroban_sdk::Bytes::from_slice(env, &[7u8; 32]));
+    crate::OracleBatchProof {
+        proof_data: soroban_sdk::Bytes::from_slice(env, bytes),
+        public_inputs: inputs,
+    }
+}
+
+fn setup_batch(
+    env: &Env,
+) -> (
+    AntiCheatOracleClient<'_>,
+    MockZkVerifierClient<'_>,
+    Address,
+) {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let oracle = Address::generate(env);
+
+    let oracle_id = env.register(AntiCheatOracle, ());
+    let client = AntiCheatOracleClient::new(env, &oracle_id);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
+    client.add_authorized_oracle(&oracle);
+
+    let verifier_id = env.register(MockZkVerifier, ());
+    client.set_zk_verifier(&verifier_id);
+    (client, MockZkVerifierClient::new(env, &verifier_id), oracle)
+}
+
+#[test]
+fn test_batch_verify_accepts_valid_batch() {
+    let env = Env::default();
+    let (client, verifier, oracle) = setup_batch(&env);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(proof(&env, b"proof-1"));
+    batch.push_back(proof(&env, b"proof-2"));
+
+    assert_eq!(client.batch_verify(&oracle, &batch), 1);
+    assert_eq!(client.get_proof_batch_count(), 1);
+    assert_eq!(verifier.accepted_batches(), 1);
+}
+
+#[test]
+fn test_batch_with_one_invalid_proof_reverts_entire_batch() {
+    let env = Env::default();
+    let (client, verifier, oracle) = setup_batch(&env);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(proof(&env, b"proof-1"));
+    batch.push_back(proof(&env, b"invalid"));
+    batch.push_back(proof(&env, b"proof-3"));
+
+    assert_eq!(
+        client.try_batch_verify(&oracle, &batch),
+        Err(Ok(AntiCheatError::ProofBatchVerificationFailed))
+    );
+    // The whole batch was reverted on both sides.
+    assert_eq!(client.get_proof_batch_count(), 0);
+    assert_eq!(verifier.accepted_batches(), 0);
+}
+
+#[test]
+fn test_batch_size_bounds() {
+    let env = Env::default();
+    let (client, _verifier, oracle) = setup_batch(&env);
+
+    let empty = soroban_sdk::Vec::new(&env);
+    assert_eq!(
+        client.try_batch_verify(&oracle, &empty),
+        Err(Ok(AntiCheatError::EmptyProofBatch))
+    );
+
+    let mut oversized = soroban_sdk::Vec::new(&env);
+    for _ in 0..(MAX_PROOF_BATCH_SIZE + 1) {
+        oversized.push_back(proof(&env, b"proof"));
+    }
+    assert_eq!(
+        client.try_batch_verify(&oracle, &oversized),
+        Err(Ok(AntiCheatError::ProofBatchTooLarge))
+    );
+}
+
+#[test]
+fn test_batch_verify_requires_authorized_oracle() {
+    let env = Env::default();
+    let (client, _verifier, _oracle) = setup_batch(&env);
+    let stranger = Address::generate(&env);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(proof(&env, b"proof-1"));
+    assert_eq!(
+        client.try_batch_verify(&stranger, &batch),
+        Err(Ok(AntiCheatError::OracleNotAuthorized))
+    );
+}

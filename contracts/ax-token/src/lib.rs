@@ -5,7 +5,8 @@ use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Map, String,
+    Symbol, Vec,
 };
 
 /// Minimal client for the staking-manager contract, used for composite
@@ -163,6 +164,36 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
+    // Configurable fee split (#1415)
+    /// Organizer share of processed fees, in basis points (0..=10_000).
+    FeeSplitBps,
+    /// Platform treasury that receives the remainder of each fee.
+    FeeTreasury,
+    /// Fee split value a governance proposal was created for.
+    FeeSplitProposal(u64),
+}
+
+/// Maximum value of `fee_split_bps` (100%).
+pub const MAX_FEE_SPLIT_BPS: u32 = 10_000;
+
+/// Outcome of `process_fee` (#1415).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSplitResult {
+    pub organizer: Address,
+    pub organizer_amount: i128,
+    pub platform_amount: i128,
+    pub fee_split_bps: u32,
+}
+
+/// Split `amount` into (organizer, platform) shares. The organizer share is
+/// rounded down; the platform keeps the remainder, so no dust is lost.
+pub fn split_fee(amount: i128, fee_split_bps: u32) -> (i128, i128) {
+    let organizer = amount
+        .checked_mul(fee_split_bps as i128)
+        .expect("fee overflow")
+        / MAX_FEE_SPLIT_BPS as i128;
+    (organizer, amount - organizer)
 }
 
 #[contract]
@@ -566,6 +597,138 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Configurable Fee Split (#1415)
+    // ---------------------------------------------------------------------------
+
+    /// Set the platform treasury that keeps the non-organizer share of fees.
+    /// Admin-only.
+    pub fn set_fee_treasury(env: Env, treasury: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeTreasury, &treasury);
+    }
+
+    pub fn get_fee_treasury(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::FeeTreasury)
+    }
+
+    /// Organizer share of fees in basis points. Defaults to 0 (all to the
+    /// platform) until governance sets it.
+    pub fn get_fee_split_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeSplitBps)
+            .unwrap_or(0)
+    }
+
+    /// Open a governance proposal to set `fee_split_bps` to `new_bps`.
+    ///
+    /// The value is bound to the proposal at creation, so the vote is on a
+    /// specific number and executing it cannot substitute another.
+    pub fn propose_fee_split(
+        env: Env,
+        proposer: Address,
+        new_bps: u32,
+        voting_duration: u64,
+    ) -> u64 {
+        if new_bps > MAX_FEE_SPLIT_BPS {
+            panic!("fee_split_bps must be between 0 and 10000");
+        }
+        let description = String::from_str(&env, "Update fee_split_bps");
+        let proposal_id = Self::create_proposal(env.clone(), proposer, description, voting_duration);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposal(proposal_id), &new_bps);
+        proposal_id
+    }
+
+    /// Apply a passed fee-split proposal. This is the only way to change
+    /// `fee_split_bps`.
+    pub fn set_fee_split_via_governance(env: Env, proposal_id: u64) -> u32 {
+        let new_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeSplitProposal(proposal_id))
+            .expect("not a fee split proposal");
+
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage().instance().set(&DataKey::FeeSplitBps, &new_bps);
+
+        env.events()
+            .publish((symbol_short!("FEE_BPS"), proposal_id), new_bps);
+        new_bps
+    }
+
+    /// Process a tournament fee of `amount` AX paid by `payer`.
+    ///
+    /// `fee_split_bps` of it goes to `organizer`; the remainder goes to the
+    /// platform treasury set by `set_fee_treasury`. Both legs move in one
+    /// call under a single flash-loan sequence check.
+    pub fn process_fee(env: Env, payer: Address, organizer: Address, amount: i128) -> FeeSplitResult {
+        payer.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeTreasury)
+            .expect("fee treasury not set");
+        if payer == organizer || payer == treasury {
+            panic!("payer cannot be a fee recipient");
+        }
+        if FlashLoanGuard::check_and_set_sequence(&env, &payer) {
+            panic!("flash loan detected: same-sequence transfer");
+        }
+        if Self::balance(&env, payer.clone()) < amount {
+            panic!("insufficient balance");
+        }
+
+        let bps = Self::get_fee_split_bps(env.clone());
+        let (organizer_amount, platform_amount) = split_fee(amount, bps);
+        if organizer_amount > 0 {
+            Self::move_balance(&env, &payer, &organizer, organizer_amount);
+        }
+        if platform_amount > 0 {
+            Self::move_balance(&env, &payer, &treasury, platform_amount);
+        }
+
+        env.events().publish(
+            (symbol_short!("FEE_SPLIT"), organizer.clone()),
+            (payer, amount, organizer_amount, platform_amount, bps),
+        );
+
+        FeeSplitResult {
+            organizer,
+            organizer_amount,
+            platform_amount,
+            fee_split_bps: bps,
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -1221,6 +1384,28 @@ impl AxToken {
     /// The address whose checkpoint currently represents `address`'s voting
     /// power: `address` itself, unless it has delegated away, in which case
     /// it's the delegatee.
+    /// Move `amount` between balances with checkpoint and transfer-event
+    /// bookkeeping, but without `transfer`'s auth / pause / flash-loan
+    /// checks — callers must have done those (used by `process_fee`).
+    fn move_balance(env: &Env, from: &Address, to: &Address, amount: i128) {
+        let from_balance = Self::balance(env, from.clone());
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
+        let to_balance = Self::balance(env, to.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &(to_balance + amount));
+
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, from), -amount);
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, to), amount);
+
+        events::emit_transfer(env, from, to, amount);
+    }
+
     fn voting_power_holder(env: &Env, address: &Address) -> Address {
         Self::get_delegate(env.clone(), address.clone()).unwrap_or_else(|| address.clone())
     }
