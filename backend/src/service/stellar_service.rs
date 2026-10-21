@@ -4,8 +4,12 @@ use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use redis::Client as RedisClient;
+use crate::middleware::horizon_circuit_breaker::{
+    BreakerSnapshot, BreakerState, HorizonBreakerConfig, HorizonCallError, HorizonCircuitBreaker,
+};
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -25,6 +29,37 @@ pub enum StellarError {
     DatabaseError(#[from] sqlx::Error),
     #[error("Stellar SDK error: {0}")]
     StellarSdkError(String),
+    /// Horizon is reachable but unhealthy (transport error, timeout, 5xx/429).
+    #[error("Stellar Horizon request failed: {0}")]
+    HorizonError(String),
+    /// The Horizon circuit breaker is open; the call was not attempted.
+    #[error("Stellar Horizon is temporarily unavailable (retry in {retry_after_secs}s)")]
+    HorizonUnavailable { retry_after_secs: u64 },
+}
+
+/// Per-request timeout for Horizon calls, so a hung Horizon counts as a
+/// failure in the circuit breaker instead of pinning a worker.
+const HORIZON_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Raw Horizon HTTP failure, classified for the circuit breaker.
+#[derive(Debug)]
+enum HorizonHttpError {
+    Transport(String),
+    Status(reqwest::StatusCode),
+}
+
+impl std::fmt::Display for HorizonHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(e) => write!(f, "transport error: {}", e),
+            Self::Status(status) => write!(f, "Horizon returned {}", status),
+        }
+    }
+}
+
+/// Whether a Horizon HTTP status signals an outage rather than a bad request.
+fn is_horizon_outage_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
 pub type DbPool = Arc<PgPool>;
@@ -85,6 +120,9 @@ pub struct StellarService {
     horizon_url: String,
     network_passphrase: String,
     admin_secret: Option<String>,
+    http_client: reqwest::Client,
+    /// Shared across clones so every handler sees the same Horizon health.
+    horizon_breaker: Arc<HorizonCircuitBreaker>,
 }
 
 impl StellarService {
@@ -101,7 +139,84 @@ impl StellarService {
             horizon_url,
             network_passphrase,
             admin_secret,
+            http_client: reqwest::Client::builder()
+                .timeout(HORIZON_REQUEST_TIMEOUT)
+                .build()
+                .unwrap_or_default(),
+            horizon_breaker: Arc::new(HorizonCircuitBreaker::new(HorizonBreakerConfig::from_env())),
         }
+    }
+
+    /// Replace the Horizon circuit breaker (e.g. to share one across services
+    /// or inject a test clock).
+    pub fn with_horizon_breaker(mut self, breaker: Arc<HorizonCircuitBreaker>) -> Self {
+        self.horizon_breaker = breaker;
+        self
+    }
+
+    pub fn horizon_breaker(&self) -> &Arc<HorizonCircuitBreaker> {
+        &self.horizon_breaker
+    }
+
+    /// Current Horizon circuit breaker state for `/health/stellar`.
+    pub fn horizon_health(&self) -> BreakerSnapshot {
+        self.horizon_breaker.snapshot()
+    }
+
+    // ========================================================================
+    // HORIZON ACCESS (circuit-breaker guarded, Issue #1346)
+    // ========================================================================
+
+    /// `GET` a Horizon URL through the circuit breaker.
+    ///
+    /// Transport errors, timeouts, 5xx and 429 count as Horizon failures; any
+    /// other response (including 404) is returned to the caller and counts as
+    /// a healthy Horizon. While the breaker is open the request is not sent
+    /// and [`StellarError::HorizonUnavailable`] is returned instead.
+    async fn horizon_get(&self, url: &str) -> Result<reqwest::Response, StellarError> {
+        let client = &self.http_client;
+        let result = self
+            .horizon_breaker
+            .call(
+                |_: &HorizonHttpError| true,
+                || async {
+                    let response = client
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(|e| HorizonHttpError::Transport(e.to_string()))?;
+                    if is_horizon_outage_status(response.status()) {
+                        return Err(HorizonHttpError::Status(response.status()));
+                    }
+                    Ok(response)
+                },
+            )
+            .await;
+
+        match result {
+            Ok(response) => Ok(response),
+            Err(HorizonCallError::Open(open)) => Err(StellarError::HorizonUnavailable {
+                retry_after_secs: open.retry_after_secs,
+            }),
+            Err(HorizonCallError::Inner(e)) => Err(StellarError::HorizonError(e.to_string())),
+        }
+    }
+
+    /// Probe Horizon's root endpoint through the breaker.
+    ///
+    /// While half-open this doubles as the recovery probe, so the breaker can
+    /// close again even when no user traffic is hitting Stellar endpoints.
+    pub async fn probe_horizon(&self) -> bool {
+        self.horizon_get(self.horizon_url.trim_end_matches('/'))
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    }
+
+    /// Whether `/health/stellar` should send a probe: only once the open
+    /// cool-down has elapsed, so health checks never hammer a down Horizon.
+    pub fn horizon_wants_probe(&self) -> bool {
+        self.horizon_breaker.state() == BreakerState::HalfOpen
     }
 
     // ========================================================================
@@ -555,33 +670,35 @@ impl StellarService {
     }
 
     /// Verify a Stellar transaction on the network
+    ///
+    /// Queries Horizon's `/transactions/{hash}` through the circuit breaker:
+    /// a successful transaction yields `true`, an unknown or failed one
+    /// `false`. Horizon outages surface as [`StellarError::HorizonError`] /
+    /// [`StellarError::HorizonUnavailable`] (HTTP 503) rather than a guess.
     pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, StellarError> {
-        // TODO: Implement actual verification by querying Horizon
-        // let client = reqwest::Client::new();
-        // let response = client
-        //     .get(&format!("{}/transactions/{}", self.horizon_url, tx_hash))
-        //     .send()
-        //     .await
-        //     .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+        let url = format!(
+            "{}/transactions/{}",
+            self.horizon_url.trim_end_matches('/'),
+            urlencoding_encode(tx_hash)
+        );
+        let response = self.horizon_get(&url).await?;
 
-        // if response.status().is_success() {
-        //     // Update transaction status in database
-        //     sqlx::query!(
-        //         r#"
-        //         UPDATE stellar_transactions
-        //         SET status = 'completed', completed_at = $1
-        //         WHERE transaction_hash = $2
-        //         "#,
-        //         Utc::now(),
-        //         tx_hash
-        //     )
-        //     .execute(&*self.db_pool)
-        //     .await?;
-        //     return Ok(true);
-        // }
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !status.is_success() {
+            return Err(StellarError::TransactionFailed(format!(
+                "Horizon returned {} for transaction {}",
+                status, tx_hash
+            )));
+        }
 
-        tracing::warn!("Transaction verification not implemented, returning true");
-        Ok(true)
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| StellarError::HorizonError(e.to_string()))?;
+        Ok(body["successful"].as_bool().unwrap_or(false))
     }
 
     /// Get transaction by hash

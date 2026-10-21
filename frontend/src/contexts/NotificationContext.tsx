@@ -93,7 +93,7 @@ interface NotificationContextType {
   toggleAlertsMuted: () => void;
 }
 
-const NotificationContext = createContext<NotificationContextType | undefined>(
+export const NotificationContext = createContext<NotificationContextType | undefined>(
   undefined
 );
 

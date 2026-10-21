@@ -6,11 +6,19 @@
 //! # Features
 //! - Generic `invoke()` method for contract function calls
 //! - Network configuration support (testnet/mainnet/custom)
-//! - Automatic retries with exponential backoff
+//! - Automatic retries with exponential backoff and jitter
+//! - Idempotent, exactly-once submission keyed by an idempotency key (#1345)
 //! - Event decoding from transaction results
 //! - Full transaction lifecycle management
 
+use crate::service::idempotency_service::{
+    ReserveOutcome, SubmissionRecord, SubmissionStatus, SubmissionStore, SubmissionStoreError,
+    SUBMISSION_RESERVATION_LEASE_SECS,
+};
+use crate::transaction::BackoffPolicy;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -97,6 +105,9 @@ pub struct RetryConfig {
     pub initial_delay_ms: u64,
     pub max_delay_ms: u64,
     pub backoff_multiplier: f64,
+    /// Fraction (0.0–1.0) of each backoff delay that is randomised, so many
+    /// clients retrying after the same outage don't hit the RPC in lock-step.
+    pub jitter: f64,
 }
 
 impl Default for RetryConfig {
@@ -106,7 +117,364 @@ impl Default for RetryConfig {
             initial_delay_ms: 1000,
             max_delay_ms: 10000,
             backoff_multiplier: 2.0,
+            jitter: 0.5,
         }
+    }
+}
+
+impl RetryConfig {
+    /// The equivalent [`BackoffPolicy`].
+    pub fn backoff(&self) -> BackoffPolicy {
+        BackoffPolicy {
+            max_retries: self.max_retries,
+            initial_delay: Duration::from_millis(self.initial_delay_ms),
+            max_delay: Duration::from_millis(self.max_delay_ms),
+            multiplier: self.backoff_multiplier,
+            jitter: self.jitter,
+        }
+    }
+}
+
+// =============================================================================
+// IDEMPOTENT SUBMISSION (Issue #1345)
+// =============================================================================
+
+/// A contract invocation to submit exactly once.
+#[derive(Clone)]
+pub struct SorobanInvocation {
+    pub contract_id: String,
+    pub function_name: String,
+    pub args: serde_json::Value,
+    pub signer_secret: String,
+}
+
+impl std::fmt::Debug for SorobanInvocation {
+    // Never print the signer secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SorobanInvocation")
+            .field("contract_id", &self.contract_id)
+            .field("function_name", &self.function_name)
+            .field("args", &self.args)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SorobanInvocation {
+    /// Fingerprint of the request (not the signer), used to reject reuse of
+    /// an idempotency key for a different payload.
+    pub fn request_hash(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.contract_id.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(self.function_name.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(self.args.to_string().as_bytes());
+        hex::encode(hasher.finalize())
+    }
+}
+
+/// A signed transaction that has not necessarily been sent yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedTx {
+    pub hash: String,
+    pub envelope: String,
+}
+
+/// The network-facing steps of a submission, abstracted so the idempotent
+/// retry loop can run against the real RPC or a simulated network in tests.
+pub trait SubmissionBackend: Send + Sync {
+    /// Simulate, build and sign — no network side effects.
+    fn prepare<'a>(
+        &'a self,
+        invocation: &'a SorobanInvocation,
+    ) -> BoxFuture<'a, Result<PreparedTx, SorobanError>>;
+
+    /// Final on-ledger result for `tx_hash`, or `None` if the network has not
+    /// applied it (unknown or still pending).
+    fn lookup<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<SorobanTxResult>, SorobanError>>;
+
+    /// Send the signed envelope; returns the hash the network assigned.
+    fn send<'a>(&'a self, prepared: &'a PreparedTx) -> BoxFuture<'a, Result<String, SorobanError>>;
+
+    /// Wait for the transaction to reach a final state.
+    fn await_result<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<SorobanTxResult, SorobanError>>;
+}
+
+impl SorobanError {
+    /// Whether retrying the same submission may succeed (network blips, RPC
+    /// overload, results not yet visible) as opposed to a permanent rejection.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            SorobanError::RpcError(_)
+                | SorobanError::NetworkError(_)
+                | SorobanError::RetryLimitExceeded
+        )
+    }
+}
+
+impl From<SubmissionStoreError> for SorobanError {
+    fn from(err: SubmissionStoreError) -> Self {
+        match err {
+            SubmissionStoreError::PayloadMismatch(key) => SorobanError::IdempotencyConflict(key),
+            other => SorobanError::Idempotency(other.to_string()),
+        }
+    }
+}
+
+fn stored_result(record: &SubmissionRecord) -> Result<SorobanTxResult, SorobanError> {
+    let value = record.result.clone().ok_or_else(|| {
+        SorobanError::Idempotency(format!(
+            "submission '{}' is {} but has no stored result",
+            record.idempotency_key,
+            record.status.as_str()
+        ))
+    })?;
+    Ok(serde_json::from_value(value)?)
+}
+
+async fn finish(
+    store: &dyn SubmissionStore,
+    key: &str,
+    result: SorobanTxResult,
+) -> Result<SorobanTxResult, SorobanError> {
+    let status = match result.status {
+        TxStatus::Failed => SubmissionStatus::Failed,
+        _ => SubmissionStatus::Completed,
+    };
+    store
+        .mark_finished(key, status, &serde_json::to_value(&result)?)
+        .await?;
+    // Another worker may have finished first; its result is authoritative.
+    match store.get(key).await? {
+        Some(record) if record.result.is_some() => stored_result(&record),
+        _ => Ok(result),
+    }
+}
+
+/// Submit `invocation` at most once per `idempotency_key`, retrying transient
+/// failures with exponential backoff and jitter.
+///
+/// 1. The key is persisted (`reserved`) before anything touches the network.
+///    A key that already has a terminal result returns that result without
+///    re-executing; a key reused for a different payload is rejected.
+/// 2. The transaction is signed and its envelope + hash persisted (`signed`)
+///    *before* the first send.
+/// 3. Every attempt first looks the hash up on the ledger and only re-sends
+///    the identical envelope when the network has not applied it, so a lost
+///    response (mid-flight failure) never produces a second execution.
+/// 4. The final result is persisted (`completed` / `failed`).
+///
+/// If retries are exhausted the key stays `signed`; calling again with the
+/// same key resumes from step 3.
+pub async fn submit_idempotent(
+    store: &dyn SubmissionStore,
+    backend: &dyn SubmissionBackend,
+    policy: &BackoffPolicy,
+    idempotency_key: &str,
+    invocation: &SorobanInvocation,
+) -> Result<SorobanTxResult, SorobanError> {
+    let request_hash = invocation.request_hash();
+
+    let record = match store.reserve(idempotency_key, &request_hash).await? {
+        ReserveOutcome::Reserved(record) => record,
+        ReserveOutcome::Existing(record) => {
+            if record.status.is_terminal() {
+                info!(
+                    idempotency_key,
+                    status = record.status.as_str(),
+                    "Duplicate Soroban submission; returning original result"
+                );
+                return stored_result(&record);
+            }
+            let lease_active = record.status == SubmissionStatus::Reserved
+                && chrono::Utc::now().signed_duration_since(record.updated_at)
+                    < chrono::Duration::seconds(SUBMISSION_RESERVATION_LEASE_SECS);
+            if lease_active {
+                return Err(SorobanError::SubmissionInProgress(idempotency_key.to_string()));
+            }
+            record
+        }
+    };
+
+    // Reuse the persisted envelope when resuming so a retry can only ever
+    // re-send the transaction that may already be on the ledger.
+    let mut prepared = match (record.tx_hash, record.signed_envelope) {
+        (Some(hash), Some(envelope)) => PreparedTx { hash, envelope },
+        _ => {
+            let prepared = backend.prepare(invocation).await?;
+            store
+                .mark_signed(idempotency_key, &prepared.hash, &prepared.envelope)
+                .await?;
+            prepared
+        }
+    };
+
+    let contract = invocation.contract_id.as_str();
+    let method = invocation.function_name.as_str();
+    let mut attempt: u32 = 0;
+    loop {
+        let outcome: Result<SorobanTxResult, SorobanError> = async {
+            // Check stored/network status before (re-)submitting.
+            if let Some(result) = backend.lookup(&prepared.hash).await? {
+                debug!(tx_hash = %prepared.hash, "Transaction already applied; not re-sending");
+                return Ok(result);
+            }
+
+            store.record_attempt(idempotency_key).await?;
+            let network_hash = backend.send(&prepared).await?;
+            log_soroban_event(SorobanEventStatus::Submit, &network_hash, contract, method);
+            if network_hash != prepared.hash {
+                store
+                    .mark_signed(idempotency_key, &network_hash, &prepared.envelope)
+                    .await?;
+                prepared.hash = network_hash;
+            }
+
+            let result = backend.await_result(&prepared.hash).await?;
+            if result.status == TxStatus::Pending {
+                return Err(SorobanError::RetryLimitExceeded);
+            }
+            Ok::<_, SorobanError>(result)
+        }
+        .await;
+
+        match outcome {
+            Ok(result) => return finish(store, idempotency_key, result).await,
+            Err(e) if e.is_transient() && attempt < policy.max_retries => {
+                let delay = policy.delay_for(attempt);
+                attempt += 1;
+                log_soroban_event(SorobanEventStatus::Retry, &prepared.hash, contract, method);
+                warn!(
+                    idempotency_key,
+                    tx_hash = %prepared.hash,
+                    attempt,
+                    delay_ms = delay.as_millis() as u64,
+                    error = %e,
+                    "Transient Soroban submission failure; retrying"
+                );
+                tokio::time::sleep(delay).await;
+            }
+            Err(e) if e.is_transient() => {
+                // Leave the key `signed`: a later call resumes safely.
+                log_soroban_event(SorobanEventStatus::Dlq, &prepared.hash, contract, method);
+                return Err(e);
+            }
+            Err(e) => {
+                // Permanent rejection: record it so duplicates get the same answer.
+                log_soroban_event(SorobanEventStatus::Dlq, &prepared.hash, contract, method);
+                let failed = SorobanTxResult {
+                    hash: prepared.hash.clone(),
+                    status: TxStatus::Failed,
+                    error: Some(e.to_string()),
+                };
+                return finish(store, idempotency_key, failed).await;
+            }
+        }
+    }
+}
+
+/// [`SubmissionBackend`] over a live Soroban RPC endpoint.
+struct RpcSubmissionBackend<'s> {
+    service: &'s SorobanService,
+    contract_id: &'s str,
+    function_name: &'s str,
+}
+
+impl SubmissionBackend for RpcSubmissionBackend<'_> {
+    fn prepare<'a>(
+        &'a self,
+        invocation: &'a SorobanInvocation,
+    ) -> BoxFuture<'a, Result<PreparedTx, SorobanError>> {
+        Box::pin(async move {
+            let simulated = self
+                .service
+                .simulate_transaction(
+                    &invocation.contract_id,
+                    &invocation.function_name,
+                    &invocation.args,
+                    &invocation.signer_secret,
+                )
+                .await?;
+            let envelope = self
+                .service
+                .build_and_sign_transaction(
+                    &invocation.contract_id,
+                    &invocation.function_name,
+                    &invocation.args,
+                    &invocation.signer_secret,
+                    &simulated.transaction_data,
+                    &simulated.min_resource_fee,
+                )
+                .await?;
+            let hash = hex::encode(Sha256::digest(envelope.as_bytes()));
+            Ok(PreparedTx { hash, envelope })
+        })
+    }
+
+    fn lookup<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<SorobanTxResult>, SorobanError>> {
+        Box::pin(async move {
+            // Deserialize loosely: NOT_FOUND responses omit most fields.
+            let response: serde_json::Value = self
+                .service
+                .rpc_call("getTransaction", serde_json::json!({ "hash": tx_hash }))
+                .await?;
+            let status = match response.get("status").and_then(|s| s.as_str()) {
+                Some("SUCCESS") => TxStatus::Success,
+                Some("FAILED") => TxStatus::Failed,
+                _ => return Ok(None),
+            };
+            Ok(Some(SorobanTxResult {
+                hash: tx_hash.to_string(),
+                status,
+                error: (status == TxStatus::Failed)
+                    .then(|| "Transaction failed on network".to_string()),
+            }))
+        })
+    }
+
+    fn send<'a>(&'a self, prepared: &'a PreparedTx) -> BoxFuture<'a, Result<String, SorobanError>> {
+        Box::pin(async move {
+            let response: serde_json::Value = self
+                .service
+                .rpc_call(
+                    "sendTransaction",
+                    serde_json::json!({ "transaction": prepared.envelope }),
+                )
+                .await?;
+            let hash = response
+                .get("hash")
+                .and_then(|h| h.as_str())
+                .unwrap_or(&prepared.hash)
+                .to_string();
+            match response.get("status").and_then(|s| s.as_str()) {
+                // DUPLICATE: the identical envelope is already known — not an error.
+                Some("PENDING") | Some("DUPLICATE") | None => Ok(hash),
+                Some("TRY_AGAIN_LATER") => {
+                    Err(SorobanError::RpcError("RPC asked to try again later".to_string()))
+                }
+                Some(other) => Err(SorobanError::TransactionFailed(format!(
+                    "sendTransaction returned {}",
+                    other
+                ))),
+            }
+        })
+    }
+
+    fn await_result<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<SorobanTxResult, SorobanError>> {
+        Box::pin(self.service.monitor_transaction(tx_hash, self.contract_id, self.function_name))
     }
 }
 
@@ -174,6 +542,12 @@ pub enum SorobanError {
     InvalidContract(String),
     #[error("Retry limit exceeded")]
     RetryLimitExceeded,
+    #[error("Idempotency key '{0}' was already used with a different payload")]
+    IdempotencyConflict(String),
+    #[error("Submission for idempotency key '{0}' is already in progress")]
+    SubmissionInProgress(String),
+    #[error("Idempotency store error: {0}")]
+    Idempotency(String),
 }
 
 /// RPC request/response types
@@ -364,6 +738,46 @@ impl SorobanService {
         Ok(result)
     }
 
+    /// Invoke a contract function exactly once per `idempotency_key`.
+    ///
+    /// Safe to call repeatedly (client retries, worker restarts): see
+    /// [`submit_idempotent`] for the guarantees. Use
+    /// [`crate::service::idempotency_service::PgSubmissionStore`] in production
+    /// so keys survive restarts.
+    pub async fn invoke_idempotent(
+        &self,
+        store: &dyn SubmissionStore,
+        idempotency_key: &str,
+        contract_id: &str,
+        function_name: &str,
+        args: &serde_json::Value,
+        signer_secret: &str,
+    ) -> Result<SorobanTxResult, SorobanError> {
+        crate::metrics::record_soroban_submitted(contract_id, function_name);
+        let invocation = SorobanInvocation {
+            contract_id: contract_id.to_string(),
+            function_name: function_name.to_string(),
+            args: args.clone(),
+            signer_secret: signer_secret.to_string(),
+        };
+        let backend = RpcSubmissionBackend {
+            service: self,
+            contract_id,
+            function_name,
+        };
+        submit_idempotent(
+            store,
+            &backend,
+            &self.retry_config.backoff(),
+            idempotency_key,
+            &invocation,
+        )
+        .await
+        .inspect_err(|_| {
+            crate::metrics::record_soroban_failed(contract_id, function_name, "idempotent_submit")
+        })
+    }
+
     /// Estimate gas costs for a transaction pre-execution
     pub async fn estimate_gas(
         &self,
@@ -501,7 +915,7 @@ impl SorobanService {
         function_name: &str,
     ) -> Result<SorobanTxResult, SorobanError> {
         let mut attempt = 0;
-        let mut delay = self.retry_config.initial_delay_ms;
+        let backoff = self.retry_config.backoff();
 
         loop {
             match self.get_transaction_status(tx_hash).await {
@@ -561,20 +975,18 @@ impl SorobanService {
                 }
             }
 
+            // Exponential backoff with jitter
+            let delay = backoff.delay_for(attempt);
             attempt += 1;
             log_soroban_event(SorobanEventStatus::Retry, tx_hash, contract_id, function_name);
             debug!(
                 tx_hash = tx_hash,
                 attempt = attempt,
-                delay_ms = delay,
+                delay_ms = delay.as_millis() as u64,
                 "Waiting before retry"
             );
 
-            tokio::time::sleep(Duration::from_millis(delay)).await;
-
-            // Exponential backoff
-            delay = (delay as f64 * self.retry_config.backoff_multiplier) as u64;
-            delay = delay.min(self.retry_config.max_delay_ms);
+            tokio::time::sleep(delay).await;
         }
     }
 
@@ -864,6 +1276,7 @@ mod tests {
             initial_delay_ms: 500,
             max_delay_ms: 5000,
             backoff_multiplier: 1.5,
+            jitter: 0.0,
         };
 
         assert_eq!(config.max_retries, 5);
@@ -880,6 +1293,7 @@ mod tests {
             initial_delay_ms: 2000,
             max_delay_ms: 20000,
             backoff_multiplier: 3.0,
+            jitter: 0.5,
         };
 
         let service = SorobanService::with_retry_config(network, retry_config);
@@ -940,5 +1354,288 @@ mod tests {
         assert_eq!(deserialized.cpu_instructions, 1500000);
         assert_eq!(deserialized.memory_bytes, 45000);
         assert_eq!(deserialized.min_resource_fee, "100");
+    }
+}
+
+/// Exactly-once submission tests against a simulated network (Issue #1345).
+#[cfg(test)]
+mod idempotent_submission_tests {
+    use super::*;
+    use crate::service::idempotency_service::InMemorySubmissionStore;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Mutex;
+
+    /// A fake ledger. Applying the same envelope twice is a no-op, like the
+    /// real network (the source sequence number is consumed on first apply).
+    #[derive(Default)]
+    struct SimulatedNetwork {
+        ledger: Mutex<HashMap<String, TxStatus>>,
+        /// Times contract logic actually ran on the ledger.
+        executions: AtomicU32,
+        prepares: AtomicU32,
+        sends: AtomicU32,
+        /// Sends that are applied on-chain but whose response is lost.
+        lost_send_responses: AtomicU32,
+        /// Lookups that fail with a transient RPC error.
+        failing_lookups: AtomicU32,
+        /// Reject every send permanently.
+        reject_sends: bool,
+    }
+
+    fn take(counter: &AtomicU32) -> bool {
+        counter
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+    }
+
+    fn result_for(hash: &str, status: TxStatus) -> SorobanTxResult {
+        SorobanTxResult {
+            hash: hash.to_string(),
+            status,
+            error: None,
+        }
+    }
+
+    impl SubmissionBackend for SimulatedNetwork {
+        fn prepare<'a>(
+            &'a self,
+            invocation: &'a SorobanInvocation,
+        ) -> BoxFuture<'a, Result<PreparedTx, SorobanError>> {
+            Box::pin(async move {
+                let n = self.prepares.fetch_add(1, Ordering::SeqCst);
+                let hash = format!("tx-{}-{}", &invocation.request_hash()[..12], n);
+                Ok(PreparedTx {
+                    envelope: format!("envelope-for-{}", hash),
+                    hash,
+                })
+            })
+        }
+
+        fn lookup<'a>(
+            &'a self,
+            tx_hash: &'a str,
+        ) -> BoxFuture<'a, Result<Option<SorobanTxResult>, SorobanError>> {
+            Box::pin(async move {
+                if take(&self.failing_lookups) {
+                    return Err(SorobanError::RpcError("lookup timed out".into()));
+                }
+                let ledger = self.ledger.lock().unwrap();
+                Ok(ledger.get(tx_hash).map(|s| result_for(tx_hash, *s)))
+            })
+        }
+
+        fn send<'a>(&'a self, prepared: &'a PreparedTx) -> BoxFuture<'a, Result<String, SorobanError>> {
+            Box::pin(async move {
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                if self.reject_sends {
+                    return Err(SorobanError::TransactionFailed("txBAD_AUTH".into()));
+                }
+                {
+                    let mut ledger = self.ledger.lock().unwrap();
+                    if !ledger.contains_key(&prepared.hash) {
+                        ledger.insert(prepared.hash.clone(), TxStatus::Success);
+                        self.executions.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                if take(&self.lost_send_responses) {
+                    // Applied on-chain, but the client never hears back.
+                    return Err(SorobanError::RpcError("connection reset by peer".into()));
+                }
+                Ok(prepared.hash.clone())
+            })
+        }
+
+        fn await_result<'a>(
+            &'a self,
+            tx_hash: &'a str,
+        ) -> BoxFuture<'a, Result<SorobanTxResult, SorobanError>> {
+            Box::pin(async move {
+                let ledger = self.ledger.lock().unwrap();
+                Ok(result_for(
+                    tx_hash,
+                    ledger.get(tx_hash).copied().unwrap_or(TxStatus::Pending),
+                ))
+            })
+        }
+    }
+
+    fn invocation() -> SorobanInvocation {
+        SorobanInvocation {
+            contract_id: "CPRIZE".into(),
+            function_name: "distribute".into(),
+            args: serde_json::json!({ "tournament": "t-1", "amount": 500 }),
+            signer_secret: "SSECRET".into(),
+        }
+    }
+
+    fn fast_policy(max_retries: u32) -> BackoffPolicy {
+        BackoffPolicy {
+            max_retries,
+            initial_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(5),
+            multiplier: 2.0,
+            jitter: 0.5,
+        }
+    }
+
+    #[tokio::test]
+    async fn mid_flight_failure_executes_exactly_once() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        network.lost_send_responses.store(1, Ordering::SeqCst);
+
+        let result = submit_idempotent(&store, &network, &fast_policy(3), "idem-key-1", &invocation())
+            .await
+            .expect("retry should recover the applied transaction");
+
+        assert_eq!(result.status, TxStatus::Success);
+        assert_eq!(network.executions.load(Ordering::SeqCst), 1, "executed exactly once");
+        assert_eq!(network.sends.load(Ordering::SeqCst), 1, "lookup prevented a re-send");
+        assert_eq!(network.prepares.load(Ordering::SeqCst), 1);
+
+        let record = store.get("idem-key-1").await.unwrap().unwrap();
+        assert_eq!(record.status, SubmissionStatus::Completed);
+        assert_eq!(record.tx_hash.as_deref(), Some(result.hash.as_str()));
+        assert_eq!(record.attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn duplicate_key_returns_original_result_without_reexecuting() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        let policy = fast_policy(3);
+
+        let first = submit_idempotent(&store, &network, &policy, "idem-key-2", &invocation())
+            .await
+            .unwrap();
+        let second = submit_idempotent(&store, &network, &policy, "idem-key-2", &invocation())
+            .await
+            .unwrap();
+
+        assert_eq!(first.hash, second.hash);
+        assert_eq!(second.status, TxStatus::Success);
+        assert_eq!(network.prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(network.sends.load(Ordering::SeqCst), 1);
+        assert_eq!(network.executions.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn exhausted_retries_resume_on_next_call_without_double_execution() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        network.lost_send_responses.store(1, Ordering::SeqCst);
+
+        // No retries: the lost response surfaces as a transient error, and the
+        // key is left `signed` with the envelope persisted.
+        let err = submit_idempotent(&store, &network, &fast_policy(0), "idem-key-3", &invocation())
+            .await
+            .unwrap_err();
+        assert!(err.is_transient());
+        let record = store.get("idem-key-3").await.unwrap().unwrap();
+        assert_eq!(record.status, SubmissionStatus::Signed);
+
+        // The client retries with the same key (e.g. after a worker restart).
+        let result = submit_idempotent(&store, &network, &fast_policy(3), "idem-key-3", &invocation())
+            .await
+            .unwrap();
+        assert_eq!(result.status, TxStatus::Success);
+        assert_eq!(network.executions.load(Ordering::SeqCst), 1);
+        assert_eq!(network.prepares.load(Ordering::SeqCst), 1, "persisted envelope reused");
+        assert_eq!(network.sends.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn transient_lookup_failures_are_retried() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        network.failing_lookups.store(2, Ordering::SeqCst);
+
+        let result = submit_idempotent(&store, &network, &fast_policy(3), "idem-key-4", &invocation())
+            .await
+            .unwrap();
+        assert_eq!(result.status, TxStatus::Success);
+        assert_eq!(network.executions.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retries_stop_at_max_retries() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        network.failing_lookups.store(10, Ordering::SeqCst);
+
+        let err = submit_idempotent(&store, &network, &fast_policy(2), "idem-key-5", &invocation())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SorobanError::RpcError(_)));
+        // 1 initial attempt + 2 retries consumed 3 failing lookups.
+        assert_eq!(network.failing_lookups.load(Ordering::SeqCst), 7);
+        assert_eq!(network.sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn key_reuse_with_different_payload_is_rejected() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        let policy = fast_policy(1);
+
+        submit_idempotent(&store, &network, &policy, "idem-key-6", &invocation())
+            .await
+            .unwrap();
+
+        let mut other = invocation();
+        other.args = serde_json::json!({ "tournament": "t-1", "amount": 9_999 });
+        let err = submit_idempotent(&store, &network, &policy, "idem-key-6", &other)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SorobanError::IdempotencyConflict(_)));
+        assert_eq!(network.executions.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn permanent_rejection_is_recorded_and_replayed() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork {
+            reject_sends: true,
+            ..Default::default()
+        };
+        let policy = fast_policy(3);
+
+        let first = submit_idempotent(&store, &network, &policy, "idem-key-7", &invocation())
+            .await
+            .unwrap();
+        assert_eq!(first.status, TxStatus::Failed);
+        assert_eq!(network.sends.load(Ordering::SeqCst), 1, "permanent errors are not retried");
+
+        let second = submit_idempotent(&store, &network, &policy, "idem-key-7", &invocation())
+            .await
+            .unwrap();
+        assert_eq!(second.status, TxStatus::Failed);
+        assert_eq!(second.error, first.error);
+        assert_eq!(network.sends.load(Ordering::SeqCst), 1);
+        assert_eq!(network.executions.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_reservation_reports_in_progress() {
+        let store = InMemorySubmissionStore::new();
+        let network = SimulatedNetwork::default();
+        // Another worker just reserved the key and hasn't signed yet.
+        store
+            .reserve("idem-key-8", &invocation().request_hash())
+            .await
+            .unwrap();
+
+        let err = submit_idempotent(&store, &network, &fast_policy(1), "idem-key-8", &invocation())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SorobanError::SubmissionInProgress(_)));
+        assert_eq!(network.prepares.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn invocation_debug_redacts_signer_secret() {
+        let rendered = format!("{:?}", invocation());
+        assert!(!rendered.contains("SSECRET"));
     }
 }
