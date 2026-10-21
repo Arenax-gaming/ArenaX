@@ -138,6 +138,13 @@ impl AuthService {
         .await
         .map_err(ApiError::database_error)?;
 
+        if let Err(e) =
+            crate::service::reputation_service::allocate_initial_reputation(&self.pool, user_id)
+                .await
+        {
+            warn!(user_id = %user_id, error = %e, "Initial reputation allocation failed");
+        }
+
         let roles = vec!["user".to_string()];
         let token_pair = self
             .jwt_service

@@ -10,6 +10,7 @@ use crate::middleware::cache::ResponseCache;
 use crate::models::{PaginatedResponse, PaginationParams};
 use crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster;
 use crate::service::leaderboard_sync::LeaderboardSync;
+use crate::service::monthly_leaderboard::MonthlyLeaderboardService;
 use crate::service::LeaderboardService;
 
 /// Builds the service with whatever optional infrastructure is registered.
@@ -38,6 +39,30 @@ fn leaderboard_service(
     }
 
     service
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PeriodQuery {
+    pub period: String,
+    pub limit: Option<isize>,
+}
+
+/// GET /api/v1/leaderboard?period=monthly
+///
+/// Real-time monthly standings from Redis with rank change indicators (Issue #1226).
+pub async fn get_leaderboard_by_period(
+    redis: web::Data<redis::aio::ConnectionManager>,
+    query: web::Query<PeriodQuery>,
+) -> Result<HttpResponse, ApiError> {
+    if query.period != "monthly" {
+        return Err(ApiError::bad_request("unsupported period; expected 'monthly'"));
+    }
+    let limit = query.limit.unwrap_or(100).clamp(1, 1000);
+    let leaderboard = MonthlyLeaderboardService::new(redis.get_ref().clone())
+        .get_monthly(limit)
+        .await
+        .map_err(|e| ApiError::internal_error(format!("monthly leaderboard unavailable: {}", e)))?;
+    Ok(HttpResponse::Ok().json(leaderboard))
 }
 
 /// GET /api/v1/leaderboards/:category
