@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import "../styles/globals.css";
+// Contrast-audited overrides (#1321) — must come after globals.css.
+import "../styles/tokens.css";
 import { NONCE_HEADER } from "@/lib/csp";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";

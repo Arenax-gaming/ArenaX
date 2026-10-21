@@ -72,7 +72,12 @@ const config = {
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
+          // AA-safe text colour on card/muted surfaces (#1321, tokens.css)
+          text: "hsl(var(--destructive-text))",
         },
+        // Contrast-audited dashboard accents (#1321, tokens.css)
+        rank: "hsl(var(--rank-accent))",
+        streak: "hsl(var(--streak-text))",
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -99,6 +104,8 @@ const config = {
           foreground: "hsl(var(--success-foreground))",
           muted: "hsl(var(--success-muted))",
           "muted-foreground": "hsl(var(--success-muted-foreground))",
+          // AA-safe text colour on card/muted surfaces (#1321, tokens.css)
+          text: "hsl(var(--success-text))",
         },
         warning: {
           DEFAULT: "hsl(var(--warning))",
