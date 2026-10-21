@@ -156,6 +156,13 @@ impl MatchmakerService {
         let mut sorted_entries = queue_entries;
         sorted_entries.sort_by(|a, b| a.joined_at.cmp(&b.joined_at));
 
+        // Fetch blocked pairs from the database so the matchmaker can exclude
+        // pairs where either player has blocked the other (#1407).
+        let user_ids: Vec<Uuid> = sorted_entries.iter().map(|e| e.user_id).collect();
+        let blocked_pairs = self.get_blocked_pairs(&user_ids).await?;
+        let blocked_set: std::collections::HashSet<(Uuid, Uuid)> =
+            blocked_pairs.into_iter().collect();
+
         let mut matches_found = Vec::new();
         let mut processed_players = std::collections::HashSet::new();
 
@@ -165,7 +172,7 @@ impl MatchmakerService {
             }
 
             if let Some(candidate) =
-                find_best_match_for_player(entry, &sorted_entries[i..], &processed_players)
+                find_best_match_for_player(entry, &sorted_entries[i..], &processed_players, &blocked_set)
             {
                 processed_players.insert(candidate.player1.user_id);
                 processed_players.insert(candidate.player2.user_id);
@@ -597,6 +604,33 @@ impl MatchmakerService {
         Ok(match_record)
     }
 
+    /// Fetch all blocked pairs among the given user IDs from the database.
+    /// Returns a set of `(blocker_id, blocked_id)` tuples.
+    /// The matchmaker uses this to exclude pairs where either player has
+    /// blocked the other (#1407).
+    async fn get_blocked_pairs(
+        &self,
+        user_ids: &[Uuid],
+    ) -> Result<std::collections::HashSet<(Uuid, Uuid)>, ApiError> {
+        if user_ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+
+        let pairs = sqlx::query_as::<_, (Uuid, Uuid)>(
+            r#"
+            SELECT blocker_id, blocked_id
+            FROM player_blocks
+            WHERE blocker_id = ANY($1) AND blocked_id = ANY($1)
+            "#
+        )
+        .bind(user_ids)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(pairs.into_iter().collect())
+    }
+
     fn calculate_initial_elo_range(&self, current_elo: i32) -> (i32, i32) {
         let range = self.config.elo_bucket_size;
         ((current_elo - range).max(0), current_elo + range)
@@ -609,10 +643,14 @@ impl MatchmakerService {
 
 /// Find the best opponent for `player` from `candidates`.
 /// This is pure CPU work — no I/O — so it does not need to be async.
+///
+/// `blocked_pairs` contains `(blocker_id, blocked_id)` tuples — pairs where
+/// either player has blocked the other are never matched (#1407).
 fn find_best_match_for_player(
     player: &QueueEntry,
     candidates: &[QueueEntry],
     processed_players: &std::collections::HashSet<Uuid>,
+    blocked_pairs: &std::collections::HashSet<(Uuid, Uuid)>,
 ) -> Option<MatchCandidate> {
     let mut best_candidate: Option<MatchCandidate> = None;
     let mut best_score = -1.0_f64;
@@ -622,6 +660,13 @@ fn find_best_match_for_player(
     for candidate in candidates {
         if candidate.user_id == player.user_id
             || processed_players.contains(&candidate.user_id)
+        {
+            continue;
+        }
+
+        // Skip blocked pairs — either direction (#1407)
+        if blocked_pairs.contains(&(player.user_id, candidate.user_id))
+            || blocked_pairs.contains(&(candidate.user_id, player.user_id))
         {
             continue;
         }

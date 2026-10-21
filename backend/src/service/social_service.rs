@@ -2,6 +2,7 @@ use crate::api_error::ApiError;
 use crate::models::{
     Friend, FriendRequest, Message, Conversation, Party, PartyMember, CommunityPost,
     OnlineStatus, SocialNotification, FriendsListResponse,
+    BlockEntry, BlockListResponse, BlockRequest,
 };
 use chrono::Utc;
 use sqlx::PgPool;
@@ -63,6 +64,11 @@ impl SocialService {
         from_user_id: Uuid,
         to_user_id: Uuid,
     ) -> Result<FriendRequest, ApiError> {
+        // Check if either user has blocked the other (mutual-block enforcement #1407)
+        if self.is_blocked(from_user_id, to_user_id).await? {
+            return Err(ApiError::BadRequest("Cannot send friend request to a blocked player".to_string()));
+        }
+
         // Check if already friends
         let existing = sqlx::query_scalar::<_, Option<String>>(
             r#"
@@ -159,6 +165,11 @@ impl SocialService {
         to_user_id: Uuid,
         content: String,
     ) -> Result<Message, ApiError> {
+        // Block check: blocked players cannot send messages (#1407)
+        if self.is_blocked(from_user_id, to_user_id).await? {
+            return Err(ApiError::BadRequest("Cannot send message to a blocked player".to_string()));
+        }
+
         let message_id = Uuid::new_v4();
 
         sqlx::query(
@@ -352,5 +363,126 @@ impl SocialService {
                 }
             })
             .collect())
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Block list (#1407)
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// Block another player.  The block is bidirectional — both (A,B) and
+    /// (B,A) rows are inserted so that a single `WHERE blocker_id = $1` query
+    /// returns all users that $1 cannot interact with.
+    pub async fn block_user(
+        &self,
+        blocker_id: Uuid,
+        blocked_id: Uuid,
+    ) -> Result<(), ApiError> {
+        if blocker_id == blocked_id {
+            return Err(ApiError::BadRequest("Cannot block yourself".to_string()));
+        }
+
+        // Insert both directions for mutual-block enforcement.
+        sqlx::query(
+            r#"
+            INSERT INTO player_blocks (blocker_id, blocked_id)
+            VALUES ($1, $2), ($2, $1)
+            ON CONFLICT (blocker_id, blocked_id) DO NOTHING
+            "#
+        )
+        .bind(blocker_id)
+        .bind(blocked_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        // Also remove any existing friendship between the two users.
+        sqlx::query(
+            r#"
+            DELETE FROM friends
+            WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)
+            "#
+        )
+        .bind(blocker_id)
+        .bind(blocked_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(())
+    }
+
+    /// Unblock a previously blocked player.  Removes both directions.
+    pub async fn unblock_user(
+        &self,
+        blocker_id: Uuid,
+        blocked_id: Uuid,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+            DELETE FROM player_blocks
+            WHERE (blocker_id = $1 AND blocked_id = $2)
+               OR (blocker_id = $2 AND blocked_id = $1)
+            "#
+        )
+        .bind(blocker_id)
+        .bind(blocked_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(())
+    }
+
+    /// Check if either user has blocked the other (mutual-block check).
+    pub async fn is_blocked(
+        &self,
+        user_a: Uuid,
+        user_b: Uuid,
+    ) -> Result<bool, ApiError> {
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM player_blocks
+            WHERE (blocker_id = $1 AND blocked_id = $2)
+               OR (blocker_id = $2 AND blocked_id = $1)
+            "#
+        )
+        .bind(user_a)
+        .bind(user_b)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(count > 0)
+    }
+
+    /// Get the block list for a user (players they have blocked).
+    pub async fn get_block_list(
+        &self,
+        user_id: Uuid,
+    ) -> Result<BlockListResponse, ApiError> {
+        let entries = sqlx::query_as::<_, (Uuid, Uuid, chrono::DateTime<chrono::Utc>)>(
+            r#"
+            SELECT blocker_id, blocked_id, created_at
+            FROM player_blocks
+            WHERE blocker_id = $1
+            ORDER BY created_at DESC
+            "#
+        )
+        .bind(user_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        let total_count = entries.len() as i32;
+        let blocks = entries
+            .into_iter()
+            .map(|(blocker_id, blocked_id, created_at)| BlockEntry {
+                blocker_id,
+                blocked_id,
+                created_at,
+            })
+            .collect();
+
+        Ok(BlockListResponse { blocks, total_count })
     }
 }
