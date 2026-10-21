@@ -27,6 +27,7 @@ members = [
     "upgrade-manager",
     "upgrade-system",
     "testing-infrastructure",
+    "reputation-tracker",
 ]
 resolver = "2"
 

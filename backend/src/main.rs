@@ -243,6 +243,22 @@ async fn main() -> io::Result<()> {
     // Response cache for read-heavy endpoints — Issue #910
     let response_cache = crate::middleware::cache::ResponseCache::new(redis_conn.clone());
 
+    // Weekly→monthly leaderboard rollup — Issue #1226
+    {
+        let monthly = crate::service::monthly_leaderboard::MonthlyLeaderboardService::new(
+            redis_conn.clone(),
+        );
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                if let Err(error) = monthly.rollup_completed_weeks().await {
+                    tracing::warn!(%error, "monthly leaderboard rollup failed");
+                }
+            }
+        });
+    }
+
     // Real-time leaderboard deltas — Issue #900
     let leaderboard_broadcaster = Arc::new(
         crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster::new(event_bus.clone()),
@@ -540,6 +556,10 @@ async fn main() -> io::Result<()> {
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
                     )
                     // Leaderboard endpoints
+                    .route(
+                        "/leaderboard",
+                        web::get().to(crate::http::leaderboard_handler::get_leaderboard_by_period),
+                    )
                     .service(
                         web::scope("/leaderboards")
                             .route("/{category}", web::get().to(crate::http::leaderboard_handler::get_leaderboard))
