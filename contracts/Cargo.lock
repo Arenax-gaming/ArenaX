@@ -1845,6 +1845,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sponsored-tournament"
+version = "0.1.0"
+dependencies = [
+ "composable-example",
+ "soroban-sdk",
+ "tournament-hooks-noop",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2017,6 +2026,13 @@ checksum = "71e552d1249bf61ac2a52db88179fd0673def1e1ad8243a00d9ec9ed71fee3dd"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tournament-hooks-noop"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

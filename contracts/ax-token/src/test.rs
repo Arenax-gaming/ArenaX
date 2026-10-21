@@ -1105,3 +1105,128 @@ fn test_datakey_variants_storage_round_trip() {
         assert_eq!(got.get(0).unwrap().delegatee, user2);
     });
 }
+
+// ============================================================================
+// AUTHORIZED MINTERS
+// ============================================================================
+
+#[test]
+fn test_minter_mints_up_to_cap() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &1000i128, &3600u64);
+    assert!(client.is_minter(&minter));
+    assert_eq!(client.get_minters().len(), 1);
+
+    client.minter_mint(&minter, &user1, &400i128);
+    client.minter_mint(&minter, &user1, &600i128);
+
+    assert_eq!(client.balance(&user1), 1000);
+    assert_eq!(client.total_supply(), 1000);
+    assert_eq!(client.get_minter(&minter).unwrap().minted_in_period, 1000);
+}
+
+#[test]
+#[should_panic(expected = "minter cap exceeded")]
+fn test_minter_over_cap_reverts() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &1000i128, &3600u64);
+    client.minter_mint(&minter, &user1, &1000i128);
+    client.minter_mint(&minter, &user1, &1i128);
+}
+
+#[test]
+fn test_minter_cap_resets_after_period() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    env.ledger().set_timestamp(100);
+    client.add_minter(&minter, &500i128, &3600u64);
+    client.minter_mint(&minter, &user1, &500i128);
+
+    env.ledger().set_timestamp(100 + 3600);
+    client.minter_mint(&minter, &user1, &500i128);
+
+    assert_eq!(client.balance(&user1), 1000);
+}
+
+#[test]
+fn test_uncapped_minter() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &0i128, &0u64);
+    client.minter_mint(&minter, &user1, &1_000_000i128);
+
+    assert_eq!(client.balance(&user1), 1_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_unlisted_minter_reverts() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let stranger = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.minter_mint(&stranger, &user1, &1i128);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_removed_minter_reverts() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &1000i128, &0u64);
+    client.remove_minter(&minter);
+    assert!(!client.is_minter(&minter));
+    assert_eq!(client.get_minters().len(), 0);
+
+    client.minter_mint(&minter, &user1, &1i128);
+}
+
+#[test]
+#[should_panic]
+fn test_add_minter_requires_admin() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    // No auth mocked: admin.require_auth() must fail.
+    client.add_minter(&minter, &1000i128, &0u64);
+}
+
+#[test]
+#[should_panic(expected = "supply cap exceeded")]
+fn test_minter_respects_global_supply_cap() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.set_supply_cap(&100i128);
+    client.add_minter(&minter, &1000i128, &0u64);
+    client.minter_mint(&minter, &user1, &101i128);
+}
