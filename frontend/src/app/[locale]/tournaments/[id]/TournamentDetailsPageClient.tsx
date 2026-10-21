@@ -18,6 +18,7 @@ import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
 import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
+import { StellarPrizePoolCard } from "@/components/stellar/StellarPrizePoolCard";
 
 export function TournamentDetailsPageClient() {
   const params = useParams();
@@ -208,6 +209,7 @@ export function TournamentDetailsPageClient() {
 
         <div className="space-y-6">
           <JoinTournamentButton tournament={tournament} partyId={partyId} />
+          <StellarPrizePoolCard tournamentId={tournament.id} />
           <div className="sticky top-24 rounded-[32px] border border-border bg-white p-6 shadow-sm">
             <h3 className="font-semibold text-foreground">Quick Stats</h3>
             <div className="mt-5 space-y-4">

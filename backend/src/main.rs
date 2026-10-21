@@ -236,6 +236,7 @@ async fn main() -> io::Result<()> {
     // reporting, disputes, Elo ratings and matchmaking-queue management.
     let match_service = Arc::new(
         MatchService::new(db_pool.clone())
+            .with_redis(Arc::new(redis_client.clone()))
             .with_event_bus(event_bus.clone())
             .with_match_events(match_events.clone()),
     );
@@ -539,6 +540,8 @@ async fn main() -> io::Result<()> {
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
                     )
+                    // Weekly leaderboard (Issue #1225)
+                    .route("/leaderboard", web::get().to(crate::http::leaderboard_handler::get_period_leaderboard))
                     // Leaderboard endpoints
                     .service(
                         web::scope("/leaderboards")
