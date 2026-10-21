@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "analyze": "ANALYZE=true next build",
     "postbuild": "node scripts/upload-datadog-sourcemaps.mjs",
     "upload:sourcemaps": "node scripts/upload-datadog-sourcemaps.mjs",
     "start": "next start",
@@ -64,6 +65,7 @@
     "@babel/preset-env": "^7.29.2",
     "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
+    "@next/bundle-analyzer": "^14.2.25",
     "@playwright/test": "^1.49.1",
     "@storybook/addon-a11y": "^8.0.0",
     "@storybook/addon-essentials": "^8.0.0",

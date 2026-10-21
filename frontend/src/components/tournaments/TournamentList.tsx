@@ -7,7 +7,8 @@ import { TournamentCardSkeleton } from "./TournamentCardSkeleton";
 import { TOURNAMENT_GRID_IMAGE_SIZES } from "@/lib/tournamentImageSizes";
 import { VirtualGrid, VirtualGridRenderProps } from "@/components/ui/VirtualGrid";
 import { Trophy } from "lucide-react";
-import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 
 // Tournament cards have a fixed height that fits all content without wrapping
 const CARD_HEIGHT = 340; // px
@@ -47,6 +48,15 @@ interface TournamentListProps {
   isLoadingMore?: boolean;
   /** Show skeleton cards in place of results until the first page arrives */
   isLoading?: boolean;
+  /** Show the error state (with retry) when the tournaments query failed */
+  isError?: boolean;
+  /** Re-triggers the tournaments fetch from the error state */
+  onRetry?: () => void;
+  /** Localised copy — pass strings from `useTranslations` */
+  emptyDescription?: string;
+  resetFiltersLabel?: string;
+  errorMessage?: string;
+  retryLabel?: string;
 }
 
 export function TournamentList({
@@ -59,6 +69,12 @@ export function TournamentList({
   onLoadMore,
   isLoadingMore = false,
   isLoading = false,
+  isError = false,
+  onRetry,
+  emptyDescription = "Try adjusting your filters",
+  resetFiltersLabel = "Reset filters",
+  errorMessage = "Failed to load tournaments",
+  retryLabel = "Retry",
 }: TournamentListProps) {
   const useVirtual = tournaments.length >= VIRTUALIZATION_THRESHOLD;
 
@@ -80,18 +96,23 @@ export function TournamentList({
     return <SkeletonGrid label="Loading tournaments" />;
   }
 
+  if (isError && tournaments.length === 0 && onRetry) {
+    return <ErrorState title={errorMessage} retryLabel={retryLabel} onRetry={onRetry} />;
+  }
+
   if (tournaments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16" role="status">
-        <Trophy className="mb-4 h-16 w-16 text-muted-foreground" aria-hidden="true" />
-        <h3 className="mb-2 text-lg font-semibold text-foreground">{emptyMessage}</h3>
-        <p className="mb-4 text-sm text-muted-foreground">Try adjusting your filters</p>
-        {onResetFilters && (
-          <Button variant="ghost" size="sm" onClick={onResetFilters}>
-            Reset filters
-          </Button>
-        )}
-      </div>
+      <EmptyState
+        icon={Trophy}
+        title={emptyMessage}
+        description={emptyDescription}
+        action={
+          onResetFilters
+            ? { label: resetFiltersLabel, onClick: onResetFilters, variant: "ghost" }
+            : undefined
+        }
+        size="lg"
+      />
     );
   }
 
