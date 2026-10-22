@@ -14,6 +14,7 @@ import dashboardRoutes from './dashboard.routes';
 import searchRoutes from './search.routes';
 import cacheRoutes from './cache.routes';
 import apiGatewayRoutes from './api-gateway.routes';
+import publicApiRoutes from './public-api.routes';
 import queueRoutes from './queue.routes';
 import accessControlRoutes from './access-control.routes';
 import crossGameAssetRoutes from './cross-game-asset.routes';
@@ -66,6 +67,12 @@ const mountVersioned = (base: string, handler: Router) => {
 
 mountVersioned('/auth', authRoutes);
 mountVersioned('/profiles', profileRoutes);
+
+// Direct /me/2fa mount for two-factor authentication (#1431)
+const twoFactorRouter: Router = Router();
+twoFactorRouter.post('/enroll', authenticateJWT, authController.enroll2FAHandler);
+twoFactorRouter.post('/verify', authenticateJWT, authController.verify2FAHandler);
+mountVersioned('/me/2fa', twoFactorRouter);
 mountVersioned('/matches', matchRoutes);
 mountVersioned('/admin', adminRoutes);
 mountVersioned('/governance', governanceRoutes);
@@ -86,6 +93,7 @@ router.use('/v1/tournaments', tournamentRoutes);
 router.use('/v1/search', searchRoutes);
 router.use('/v1/cache', cacheRoutes);
 router.use('/v1/gateway', apiGatewayRoutes);
+router.use('/v1/public', publicApiRoutes);
 router.use('/v1/queue', queueRoutes);
 router.use('/v1/access-control', accessControlRoutes);
 router.use('/v1/assets', crossGameAssetRoutes);

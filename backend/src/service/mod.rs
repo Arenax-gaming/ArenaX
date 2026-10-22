@@ -24,6 +24,7 @@ pub mod match_service;
 pub mod match_service_background;
 pub mod matchmaker;
 pub mod matchmaker_tests;
+pub mod matchmaking_pipeline;
 pub mod notification_service;
 pub mod payment_provider;
 pub mod platform_links;

@@ -380,6 +380,113 @@ impl TransactionMonitor {
 
         Ok(result.rows_affected())
     }
+
+    /// Parse memo on incoming XLM payment and attribute deposit (#1432).
+    pub async fn process_incoming_deposit(
+        &self,
+        payment: IncomingStellarPayment,
+        confirmation_threshold: u64,
+        wallet_service: &crate::service::wallet_service::WalletService,
+    ) -> Result<DepositAttributionResult, crate::api_error::ApiError> {
+        let result = attribute_deposit(
+            payment.memo.as_deref(),
+            payment.confirmations,
+            confirmation_threshold,
+            &payment.tx_hash,
+            payment.amount,
+        );
+
+        if let DepositAttributionResult::Credited { user_id, amount, .. } = &result {
+            wallet_service
+                .add_xlm_balance(*user_id, *amount)
+                .await
+                .map_err(|e| crate::api_error::ApiError::internal_error(format!("Failed to credit deposit: {e}")))?;
+        }
+
+        Ok(result)
+    }
+}
+
+// ─── Stellar Deposit Memo Attribution (#1432) ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncomingStellarPayment {
+    pub tx_hash: String,
+    pub source_account: String,
+    pub destination_account: String,
+    pub amount: i64, // in stroops
+    pub asset_code: String,
+    pub memo: Option<String>,
+    pub confirmations: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DepositAttributionResult {
+    Credited {
+        user_id: Uuid,
+        amount: i64,
+        tx_hash: String,
+    },
+    PendingConfirmations {
+        user_id: Uuid,
+        confirmations: u64,
+        required: u64,
+        tx_hash: String,
+    },
+    FlaggedForManualReview {
+        tx_hash: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepositConfig {
+    pub confirmation_threshold: u64,
+}
+
+impl Default for DepositConfig {
+    fn default() -> Self {
+        Self {
+            confirmation_threshold: 1,
+        }
+    }
+}
+
+pub fn attribute_deposit(
+    memo: Option<&str>,
+    confirmations: u64,
+    threshold: u64,
+    tx_hash: &str,
+    amount: i64,
+) -> DepositAttributionResult {
+    let Some(memo_str) = memo.map(str::trim).filter(|s| !s.is_empty()) else {
+        return DepositAttributionResult::FlaggedForManualReview {
+            tx_hash: tx_hash.to_string(),
+            reason: "Deposit missing transaction memo".to_string(),
+        };
+    };
+
+    let Some(user_id) = crate::service::stellar_service::parse_deposit_memo(memo_str) else {
+        return DepositAttributionResult::FlaggedForManualReview {
+            tx_hash: tx_hash.to_string(),
+            reason: format!("Unmatched memo: {memo_str}"),
+        };
+    };
+
+    if confirmations < threshold {
+        return DepositAttributionResult::PendingConfirmations {
+            user_id,
+            confirmations,
+            required: threshold,
+            tx_hash: tx_hash.to_string(),
+        };
+    }
+
+    DepositAttributionResult::Credited {
+        user_id,
+        amount,
+        tx_hash: tx_hash.to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -420,5 +527,71 @@ mod tests {
         let stats = TransactionStatistics::default();
         assert_eq!(stats.total_transactions, 0);
         assert_eq!(stats.completed_transactions, 0);
+    }
+
+    #[test]
+    fn test_deposit_memo_attribution_valid_and_credited() {
+        let user_id = Uuid::new_v4();
+        let memo = crate::service::stellar_service::get_user_deposit_memo(user_id);
+        let amount = 10_000_000; // 1 XLM in stroops
+
+        let result = attribute_deposit(Some(&memo), 3, 3, "tx_123", amount);
+        match result {
+            DepositAttributionResult::Credited {
+                user_id: credited_user,
+                amount: credited_amount,
+                tx_hash,
+            } => {
+                assert_eq!(credited_user, user_id);
+                assert_eq!(credited_amount, amount);
+                assert_eq!(tx_hash, "tx_123");
+            }
+            other => panic!("Expected Credited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_deposit_memo_attribution_pending_confirmations() {
+        let user_id = Uuid::new_v4();
+        let memo = crate::service::stellar_service::get_user_deposit_memo(user_id);
+
+        let result = attribute_deposit(Some(&memo), 1, 3, "tx_pending", 500);
+        match result {
+            DepositAttributionResult::PendingConfirmations {
+                user_id: pending_user,
+                confirmations,
+                required,
+                tx_hash,
+            } => {
+                assert_eq!(pending_user, user_id);
+                assert_eq!(confirmations, 1);
+                assert_eq!(required, 3);
+                assert_eq!(tx_hash, "tx_pending");
+            }
+            other => panic!("Expected PendingConfirmations, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_deposit_memo_attribution_missing_or_unknown_flags_manual_review() {
+        // Missing memo
+        let no_memo = attribute_deposit(None, 5, 1, "tx_missing_memo", 1000);
+        match no_memo {
+            DepositAttributionResult::FlaggedForManualReview { tx_hash, reason } => {
+                assert_eq!(tx_hash, "tx_missing_memo");
+                assert!(reason.contains("missing"));
+            }
+            other => panic!("Expected FlaggedForManualReview, got {:?}", other),
+        }
+
+        // Unknown / invalid memo
+        let invalid_memo = attribute_deposit(Some("not-a-valid-uuid"), 5, 1, "tx_invalid", 1000);
+        match invalid_memo {
+            DepositAttributionResult::FlaggedForManualReview { tx_hash, reason } => {
+                assert_eq!(tx_hash, "tx_invalid");
+                assert!(reason.contains("Unmatched"));
+            }
+            other => panic!("Expected FlaggedForManualReview, got {:?}", other),
+        }
     }
 }

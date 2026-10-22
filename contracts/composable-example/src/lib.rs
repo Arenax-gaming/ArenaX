@@ -1,5 +1,11 @@
 #![no_std]
 
+pub mod tournament_hooks;
+pub use tournament_hooks::{
+    ComposableTournamentHooks, ComposableTournamentHooksClient, HookKey, TournamentHook,
+    TournamentHookClient,
+};
+
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
 
 #[contracttype]

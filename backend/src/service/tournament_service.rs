@@ -248,6 +248,7 @@ pub struct TournamentService {
     /// Distributed lock and versioned status (Issue #1253).
     state_backend: Option<crate::service::distributed_tournament_state::TournamentStateBackend>,
     instance_id: String,
+    sponsored_tokens: Option<Arc<crate::service::sponsored_tokens::SponsoredTokens>>,
 }
 
 impl TournamentService {
@@ -261,7 +262,16 @@ impl TournamentService {
             admin_secret: None,
             state_backend: None,
             instance_id: format!("tournament-{}", Uuid::new_v4()),
+            sponsored_tokens: None,
         }
+    }
+
+    pub fn with_sponsored_tokens(
+        mut self,
+        sponsored_tokens: Arc<crate::service::sponsored_tokens::SponsoredTokens>,
+    ) -> Self {
+        self.sponsored_tokens = Some(sponsored_tokens);
+        self
     }
 
     pub fn with_state_backend(
@@ -289,6 +299,49 @@ impl TournamentService {
         self.prize_contract_id = Some(prize_contract_id);
         self.admin_secret = Some(admin_secret);
         self
+    }
+
+    /// Purchase a tournament sponsorship package and deploy the sponsored-token contract (#1419)
+    pub async fn purchase_sponsor_package(
+        &self,
+        tournament_id: Uuid,
+        sponsor_id: &str,
+        tier: crate::service::sponsored_tokens::SponsorPackageTier,
+    ) -> Result<crate::service::sponsored_tokens::TournamentSponsorship, ApiError> {
+        let tokens = self
+            .sponsored_tokens
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new()));
+
+        let sponsorship = tokens
+            .purchase_package(tournament_id, sponsor_id, tier)
+            .await
+            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+
+        self.publish_tournament_event(serde_json::json!({
+            "type": "sponsorship_purchased",
+            "tournament_id": tournament_id,
+            "sponsor_id": sponsorship.sponsor_id.clone(),
+            "contract_address": sponsorship.contract_address.clone(),
+            "tier": sponsorship.package.tier.to_string(),
+            "on_chain_status": sponsorship.on_chain_status.clone(),
+        }))
+        .await
+        .ok();
+
+        Ok(sponsorship)
+    }
+
+    /// Retrieve active sponsorship for a tournament (#1419)
+    pub async fn get_tournament_sponsorship(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Option<crate::service::sponsored_tokens::TournamentSponsorship>, ApiError> {
+        if let Some(tokens) = &self.sponsored_tokens {
+            Ok(tokens.get_sponsorship(tournament_id).await)
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn enqueue_generate_bracket_job(

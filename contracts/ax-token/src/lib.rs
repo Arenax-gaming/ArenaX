@@ -122,6 +122,20 @@ pub struct ScheduledUpgrade {
     pub executable_at: u64,
 }
 
+/// Authorized minter entry with an optional per-period mint cap.
+///
+/// `cap == 0` means the minter is uncapped. When `period == 0` the cap is a
+/// lifetime cap; otherwise the minted counter resets once `period` seconds
+/// have elapsed since `period_start`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinterConfig {
+    pub cap: i128,
+    pub period: u64,
+    pub period_start: u64,
+    pub minted_in_period: i128,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -163,6 +177,9 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
+    // Authorized minters registry
+    Minter(Address),
+    MinterList,
 }
 
 #[contract]
@@ -191,7 +208,116 @@ impl AxToken {
 
     pub fn mint(env: &Env, to: Address, amount: i128) {
         Self::require_admin(env);
+        Self::mint_internal(env, to, amount);
+    }
 
+    /// Register (or reconfigure) an authorized minter. Admin only.
+    ///
+    /// `cap` is the maximum amount the minter may mint per `period` seconds;
+    /// pass `cap = 0` for an uncapped minter and `period = 0` to make the cap
+    /// a lifetime cap. Reconfiguring an existing minter resets its window.
+    pub fn add_minter(env: &Env, minter: Address, cap: i128, period: u64) {
+        Self::require_admin(env);
+
+        if cap < 0 {
+            panic!("cap must not be negative");
+        }
+
+        let config = MinterConfig {
+            cap,
+            period,
+            period_start: env.ledger().timestamp(),
+            minted_in_period: 0,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::Minter(minter.clone()), &config);
+
+        let mut list = Self::get_minters(env);
+        if !list.contains(&minter) {
+            list.push_back(minter.clone());
+            env.storage().instance().set(&DataKey::MinterList, &list);
+        }
+
+        env.events()
+            .publish((Symbol::new(env, "minter_added"), minter), (cap, period));
+    }
+
+    /// Remove an authorized minter. Admin only.
+    pub fn remove_minter(env: &Env, minter: Address) {
+        Self::require_admin(env);
+
+        if !Self::is_minter(env, minter.clone()) {
+            panic!("not a minter");
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::Minter(minter.clone()));
+
+        let mut list = Self::get_minters(env);
+        if let Some(idx) = list.first_index_of(&minter) {
+            list.remove(idx);
+            env.storage().instance().set(&DataKey::MinterList, &list);
+        }
+
+        env.events()
+            .publish((Symbol::new(env, "minter_removed"), minter), ());
+    }
+
+    pub fn is_minter(env: &Env, minter: Address) -> bool {
+        env.storage().instance().has(&DataKey::Minter(minter))
+    }
+
+    pub fn get_minter(env: &Env, minter: Address) -> Option<MinterConfig> {
+        env.storage().instance().get(&DataKey::Minter(minter))
+    }
+
+    pub fn get_minters(env: &Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinterList)
+            .unwrap_or(Vec::new(env))
+    }
+
+    /// Mint as an authorized minter. Reverts with `Unauthorized` for any
+    /// address not in the minters list, and with `minter cap exceeded` when
+    /// the mint would push the minter past its cap for the current period.
+    pub fn minter_mint(env: &Env, minter: Address, to: Address, amount: i128) {
+        minter.require_auth();
+
+        let mut config: MinterConfig = env
+            .storage()
+            .instance()
+            .get(&DataKey::Minter(minter.clone()))
+            .unwrap_or_else(|| panic!("Unauthorized"));
+
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let now = env.ledger().timestamp();
+        if config.period > 0 && now >= config.period_start.saturating_add(config.period) {
+            config.period_start = now;
+            config.minted_in_period = 0;
+        }
+
+        let minted = config
+            .minted_in_period
+            .checked_add(amount)
+            .expect("minter total overflow");
+        if config.cap > 0 && minted > config.cap {
+            panic!("minter cap exceeded");
+        }
+        config.minted_in_period = minted;
+        env.storage()
+            .instance()
+            .set(&DataKey::Minter(minter), &config);
+
+        Self::mint_internal(env, to, amount);
+    }
+
+    fn mint_internal(env: &Env, to: Address, amount: i128) {
         if amount <= 0 {
             panic!("amount must be positive");
         }
