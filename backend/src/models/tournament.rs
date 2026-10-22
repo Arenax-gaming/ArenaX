@@ -359,6 +359,71 @@ pub struct TournamentMatch {
     pub updated_at: DateTime<Utc>,
 }
 
+// ===== Waitlist (Issue #1401) =====
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TournamentWaitlistEntry {
+    pub id: Uuid,
+    pub tournament_id: Uuid,
+    pub user_id: Uuid,
+    pub status: WaitlistStatus,
+    pub joined_at: DateTime<Utc>,
+    pub promoted_at: Option<DateTime<Utc>>,
+    pub cancelled_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum WaitlistStatus {
+    Waiting,
+    Promoted,
+    Cancelled,
+}
+
+impl std::fmt::Display for WaitlistStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WaitlistStatus::Waiting => write!(f, "waiting"),
+            WaitlistStatus::Promoted => write!(f, "promoted"),
+            WaitlistStatus::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
+/// Result of a registration attempt: either a confirmed participant row or a
+/// waitlist entry when the tournament is already at capacity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "registration_status", rename_all = "snake_case")]
+pub enum JoinTournamentOutcome {
+    Registered { participant: TournamentParticipant },
+    Waitlisted {
+        entry: TournamentWaitlistEntry,
+        position: i64,
+    },
+}
+
+/// Current waitlist position for a player, returned by
+/// `GET /api/tournaments/{id}/waitlist`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentWaitlistStatus {
+    pub tournament_id: Uuid,
+    pub waitlisted: bool,
+    /// 1-based FIFO position while `waiting`; `None` once promoted/cancelled.
+    pub position: Option<i64>,
+    pub status: Option<WaitlistStatus>,
+    pub joined_at: Option<DateTime<Utc>>,
+}
+
+/// Outcome of a withdrawal, including the player (if any) who took the freed
+/// slot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentWithdrawalResult {
+    pub tournament_id: Uuid,
+    pub user_id: Uuid,
+    pub promoted_user_id: Option<Uuid>,
+}
+
 // ===== Type Conversions =====
 
 impl std::str::FromStr for RoundType {
