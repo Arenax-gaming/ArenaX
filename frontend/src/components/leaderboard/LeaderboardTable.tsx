@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import { useVirtualScrollAnalytics } from '@/hooks/useVirtualScrollAnalytics';
+import { ReputationBalanceValue } from '@/components/profile/ReputationBalance';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -16,6 +17,8 @@ export interface LeaderboardEntry {
   winRate: number;
   lastUpdated: Date;
   trend?: 'up' | 'down' | 'stable';
+  /** Stellar account used to look up the player's Reputation Token balance. */
+  stellarPublicKey?: string;
 }
 
 interface LeaderboardTableProps {
@@ -111,6 +114,11 @@ function LeaderboardRow({
       {/* Win Rate */}
       <div className="w-20 shrink-0 px-4 text-sm text-right font-semibold text-foreground">
         {(entry.winRate * 100).toFixed(1)}%
+      </div>
+
+      {/* Reputation */}
+      <div className="w-20 shrink-0 px-4 text-sm text-right font-semibold text-foreground">
+        <ReputationBalanceValue publicKey={entry.stellarPublicKey} />
       </div>
 
       {/* Trend */}
@@ -245,6 +253,9 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
             <SortIcon column={key} />
           </button>
         ))}
+        <div role="columnheader" className="w-20 shrink-0 px-4 py-3 text-right text-sm font-semibold text-foreground/70">
+          Rep
+        </div>
         <div role="columnheader" className="w-16 shrink-0 px-4 py-3 text-center text-sm font-semibold text-foreground/70">
           Trend
         </div>

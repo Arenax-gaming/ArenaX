@@ -32,6 +32,7 @@ pub mod player_stats_service;
 pub mod push_notification_service;
 pub mod reaper_service;
 pub mod reputation_service;
+pub mod reputation_penalty_service;
 pub mod reward_settlement_service;
 pub mod social_service;
 pub mod soroban_service;
