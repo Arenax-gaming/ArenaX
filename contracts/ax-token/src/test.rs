@@ -44,7 +44,7 @@ fn create_token(env: &Env) -> (Address, Address) {
 fn mint_tokens(env: &Env, contract: &Address, to: &Address, amount: i128) {
     let client = AxTokenClient::new(env, contract);
     env.mock_all_auths();
-    client.mint(to, &amount);
+    client.mint(&client.get_admin(), to, &amount);
 }
 
 #[allow(dead_code)]
@@ -104,11 +104,11 @@ fn test_mint() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     assert_eq!(client.balance(&user1), 1000);
     assert_eq!(client.total_supply(), 1000);
 
-    client.mint(&user2, &500i128);
+    client.mint(&admin, &user2, &500i128);
     assert_eq!(client.balance(&user2), 500);
     assert_eq!(client.total_supply(), 1500);
 }
@@ -121,7 +121,7 @@ fn test_mint_zero_amount() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &0i128);
+    client.mint(&admin, &user1, &0i128);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn test_mint_negative_amount() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &-100i128);
+    client.mint(&admin, &user1, &-100i128);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn test_mint_unauthorized() {
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn test_burn() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     assert_eq!(client.balance(&user1), 1000);
     assert_eq!(client.total_supply(), 1000);
 
@@ -171,7 +171,7 @@ fn test_burn_insufficient_balance() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     client.burn(&user1, &1500i128);
 }
 
@@ -184,7 +184,7 @@ fn test_burn_zero_amount() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     client.burn(&user1, &0i128);
 }
 
@@ -207,8 +207,8 @@ fn test_transfer() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
-    client.mint(&user2, &500i128);
+    client.mint(&admin, &user1, &1000i128);
+    client.mint(&admin, &user2, &500i128);
 
     client.transfer(&user1, &user2, &300i128);
     assert_eq!(client.balance(&user1), 700);
@@ -225,7 +225,7 @@ fn test_transfer_insufficient_balance() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     client.transfer(&user1, &user2, &1500i128);
 }
 
@@ -238,7 +238,7 @@ fn test_transfer_zero_amount() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     client.transfer(&user1, &user2, &0i128);
 }
 
@@ -251,7 +251,7 @@ fn test_transfer_to_self() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
     client.transfer(&user1, &user1, &100i128);
 }
 
@@ -263,7 +263,7 @@ fn test_transfer_unauthorized() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     // Call without mock_all_auths and without signing should panic
     let env_unauth = Env::default();
@@ -303,8 +303,8 @@ fn test_full_lifecycle() {
 
     env.mock_all_auths();
 
-    client.mint(&user1, &1000i128);
-    client.mint(&user2, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
+    client.mint(&admin, &user2, &1000i128);
     assert_eq!(client.total_supply(), 2000);
 
     client.transfer(&user1, &user2, &300i128);
@@ -332,8 +332,8 @@ fn test_large_amounts() {
     env.mock_all_auths();
 
     let large_amount = (i128::MAX / 4) / 2 * 2;
-    client.mint(&user1, &large_amount);
-    client.mint(&user2, &large_amount);
+    client.mint(&admin, &user1, &large_amount);
+    client.mint(&admin, &user2, &large_amount);
 
     assert_eq!(client.total_supply(), large_amount * 2);
     assert_eq!(client.balance(&user1), large_amount);
@@ -358,7 +358,7 @@ fn test_multiple_users() {
     let amounts = [1000i128, 2000i128, 3000i128, 4000i128];
 
     for (i, user) in users.iter().enumerate() {
-        client.mint(user, &amounts[i]);
+        client.mint(&admin, user, &amounts[i]);
     }
 
     assert_eq!(client.total_supply(), 10000);
@@ -528,7 +528,7 @@ fn test_locking_flow() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     // Lock 400 tokens until timestamp 500
     env.ledger().set_timestamp(100);
@@ -554,7 +554,7 @@ fn test_unlock_before_unlock_time() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     env.ledger().set_timestamp(100);
     client.lock_tokens(&user1, &400i128, &500u64);
@@ -570,8 +570,8 @@ fn test_governance_flow() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1500i128);
-    client.mint(&user2, &500i128);
+    client.mint(&admin, &user1, &1500i128);
+    client.mint(&admin, &user2, &500i128);
 
     // Create a proposal
     env.ledger().set_timestamp(100);
@@ -597,7 +597,7 @@ fn test_emergency_pause_and_governance_unpause() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     assert!(!client.is_paused());
 
@@ -642,7 +642,7 @@ fn test_transfer_fails_when_paused() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     let reason = soroban_sdk::Symbol::new(&env, "EMERGENCY");
     client.pause(&reason);
@@ -657,7 +657,7 @@ fn test_pause_timeout_expiration() {
     let client = AxTokenClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     env.ledger().set_timestamp(100);
     let reason = soroban_sdk::Symbol::new(&env, "BUG");
@@ -687,7 +687,7 @@ fn test_supply_cap_enforcement_and_burn() {
     client.set_supply_cap(&2000i128);
     assert_eq!(client.get_supply_cap(), 2000);
 
-    client.mint(&user1, &1500i128);
+    client.mint(&admin, &user1, &1500i128);
     assert_eq!(client.total_supply(), 1500);
 
     // Sequence 0 is treated as a flash-loan collision by FlashLoanGuard.
@@ -708,7 +708,7 @@ fn test_admin_can_lower_supply_cap() {
 
     env.mock_all_auths();
     client.set_supply_cap(&2000i128);
-    client.mint(&user1, &500i128);
+    client.mint(&admin, &user1, &500i128);
 
     client.set_supply_cap(&1000i128);
     assert_eq!(client.get_supply_cap(), 1000);
@@ -735,7 +735,7 @@ fn test_mint_exceeds_supply_cap() {
 
     env.mock_all_auths();
     client.set_supply_cap(&1000i128);
-    client.mint(&user1, &1001i128);
+    client.mint(&admin, &user1, &1001i128);
 }
 
 #[test]
@@ -747,7 +747,7 @@ fn test_adjust_cap_via_governance() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(1);
     client.set_supply_cap(&1000i128);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     // Create proposal to increase cap to 5000
     let proposal_desc = String::from_str(&env, "Increase Cap to 5000");
@@ -759,7 +759,7 @@ fn test_adjust_cap_via_governance() {
     client.adjust_cap_via_governance(&proposal_id, &5000i128);
 
     assert_eq!(client.get_supply_cap(), 5000);
-    client.mint(&user1, &2000i128);
+    client.mint(&admin, &user1, &2000i128);
     assert_eq!(client.total_supply(), 3000);
 }
 
@@ -778,7 +778,7 @@ fn test_batch_mint() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone(), user3.clone()];
     let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128, 500i128];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 
     assert_eq!(client.balance(&user1), 1000);
     assert_eq!(client.balance(&user2), 2000);
@@ -798,7 +798,7 @@ fn test_batch_mint_length_mismatch() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone()];
     let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 }
 
 #[test]
@@ -812,7 +812,7 @@ fn test_batch_mint_empty() {
 
     let recipients: Vec<Address> = soroban_sdk::vec![&env];
     let amounts: Vec<i128> = soroban_sdk::vec![&env];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 }
 
 #[test]
@@ -826,7 +826,7 @@ fn test_batch_mint_rejects_non_positive_amount() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
     let amounts = soroban_sdk::vec![&env, 1000i128, 0i128];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 }
 
 #[test]
@@ -839,7 +839,7 @@ fn test_batch_mint_unauthorized() {
     // No mock_all_auths(): admin never authorized this call.
     let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
     let amounts = soroban_sdk::vec![&env, 1000i128, 2000i128];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 }
 
 #[test]
@@ -855,7 +855,7 @@ fn test_batch_mint_merges_duplicate_recipients() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone(), user1.clone(), user2.clone()];
     let amounts = soroban_sdk::vec![&env, 300i128, 700i128, 500i128];
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 
     assert_eq!(client.balance(&user1), 1000);
     assert_eq!(client.balance(&user2), 500);
@@ -877,7 +877,7 @@ fn test_batch_mint_atomic_on_cap_exceeded() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
     let amounts = soroban_sdk::vec![&env, 900i128, 200i128]; // totals 1100 > cap
-    client.batch_mint(&recipients, &amounts);
+    client.batch_mint(&admin, &recipients, &amounts);
 }
 
 #[test]
@@ -894,7 +894,7 @@ fn test_batch_mint_atomic_rollback_leaves_no_partial_state() {
 
     let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
     let amounts = soroban_sdk::vec![&env, 900i128, 200i128];
-    let result = client.try_batch_mint(&recipients, &amounts);
+    let result = client.try_batch_mint(&admin, &recipients, &amounts);
 
     assert!(result.is_err());
     assert_eq!(client.balance(&user1), 0);
@@ -915,7 +915,7 @@ fn test_expired_proposal_can_be_cleaned_up() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
     env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     let proposal_desc = String::from_str(&env, "Expiring proposal");
     let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
@@ -942,7 +942,7 @@ fn test_expired_proposal_cannot_be_voted_on() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
     env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     let proposal_desc = String::from_str(&env, "Expiring proposal");
     let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
@@ -965,7 +965,7 @@ fn test_passed_proposal_expires_after_grace_period() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
     env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     // Set grace period to 1 hour (3600s)
     client.set_proposal_grace_period(&3600u64);
@@ -994,7 +994,7 @@ fn test_passed_proposal_survives_grace_period() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
     env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     client.set_proposal_grace_period(&3600u64);
 
@@ -1019,7 +1019,7 @@ fn test_execute_proposal_hook() {
     env.mock_all_auths();
     env.ledger().set_sequence_number(100);
     env.ledger().set_timestamp(1_000);
-    client.mint(&user1, &1000i128);
+    client.mint(&admin, &user1, &1000i128);
 
     let proposal_desc = String::from_str(&env, "Exec proposal");
     let proposal_id = client.create_proposal(&user1, &proposal_desc, &3600u64);
@@ -1107,11 +1107,22 @@ fn test_datakey_variants_storage_round_trip() {
 }
 
 // ============================================================================
-// AUTHORIZED MINTERS
+// AUTHORIZED MINTERS (#1418)
 // ============================================================================
 
 #[test]
-fn test_minter_mints_up_to_cap() {
+fn test_admin_is_bootstrap_minter() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    assert!(client.is_minter(&admin));
+    assert_eq!(client.get_minters(), soroban_sdk::vec![&env, admin.clone()]);
+    assert_eq!(client.get_remaining_mint_allowance(&admin), None);
+}
+
+#[test]
+fn test_minter_mints_up_to_cap_then_over_cap_reverts() {
     let (env, admin, user1, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
@@ -1120,28 +1131,22 @@ fn test_minter_mints_up_to_cap() {
     env.mock_all_auths();
     client.add_minter(&minter, &1000i128, &3600u64);
     assert!(client.is_minter(&minter));
-    assert_eq!(client.get_minters().len(), 1);
+    assert_eq!(client.get_minters().len(), 2);
 
-    client.minter_mint(&minter, &user1, &400i128);
-    client.minter_mint(&minter, &user1, &600i128);
-
+    // Mint exactly up to the cap.
+    client.mint(&minter, &user1, &400i128);
+    client.mint(&minter, &user1, &600i128);
     assert_eq!(client.balance(&user1), 1000);
     assert_eq!(client.total_supply(), 1000);
     assert_eq!(client.get_minter(&minter).unwrap().minted_in_period, 1000);
-}
+    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(0));
 
-#[test]
-#[should_panic(expected = "minter cap exceeded")]
-fn test_minter_over_cap_reverts() {
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.add_minter(&minter, &1000i128, &3600u64);
-    client.minter_mint(&minter, &user1, &1000i128);
-    client.minter_mint(&minter, &user1, &1i128);
+    // One more unit is over the cap and must revert without side effects.
+    let result = client.try_mint(&minter, &user1, &1i128);
+    assert_eq!(result, Err(Ok(TokenError::MinterCapExceeded)));
+    assert_eq!(client.balance(&user1), 1000);
+    assert_eq!(client.total_supply(), 1000);
+    assert_eq!(client.get_minter(&minter).unwrap().minted_in_period, 1000);
 }
 
 #[test]
@@ -1154,12 +1159,39 @@ fn test_minter_cap_resets_after_period() {
     env.mock_all_auths();
     env.ledger().set_timestamp(100);
     client.add_minter(&minter, &500i128, &3600u64);
-    client.minter_mint(&minter, &user1, &500i128);
+    client.mint(&minter, &user1, &500i128);
 
+    // Still inside the window: rejected.
+    env.ledger().set_timestamp(100 + 3599);
+    assert_eq!(
+        client.try_mint(&minter, &user1, &1i128),
+        Err(Ok(TokenError::MinterCapExceeded))
+    );
+
+    // Window elapsed: allowance is restored.
     env.ledger().set_timestamp(100 + 3600);
-    client.minter_mint(&minter, &user1, &500i128);
+    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(500));
+    client.mint(&minter, &user1, &500i128);
 
     assert_eq!(client.balance(&user1), 1000);
+}
+
+#[test]
+fn test_lifetime_cap_never_resets() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &300i128, &0u64);
+    client.mint(&minter, &user1, &300i128);
+
+    env.ledger().set_timestamp(10_000_000);
+    assert_eq!(
+        client.try_mint(&minter, &user1, &1i128),
+        Err(Ok(TokenError::MinterCapExceeded))
+    );
 }
 
 #[test]
@@ -1171,26 +1203,70 @@ fn test_uncapped_minter() {
 
     env.mock_all_auths();
     client.add_minter(&minter, &0i128, &0u64);
-    client.minter_mint(&minter, &user1, &1_000_000i128);
+    client.mint(&minter, &user1, &1_000_000i128);
 
     assert_eq!(client.balance(&user1), 1_000_000);
+    assert_eq!(client.get_remaining_mint_allowance(&minter), None);
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
-fn test_unlisted_minter_reverts() {
+fn test_unlisted_minter_reverts_unauthorized() {
     let (env, admin, user1, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
     let stranger = Address::generate(&env);
 
     env.mock_all_auths();
-    client.minter_mint(&stranger, &user1, &1i128);
+    assert_eq!(
+        client.try_mint(&stranger, &user1, &1i128),
+        Err(Ok(TokenError::Unauthorized))
+    );
+    assert_eq!(client.get_remaining_mint_allowance(&stranger), Some(0));
+    assert_eq!(client.total_supply(), 0);
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
-fn test_removed_minter_reverts() {
+fn test_unlisted_minter_batch_mint_reverts_unauthorized() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let stranger = Address::generate(&env);
+
+    env.mock_all_auths();
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let amounts = soroban_sdk::vec![&env, 1i128, 1i128];
+    assert_eq!(
+        client.try_batch_mint(&stranger, &recipients, &amounts),
+        Err(Ok(TokenError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_batch_mint_charges_minter_cap() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &1000i128, &3600u64);
+
+    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
+    let over = soroban_sdk::vec![&env, 600i128, 401i128];
+    assert_eq!(
+        client.try_batch_mint(&minter, &recipients, &over),
+        Err(Ok(TokenError::MinterCapExceeded))
+    );
+    assert_eq!(client.total_supply(), 0);
+
+    let exact = soroban_sdk::vec![&env, 600i128, 400i128];
+    client.batch_mint(&minter, &recipients, &exact);
+    assert_eq!(client.total_supply(), 1000);
+    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(0));
+}
+
+#[test]
+fn test_removed_minter_reverts_unauthorized() {
     let (env, admin, user1, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
@@ -1200,9 +1276,55 @@ fn test_removed_minter_reverts() {
     client.add_minter(&minter, &1000i128, &0u64);
     client.remove_minter(&minter);
     assert!(!client.is_minter(&minter));
-    assert_eq!(client.get_minters().len(), 0);
+    assert_eq!(client.get_minters(), soroban_sdk::vec![&env, admin.clone()]);
 
-    client.minter_mint(&minter, &user1, &1i128);
+    assert_eq!(
+        client.try_mint(&minter, &user1, &1i128),
+        Err(Ok(TokenError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_admin_can_revoke_own_minting_right() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.remove_minter(&admin);
+    assert_eq!(
+        client.try_mint(&admin, &user1, &1i128),
+        Err(Ok(TokenError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_remove_unknown_minter_reverts() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let stranger = Address::generate(&env);
+
+    env.mock_all_auths();
+    assert_eq!(
+        client.try_remove_minter(&stranger),
+        Err(Ok(TokenError::MinterNotFound))
+    );
+}
+
+#[test]
+fn test_add_minter_rejects_negative_cap() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    assert_eq!(
+        client.try_add_minter(&minter, &-1i128, &0u64),
+        Err(Ok(TokenError::InvalidMinterConfig))
+    );
+    assert!(!client.is_minter(&minter));
 }
 
 #[test]
@@ -1218,6 +1340,33 @@ fn test_add_minter_requires_admin() {
 }
 
 #[test]
+#[should_panic]
+fn test_remove_minter_requires_admin() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    // No auth mocked: admin.require_auth() must fail.
+    client.remove_minter(&admin);
+}
+
+#[test]
+#[should_panic]
+fn test_listed_minter_must_sign() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let minter = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.add_minter(&minter, &1000i128, &0u64);
+
+    // Drop mocked auths: being listed is not enough without the signature.
+    env.set_auths(&[]);
+    client.mint(&minter, &user1, &1i128);
+}
+
+#[test]
 #[should_panic(expected = "supply cap exceeded")]
 fn test_minter_respects_global_supply_cap() {
     let (env, admin, user1, _) = create_test_env();
@@ -1228,5 +1377,5 @@ fn test_minter_respects_global_supply_cap() {
     env.mock_all_auths();
     client.set_supply_cap(&100i128);
     client.add_minter(&minter, &1000i128, &0u64);
-    client.minter_mint(&minter, &user1, &101i128);
+    client.mint(&minter, &user1, &101i128);
 }
