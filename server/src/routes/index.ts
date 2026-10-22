@@ -25,6 +25,7 @@ import anchorRoutes from './anchor.routes';
 import notificationRoutes from './notification.routes';
 import { getMyPreferences, updatePreferences } from '../controllers/notification.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
+import * as authController from '../controllers/auth.controller';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';

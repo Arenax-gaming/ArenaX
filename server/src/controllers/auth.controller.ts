@@ -133,9 +133,10 @@ export const guestSession = async (req: Request, res: Response, next: NextFuncti
 
 export const verifyEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const payload = parseBody(verifyEmailSchema, req.body);
-        await verifyEmail(payload);
-        res.status(200).json({ message: 'Email verified successfully' });
+        const token = req.body?.token || req.query?.token;
+        const payload = parseBody(verifyEmailSchema, { token });
+        const result = await verifyEmail(payload);
+        res.status(200).json(result);
     } catch (error) {
         next(error);
     }
