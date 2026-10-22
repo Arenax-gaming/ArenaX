@@ -187,6 +187,7 @@ pub struct StellarConfig {
     /// `soroban_contract_prize` so existing deployments keep working without
     /// adding the new variable.
     pub soroban_contract_match: String,
+    pub soroban_contract_match_outcome: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -314,6 +315,9 @@ impl Config {
         // Falls back to the prize contract so existing deployments don't break.
         let soroban_contract_match = env::var("SOROBAN_CONTRACT_MATCH")
             .unwrap_or_else(|_| soroban_contract_prize.clone());
+        let soroban_contract_match_outcome = env::var("SOROBAN_CONTRACT_MATCH_OUTCOME")
+            .ok()
+            .filter(|value| !value.trim().is_empty() && !value.contains("XXX"));
         let ai_model_path = env::var("AI_MODEL_PATH")?;
         let port: u16 = env::var("PORT")?.parse()?;
         let host = env::var("HOST")?;
@@ -371,6 +375,7 @@ impl Config {
                 soroban_contract_reputation,
                 soroban_contract_arenax_token,
                 soroban_contract_match,
+                soroban_contract_match_outcome,
             },
             ai: AiConfig {
                 model_path: ai_model_path,

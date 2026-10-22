@@ -5,8 +5,23 @@ use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Map, String,
+    Symbol, Vec,
 };
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum TokenError {
+    /// Caller is not in the authorized-minters registry.
+    Unauthorized = 1,
+    /// Mint would exceed the minter's cap for the current period.
+    MinterCapExceeded = 2,
+    /// `remove_minter` was called for an address that is not a minter.
+    MinterNotFound = 3,
+    /// Minter cap must not be negative.
+    InvalidMinterConfig = 4,
+}
 
 /// Minimal client for the staking-manager contract, used for composite
 /// voting power (AX checkpoints + stake weight + escrow).
@@ -177,7 +192,8 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
-    // Authorized minters registry
+    // Authorized minters registry (#1418): `Minter` entries live in
+    // persistent storage; `MinterList` is a small instance-level index.
     Minter(Address),
     MinterList,
 }
@@ -204,11 +220,46 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &0u64);
+
+        // Bootstrap: the initial admin is the first (uncapped) authorized
+        // minter so the token can be seeded. It holds no implicit minting
+        // right beyond this entry and can be capped or removed like any other
+        // minter.
+        Self::write_minter(
+            env,
+            &admin,
+            &MinterConfig {
+                cap: 0,
+                period: 0,
+                period_start: env.ledger().timestamp(),
+                minted_in_period: 0,
+            },
+        );
     }
 
-    pub fn mint(env: &Env, to: Address, amount: i128) {
-        Self::require_admin(env);
+    /// Mint `amount` to `to` on behalf of an authorized `minter`.
+    ///
+    /// `minter` must sign the call and be present in the authorized-minters
+    /// registry; any other address is rejected with
+    /// [`TokenError::Unauthorized`] before any state is touched. A capped
+    /// minter is rejected with [`TokenError::MinterCapExceeded`] when the mint
+    /// would push it past its cap for the current period. The global supply
+    /// cap still applies on top of the per-minter cap.
+    pub fn mint(env: &Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        minter.require_auth();
+
+        let config = Self::read_minter(env, &minter)
+            .ok_or(TokenError::Unauthorized)?;
+
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let config = Self::charge_minter(env, config, amount)?;
+        Self::write_minter(env, &minter, &config);
+
         Self::mint_internal(env, to, amount);
+        Ok(())
     }
 
     /// Register (or reconfigure) an authorized minter. Admin only.
@@ -216,11 +267,16 @@ impl AxToken {
     /// `cap` is the maximum amount the minter may mint per `period` seconds;
     /// pass `cap = 0` for an uncapped minter and `period = 0` to make the cap
     /// a lifetime cap. Reconfiguring an existing minter resets its window.
-    pub fn add_minter(env: &Env, minter: Address, cap: i128, period: u64) {
+    pub fn add_minter(
+        env: &Env,
+        minter: Address,
+        cap: i128,
+        period: u64,
+    ) -> Result<(), TokenError> {
         Self::require_admin(env);
 
         if cap < 0 {
-            panic!("cap must not be negative");
+            return Err(TokenError::InvalidMinterConfig);
         }
 
         let config = MinterConfig {
@@ -229,30 +285,23 @@ impl AxToken {
             period_start: env.ledger().timestamp(),
             minted_in_period: 0,
         };
-        env.storage()
-            .instance()
-            .set(&DataKey::Minter(minter.clone()), &config);
-
-        let mut list = Self::get_minters(env);
-        if !list.contains(&minter) {
-            list.push_back(minter.clone());
-            env.storage().instance().set(&DataKey::MinterList, &list);
-        }
+        Self::write_minter(env, &minter, &config);
 
         env.events()
             .publish((Symbol::new(env, "minter_added"), minter), (cap, period));
+        Ok(())
     }
 
     /// Remove an authorized minter. Admin only.
-    pub fn remove_minter(env: &Env, minter: Address) {
+    pub fn remove_minter(env: &Env, minter: Address) -> Result<(), TokenError> {
         Self::require_admin(env);
 
         if !Self::is_minter(env, minter.clone()) {
-            panic!("not a minter");
+            return Err(TokenError::MinterNotFound);
         }
 
         env.storage()
-            .instance()
+            .persistent()
             .remove(&DataKey::Minter(minter.clone()));
 
         let mut list = Self::get_minters(env);
@@ -263,14 +312,15 @@ impl AxToken {
 
         env.events()
             .publish((Symbol::new(env, "minter_removed"), minter), ());
+        Ok(())
     }
 
     pub fn is_minter(env: &Env, minter: Address) -> bool {
-        env.storage().instance().has(&DataKey::Minter(minter))
+        env.storage().persistent().has(&DataKey::Minter(minter))
     }
 
     pub fn get_minter(env: &Env, minter: Address) -> Option<MinterConfig> {
-        env.storage().instance().get(&DataKey::Minter(minter))
+        Self::read_minter(env, &minter)
     }
 
     pub fn get_minters(env: &Env) -> Vec<Address> {
@@ -280,41 +330,66 @@ impl AxToken {
             .unwrap_or(Vec::new(env))
     }
 
-    /// Mint as an authorized minter. Reverts with `Unauthorized` for any
-    /// address not in the minters list, and with `minter cap exceeded` when
-    /// the mint would push the minter past its cap for the current period.
-    pub fn minter_mint(env: &Env, minter: Address, to: Address, amount: i128) {
-        minter.require_auth();
-
-        let mut config: MinterConfig = env
-            .storage()
-            .instance()
-            .get(&DataKey::Minter(minter.clone()))
-            .unwrap_or_else(|| panic!("Unauthorized"));
-
-        if amount <= 0 {
-            panic!("amount must be positive");
+    /// Amount `minter` may still mint in its current period, or `None` when
+    /// it is uncapped. Returns `Some(0)` for an address that is not a minter.
+    pub fn get_remaining_mint_allowance(env: &Env, minter: Address) -> Option<i128> {
+        let config = match Self::read_minter(env, &minter) {
+            Some(config) => config,
+            None => return Some(0),
+        };
+        if config.cap == 0 {
+            return None;
         }
+        let config = Self::roll_minter_period(env, config);
+        Some(config.cap - config.minted_in_period)
+    }
 
+    fn read_minter(env: &Env, minter: &Address) -> Option<MinterConfig> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Minter(minter.clone()))
+    }
+
+    fn write_minter(env: &Env, minter: &Address, config: &MinterConfig) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Minter(minter.clone()), config);
+
+        let mut list = Self::get_minters(env);
+        if !list.contains(minter) {
+            list.push_back(minter.clone());
+            env.storage().instance().set(&DataKey::MinterList, &list);
+        }
+    }
+
+    /// Start a fresh window once the current period has fully elapsed.
+    fn roll_minter_period(env: &Env, mut config: MinterConfig) -> MinterConfig {
         let now = env.ledger().timestamp();
         if config.period > 0 && now >= config.period_start.saturating_add(config.period) {
             config.period_start = now;
             config.minted_in_period = 0;
         }
+        config
+    }
 
+    /// Charge `amount` against the minter's allowance for the current period.
+    /// Pure: callers persist the returned config only once every check has
+    /// passed, so a rejected mint leaves the minter's counter untouched.
+    fn charge_minter(
+        env: &Env,
+        config: MinterConfig,
+        amount: i128,
+    ) -> Result<MinterConfig, TokenError> {
+        let mut config = Self::roll_minter_period(env, config);
         let minted = config
             .minted_in_period
             .checked_add(amount)
-            .expect("minter total overflow");
+            .ok_or(TokenError::MinterCapExceeded)?;
         if config.cap > 0 && minted > config.cap {
-            panic!("minter cap exceeded");
+            return Err(TokenError::MinterCapExceeded);
         }
         config.minted_in_period = minted;
-        env.storage()
-            .instance()
-            .set(&DataKey::Minter(minter), &config);
-
-        Self::mint_internal(env, to, amount);
+        Ok(config)
     }
 
     fn mint_internal(env: &Env, to: Address, amount: i128) {
@@ -363,8 +438,19 @@ impl AxToken {
     /// written once for the whole batch rather than once per entry. One
     /// mint event is still emitted per input entry, matching what calling
     /// `mint` that many times would have emitted.
-    pub fn batch_mint(env: &Env, recipients: Vec<Address>, amounts: Vec<i128>) {
-        Self::require_admin(env);
+    ///
+    /// Gated exactly like `mint`: `minter` must be an authorized minter, and
+    /// the batch total is charged against its per-period cap as one mint.
+    pub fn batch_mint(
+        env: &Env,
+        minter: Address,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<(), TokenError> {
+        minter.require_auth();
+
+        let config = Self::read_minter(env, &minter)
+            .ok_or(TokenError::Unauthorized)?;
 
         if recipients.len() != amounts.len() {
             panic!("recipients and amounts length mismatch");
@@ -401,6 +487,9 @@ impl AxToken {
             panic!("supply cap exceeded");
         }
 
+        let config = Self::charge_minter(env, config, total)?;
+        Self::write_minter(env, &minter, &config);
+
         for (to, delta) in per_recipient_delta.iter() {
             let current_balance = Self::balance(env, to.clone());
             let new_balance = current_balance
@@ -420,6 +509,7 @@ impl AxToken {
             let amount = amounts.get(i).unwrap();
             events::emit_mint(env, &to, amount);
         }
+        Ok(())
     }
 
     pub fn burn(env: &Env, from: Address, amount: i128) {
@@ -692,6 +782,138 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Configurable Fee Split (#1415)
+    // ---------------------------------------------------------------------------
+
+    /// Set the platform treasury that keeps the non-organizer share of fees.
+    /// Admin-only.
+    pub fn set_fee_treasury(env: Env, treasury: Address) {
+        Self::require_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeTreasury, &treasury);
+    }
+
+    pub fn get_fee_treasury(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::FeeTreasury)
+    }
+
+    /// Organizer share of fees in basis points. Defaults to 0 (all to the
+    /// platform) until governance sets it.
+    pub fn get_fee_split_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeSplitBps)
+            .unwrap_or(0)
+    }
+
+    /// Open a governance proposal to set `fee_split_bps` to `new_bps`.
+    ///
+    /// The value is bound to the proposal at creation, so the vote is on a
+    /// specific number and executing it cannot substitute another.
+    pub fn propose_fee_split(
+        env: Env,
+        proposer: Address,
+        new_bps: u32,
+        voting_duration: u64,
+    ) -> u64 {
+        if new_bps > MAX_FEE_SPLIT_BPS {
+            panic!("fee_split_bps must be between 0 and 10000");
+        }
+        let description = String::from_str(&env, "Update fee_split_bps");
+        let proposal_id = Self::create_proposal(env.clone(), proposer, description, voting_duration);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposal(proposal_id), &new_bps);
+        proposal_id
+    }
+
+    /// Apply a passed fee-split proposal. This is the only way to change
+    /// `fee_split_bps`.
+    pub fn set_fee_split_via_governance(env: Env, proposal_id: u64) -> u32 {
+        let new_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeSplitProposal(proposal_id))
+            .expect("not a fee split proposal");
+
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage().instance().set(&DataKey::FeeSplitBps, &new_bps);
+
+        env.events()
+            .publish((symbol_short!("FEE_BPS"), proposal_id), new_bps);
+        new_bps
+    }
+
+    /// Process a tournament fee of `amount` AX paid by `payer`.
+    ///
+    /// `fee_split_bps` of it goes to `organizer`; the remainder goes to the
+    /// platform treasury set by `set_fee_treasury`. Both legs move in one
+    /// call under a single flash-loan sequence check.
+    pub fn process_fee(env: Env, payer: Address, organizer: Address, amount: i128) -> FeeSplitResult {
+        payer.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("contract is paused");
+        }
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeTreasury)
+            .expect("fee treasury not set");
+        if payer == organizer || payer == treasury {
+            panic!("payer cannot be a fee recipient");
+        }
+        if FlashLoanGuard::check_and_set_sequence(&env, &payer) {
+            panic!("flash loan detected: same-sequence transfer");
+        }
+        if Self::balance(&env, payer.clone()) < amount {
+            panic!("insufficient balance");
+        }
+
+        let bps = Self::get_fee_split_bps(env.clone());
+        let (organizer_amount, platform_amount) = split_fee(amount, bps);
+        if organizer_amount > 0 {
+            Self::move_balance(&env, &payer, &organizer, organizer_amount);
+        }
+        if platform_amount > 0 {
+            Self::move_balance(&env, &payer, &treasury, platform_amount);
+        }
+
+        env.events().publish(
+            (symbol_short!("FEE_SPLIT"), organizer.clone()),
+            (payer, amount, organizer_amount, platform_amount, bps),
+        );
+
+        FeeSplitResult {
+            organizer,
+            organizer_amount,
+            platform_amount,
+            fee_split_bps: bps,
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -1347,6 +1569,28 @@ impl AxToken {
     /// The address whose checkpoint currently represents `address`'s voting
     /// power: `address` itself, unless it has delegated away, in which case
     /// it's the delegatee.
+    /// Move `amount` between balances with checkpoint and transfer-event
+    /// bookkeeping, but without `transfer`'s auth / pause / flash-loan
+    /// checks — callers must have done those (used by `process_fee`).
+    fn move_balance(env: &Env, from: &Address, to: &Address, amount: i128) {
+        let from_balance = Self::balance(env, from.clone());
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
+        let to_balance = Self::balance(env, to.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &(to_balance + amount));
+
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, from), -amount);
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, to), amount);
+
+        events::emit_transfer(env, from, to, amount);
+    }
+
     fn voting_power_holder(env: &Env, address: &Address) -> Address {
         Self::get_delegate(env.clone(), address.clone()).unwrap_or_else(|| address.clone())
     }

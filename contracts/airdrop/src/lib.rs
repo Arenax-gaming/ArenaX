@@ -30,8 +30,53 @@
 
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Bytes, BytesN, Env, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
+    Address, Bytes, BytesN, Env, Vec,
 };
+
+/// Maximum Merkle proof depth accepted by claims (2^32 leaves).
+const MAX_PROOF_DEPTH: u32 = 32;
+
+// ─── Errors (per-token drops, #1416) ──────────────────────────────────────────
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum AirdropError {
+    NotInitialized = 1,
+    /// No Merkle root has been stored for this token.
+    TokenDropNotFound = 2,
+    /// The address already claimed this token's drop.
+    AlreadyClaimed = 3,
+    /// The proof does not connect the claimant's leaf to the stored root.
+    InvalidProof = 4,
+    InvalidAmount = 5,
+    ProofTooDeep = 6,
+    Paused = 7,
+    InsufficientBalance = 8,
+    Expired = 9,
+}
+
+// ─── Events (per-token drops, #1416) ──────────────────────────────────────────
+
+#[contractevent(topics = ["Airdrop", "DROP_SET"])]
+pub struct TokenDropConfigured {
+    #[topic]
+    pub token: Address,
+    pub merkle_root: BytesN<32>,
+    pub amount: i128,
+    pub budget: i128,
+}
+
+#[contractevent(topics = ["Airdrop", "CLAIMED"])]
+pub struct TokenDropClaimed {
+    #[topic]
+    pub token: Address,
+    #[topic]
+    pub claimant: Address,
+    pub amount: i128,
+    pub claimed_at: u64,
+}
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
@@ -53,6 +98,25 @@ pub enum DataKey {
     AirdropId,
     /// Uniform token amount each eligible address may claim (#1059).
     TokenAmountPerAddress,
+    /// Per-token eligibility snapshot (#1416): token → TokenDrop.
+    TokenDrop(Address),
+    /// Per-token nullifier (#1416): (token, claimant) → bool.
+    TokenClaimed(Address, Address),
+}
+
+/// Eligibility snapshot for one token (#1416). Root, per-claim amount and
+/// budget live in one entry, so configuring a drop is a single storage write.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenDrop {
+    /// Root of a sorted-pair tree whose leaves are `sha256(address || amount)`.
+    pub merkle_root: BytesN<32>,
+    /// Amount every eligible address receives.
+    pub amount: i128,
+    /// Total this drop may pay out (must be held by the contract).
+    pub budget: i128,
+    /// Total paid out so far.
+    pub claimed: i128,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -412,6 +476,148 @@ impl AirdropContract {
             .set(&DataKey::ClaimedAmount, &claimed_total);
 
         results
+    }
+
+    // ── Per-token Merkle drops (#1416) ────────────────────────────────────────
+
+    /// Store (or replace) the Merkle root and per-claim amount for `token`
+    /// in a single storage write (admin only).
+    ///
+    /// Leaves are `sha256(xdr(address) || amount_be_i128)` hashed into a
+    /// sorted-pair tree, the same scheme as [`Self::claim`]. `budget` caps the
+    /// total payout. Replacing a drop keeps the amount already paid out, and
+    /// addresses that already claimed stay claimed.
+    pub fn set_token_drop(
+        env: Env,
+        token: Address,
+        merkle_root: BytesN<32>,
+        amount: i128,
+        budget: i128,
+    ) -> Result<(), AirdropError> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(AirdropError::NotInitialized)?;
+        admin.require_auth();
+
+        if amount <= 0 || budget < amount {
+            return Err(AirdropError::InvalidAmount);
+        }
+
+        let key = DataKey::TokenDrop(token.clone());
+        let claimed = env
+            .storage()
+            .persistent()
+            .get::<DataKey, TokenDrop>(&key)
+            .map(|d| d.claimed)
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &key,
+            &TokenDrop {
+                merkle_root: merkle_root.clone(),
+                amount,
+                budget,
+                claimed,
+            },
+        );
+
+        TokenDropConfigured {
+            token,
+            merkle_root,
+            amount,
+            budget,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Claim `token`'s drop for `claimant` with a sorted-pair Merkle proof.
+    ///
+    /// Checks, in order: not paused / expired, drop exists, address has not
+    /// claimed this token (→ `AlreadyClaimed`, before any hashing), proof
+    /// depth, proof validity against the stored root, remaining budget. Only
+    /// then is the nullifier written and the tokens transferred.
+    pub fn claim_token(
+        env: Env,
+        token: Address,
+        claimant: Address,
+        proof: Vec<BytesN<32>>,
+    ) -> Result<ClaimResult, AirdropError> {
+        claimant.require_auth();
+        if Self::is_paused(env.clone()) {
+            return Err(AirdropError::Paused);
+        }
+        if Self::is_expired(env.clone()) && env.storage().instance().has(&DataKey::ExpiresAt) {
+            return Err(AirdropError::Expired);
+        }
+
+        let drop_key = DataKey::TokenDrop(token.clone());
+        let mut drop: TokenDrop = env
+            .storage()
+            .persistent()
+            .get(&drop_key)
+            .ok_or(AirdropError::TokenDropNotFound)?;
+
+        let claimed_key = DataKey::TokenClaimed(token.clone(), claimant.clone());
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&claimed_key)
+            .unwrap_or(false)
+        {
+            return Err(AirdropError::AlreadyClaimed);
+        }
+
+        if proof.len() > MAX_PROOF_DEPTH {
+            return Err(AirdropError::ProofTooDeep);
+        }
+        let leaf = compute_leaf(&env, &claimant, drop.amount);
+        if !verify_sorted_merkle_proof(&env, leaf, &proof, &drop.merkle_root) {
+            return Err(AirdropError::InvalidProof);
+        }
+
+        let new_claimed = drop
+            .claimed
+            .checked_add(drop.amount)
+            .ok_or(AirdropError::InsufficientBalance)?;
+        if new_claimed > drop.budget {
+            return Err(AirdropError::InsufficientBalance);
+        }
+
+        // Effects before the external transfer call.
+        env.storage().persistent().set(&claimed_key, &true);
+        drop.claimed = new_claimed;
+        env.storage().persistent().set(&drop_key, &drop);
+
+        let contract_addr = env.current_contract_address();
+        token::Client::new(&env, &token).transfer(&contract_addr, &claimant, &drop.amount);
+
+        let now = env.ledger().timestamp();
+        TokenDropClaimed {
+            token,
+            claimant: claimant.clone(),
+            amount: drop.amount,
+            claimed_at: now,
+        }
+        .publish(&env);
+
+        Ok(ClaimResult {
+            claimant,
+            amount: drop.amount,
+            claimed_at: now,
+        })
+    }
+
+    pub fn get_token_drop(env: Env, token: Address) -> Option<TokenDrop> {
+        env.storage().persistent().get(&DataKey::TokenDrop(token))
+    }
+
+    pub fn has_claimed_token(env: Env, token: Address, claimant: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get::<DataKey, bool>(&DataKey::TokenClaimed(token, claimant))
+            .unwrap_or(false)
     }
 
     // ── Admin operations ──────────────────────────────────────────────────────
