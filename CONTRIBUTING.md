@@ -12,7 +12,7 @@
 | `contract/<name>` | Smart contract changes |
 | `migration/<name>` | DB schema changes |
 
-All PRs target `dev`. Only `dev` → `main` merges go to production..
+All PRs target `dev`. Only `dev` → `main` merges go to production.
 
 ## Commit messages
 
