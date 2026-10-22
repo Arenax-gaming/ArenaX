@@ -12,3 +12,6 @@ soroban-sdk = "23.5.2"
 contract-standards = { path = "../contract-standards" }
 contract-utils = { path = "../contract-utils" }
 arenax-events = { path = "../arenax-events" }
+
+[dev-dependencies]
+soroban-sdk = { version = "23.5.2", features = ["testutils"] }

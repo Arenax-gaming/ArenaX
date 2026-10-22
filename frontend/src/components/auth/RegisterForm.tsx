@@ -128,8 +128,8 @@ export function RegisterForm({ className }: RegisterFormProps) {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Username</FormLabel>
-                <FormControl>
-                  <div className="relative">
+                <div className="relative">
+                  <FormControl>
                     <Input
                       {...field}
                       type="text"
@@ -141,26 +141,26 @@ export function RegisterForm({ className }: RegisterFormProps) {
                       }
                       className="pr-8"
                     />
-                    {usernameStatus === "checking" && (
-                      <Loader2
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {usernameStatus === "available" && !form.formState.errors.username && (
-                      <CheckCircle2
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {usernameStatus === "unavailable" && (
-                      <XCircle
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-destructive"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </div>
-                </FormControl>
+                  </FormControl>
+                  {usernameStatus === "checking" && (
+                    <Loader2
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {usernameStatus === "available" && !form.formState.errors.username && (
+                    <CheckCircle2
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {usernameStatus === "unavailable" && (
+                    <XCircle
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-destructive"
+                      aria-hidden="true"
+                    />
+                  )}
+                </div>
                 <FormDescription>
                   3–20 characters, letters and numbers only
                 </FormDescription>

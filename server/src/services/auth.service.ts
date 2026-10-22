@@ -15,6 +15,7 @@ import {
     resolveTwitchProfileFromAuthorizationCode,
     validateTwitchToken
 } from './twitch-oauth.service';
+import { notificationService } from './notification.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -302,6 +303,15 @@ export const registerUser = async (input: RegisterInput) => {
                 // Don't fail registration if email fails
             }
 
+            try {
+                await notificationService.createDefaultPreferences(createdUser.id);
+            } catch (prefError) {
+                logger.warn('Failed to initialize default notification preferences', {
+                    userId: createdUser.id,
+                    error: prefError,
+                });
+            }
+
             const tokens = await issueSessionTokens(createdUser);
 
             logger.info('User registered', {
@@ -350,6 +360,17 @@ export const loginUser = async (input: LoginInput) => {
     if (!isPasswordValid) {
         logger.warn('Failed login attempt', { email: normalizedEmail });
         throw new HttpError(401, 'Invalid credentials');
+    }
+
+    const twoFactor = getTwoFactorData(user.id);
+    if (twoFactor && twoFactor.enabled) {
+        const tempToken = createTemp2FAToken(user.id);
+        logger.info('User login requires 2FA second step', { userId: user.id });
+        return {
+            requires2FA: true,
+            tempToken,
+            message: 'Two-factor authentication code required'
+        };
     }
 
     const tokens = await issueSessionTokens(user);
@@ -558,6 +579,9 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
                         await stellarWalletService.registerUserWallet(newUser.id, tx);
                         return newUser;
                     });
+                    try {
+                        await notificationService.createDefaultPreferences(createdUser.id);
+                    } catch {}
                     break;
                 } catch (error) {
                     if (isUniqueConstraintError(error, 'email')) {
@@ -830,4 +854,261 @@ export const resetPassword = async (input: ResetPasswordInput) => {
     });
     
     return { message: 'Password reset successfully' };
+};
+
+// ─── Two-Factor Authentication (TOTP) Flow (#1431) ──────────────────────────
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+export const base32Encode = (buffer: Buffer): string => {
+    let bits = 0;
+    let value = 0;
+    let output = '';
+
+    for (let i = 0; i < buffer.length; i++) {
+        value = (value << 8) | buffer[i];
+        bits += 8;
+
+        while (bits >= 5) {
+            output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+            bits -= 5;
+        }
+    }
+
+    if (bits > 0) {
+        output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+    }
+
+    return output;
+};
+
+export const base32Decode = (input: string): Buffer => {
+    const cleaned = input.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
+    let bits = 0;
+    let value = 0;
+    const output: number[] = [];
+
+    for (let i = 0; i < cleaned.length; i++) {
+        const index = BASE32_ALPHABET.indexOf(cleaned[i]);
+        if (index === -1) {
+            continue;
+        }
+        value = (value << 5) | index;
+        bits += 5;
+
+        if (bits >= 8) {
+            output.push((value >>> (bits - 8)) & 255);
+            bits -= 8;
+        }
+    }
+
+    return Buffer.from(output);
+};
+
+export const generateTotpSecret = (): string => {
+    return base32Encode(crypto.randomBytes(20));
+};
+
+export const generateTotpUri = (
+    secret: string,
+    accountName: string,
+    issuer: string = 'ArenaX'
+): string => {
+    const encodedIssuer = encodeURIComponent(issuer);
+    const encodedAccount = encodeURIComponent(accountName);
+    return `otpauth://totp/${encodedIssuer}:${encodedAccount}?secret=${secret}&issuer=${encodedIssuer}&algorithm=SHA1&digits=6&period=30`;
+};
+
+export const computeTotpCode = (secret: string, counter: number): string => {
+    const key = base32Decode(secret);
+    const counterBuf = Buffer.alloc(8);
+    counterBuf.writeBigInt64BE(BigInt(counter));
+
+    const hmac = crypto.createHmac('sha1', key).update(counterBuf).digest();
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const codeNum =
+        ((hmac[offset] & 0x7f) << 24) |
+        ((hmac[offset + 1] & 0xff) << 16) |
+        ((hmac[offset + 2] & 0xff) << 8) |
+        (hmac[offset + 3] & 0xff);
+
+    return (codeNum % 1000000).toString().padStart(6, '0');
+};
+
+export const verifyTotpCode = (secret: string, code: string, window: number = 1): boolean => {
+    if (!code || code.length !== 6) {
+        return false;
+    }
+    const currentCounter = Math.floor(Date.now() / 1000 / 30);
+    for (let step = -window; step <= window; step++) {
+        if (computeTotpCode(secret, currentCounter + step) === code) {
+            return true;
+        }
+    }
+    return false;
+};
+
+export const generateBackupCodes = (count: number = 8): string[] => {
+    const codes: string[] = [];
+    for (let i = 0; i < count; i++) {
+        codes.push(crypto.randomBytes(5).toString('hex').toUpperCase());
+    }
+    return codes;
+};
+
+export interface TwoFactorData {
+    enabled: boolean;
+    secret?: string;
+    pendingSecret?: string;
+    backupCodes: string[];
+}
+
+const twoFactorStore = new Map<string, TwoFactorData>();
+
+export const getTwoFactorData = (userId: string): TwoFactorData | undefined => {
+    return twoFactorStore.get(userId);
+};
+
+export const getOrCreateTwoFactorData = (userId: string): TwoFactorData => {
+    let data = twoFactorStore.get(userId);
+    if (!data) {
+        data = {
+            enabled: false,
+            backupCodes: []
+        };
+        twoFactorStore.set(userId, data);
+    }
+    return data;
+};
+
+// In-memory store for pending 2FA login challenge tokens (expires in 5 minutes)
+const temp2FATokenStore = new Map<string, { userId: string; expiresAt: number }>();
+
+export const createTemp2FAToken = (userId: string): string => {
+    const token = crypto.randomBytes(32).toString('hex');
+    temp2FATokenStore.set(token, {
+        userId,
+        expiresAt: Date.now() + 5 * 60 * 1000
+    });
+    return token;
+};
+
+export const verifyTemp2FAToken = (token: string): string | null => {
+    const entry = temp2FATokenStore.get(token);
+    if (!entry) {
+        return null;
+    }
+    if (Date.now() > entry.expiresAt) {
+        temp2FATokenStore.delete(token);
+        return null;
+    }
+    return entry.userId;
+};
+
+export const consumeTemp2FAToken = (token: string): void => {
+    temp2FATokenStore.delete(token);
+};
+
+export const enroll2FA = async (userId: string) => {
+    const prisma = getDatabaseClient();
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        throw new HttpError(404, 'User not found');
+    }
+
+    const secret = generateTotpSecret();
+    const uri = generateTotpUri(secret, user.email, 'ArenaX');
+
+    const twoFactor = getOrCreateTwoFactorData(userId);
+    twoFactor.pendingSecret = secret;
+
+    return {
+        secret,
+        uri,
+        qrCodeUrl: uri
+    };
+};
+
+export const verifyAndEnable2FA = async (userId: string, code: string) => {
+    const twoFactor = getTwoFactorData(userId);
+    if (!twoFactor || !twoFactor.pendingSecret) {
+        throw new HttpError(400, 'No pending 2FA enrollment found. Please enroll first.');
+    }
+
+    const isValid = verifyTotpCode(twoFactor.pendingSecret, code.trim());
+    if (!isValid) {
+        throw new HttpError(400, 'Invalid 6-digit TOTP code');
+    }
+
+    twoFactor.enabled = true;
+    twoFactor.secret = twoFactor.pendingSecret;
+    twoFactor.pendingSecret = undefined;
+    const backupCodes = generateBackupCodes(8);
+    twoFactor.backupCodes = [...backupCodes];
+
+    logger.info('2FA enabled for user', { userId });
+
+    return {
+        enabled: true,
+        backupCodes,
+        message: 'Two-factor authentication enabled successfully'
+    };
+};
+
+export interface Login2FAInput {
+    tempToken: string;
+    code: string;
+}
+
+export const login2FA = async (input: Login2FAInput) => {
+    const userId = verifyTemp2FAToken(input.tempToken);
+    if (!userId) {
+        throw new HttpError(401, 'Invalid or expired temporary 2FA token');
+    }
+
+    const prisma = getDatabaseClient();
+    const user = await prisma.user.findUnique({
+        where: { id: userId }
+    });
+    if (!user) {
+        throw new HttpError(404, 'User not found');
+    }
+
+    const twoFactor = getTwoFactorData(userId);
+    if (!twoFactor || !twoFactor.enabled || !twoFactor.secret) {
+        throw new HttpError(400, '2FA is not enabled for this account');
+    }
+
+    const cleanedCode = input.code.trim();
+    const isTotpValid = verifyTotpCode(twoFactor.secret, cleanedCode);
+
+    if (!isTotpValid) {
+        // Check backup codes
+        const codeUpper = cleanedCode.toUpperCase();
+        const backupIndex = twoFactor.backupCodes.findIndex(
+            (bc) => bc.toUpperCase() === codeUpper
+        );
+        if (backupIndex !== -1) {
+            // Backup code used once each (#1431)
+            twoFactor.backupCodes.splice(backupIndex, 1);
+            logger.info('Backup code used for 2FA login', { userId });
+        } else {
+            throw new HttpError(400, 'Invalid 2FA code or backup code');
+        }
+    }
+
+    consumeTemp2FAToken(input.tempToken);
+
+    const tokens = await issueSessionTokens(user);
+    logger.info('User logged in with 2FA', { userId: user.id, username: user.username });
+
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        }
+    };
 };

@@ -12,10 +12,17 @@ import {
   Palette,
   Keyboard,
   Save,
+  UserCircle,
 } from "lucide-react";
 import { SettingsBackup } from "@/components/settings/SettingsBackup";
 
 const navigationItems = [
+  {
+    href: "/settings/profile",
+    label: "Profile",
+    description: "Avatar and notification preferences",
+    icon: UserCircle,
+  },
   {
     href: "/settings/account",
     label: "Account",

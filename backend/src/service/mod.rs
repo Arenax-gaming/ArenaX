@@ -24,6 +24,7 @@ pub mod match_service;
 pub mod match_service_background;
 pub mod matchmaker;
 pub mod matchmaker_tests;
+pub mod matchmaking_pipeline;
 pub mod notification_service;
 pub mod payment_provider;
 pub mod platform_links;
@@ -31,14 +32,17 @@ pub mod player_stats_service;
 pub mod push_notification_service;
 pub mod reaper_service;
 pub mod reputation_service;
+pub mod reputation_penalty_service;
 pub mod reward_settlement_service;
 pub mod social_service;
 pub mod soroban_service;
 pub mod sponsored_tokens;
 pub mod staking_service;
+pub mod stellar_sdk_service;
 pub mod stellar_service;
 pub mod suspension_service;
 pub mod tournament_service;
+pub mod tournament_refund_tests;
 pub mod user_service;
 pub mod wallet_service;
 
@@ -66,6 +70,7 @@ pub use soroban_service::{
     DecodedEvent, NetworkConfig, RetryConfig, SorobanError, SorobanService, SorobanTxResult,
     TxStatus,
 };
+pub use stellar_sdk_service::{StellarSdkError, StellarSdkService};
 pub use stellar_service::StellarService;
 pub use tournament_service::TournamentService;
 pub use user_service::UserService;
