@@ -22,6 +22,8 @@ import i18nRoutes from './i18n.routes';
 import paymentWebhookRoutes from './payment-webhook.routes';
 import currencyRoutes from './currency.routes';
 import anchorRoutes from './anchor.routes';
+import * as authController from '../controllers/auth.controller';
+import { authenticateJWT } from '../middleware/auth.middleware';
 
 
 import { publicRateLimiter } from '../middleware/rate-limit.middleware';
@@ -64,6 +66,12 @@ const mountVersioned = (base: string, handler: Router) => {
 
 mountVersioned('/auth', authRoutes);
 mountVersioned('/profiles', profileRoutes);
+
+// Direct /me/2fa mount for two-factor authentication (#1431)
+const twoFactorRouter: Router = Router();
+twoFactorRouter.post('/enroll', authenticateJWT, authController.enroll2FAHandler);
+twoFactorRouter.post('/verify', authenticateJWT, authController.verify2FAHandler);
+mountVersioned('/me/2fa', twoFactorRouter);
 mountVersioned('/matches', matchRoutes);
 mountVersioned('/admin', adminRoutes);
 mountVersioned('/governance', governanceRoutes);

@@ -14,8 +14,9 @@ use crate::auth::middleware::ClaimsExt;
 use crate::db::DbPool;
 use crate::models::match_models::MatchDispute;
 use crate::service::evidence_storage::{
-    evidence_object_key, hash_evidence, validate_content_type, validate_evidence_size,
-    validate_magic_bytes, EvidenceStore,
+    compute_ipfs_cid, evidence_object_key, hash_evidence, pin_evidence_with_fallback,
+    validate_content_type, validate_evidence_size, validate_magic_bytes, EvidenceStore,
+    IpfsPinner,
 };
 use crate::realtime::event_stream::EventStream;
 use crate::service::match_service::MatchService;
@@ -30,11 +31,19 @@ pub struct DisputeEvidenceResponse {
     pub dispute: MatchDispute,
 }
 
+#[derive(Debug, Serialize)]
+pub struct VerifyEvidenceResponse {
+    pub valid: bool,
+    pub recomputed_cid: String,
+    pub stored_cid: Option<String>,
+}
+
 /// POST /api/matches/{id}/dispute/evidence
 pub async fn upload_dispute_evidence(
     req: HttpRequest,
     db: web::Data<DbPool>,
     store: web::Data<Arc<dyn EvidenceStore>>,
+    pinner: Option<web::Data<Arc<dyn IpfsPinner>>>,
     events: Option<web::Data<EventStream>>,
     path: web::Path<Uuid>,
     body: web::Bytes,
@@ -59,15 +68,49 @@ pub async fn upload_dispute_evidence(
     let s3_key = evidence_object_key(user_id, match_id, &content_type, &hash_hex);
     store.put(&s3_key, &content_type, &body).await?;
 
+    let ipfs_cid = pin_evidence_with_fallback(
+        pinner.as_ref().map(|p| p.get_ref()),
+        &body,
+        &format!("{hash_hex}.bin"),
+    )
+    .await;
+
     let mut svc = MatchService::new(db.get_ref().clone());
     if let Some(events) = events {
         svc = svc.with_match_events(events.get_ref().clone());
     }
-    let dispute = svc
-        .attach_dispute_evidence(match_id, user_id, &hash_hex, &s3_key)
+    let mut dispute = svc
+        .attach_dispute_evidence_with_cid(match_id, user_id, &hash_hex, &s3_key, ipfs_cid.as_deref())
         .await?;
+    if dispute.ipfs_cid.is_none() {
+        dispute.ipfs_cid = ipfs_cid;
+    }
 
     Ok(HttpResponse::Ok().json(DisputeEvidenceResponse { dispute }))
+}
+
+/// POST /api/matches/{id}/dispute/evidence/verify
+pub async fn verify_dispute_evidence(
+    req: HttpRequest,
+    body: web::Bytes,
+) -> Result<HttpResponse, ApiError> {
+    let recomputed_cid = compute_ipfs_cid(&body);
+    let expected_cid = req
+        .headers()
+        .get("x-ipfs-cid")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let valid = expected_cid
+        .as_deref()
+        .map(|cid| cid == recomputed_cid)
+        .unwrap_or(true);
+
+    Ok(HttpResponse::Ok().json(VerifyEvidenceResponse {
+        valid,
+        recomputed_cid,
+        stored_cid: expected_cid,
+    }))
 }
 
 /// GET /api/matches/{id}/dispute
@@ -91,7 +134,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/matches").service(
             web::scope("/{id}/dispute")
                 .route("", web::get().to(get_match_dispute))
-                .route("/evidence", web::post().to(upload_dispute_evidence)),
+                .route("/evidence", web::post().to(upload_dispute_evidence))
+                .route("/evidence/verify", web::post().to(verify_dispute_evidence)),
         ),
     );
 }
