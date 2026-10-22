@@ -16,6 +16,7 @@ mod service;
 mod orchestrator;
 mod security;
 mod telemetry;
+mod transaction;
 mod validators;
 
 use crate::config::Config;
@@ -408,6 +409,7 @@ async fn main() -> io::Result<()> {
                     .route("/health", web::get().to(crate::http::health::health_check))
                     .route("/health/live", web::get().to(crate::http::health::liveness_check))
                     .route("/health/ready", web::get().to(crate::http::health::readiness_check))
+                    .route("/health/stellar", web::get().to(crate::http::health::stellar_health_check))
                     .route("/csrf-token", web::get().to(csrf_token_handler))
                     // Batch operations endpoints — Issue #952
                     .configure(crate::http::batch_handler::configure_routes)
