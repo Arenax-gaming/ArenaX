@@ -16,6 +16,7 @@ pub mod gameplay_analysis;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod idempotency_tests;
+pub mod elo_history_tests;
 pub mod leaderboard_service;
 pub mod leaderboard_sync;
 pub mod match_authority_service;
