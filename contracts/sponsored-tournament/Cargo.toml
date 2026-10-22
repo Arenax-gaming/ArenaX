@@ -1,13 +1,18 @@
 [package]
 name = "sponsored-tournament"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-soroban-sdk = "21.7.7"
+soroban-sdk.workspace = true
 
 [dev-dependencies]
-soroban-sdk = { version = "21.7.7", features = ["testutils"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+composable-example = { path = "../composable-example" }
+tournament-hooks-noop = { path = "../tournament-hooks-noop" }

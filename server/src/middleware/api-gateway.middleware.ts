@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { apiGatewayService } from '../services/api-gateway.service';
+import { ApiGatewayService, ApiKeyScope, apiGatewayService, hasScopes } from '../services/api-gateway.service';
 import { HttpError } from '../utils/http-error';
 
 const API_KEY_HEADER = 'x-api-key';
@@ -8,29 +8,50 @@ const RATE_LIMIT_MAX = 100;
 
 const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
 
-export async function apiKeyAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
-  const apiKey = req.headers[API_KEY_HEADER] as string | undefined;
+/** Build API key authentication middleware bound to a gateway service. */
+export function createApiKeyAuth(service: ApiGatewayService) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    const apiKey = req.headers[API_KEY_HEADER] as string | undefined;
 
-  if (!apiKey) {
-    return next(new HttpError(401, 'API key is required. Provide it via the X-API-Key header.'));
-  }
+    if (!apiKey) {
+      return next(new HttpError(401, 'API key is required. Provide it via the X-API-Key header.'));
+    }
 
-  const result = await apiGatewayService.validateKey(apiKey);
+    const result = await service.validateKey(apiKey);
 
-  if (!result.valid) {
-    return next(new HttpError(401, result.error ?? 'Invalid API key'));
-  }
+    if (!result.valid) {
+      return next(new HttpError(401, result.error ?? 'Invalid API key'));
+    }
 
-  const keyData = result.keyData!;
-  req.apiKeyInfo = {
-    keyId: keyData.id,
-    keyPrefix: keyData.keyPrefix,
-    name: keyData.name,
-    userId: keyData.userId,
-    permissions: keyData.permissions,
+    const keyData = result.keyData!;
+    req.apiKeyInfo = {
+      keyId: keyData.id,
+      keyPrefix: keyData.keyPrefix,
+      name: keyData.name,
+      userId: keyData.userId,
+      permissions: keyData.permissions,
+    };
+
+    next();
   };
+}
 
-  next();
+export const apiKeyAuth = createApiKeyAuth(apiGatewayService);
+
+/**
+ * Per-request scope enforcement: responds 401 without an authenticated API
+ * key and 403 when the key lacks any of the required scopes.
+ */
+export function requireApiScopes(...scopes: ApiKeyScope[]) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.apiKeyInfo) {
+      return next(new HttpError(401, 'API key authentication required'));
+    }
+    if (!hasScopes(req.apiKeyInfo.permissions, scopes)) {
+      return next(new HttpError(403, `API key is missing required scope(s): ${scopes.join(', ')}`));
+    }
+    next();
+  };
 }
 
 export async function apiKeyRateLimiter(req: Request, _res: Response, next: NextFunction): Promise<void> {
@@ -55,13 +76,9 @@ export async function apiKeyRateLimiter(req: Request, _res: Response, next: Next
   next();
 }
 
-export function requireApiPermission(...permissions: string[]) {
-  return (req: Request, _res: Response, next: NextFunction): void => {
-    if (!req.apiKeyInfo) {
-      return next(new HttpError(401, 'API key authentication required'));
-    }
-    next();
-  };
+/** @deprecated Use {@link requireApiScopes}. */
+export function requireApiPermission(...permissions: ApiKeyScope[]) {
+  return requireApiScopes(...permissions);
 }
 
 export function trackApiUsage(req: Request, _res: Response, next: NextFunction): void {

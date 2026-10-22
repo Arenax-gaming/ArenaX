@@ -48,6 +48,9 @@ export function AppLayout({ children }: AppLayoutProps) {
         case "nav_matches":
           router.push("/matches");
           break;
+        case "nav_wallet":
+          router.push("/wallet");
+          break;
         default:
           break;
       }

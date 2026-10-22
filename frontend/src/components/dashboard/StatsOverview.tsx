@@ -98,14 +98,14 @@ export function StatsOverview({
       label: "Global Rank",
       value: `#${rank}`,
       icon: <Trophy className="h-5 w-5" />,
-      accent: "text-yellow-500",
+      accent: "text-rank",
     },
     {
       label: "Win Rate",
       value: `${winRate}%`,
       change: 2.5,
       icon: <Target className="h-5 w-5" />,
-      accent: "text-success",
+      accent: "text-success-text",
     },
     {
       label: "W / L",
@@ -128,13 +128,13 @@ export function StatsOverview({
             </div>
             <p className="text-2xl font-black tracking-tight">{stat.value}</p>
             {stat.change !== undefined && (
-              <p className={`text-xs mt-1 flex items-center gap-1 ${stat.change >= 0 ? "text-success" : "text-destructive"}`}>
+              <p className={`text-xs mt-1 flex items-center gap-1 ${stat.change >= 0 ? "text-success-text" : "text-destructive-text"}`}>
                 {stat.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 {stat.change >= 0 ? "+" : ""}{stat.change} this week
               </p>
             )}
             {streak > 0 && stat.label === "Win Rate" && (
-              <p className="text-xs mt-1 text-orange-500 font-semibold">🔥 {streak} win streak</p>
+              <p className="text-xs mt-1 text-streak font-semibold">🔥 {streak} win streak</p>
             )}
           </CardContent>
         </Card>

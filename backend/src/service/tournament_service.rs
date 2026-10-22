@@ -30,6 +30,37 @@ pub struct JobRecord {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RefundStatus {
+    Success,
+    AlreadyRefunded,
+    Pending,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefundReportItem {
+    pub user_id: Uuid,
+    pub amount: i64,
+    pub currency: String,
+    pub status: RefundStatus,
+    pub reference: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TournamentRefundSummaryReport {
+    pub tournament_id: Uuid,
+    pub total_registrants: usize,
+    pub paid_registrants: usize,
+    pub refunded_count: usize,
+    pub skipped_count: usize,
+    pub failed_count: usize,
+    pub items: Vec<RefundReportItem>,
+    pub generated_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct JobQueue {
     db_pool: DbPool,
@@ -217,6 +248,7 @@ pub struct TournamentService {
     /// Distributed lock and versioned status (Issue #1253).
     state_backend: Option<crate::service::distributed_tournament_state::TournamentStateBackend>,
     instance_id: String,
+    sponsored_tokens: Option<Arc<crate::service::sponsored_tokens::SponsoredTokens>>,
 }
 
 impl TournamentService {
@@ -230,7 +262,16 @@ impl TournamentService {
             admin_secret: None,
             state_backend: None,
             instance_id: format!("tournament-{}", Uuid::new_v4()),
+            sponsored_tokens: None,
         }
+    }
+
+    pub fn with_sponsored_tokens(
+        mut self,
+        sponsored_tokens: Arc<crate::service::sponsored_tokens::SponsoredTokens>,
+    ) -> Self {
+        self.sponsored_tokens = Some(sponsored_tokens);
+        self
     }
 
     pub fn with_state_backend(
@@ -258,6 +299,49 @@ impl TournamentService {
         self.prize_contract_id = Some(prize_contract_id);
         self.admin_secret = Some(admin_secret);
         self
+    }
+
+    /// Purchase a tournament sponsorship package and deploy the sponsored-token contract (#1419)
+    pub async fn purchase_sponsor_package(
+        &self,
+        tournament_id: Uuid,
+        sponsor_id: &str,
+        tier: crate::service::sponsored_tokens::SponsorPackageTier,
+    ) -> Result<crate::service::sponsored_tokens::TournamentSponsorship, ApiError> {
+        let tokens = self
+            .sponsored_tokens
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new()));
+
+        let sponsorship = tokens
+            .purchase_package(tournament_id, sponsor_id, tier)
+            .await
+            .map_err(|e| ApiError::bad_request(e.to_string()))?;
+
+        self.publish_tournament_event(serde_json::json!({
+            "type": "sponsorship_purchased",
+            "tournament_id": tournament_id,
+            "sponsor_id": sponsorship.sponsor_id.clone(),
+            "contract_address": sponsorship.contract_address.clone(),
+            "tier": sponsorship.package.tier.to_string(),
+            "on_chain_status": sponsorship.on_chain_status.clone(),
+        }))
+        .await
+        .ok();
+
+        Ok(sponsorship)
+    }
+
+    /// Retrieve active sponsorship for a tournament (#1419)
+    pub async fn get_tournament_sponsorship(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Option<crate::service::sponsored_tokens::TournamentSponsorship>, ApiError> {
+        if let Some(tokens) = &self.sponsored_tokens {
+            Ok(tokens.get_sponsorship(tournament_id).await)
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn enqueue_generate_bracket_job(
@@ -1670,6 +1754,42 @@ impl TournamentService {
         Ok(())
     }
 
+    /// `INSERT INTO transactions` with a specific unique reference for idempotency.
+    pub async fn create_transaction_with_reference(
+        &self,
+        user_id: Uuid,
+        transaction_type: TransactionType,
+        amount: i64,
+        currency: String,
+        reference: String,
+        description: String,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO transactions (
+                id, user_id, transaction_type, amount, currency, status, reference, description, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            )
+            "#,
+            Uuid::new_v4(),
+            user_id,
+            transaction_type as _,
+            amount,
+            currency,
+            TransactionStatus::Completed as _,
+            reference,
+            description,
+            Utc::now(),
+            Utc::now()
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(())
+    }
+
     /// Create a real Stellar prize-pool account.
     ///
     /// Steps:
@@ -1822,10 +1942,152 @@ impl TournamentService {
         self.distribute_prizes(tournament_id).await
     }
 
-    /// Cancel a tournament and refund all participants.
+    /// Process idempotent entry fee refunds for all paid registrants of a cancelled tournament.
     ///
-    /// Sets status to `Cancelled`, then issues a wallet refund for every
-    /// participant who paid an entry fee.
+    /// Generates a summary report detailing each registrant's refund status.
+    pub async fn process_tournament_refunds(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<TournamentRefundSummaryReport, ApiError> {
+        let tournament = self.get_tournament_by_id(tournament_id).await?;
+
+        let participants = sqlx::query_as!(
+            TournamentParticipant,
+            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND entry_fee_paid = true",
+            tournament_id,
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let mut items = Vec::new();
+        let mut refunded_count = 0;
+        let mut skipped_count = 0;
+        let mut failed_count = 0;
+
+        for participant in &participants {
+            let refund_ref = format!("refund:{}:{}", tournament_id, participant.user_id);
+
+            // Idempotency check: see if a completed refund with this reference already exists
+            let existing_tx = sqlx::query!(
+                "SELECT id FROM transactions WHERE reference = $1 AND status = 'completed'",
+                refund_ref
+            )
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            if existing_tx.is_some() {
+                items.push(RefundReportItem {
+                    user_id: participant.user_id,
+                    amount: tournament.entry_fee,
+                    currency: tournament.entry_fee_currency.clone(),
+                    status: RefundStatus::AlreadyRefunded,
+                    reference: refund_ref,
+                    error: None,
+                });
+                skipped_count += 1;
+                continue;
+            }
+
+            // Refund via original payment method
+            let refund_result: Result<(), ApiError> = match tournament.entry_fee_currency.as_str() {
+                "ARENAX_TOKEN" => {
+                    sqlx::query!(
+                        "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens + $1 WHERE user_id = $2",
+                        tournament.entry_fee,
+                        participant.user_id,
+                    )
+                    .execute(&self.db_pool)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))
+                    .map(|_| ())
+                }
+                _ => {
+                    sqlx::query!(
+                        "UPDATE wallets SET balance_ngn = balance_ngn + $1 WHERE user_id = $2",
+                        tournament.entry_fee,
+                        participant.user_id,
+                    )
+                    .execute(&self.db_pool)
+                    .await
+                    .map_err(|e| ApiError::database_error(e))
+                    .map(|_| ())
+                }
+            };
+
+            match refund_result {
+                Ok(_) => {
+                    if let Err(tx_err) = self
+                        .create_transaction_with_reference(
+                            participant.user_id,
+                            TransactionType::Refund,
+                            tournament.entry_fee,
+                            tournament.entry_fee_currency.clone(),
+                            refund_ref.clone(),
+                            format!("Refund for cancelled tournament: {}", tournament.name),
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            user_id = %participant.user_id,
+                            error = %tx_err,
+                            "Failed to write refund transaction record"
+                        );
+                        items.push(RefundReportItem {
+                            user_id: participant.user_id,
+                            amount: tournament.entry_fee,
+                            currency: tournament.entry_fee_currency.clone(),
+                            status: RefundStatus::Failed,
+                            reference: refund_ref,
+                            error: Some(tx_err.to_string()),
+                        });
+                        failed_count += 1;
+                    } else {
+                        items.push(RefundReportItem {
+                            user_id: participant.user_id,
+                            amount: tournament.entry_fee,
+                            currency: tournament.entry_fee_currency.clone(),
+                            status: RefundStatus::Success,
+                            reference: refund_ref,
+                            error: None,
+                        });
+                        refunded_count += 1;
+                    }
+                }
+                Err(err) => {
+                    items.push(RefundReportItem {
+                        user_id: participant.user_id,
+                        amount: tournament.entry_fee,
+                        currency: tournament.entry_fee_currency.clone(),
+                        status: RefundStatus::Failed,
+                        reference: refund_ref,
+                        error: Some(err.to_string()),
+                    });
+                    failed_count += 1;
+                }
+            }
+        }
+
+        let report = TournamentRefundSummaryReport {
+            tournament_id,
+            total_registrants: participants.len(),
+            paid_registrants: participants.len(),
+            refunded_count,
+            skipped_count,
+            failed_count,
+            items,
+            generated_at: Utc::now(),
+        };
+
+        Ok(report)
+    }
+
+    /// Cancel a tournament and trigger refund job for all participants.
+    ///
+    /// Sets status to `Cancelled`, enqueues a refund job in the job queue,
+    /// issues idempotent entry fee refunds via original payment methods,
+    /// and generates a summary report.
     pub async fn cancel_tournament(&self, tournament_id: Uuid) -> Result<Tournament, ApiError> {
         let tournament = self.get_tournament_by_id(tournament_id).await?;
 
@@ -1837,52 +2099,6 @@ impl TournamentService {
             return Err(ApiError::bad_request(
                 "Cannot cancel a tournament that is already in progress, completed, or cancelled",
             ));
-        }
-
-        // Issue refunds for every participant who paid
-        let participants = sqlx::query_as!(
-            TournamentParticipant,
-            "SELECT * FROM tournament_participants WHERE tournament_id = $1 AND entry_fee_paid = true",
-            tournament_id,
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        for participant in &participants {
-            // Refund in the tournament's currency
-            match tournament.entry_fee_currency.as_str() {
-                "ARENAX_TOKEN" => {
-                    sqlx::query!(
-                        "UPDATE wallets SET balance_arenax_tokens = balance_arenax_tokens + $1 WHERE user_id = $2",
-                        tournament.entry_fee,
-                        participant.user_id,
-                    )
-                    .execute(&self.db_pool)
-                    .await
-                    .map_err(|e| ApiError::database_error(e))?;
-                }
-                _ => {
-                    // NGN and other fiat
-                    sqlx::query!(
-                        "UPDATE wallets SET balance_ngn = balance_ngn + $1 WHERE user_id = $2",
-                        tournament.entry_fee,
-                        participant.user_id,
-                    )
-                    .execute(&self.db_pool)
-                    .await
-                    .map_err(|e| ApiError::database_error(e))?;
-                }
-            }
-
-            self.create_transaction(
-                participant.user_id,
-                TransactionType::Refund,
-                tournament.entry_fee,
-                tournament.entry_fee_currency.clone(),
-                format!("Refund for cancelled tournament: {}", tournament.name),
-            )
-            .await?;
         }
 
         // Update tournament status
@@ -1897,10 +2113,29 @@ impl TournamentService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        // Audit log
+        // Enqueue background refund job for all paid registrants
+        let job_payload = serde_json::json!({
+            "tournament_id": tournament_id,
+            "tournament_name": tournament.name,
+            "entry_fee": tournament.entry_fee,
+            "currency": tournament.entry_fee_currency,
+            "action": "refund_entry_fees"
+        });
+        let job = self.job_queue.enqueue("tournament_refund", job_payload).await?;
+
+        // Process entry fee refunds idempotently and generate summary report
+        let report = self.process_tournament_refunds(tournament_id).await?;
+        let report_value = serde_json::to_value(&report).unwrap_or_default();
+
+        // Mark job as done with the generated summary report
+        let _ = self.job_queue.mark_done(job.id, report_value.clone()).await;
+
+        // Audit log with summary report details
         let details = serde_json::json!({
             "old_status": tournament.status,
             "new_status": TournamentStatus::Cancelled,
+            "refund_job_id": job.id,
+            "refund_summary": report_value,
         });
         sqlx::query!(
             r#"
@@ -1918,8 +2153,11 @@ impl TournamentService {
 
         tracing::info!(
             tournament_id = %tournament_id,
-            refunds_issued = participants.len(),
-            "Tournament cancelled and refunds issued"
+            refund_job_id = %job.id,
+            refunded = report.refunded_count,
+            skipped = report.skipped_count,
+            failed = report.failed_count,
+            "Tournament cancelled, refund job processed, and summary report generated"
         );
 
         Ok(updated)

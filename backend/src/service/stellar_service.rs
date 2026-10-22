@@ -768,6 +768,30 @@ impl StellarService {
     pub fn stroops_to_xlm(stroops: i64) -> f64 {
         stroops as f64 / 10_000_000.0
     }
+
+    /// Unique deposit memo for a user (#1432).
+    pub fn user_deposit_memo(&self, user_id: Uuid) -> String {
+        get_user_deposit_memo(user_id)
+    }
+
+    /// Parse user ID from deposit memo (#1432).
+    pub fn parse_memo(&self, memo: &str) -> Option<Uuid> {
+        parse_deposit_memo(memo)
+    }
+}
+
+/// Generate a unique deposit memo for a user (#1432).
+pub fn get_user_deposit_memo(user_id: Uuid) -> String {
+    user_id.to_string()
+}
+
+/// Parse a user ID from a deposit transaction memo (#1432).
+pub fn parse_deposit_memo(memo: &str) -> Option<Uuid> {
+    let trimmed = memo.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Uuid::parse_str(trimmed).ok()
 }
 
 // ============================================================================

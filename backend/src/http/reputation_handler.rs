@@ -8,7 +8,10 @@
 use crate::api_error::ApiError;
 use crate::models::{ApiResponse, PaginatedResponse, PaginationParams};
 use crate::service::reputation_service::{PlayerReputation, ReputationService};
-use actix_web::{web, HttpResponse};
+use crate::auth::middleware::ClaimsExt;
+use crate::service::reputation_penalty_service::{PenaltyRule, ReputationPenaltyService};
+use actix_web::{web, HttpRequest, HttpResponse};
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -304,6 +307,35 @@ pub async fn get_reputation_stats(
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
+/// Request body for `POST /reputation/penalties`.
+#[derive(Debug, Deserialize)]
+pub struct ApplyPenaltyRequest {
+    pub user_id: Uuid,
+    pub rule: PenaltyRule,
+    pub match_id: Option<Uuid>,
+    /// Admin override of the rule's default deduction (0 waives it).
+    pub override_amount: Option<i32>,
+}
+
+/// POST /api/reputation/penalties — apply a reputation penalty (admin/moderator only).
+pub async fn apply_penalty(
+    req: HttpRequest,
+    service: web::Data<Arc<ReputationPenaltyService>>,
+    body: web::Json<ApplyPenaltyRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = req.claims().ok_or(ApiError::Unauthorized)?;
+    if !claims.roles.iter().any(|r| r == "admin" || r == "moderator") {
+        return Err(ApiError::Forbidden);
+    }
+    let issued_by = req.user_id();
+
+    let outcome = service
+        .apply_penalty(body.user_id, body.rule, body.match_id, body.override_amount, issued_by)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(outcome)))
+}
+
 /// Configure routes.
 ///
 /// Intended to be called via `.configure(...)` inside an existing `/api`
@@ -320,6 +352,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             // Admin endpoints (should be protected by admin middleware)
             .route("/bad-actors", web::get().to(get_bad_actors))
             .route("/bad-actors/{user_id}/remove", web::post().to(remove_bad_actor_flag))
-            .route("/stats", web::get().to(get_reputation_stats)),
+            .route("/stats", web::get().to(get_reputation_stats))
+            .route("/penalties", web::post().to(apply_penalty)),
     );
 }

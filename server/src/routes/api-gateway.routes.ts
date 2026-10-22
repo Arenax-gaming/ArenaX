@@ -8,6 +8,8 @@ import {
   rotateApiKey,
   getApiKeyAnalytics,
   getApiKeyUsage,
+  adminCreateApiKey,
+  adminRotateApiKey,
   adminListAllKeys,
   adminUpdateKeyPermissions,
 } from '../controllers/api-gateway.controller';
@@ -22,7 +24,9 @@ router.post('/keys/:id/rotate', authenticateJWT, rotateApiKey);
 router.get('/keys/:id/usage', authenticateJWT, getApiKeyUsage);
 
 // Admin routes
+router.post('/admin/keys', authenticateJWT, restrictTo('ADMIN'), adminCreateApiKey);
 router.get('/admin/keys', authenticateJWT, restrictTo('ADMIN'), adminListAllKeys);
+router.post('/admin/keys/:id/rotate', authenticateJWT, restrictTo('ADMIN'), adminRotateApiKey);
 router.put('/admin/keys/:id/permissions', authenticateJWT, restrictTo('ADMIN'), adminUpdateKeyPermissions);
 router.get('/admin/analytics', authenticateJWT, restrictTo('ADMIN'), getApiKeyAnalytics);
 

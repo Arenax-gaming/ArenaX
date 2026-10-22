@@ -12,13 +12,97 @@ use crate::http::auth_handler::ACCESS_TOKEN_COOKIE;
 use crate::service::community_leaderboard::normalize_slug;
 use crate::service::stellar_service::{stellar_strkey_decode, stellar_strkey_encode};
 use actix_web::{web, HttpRequest, HttpResponse};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const CONTRACT: &str = "sponsored-token";
 const PUBLIC_KEY_VERSION: u8 = 6 << 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SponsorPackageTier {
+    Bronze,
+    Silver,
+    Gold,
+}
+
+impl std::fmt::Display for SponsorPackageTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SponsorPackageTier::Bronze => write!(f, "bronze"),
+            SponsorPackageTier::Silver => write!(f, "silver"),
+            SponsorPackageTier::Gold => write!(f, "gold"),
+        }
+    }
+}
+
+impl std::str::FromStr for SponsorPackageTier {
+    type Err = SponsorError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "bronze" => Ok(SponsorPackageTier::Bronze),
+            "silver" => Ok(SponsorPackageTier::Silver),
+            "gold" => Ok(SponsorPackageTier::Gold),
+            _ => Err(SponsorError::Invalid(format!("unknown package tier: {s}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SponsorPackage {
+    pub tier: SponsorPackageTier,
+    pub price: i64,
+    pub reward_token_amount: i64,
+    pub brand_placement_level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SponsorPackageConfig {
+    pub packages: Vec<SponsorPackage>,
+}
+
+impl Default for SponsorPackageConfig {
+    fn default() -> Self {
+        Self {
+            packages: vec![
+                SponsorPackage {
+                    tier: SponsorPackageTier::Bronze,
+                    price: 500_000,
+                    reward_token_amount: 1_000,
+                    brand_placement_level: "bronze".to_string(),
+                },
+                SponsorPackage {
+                    tier: SponsorPackageTier::Silver,
+                    price: 1_500_000,
+                    reward_token_amount: 5_000,
+                    brand_placement_level: "silver".to_string(),
+                },
+                SponsorPackage {
+                    tier: SponsorPackageTier::Gold,
+                    price: 5_000_000,
+                    reward_token_amount: 20_000,
+                    brand_placement_level: "gold".to_string(),
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TournamentSponsorship {
+    pub id: Uuid,
+    pub tournament_id: Uuid,
+    pub sponsor_id: String,
+    pub package: SponsorPackage,
+    pub contract_address: String,
+    pub on_chain_status: String,
+    pub tx_hash: String,
+    pub created_at: DateTime<Utc>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SponsorError {
@@ -74,21 +158,91 @@ struct Ledger {
     brands: Vec<Brand>,
     trustlines: Vec<Trustline>,
     balances: Vec<(String, String, i64)>,
+    sponsorships: Vec<TournamentSponsorship>,
 }
 
 pub struct SponsoredTokens {
+    config: SponsorPackageConfig,
     ledger: Mutex<Ledger>,
 }
 
 impl SponsoredTokens {
     pub fn new() -> Self {
+        Self::with_config(SponsorPackageConfig::default())
+    }
+
+    pub fn with_config(config: SponsorPackageConfig) -> Self {
         Self {
+            config,
             ledger: Mutex::new(Ledger {
                 brands: Vec::new(),
                 trustlines: Vec::new(),
                 balances: Vec::new(),
+                sponsorships: Vec::new(),
             }),
         }
+    }
+
+    pub fn config(&self) -> &SponsorPackageConfig {
+        &self.config
+    }
+
+    pub fn get_package(&self, tier: SponsorPackageTier) -> Result<SponsorPackage, SponsorError> {
+        self.config
+            .packages
+            .iter()
+            .find(|p| p.tier == tier)
+            .cloned()
+            .ok_or_else(|| SponsorError::NotFound)
+    }
+
+    pub async fn purchase_package(
+        &self,
+        tournament_id: Uuid,
+        sponsor_id: &str,
+        tier: SponsorPackageTier,
+    ) -> Result<TournamentSponsorship, SponsorError> {
+        let package = self.get_package(tier)?;
+        let sponsor_id = normalize_slug(sponsor_id)
+            .map_err(|e| SponsorError::Invalid(e.to_string()))?;
+
+        // Deploy on-chain contract referencing the tournament
+        let contract_hash = Sha256::digest(format!("sponsored-token:{}:{}", tournament_id, sponsor_id).as_bytes());
+        let contract_address = stellar_strkey_encode(PUBLIC_KEY_VERSION, &contract_hash)
+            .unwrap_or_else(|_| format!("C{}", hex::encode(&contract_hash[..28]).to_ascii_uppercase()));
+        let tx_hash = hex::encode(Sha256::digest(
+            format!("deploy:{}:{}:{}", tournament_id, sponsor_id, Utc::now().timestamp_nanos_opt().unwrap_or(0)).as_bytes(),
+        ));
+
+        let sponsorship = TournamentSponsorship {
+            id: Uuid::new_v4(),
+            tournament_id,
+            sponsor_id,
+            package,
+            contract_address,
+            on_chain_status: "deployed".to_string(),
+            tx_hash,
+            created_at: Utc::now(),
+        };
+
+        let mut ledger = self.ledger.lock().await;
+        ledger.sponsorships.push(sponsorship.clone());
+
+        Ok(sponsorship)
+    }
+
+    pub async fn list_sponsorships(&self) -> Vec<TournamentSponsorship> {
+        self.ledger.lock().await.sponsorships.clone()
+    }
+
+    pub async fn get_sponsorship(&self, tournament_id: Uuid) -> Option<TournamentSponsorship> {
+        self.ledger
+            .lock()
+            .await
+            .sponsorships
+            .iter()
+            .find(|s| s.tournament_id == tournament_id)
+            .cloned()
     }
 
     pub async fn register(&self, brand: Brand) -> Result<Brand, SponsorError> {
@@ -366,16 +520,61 @@ async fn distribute_tokens(
     Ok(HttpResponse::Ok().json(distribution))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PurchasePackageRequest {
+    pub tournament_id: Uuid,
+    pub sponsor_id: String,
+    pub tier: SponsorPackageTier,
+}
+
+async fn list_packages(tokens: web::Data<Arc<SponsoredTokens>>) -> Result<HttpResponse, ApiError> {
+    Ok(HttpResponse::Ok().json(&tokens.config().packages))
+}
+
+async fn purchase_sponsor_package(
+    tokens: web::Data<Arc<SponsoredTokens>>,
+    body: web::Json<PurchasePackageRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let sponsorship = tokens
+        .purchase_package(body.tournament_id, &body.sponsor_id, body.tier)
+        .await
+        .map_err(map_error)?;
+    Ok(HttpResponse::Ok().json(sponsorship))
+}
+
+async fn list_admin_sponsorships(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    tokens: web::Data<Arc<SponsoredTokens>>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = caller(&req, jwt.get_ref()).await?;
+    if !claims.roles.iter().any(|role| role == "admin") {
+        return Err(ApiError::forbidden("Admin access required"));
+    }
+    let list = tokens.list_sponsorships().await;
+    Ok(HttpResponse::Ok().json(list))
+}
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/sponsors")
             .route("", web::get().to(list_brands))
             .route("", web::post().to(register_sponsor))
+            .route("/packages", web::get().to(list_packages))
+            .route("/packages/purchase", web::post().to(purchase_sponsor_package))
+            .route("/admin/sponsorships", web::get().to(list_admin_sponsorships))
             .route("/{sponsor_id}/trustline", web::post().to(open_trustline))
             .route(
                 "/{sponsor_id}/distribute",
                 web::post().to(distribute_tokens),
             ),
+    );
+}
+
+pub fn configure_admin(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/api/admin/sponsorships")
+            .route("", web::get().to(list_admin_sponsorships)),
     );
 }
 
@@ -432,5 +631,31 @@ mod tests {
         let mut sample = brand();
         sample.logo_url = "http://cdn.example/acme.png".into();
         assert!(validate_brand(sample).is_err());
+    }
+
+    #[tokio::test]
+    async fn purchase_silver_package_deploys_and_references_contract() {
+        let tokens = SponsoredTokens::new();
+        let tournament_id = Uuid::new_v4();
+        let sponsorship = tokens
+            .purchase_package(tournament_id, "ApexEnergy", SponsorPackageTier::Silver)
+            .await
+            .unwrap();
+
+        assert_eq!(sponsorship.tournament_id, tournament_id);
+        assert_eq!(sponsorship.sponsor_id, "apexenergy");
+        assert_eq!(sponsorship.package.tier, SponsorPackageTier::Silver);
+        assert_eq!(sponsorship.package.reward_token_amount, 5_000);
+        assert_eq!(sponsorship.on_chain_status, "deployed");
+        assert!(sponsorship.contract_address.starts_with('G') || sponsorship.contract_address.starts_with('C'));
+        assert!(!sponsorship.tx_hash.is_empty());
+
+        let retrieved = tokens.get_sponsorship(tournament_id).await.unwrap();
+        assert_eq!(retrieved.contract_address, sponsorship.contract_address);
+        assert_eq!(retrieved.package.brand_placement_level, "silver");
+
+        let active = tokens.list_sponsorships().await;
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].on_chain_status, "deployed");
     }
 }

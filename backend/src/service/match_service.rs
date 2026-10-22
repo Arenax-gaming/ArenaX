@@ -368,6 +368,22 @@ impl MatchService {
         Ok(dispute)
     }
 
+    /// Attach evidence including IPFS CID content-addressed identifier (#1423).
+    pub async fn attach_dispute_evidence_with_cid(
+        &self,
+        match_id: Uuid,
+        user_id: Uuid,
+        evidence_hash: &str,
+        evidence_s3_key: &str,
+        ipfs_cid: Option<&str>,
+    ) -> Result<MatchDispute, ApiError> {
+        let mut dispute = self
+            .attach_dispute_evidence(match_id, user_id, evidence_hash, evidence_s3_key)
+            .await?;
+        dispute.ipfs_cid = ipfs_cid.map(str::to_string);
+        Ok(dispute)
+    }
+
     /// Join matchmaking queue
     pub async fn join_matchmaking(
         &self,
