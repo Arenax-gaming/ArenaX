@@ -2042,18 +2042,21 @@ impl MatchService {
             r#"
             UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, resolution = $3, resolved_at = $4
-            WHERE id = $5
+            WHERE id = $5 AND status IN ($6, $7)
             RETURNING *
             "#,
             DisputeStatus::Resolved as _,
             admin_id,
             resolution,
             Utc::now(),
-            dispute_id
+            dispute_id,
+            DisputeStatus::Pending as _,
+            DisputeStatus::UnderReview as _
         )
-        .fetch_one(&self.db_pool)
+        .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or_else(|| ApiError::bad_request("Dispute is not open for resolution"))?;
 
         // Update match record if winner needs to be reassigned
         if let Some(new_winner) = winner_id {
@@ -2095,6 +2098,31 @@ impl MatchService {
         Ok(dispute)
     }
 
+    /// Move a match dispute into admin review.
+    pub async fn start_dispute_review(
+        &self,
+        dispute_id: Uuid,
+        admin_id: Uuid,
+    ) -> Result<MatchDispute, ApiError> {
+        sqlx::query_as!(
+            MatchDispute,
+            r#"
+            UPDATE match_disputes
+            SET status = $1, admin_reviewer_id = $2
+            WHERE id = $3 AND status = $4
+            RETURNING *
+            "#,
+            DisputeStatus::UnderReview as _,
+            admin_id,
+            dispute_id,
+            DisputeStatus::Pending as _
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or_else(|| ApiError::bad_request("Dispute is not pending review"))
+    }
+
     /// Reject a match dispute
     pub async fn reject_dispute(
         &self,
@@ -2107,18 +2135,21 @@ impl MatchService {
             r#"
             UPDATE match_disputes
             SET status = $1, admin_reviewer_id = $2, admin_notes = $3, resolved_at = $4
-            WHERE id = $5
+            WHERE id = $5 AND status IN ($6, $7)
             RETURNING *
             "#,
             DisputeStatus::Rejected as _,
             admin_id,
             reason,
             Utc::now(),
-            dispute_id
+            dispute_id,
+            DisputeStatus::Pending as _,
+            DisputeStatus::UnderReview as _
         )
-        .fetch_one(&self.db_pool)
+        .fetch_optional(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(|e| ApiError::database_error(e))?
+        .ok_or_else(|| ApiError::bad_request("Dispute is not open for rejection"))?;
 
         let match_record = self.get_match_by_id(dispute.match_id).await?;
         self.update_match_status(dispute.match_id, match_record.status, MatchStatus::Completed)
