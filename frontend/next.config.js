@@ -21,6 +21,17 @@ try {
   console.warn("[next.config] next-intl plugin unavailable, running without i18n");
 }
 
+// Bundle analysis (#1325): `npm run analyze` sets ANALYZE=true and opens
+// treemap reports for the client and server bundles.
+let withBundleAnalyzer = (config) => config;
+try {
+  withBundleAnalyzer = require("@next/bundle-analyzer")({
+    enabled: process.env.ANALYZE === "true",
+  });
+} catch {
+  console.warn("[next.config] @next/bundle-analyzer unavailable, skipping bundle analysis");
+}
+
 // Content-Security-Policy is no longer set here (#1091): a static policy
 // can't carry a per-request nonce, so it had to allow 'unsafe-inline'
 // 'unsafe-eval' in script-src — defeating CSP's script protection entirely.
@@ -217,4 +228,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withNextIntl(withPWA(nextConfig));
+module.exports = withBundleAnalyzer(withNextIntl(withPWA(nextConfig)));

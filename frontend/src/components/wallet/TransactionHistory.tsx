@@ -12,11 +12,19 @@ import {
 import { EmptyState } from "@/components/common/EmptyState";
 import { TxHistoryItem } from "@/lib/wallet/types";
 import { Receipt } from "lucide-react";
+import { useDevice } from "@/hooks/useMobile";
+import { TransactionRowSkeleton } from "./TransactionRowSkeleton";
 
 interface TransactionHistoryProps {
   items: TxHistoryItem[];
   onClear: () => void;
+  /** Show skeleton rows in place of the list while history loads */
+  isLoading?: boolean;
 }
+
+// Skeleton rows roughly filling the viewport (#1319)
+const MOBILE_SKELETON_ROWS = 8;
+const DESKTOP_SKELETON_ROWS = 15;
 
 type TabType = "all" | "deposits" | "withdrawals" | "earnings";
 
@@ -35,8 +43,10 @@ const statusStyles: Record<TxHistoryItem["status"], string> = {
 export function TransactionHistory({
   items,
   onClear,
+  isLoading = false,
 }: TransactionHistoryProps) {
   const [activeTab, setActiveTab] = useState<TabType>("all");
+  const { isMobile } = useDevice();
 
   const filteredItems = items.filter((item) => {
     if (activeTab === "all") return true;
@@ -86,7 +96,15 @@ export function TransactionHistory({
           ))}
         </div>
 
-        {filteredItems.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-3" role="status" aria-busy="true" aria-label="Loading transactions">
+            {Array.from({
+              length: isMobile ? MOBILE_SKELETON_ROWS : DESKTOP_SKELETON_ROWS,
+            }).map((_, i) => (
+              <TransactionRowSkeleton key={i} />
+            ))}
+          </div>
+        ) : filteredItems.length === 0 ? (
           <EmptyState
             icon={Receipt}
             title={
