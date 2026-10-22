@@ -976,15 +976,21 @@ model FeatureFlagAuditLog {
 }
 
 model ApiKey {
-  id        String    @id @default(uuid())
-  key       String    @unique
-  name      String
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  isActive  Boolean   @default(true)
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id             String    @id @default(uuid())
+  key            String    @unique
+  keyPrefix      String?
+  name           String
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes         String[]  @default([])
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
+  // Set on rotation: the old key stays valid until this instant (overlap period).
+  graceExpiresAt DateTime?
+  rotatedFromId  String?
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([userId])
 }
