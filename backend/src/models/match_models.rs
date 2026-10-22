@@ -38,6 +38,17 @@ pub struct Match {
     pub forfeited_by: Option<Uuid>,
     /// Human-readable description of the score discrepancy that caused a conflict.
     pub conflict_reason: Option<String>,
+    // --- Platform verification fields (console match reports) ---
+    /// Whether the match result has been verified against the game platform's
+    /// official server-to-server API. `None` for non-console matches.
+    pub platform_verified: Option<bool>,
+    /// Identifier of the external platform match used for verification.
+    pub platform_match_id: Option<String>,
+    /// Deadline by which the platform API must respond before the match is
+    /// escalated to admin review.
+    pub verification_deadline: Option<DateTime<Utc>>,
+    /// Human-readable reason the match was flagged for human review.
+    pub verification_flag_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -154,6 +165,11 @@ pub enum MatchStatus {
     /// Automatically set when both players submit contradictory score reports.
     /// Requires manual or oracle-based resolution before the match can be finalized.
     Conflict,
+    /// Score submitted; awaiting server-to-server verification against the
+    /// game platform's official API before it can be finalized.
+    PendingVerification,
+    /// Platform API confirmed the reported result.
+    Verified,
     Disputed,
     Cancelled,
     Abandoned,
@@ -212,6 +228,18 @@ pub struct ScoreReportAttempt {
     /// Whether this attempt passed all validation and created a `match_scores` row.
     pub accepted: bool,
     pub rejection_reason: Option<String>,
+}
+
+/// Result of a server-to-server verification call against a game platform's
+/// official match API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformVerificationResult {
+    /// Whether the platform confirmed the reported match result.
+    pub confirmed: bool,
+    /// The platform's authoritative winner, if it reported one.
+    pub winner_id: Option<Uuid>,
+    /// Optional human-readable detail about a mismatch.
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -300,6 +328,8 @@ impl std::str::FromStr for MatchStatus {
             "in_progress" => Ok(MatchStatus::InProgress),
             "completed" => Ok(MatchStatus::Completed),
             "conflict" => Ok(MatchStatus::Conflict),
+            "pending_verification" => Ok(MatchStatus::PendingVerification),
+            "verified" => Ok(MatchStatus::Verified),
             "disputed" => Ok(MatchStatus::Disputed),
             "cancelled" => Ok(MatchStatus::Cancelled),
             "abandoned" => Ok(MatchStatus::Abandoned),
