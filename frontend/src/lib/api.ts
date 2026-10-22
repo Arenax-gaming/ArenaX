@@ -692,6 +692,14 @@ class ApiClient {
     });
   }
 
+  /** Withdraw a pending outgoing friend request to `friendId`. */
+  async cancelFriendRequest(friendId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/v1/friends/requests/cancel", {
+      method: "POST",
+      body: JSON.stringify({ user_id: friendId }),
+    });
+  }
+
   async acceptFriendRequest(requestId: string): Promise<{ message: string }> {
     return this.request<{ message: string }>("/v1/friends/requests/accept", {
       method: "POST",

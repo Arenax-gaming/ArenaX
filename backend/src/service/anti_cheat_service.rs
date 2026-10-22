@@ -34,6 +34,9 @@ use uuid::Uuid;
 /// Score at or above which a finding is considered suspicious.
 pub const ALERT_THRESHOLD: u8 = 70;
 
+/// Upper bound on one page of the admin review queue.
+pub const REVIEW_QUEUE_MAX_LIMIT: i64 = 200;
+
 /// A suspicious-activity finding produced by either pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Finding {
@@ -193,11 +196,60 @@ pub fn analyze_screenshot(bytes: &[u8]) -> Result<ScreenshotAnalysis, ApiError> 
         reasons.push("a single byte value dominates the screenshot payload".to_string());
     }
 
+    let tamper = tamper_probability(bytes, entropy_bps);
+    if tamper >= 0.5 {
+        score += (tamper * 40.0).round() as u32;
+        reasons.push(format!(
+            "image manipulation model flagged payload (confidence {:.2})",
+            tamper
+        ));
+    }
+
     Ok(ScreenshotAnalysis {
         score: score.min(100) as u8,
         entropy_bps,
         reasons,
     })
+}
+
+/// Editing-software signatures that real in-game captures never carry.
+const EDITOR_SIGNATURES: &[&[u8]] = &[b"Photoshop", b"GIMP", b"paint.net", b"Pixelmator", b"Snapseed"];
+
+/// Logistic image-tampering model (Issue #1232).
+///
+/// Combines container-level manipulation signals into a probability in
+/// `0.0..=1.0`: data appended after the image terminator (PNG `IEND` /
+/// JPEG `EOI`), editing-software metadata, re-encoding (multiple JPEG
+/// quantisation tables beyond the standard pair) and entropy far from the
+/// band of real rendered frames. Weights are hand-calibrated so a single
+/// strong signal crosses 0.5 while an untouched capture stays near 0.
+pub fn tamper_probability(bytes: &[u8], entropy_bps: u32) -> f64 {
+    let trailing = match bytes {
+        [0x89, b'P', b'N', b'G', ..] => find_subslice(bytes, b"IEND")
+            .map(|i| bytes.len().saturating_sub(i + 8) > 0)
+            .unwrap_or(false),
+        [0xFF, 0xD8, ..] => bytes.windows(2).rposition(|w| w == [0xFF, 0xD9])
+            .map(|i| i + 2 < bytes.len())
+            .unwrap_or(false),
+        _ => false,
+    };
+    let edited = EDITOR_SIGNATURES
+        .iter()
+        .any(|sig| find_subslice(bytes, sig).is_some());
+    let requantised = bytes.starts_with(&[0xFF, 0xD8])
+        && bytes.windows(2).filter(|w| *w == [0xFF, 0xDB]).count() > 2;
+    let entropy_dev = (entropy_bps as f64 - 7_000.0).abs() / 7_000.0;
+
+    let z = -4.0
+        + 4.5 * trailing as u8 as f64
+        + 4.0 * edited as u8 as f64
+        + 2.5 * requantised as u8 as f64
+        + 3.0 * entropy_dev;
+    1.0 / (1.0 + (-z).exp())
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Constant-time-ish comparison of the stored evidence hash against the bytes
@@ -436,6 +488,45 @@ impl AntiCheatService {
             "#,
         )
         .bind(match_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows.into_iter().map(Finding::from).collect())
+    }
+
+    /// Flag history for one player (Issue #1233): every flagged finding
+    /// recorded against them, newest first.
+    pub async fn list_player_flags(&self, player_id: Uuid) -> Result<Vec<Finding>, ApiError> {
+        let rows = sqlx::query_as::<_, FindingRow>(
+            r#"
+            SELECT id, match_id, player_id, source, score, flagged, reasons,
+                   evidence_key, evidence_hash, transaction_hash, created_at
+            FROM anticheat_findings
+            WHERE player_id = $1 AND flagged
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(player_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows.into_iter().map(Finding::from).collect())
+    }
+
+    /// Admin review queue (Issue #1233): flagged findings no admin has
+    /// reviewed yet, oldest first so nothing waits indefinitely.
+    pub async fn list_review_queue(&self, limit: i64) -> Result<Vec<Finding>, ApiError> {
+        let rows = sqlx::query_as::<_, FindingRow>(
+            r#"
+            SELECT id, match_id, player_id, source, score, flagged, reasons,
+                   evidence_key, evidence_hash, transaction_hash, created_at
+            FROM anticheat_findings
+            WHERE flagged AND reviewed_at IS NULL
+            ORDER BY created_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit.clamp(1, REVIEW_QUEUE_MAX_LIMIT))
         .fetch_all(&self.db)
         .await?;
 

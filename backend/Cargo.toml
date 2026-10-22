@@ -49,6 +49,10 @@ zeroize = { version = "1.8", features = ["derive"] }
 # sqlx's ConnectOptions::log_slow_statements/log_statements take log::LevelFilter (#1084)
 log = "0.4"
 
+# Stellar Rust SDK (#1283): account management, asset issuance, transaction
+# building/submission, and Soroban contract invocation via Stellar RPC.
+soroban-client = "0.6"
+
 
 # Security: pin patched versions of transitive deps
 quinn-proto = "0.11.14"

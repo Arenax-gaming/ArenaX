@@ -57,7 +57,7 @@ export interface Dispute {
 }
 
 export interface ResolveDisputePayload {
-  status: "RESOLVED" | "DISMISSED" | "VOIDED";
+  status: "RESOLVED" | "DISMISSED" | "VOIDED" | "REPLAY";
   resolution: string;
   winnerOverrideId?: string;
 }

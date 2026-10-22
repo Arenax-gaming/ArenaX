@@ -7,7 +7,14 @@
  *   GET /api/v1/reputation/history/:userId — paginated reputation event history
  */
 import { useQuery } from "@tanstack/react-query";
+import { Horizon } from "@stellar/stellar-sdk";
 import { API_BASE } from "@/lib/constants";
+import { walletConfig } from "@/lib/wallet/config";
+
+/** Asset code of the on-chain Reputation Token. */
+const REPUTATION_ASSET_CODE =
+  process.env.NEXT_PUBLIC_REPUTATION_ASSET_CODE ?? "REP";
+const REPUTATION_ASSET_ISSUER = process.env.NEXT_PUBLIC_REPUTATION_ASSET_ISSUER;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +91,7 @@ export const REPUTATION_KEYS = {
   all: ["reputation"] as const,
   player: (userId: string) => ["reputation", "player", userId] as const,
   me: () => ["reputation", "me"] as const,
+  balance: (publicKey: string) => ["reputation", "balance", publicKey] as const,
   history: (userId: string, page?: number) =>
     ["reputation", "history", userId, page] as const,
 };
@@ -143,6 +151,26 @@ export function useReputationHistory(userId: string, page = 1, perPage = 20) {
       return res.json() as Promise<ReputationHistoryResponse>;
     },
     enabled: !!userId,
+    staleTime: 60_000,
+  });
+}
+
+/** Fetch the Reputation Token balance held by a Stellar account. */
+export function useReputationBalance(publicKey?: string) {
+  return useQuery<number>({
+    queryKey: REPUTATION_KEYS.balance(publicKey ?? ""),
+    queryFn: async () => {
+      const server = new Horizon.Server(walletConfig.horizonUrl);
+      const account = await server.loadAccount(publicKey!);
+      const balance = account.balances.find(
+        (b) =>
+          "asset_code" in b &&
+          b.asset_code === REPUTATION_ASSET_CODE &&
+          (!REPUTATION_ASSET_ISSUER || b.asset_issuer === REPUTATION_ASSET_ISSUER),
+      );
+      return balance ? Number(balance.balance) : 0;
+    },
+    enabled: !!publicKey,
     staleTime: 60_000,
   });
 }

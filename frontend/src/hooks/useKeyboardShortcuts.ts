@@ -63,7 +63,8 @@ const GLOBAL_SHORTCUTS: Shortcut[] = [
   { id: "nav_tournaments", description: "Go to Tournaments", category: "navigation", key: "g+t" },
   { id: "nav_leaderboard", description: "Go to Leaderboard", category: "navigation", key: "g+l" },
   { id: "nav_profile", description: "Go to Profile", category: "navigation", key: "g+p" },
-  { id: "nav_matches", description: "Go to Matches", category: "navigation", key: "g+m" },
+  { id: "nav_matches", description: "Go to active match", category: "navigation", key: "g+m" },
+  { id: "nav_wallet", description: "Go to Wallet", category: "navigation", key: "g+w" },
   { id: "new_match", description: "Create a new match", category: "game", key: "n+m" },
   { id: "join_tournament", description: "Join a tournament", category: "tournament", key: "n+t" },
 ];

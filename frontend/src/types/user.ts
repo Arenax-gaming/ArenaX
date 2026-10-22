@@ -15,6 +15,8 @@ export interface User {
   elo: number;
   createdAt: string;
   role?: "user" | "admin" | "moderator";
+  /** Linked Stellar account holding the player's Reputation Tokens. */
+  stellarPublicKey?: string;
 }
 
 export interface UserProfileUpdate {

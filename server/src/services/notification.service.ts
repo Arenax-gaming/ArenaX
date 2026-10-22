@@ -1,6 +1,8 @@
 import fetch from 'node-fetch';
+import { getDatabaseClient } from './database.service';
 
 const WEBHOOK_URL = process.env.ADMIN_WEBHOOK_URL;
+
 export type NotificationType =
   | 'match_started'
   | 'match_ended'
@@ -8,7 +10,12 @@ export type NotificationType =
   | 'payment_received'
   | 'friend_request'
   | 'tournament_started'
+  | 'tournament-start'
+  | 'dispute_resolved'
   | 'system_alert'
+  | string;
+
+export type NotificationChannel = 'email' | 'push' | 'in-app';
 
 export interface Notification {
   id: string
@@ -19,6 +26,8 @@ export interface Notification {
   read: boolean
   createdAt: Date
   readAt?: Date
+  sentChannels?: string[]
+  skippedChannels?: string[]
 }
 
 export interface NotificationPreferences {
@@ -26,7 +35,17 @@ export interface NotificationPreferences {
   inAppNotifications: boolean
   emailNotifications: boolean
   pushNotifications: boolean
-  notificationTypes: Partial<Record<NotificationType, boolean>>
+  notificationTypes: Partial<Record<string, boolean>>
+}
+
+export interface NotificationPreferenceRecord {
+  id?: string
+  userId: string
+  eventType: string
+  channel: string
+  enabled: boolean
+  createdAt?: Date
+  updatedAt?: Date
 }
 
 export interface NotificationFilter {
@@ -35,6 +54,20 @@ export interface NotificationFilter {
   limit?: number
   offset?: number
 }
+
+export const DEFAULT_EVENT_TYPES = [
+  'tournament_started',
+  'tournament-start',
+  'match_started',
+  'match_ended',
+  'achievement_unlocked',
+  'payment_received',
+  'friend_request',
+  'dispute_resolved',
+  'system_alert',
+];
+
+export const DEFAULT_CHANNELS: NotificationChannel[] = ['email', 'push', 'in-app'];
 
 export class NotificationService {
   static async notifyWebhook(event: { type: string; payload: any }) {
@@ -61,9 +94,226 @@ export class NotificationService {
       return false;
     }
   }
+
   private notifications = new Map<string, Notification[]>()
   private preferences = new Map<string, NotificationPreferences>()
+  private perEventPreferences = new Map<string, Map<string, boolean>>()
   private messageQueue: Notification[] = []
+  public pushDispatches: { userId: string; notification: Notification }[] = []
+  public emailDispatches: { userId: string; notification: Notification }[] = []
+  public inAppDispatches: { userId: string; notification: Notification }[] = []
+
+  private getPrefKey(eventType: string, channel: string): string {
+    return `${eventType.trim().toLowerCase()}:${channel.trim().toLowerCase()}`;
+  }
+
+  /**
+   * Normalizes event types for preference checks (e.g., tournament-start <-> tournament_started)
+   */
+  private getEventAliases(eventType: string): string[] {
+    const raw = eventType.trim().toLowerCase();
+    const snake = raw.replace(/-/g, '_');
+    const kebab = raw.replace(/_/g, '-');
+    return Array.from(new Set([raw, snake, kebab]));
+  }
+
+  /**
+   * Check if a specific channel is enabled for a given user and event type.
+   */
+  async isChannelEnabled(userId: string, eventType: string, channel: NotificationChannel): Promise<boolean> {
+    const channelKey = channel.toLowerCase();
+
+    // 1. Check in-memory per-event preferences first
+    const userPrefs = this.perEventPreferences.get(userId);
+    if (userPrefs) {
+      for (const alias of this.getEventAliases(eventType)) {
+        const key = this.getPrefKey(alias, channelKey);
+        if (userPrefs.has(key)) {
+          return userPrefs.get(key)!;
+        }
+      }
+    }
+
+    // 2. Check Database if available
+    try {
+      const prisma = getDatabaseClient();
+      if ((prisma as any).notificationPreference) {
+        const aliases = this.getEventAliases(eventType);
+        const record = await (prisma as any).notificationPreference.findFirst({
+          where: {
+            userId,
+            eventType: { in: aliases },
+            channel: channelKey,
+          },
+        });
+        if (record) {
+          // Cache in memory
+          if (!this.perEventPreferences.has(userId)) {
+            this.perEventPreferences.set(userId, new Map());
+          }
+          this.perEventPreferences.get(userId)!.set(this.getPrefKey(record.eventType, channelKey), record.enabled);
+          return record.enabled;
+        }
+      }
+    } catch {
+      // Fallback silently if DB is unavailable
+    }
+
+    // 3. Fallback to broad channel preferences
+    const globalPrefs = this.preferences.get(userId) || this.getDefaultPreferences(userId);
+    if (channel === 'in-app' && !globalPrefs.inAppNotifications) return false;
+    if (channel === 'email' && !globalPrefs.emailNotifications) return false;
+    if (channel === 'push' && !globalPrefs.pushNotifications) return false;
+
+    // Default to true
+    return true;
+  }
+
+  /**
+   * Creates a default preference set for a newly registered user.
+   */
+  async createDefaultPreferences(userId: string): Promise<NotificationPreferenceRecord[]> {
+    const defaultRecords: NotificationPreferenceRecord[] = [];
+
+    if (!this.perEventPreferences.has(userId)) {
+      this.perEventPreferences.set(userId, new Map());
+    }
+    const userMap = this.perEventPreferences.get(userId)!;
+
+    for (const eventType of DEFAULT_EVENT_TYPES) {
+      for (const channel of DEFAULT_CHANNELS) {
+        userMap.set(this.getPrefKey(eventType, channel), true);
+        defaultRecords.push({
+          userId,
+          eventType,
+          channel,
+          enabled: true,
+        });
+      }
+    }
+
+    // Persist to database if available
+    try {
+      const prisma = getDatabaseClient();
+      if ((prisma as any).notificationPreference) {
+        for (const record of defaultRecords) {
+          await (prisma as any).notificationPreference.upsert({
+            where: {
+              userId_eventType_channel: {
+                userId: record.userId,
+                eventType: record.eventType,
+                channel: record.channel,
+              },
+            },
+            update: { enabled: record.enabled },
+            create: {
+              userId: record.userId,
+              eventType: record.eventType,
+              channel: record.channel,
+              enabled: record.enabled,
+            },
+          });
+        }
+      }
+    } catch {
+      // Fallback silently if DB is unavailable
+    }
+
+    this.preferences.set(userId, this.getDefaultPreferences(userId));
+    return defaultRecords;
+  }
+
+  /**
+   * Sets or updates a per-event channel preference.
+   */
+  async setPreference(
+    userId: string,
+    eventType: string,
+    channel: string,
+    enabled: boolean
+  ): Promise<NotificationPreferenceRecord> {
+    const normalizedChannel = channel.toLowerCase();
+    const key = this.getPrefKey(eventType, normalizedChannel);
+
+    if (!this.perEventPreferences.has(userId)) {
+      this.perEventPreferences.set(userId, new Map());
+    }
+    this.perEventPreferences.get(userId)!.set(key, enabled);
+
+    // Also set for common aliases so 'tournament-start' and 'tournament_started' remain in sync
+    for (const alias of this.getEventAliases(eventType)) {
+      this.perEventPreferences.get(userId)!.set(this.getPrefKey(alias, normalizedChannel), enabled);
+    }
+
+    let record: NotificationPreferenceRecord = {
+      userId,
+      eventType,
+      channel: normalizedChannel,
+      enabled,
+      updatedAt: new Date(),
+    };
+
+    try {
+      const prisma = getDatabaseClient();
+      if ((prisma as any).notificationPreference) {
+        record = await (prisma as any).notificationPreference.upsert({
+          where: {
+            userId_eventType_channel: {
+              userId,
+              eventType,
+              channel: normalizedChannel,
+            },
+          },
+          update: { enabled },
+          create: {
+            userId,
+            eventType,
+            channel: normalizedChannel,
+            enabled,
+          },
+        });
+      }
+    } catch {
+      // In-memory fallback
+    }
+
+    return record;
+  }
+
+  /**
+   * Get all per-event preferences for a user.
+   */
+  async getPerEventPreferences(userId: string): Promise<NotificationPreferenceRecord[]> {
+    try {
+      const prisma = getDatabaseClient();
+      if ((prisma as any).notificationPreference) {
+        const records = await (prisma as any).notificationPreference.findMany({
+          where: { userId },
+        });
+        if (records && records.length > 0) {
+          return records;
+        }
+      }
+    } catch {
+      // fallback
+    }
+
+    // In-memory list
+    const results: NotificationPreferenceRecord[] = [];
+    const userMap = this.perEventPreferences.get(userId);
+    if (userMap) {
+      for (const [k, enabled] of userMap.entries()) {
+        const [eventType, channel] = k.split(':');
+        results.push({ userId, eventType, channel, enabled });
+      }
+    }
+
+    if (results.length === 0) {
+      return this.createDefaultPreferences(userId);
+    }
+
+    return results;
+  }
 
   async sendNotification(
     userId: string,
@@ -79,6 +329,8 @@ export class NotificationService {
       content,
       read: false,
       createdAt: new Date(),
+      sentChannels: [],
+      skippedChannels: [],
     }
 
     // Store notification
@@ -87,25 +339,40 @@ export class NotificationService {
     }
     this.notifications.get(userId)!.push(notification)
 
-    // Check user preferences before sending
-    const prefs = this.preferences.get(userId) || this.getDefaultPreferences(userId)
-
-    if (prefs.inAppNotifications) {
-      // In production, emit WebSocket event
-      this.emitWebSocketEvent(userId, 'notification:new', notification)
+    // Check user preferences before sending each channel
+    const inAppEnabled = await this.isChannelEnabled(userId, type, 'in-app');
+    if (inAppEnabled) {
+      this.emitWebSocketEvent(userId, 'notification:new', notification);
+      this.inAppDispatches.push({ userId, notification });
+      notification.sentChannels!.push('in-app');
+    } else {
+      notification.skippedChannels!.push('in-app');
     }
 
-    if (prefs.emailNotifications) {
-      // Queue for email delivery
-      await this.queueEmailNotification(userId, notification)
+    const emailEnabled = await this.isChannelEnabled(userId, type, 'email');
+    if (emailEnabled) {
+      await this.queueEmailNotification(userId, notification);
+      this.emailDispatches.push({ userId, notification });
+      notification.sentChannels!.push('email');
+    } else {
+      notification.skippedChannels!.push('email');
     }
 
-    if (prefs.pushNotifications) {
-      // Queue for push notification delivery
-      await this.queuePushNotification(userId, notification)
+    const pushEnabled = await this.isChannelEnabled(userId, type, 'push');
+    if (pushEnabled) {
+      await this.queuePushNotification(userId, notification);
+      this.pushDispatches.push({ userId, notification });
+      notification.sentChannels!.push('push');
+    } else {
+      notification.skippedChannels!.push('push');
     }
 
-    console.log('[Notification] Sent to', userId, ':', { type, title })
+    console.log('[Notification] Processed for', userId, ':', {
+      type,
+      title,
+      sent: notification.sentChannels,
+      skipped: notification.skippedChannels,
+    });
 
     return notification
   }
@@ -236,23 +503,21 @@ export class NotificationService {
         payment_received: true,
         friend_request: true,
         tournament_started: true,
+        'tournament-start': true,
         system_alert: true,
       },
     }
   }
 
   private emitWebSocketEvent(userId: string, event: string, data: any): void {
-    // In production, emit to WebSocket server
     console.log(`[WebSocket] ${event} for ${userId}:`, data)
   }
 
-  private async queueEmailNotification(userId: string, notification: Notification): Promise<void> {
-    // In production, queue to email service
+  public async queueEmailNotification(userId: string, notification: Notification): Promise<void> {
     console.log('[Email Queue] Notification for', userId, ':', notification.title)
   }
 
-  private async queuePushNotification(userId: string, notification: Notification): Promise<void> {
-    // In production, queue to push notification service
+  public async queuePushNotification(userId: string, notification: Notification): Promise<void> {
     console.log('[Push Queue] Notification for', userId, ':', notification.title)
   }
 
@@ -264,14 +529,14 @@ export class NotificationService {
   getNotificationStats(userId: string): {
     total: number
     unread: number
-    byType: Record<NotificationType, number>
+    byType: Record<string, number>
   } {
     const userNotifications = this.notifications.get(userId) || []
 
     const stats = {
       total: userNotifications.length,
       unread: userNotifications.filter(n => !n.read).length,
-      byType: {} as Record<NotificationType, number>,
+      byType: {} as Record<string, number>,
     }
 
     for (const notification of userNotifications) {
@@ -281,6 +546,8 @@ export class NotificationService {
     return stats
   }
 }
+
+export const notificationService = new NotificationService();
 
 export function createNotificationService() {
   return new NotificationService()

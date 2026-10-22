@@ -27,7 +27,7 @@ migration: add governance tables
 
 Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `migration`, `contract`
 
-## Development setup
+## Development setup.
 
 ### Backend (Rust)
 ```bash

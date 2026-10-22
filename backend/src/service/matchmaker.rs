@@ -152,26 +152,7 @@ impl MatchmakerService {
             return Ok(());
         }
 
-        // Sort by wait time (longest waiting first) so they get priority.
-        let mut sorted_entries = queue_entries;
-        sorted_entries.sort_by(|a, b| a.joined_at.cmp(&b.joined_at));
-
-        let mut matches_found = Vec::new();
-        let mut processed_players = std::collections::HashSet::new();
-
-        for (i, entry) in sorted_entries.iter().enumerate() {
-            if processed_players.contains(&entry.user_id) {
-                continue;
-            }
-
-            if let Some(candidate) =
-                find_best_match_for_player(entry, &sorted_entries[i..], &processed_players)
-            {
-                processed_players.insert(candidate.player1.user_id);
-                processed_players.insert(candidate.player2.user_id);
-                matches_found.push(candidate);
-            }
-        }
+        let matches_found = pair_queue_entries(queue_entries);
 
         for candidate in matches_found {
             self.create_match_from_candidate(&candidate).await?;
@@ -606,6 +587,43 @@ impl MatchmakerService {
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure (sync) helpers — no async needed
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Redis key holding a serialized [`QueueEntry`].
+pub fn queue_entry_key(game: &str, game_mode: &str, user_id: &Uuid) -> String {
+    format!("{}{}", queue_entry_prefix(game, game_mode), user_id)
+}
+
+/// Key prefix shared by every queue entry of a (game, game_mode) queue.
+pub fn queue_entry_prefix(game: &str, game_mode: &str) -> String {
+    format!("{}:{}:{}:", QUEUE_ENTRY_PREFIX, game, game_mode)
+}
+
+/// Pair queued players into match candidates.
+///
+/// Longest-waiting players are considered first; each player appears in at
+/// most one candidate. Shared by [`MatchmakerService`] and the store-agnostic
+/// matchmaking pipeline so both use identical pairing rules.
+pub fn pair_queue_entries(mut entries: Vec<QueueEntry>) -> Vec<MatchCandidate> {
+    entries.sort_by(|a, b| a.joined_at.cmp(&b.joined_at));
+
+    let mut matches_found = Vec::new();
+    let mut processed_players = std::collections::HashSet::new();
+
+    for (i, entry) in entries.iter().enumerate() {
+        if processed_players.contains(&entry.user_id) {
+            continue;
+        }
+
+        if let Some(candidate) = find_best_match_for_player(entry, &entries[i..], &processed_players)
+        {
+            processed_players.insert(candidate.player1.user_id);
+            processed_players.insert(candidate.player2.user_id);
+            matches_found.push(candidate);
+        }
+    }
+
+    matches_found
+}
 
 /// Find the best opponent for `player` from `candidates`.
 /// This is pure CPU work — no I/O — so it does not need to be async.

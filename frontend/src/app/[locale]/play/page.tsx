@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import GameModeSelector from '@/components/game/GameModeSelector';
-import MatchmakingQueue from '@/components/game/MatchmakingQueue';
+import { MatchQueueView } from '@/components/match/MatchQueueView';
 import SkillQuickAccessBar from '@/components/game/SkillQuickAccessBar';
 import MobileGameControls from '@/components/game/MobileGameControls';
 import { useSettings } from '@/hooks/useSettings';
@@ -31,9 +31,12 @@ function PlayPageContent() {
 
   if (isSearching && selectedMode) {
     return (
-      <MatchmakingQueue
+      // #1320: guards tab close, links and Back while queueing; asks before
+      // the Cancel button drops the user out of the queue.
+      <MatchQueueView
         gameMode={selectedMode}
-        onCancel={handleCancelMatchmaking}
+        status="queueing"
+        onLeaveQueue={handleCancelMatchmaking}
         onMatchFound={handleMatchFound}
       />
     );

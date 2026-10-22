@@ -73,6 +73,8 @@ pub struct MatchDispute {
     /// S3 object key the evidence file was stored under, namespaced
     /// `{user_id}/{match_id}/{hash}.{ext}`.
     pub evidence_s3_key: Option<String>,
+    /// Content-addressed IPFS CID for tamper-evidence (#1423).
+    pub ipfs_cid: Option<String>,
     pub status: DisputeStatus,
     pub admin_reviewer_id: Option<Uuid>,
     pub admin_notes: Option<String>,

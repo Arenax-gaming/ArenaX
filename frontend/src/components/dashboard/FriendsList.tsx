@@ -22,7 +22,7 @@ const mockFriends: Friend[] = [
 
 const statusConfig = {
   online: { label: "Online", color: "bg-success" },
-  "in-game": { label: "In Game", color: "bg-yellow-500" },
+  "in-game": { label: "In Game", color: "bg-rank" },
   offline: { label: "Offline", color: "bg-muted-foreground" },
 };
 

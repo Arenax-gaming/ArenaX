@@ -1,6 +1,9 @@
 import { getDatabaseClient } from './database.service';
 import { MatchStatus } from '@prisma/client';
 import { AuditService } from './audit.service';
+import { createNotificationService } from './notification.service';
+
+const notificationService = createNotificationService();
 import os from 'node:os';
 
 interface MatchRequest {
@@ -156,13 +159,13 @@ export class MatchService {
      * Resolve a dispute (Admin action).
      */
     async resolveDispute(disputeId: string, adminId: string, data: {
-        status: 'RESOLVED' | 'DISMISSED';
+        status: 'RESOLVED' | 'DISMISSED' | 'REPLAY';
         resolution?: string;
         winnerOverrideId?: string;
     }) {
         const prisma = getDatabaseClient();
         
-        return await prisma.$transaction(async (tx) => {
+        const { dispute, updatedDispute } = await prisma.$transaction(async (tx) => {
             const dispute = await tx.dispute.findUnique({
                 where: { id: disputeId },
                 include: { match: true }
@@ -190,6 +193,12 @@ export class MatchService {
                         winnerId: data.winnerOverrideId || dispute.match.winnerId,
                     },
                 });
+            } else if (data.status === 'REPLAY') {
+                // Reset the match so both players can play it again
+                await tx.match.update({
+                    where: { id: dispute.matchId },
+                    data: { status: MatchStatus.CREATED, winnerId: null, startedAt: null, endedAt: null },
+                });
             } else {
                 // If dismissed, just finalize the match with original result
                 await tx.match.update({
@@ -201,7 +210,7 @@ export class MatchService {
             // Log the admin action
             await AuditService.logAction({
                 adminId,
-                action: data.status === 'RESOLVED' ? 'DISPUTE_RESOLVED' : 'DISPUTE_DISMISSED',
+                action: `DISPUTE_${data.status === 'REPLAY' ? 'REPLAY_ORDERED' : data.status}`,
                 targetType: 'MATCH',
                 targetId: dispute.matchId,
                 details: {
@@ -211,8 +220,25 @@ export class MatchService {
                 },
             });
 
-            return updatedDispute;
+            return { dispute, updatedDispute };
         });
+
+        const outcome =
+            data.status === 'REPLAY' ? 'A replay has been ordered.'
+            : data.status === 'RESOLVED' ? 'The result has been finalized.'
+            : 'The dispute was dismissed and the original result stands.';
+        await Promise.all(
+            [dispute.match.playerAId, dispute.match.playerBId].map((playerId) =>
+                notificationService.sendNotification(
+                    playerId,
+                    'dispute_resolved',
+                    'Match dispute resolved',
+                    data.resolution ? `${outcome} ${data.resolution}` : outcome,
+                ),
+            ),
+        );
+
+        return updatedDispute;
     }
 
     /**
