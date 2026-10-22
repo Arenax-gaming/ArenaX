@@ -207,6 +207,7 @@ async fn main() -> io::Result<()> {
             soroban_service.clone(),
             config.stellar.soroban_contract_match.clone(),
         )
+        .with_match_outcome_contract(config.stellar.soroban_contract_match_outcome.clone())
         .with_match_events(match_events.clone()),
     );
     // Store the signer secret in app_data using the SignerSecret newtype so
