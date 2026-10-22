@@ -37,7 +37,15 @@ fn setup(env: &Env) -> TestSetup<'_> {
     let signer2 = Address::generate(env);
     signers.push_back(signer2);
 
-    client.initialize(&admin, &token, &signers, &2, &3600, &Some(token.clone()));
+    client.initialize(
+        &admin,
+        &token,
+        &signers,
+        &2,
+        &3600,
+        &timelock_id,
+        &Some(token.clone()),
+    );
     TestSetup {
         client,
         admin,
@@ -372,4 +380,74 @@ fn timelock_integration_duration_change_preserves_execute_after() {
     let executed = s.client.get_spending_proposal(&proposal_id).unwrap();
     assert!(executed.executed);
     assert_eq!(s.client.get_balance(), 9000);
+}
+
+// ── Configurable fee split (#1415) ───────────────────────────────────────────
+
+/// Set `fee_split_bps` through the multi-sig flow (2-of-2 in `setup`).
+fn govern_fee_split(s: &TestSetup, bps: u32) {
+    let proposal_id = s.client.propose_fee_split_update(&s.admin, &bps);
+    s.client
+        .vote_fee_split_update(&s.signers.get(1).unwrap(), &proposal_id, &true);
+    s.client.finalize_fee_split_update(&s.admin, &proposal_id);
+}
+
+#[test]
+fn fee_split_routes_twenty_percent_to_organizer() {
+    let env = Env::default();
+    let s = setup(&env);
+    let tok = TokenClient::new(&env, &s.token);
+    let organizer = Address::generate(&env);
+    let payer = funded_depositor(&env, &s.client, 5_000);
+
+    govern_fee_split(&s, 2_000); // 20%
+    assert_eq!(s.client.get_fee_split_bps(), 2_000);
+
+    let result = s.client.collect_fee(&payer, &organizer, &1_000);
+
+    assert_eq!(result.organizer_amount, 200);
+    assert_eq!(result.platform_amount, 800);
+    assert_eq!(tok.balance(&organizer), 200);
+    assert_eq!(tok.balance(&s.client.address), 800);
+    assert_eq!(tok.balance(&payer), 4_000);
+    assert_eq!(s.client.get_balance(), 800);
+    assert_eq!(s.client.get_fee_totals(), (800, 200));
+}
+
+#[test]
+fn fee_split_rounds_down_for_organizer_and_platform_keeps_dust() {
+    assert_eq!(split_fee(999, 2_000), (199, 800));
+    assert_eq!(split_fee(1, 2_000), (0, 1));
+    assert_eq!(split_fee(1_000, 0), (0, 1_000));
+    assert_eq!(split_fee(1_000, 10_000), (1_000, 0));
+}
+
+#[test]
+fn fee_split_defaults_to_platform_only() {
+    let env = Env::default();
+    let s = setup(&env);
+    let organizer = Address::generate(&env);
+    let payer = funded_depositor(&env, &s.client, 1_000);
+
+    let result = s.client.collect_fee(&payer, &organizer, &1_000);
+    assert_eq!(result.organizer_amount, 0);
+    assert_eq!(result.platform_amount, 1_000);
+    assert_eq!(TokenClient::new(&env, &s.token).balance(&organizer), 0);
+}
+
+#[test]
+#[should_panic(expected = "insufficient votes for quorum")]
+fn fee_split_requires_governance_quorum() {
+    let env = Env::default();
+    let s = setup(&env);
+    let proposal_id = s.client.propose_fee_split_update(&s.admin, &5_000);
+    s.client.finalize_fee_split_update(&s.admin, &proposal_id);
+}
+
+#[test]
+#[should_panic(expected = "fee_split_bps must be between 0 and 10000")]
+fn fee_split_rejects_out_of_range_bps() {
+    let env = Env::default();
+    let s = setup(&env);
+    s.client.propose_fee_split_update(&s.admin, &10_001);
 }

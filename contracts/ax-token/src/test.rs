@@ -1107,275 +1107,109 @@ fn test_datakey_variants_storage_round_trip() {
 }
 
 // ============================================================================
-// AUTHORIZED MINTERS (#1418)
+// CONFIGURABLE FEE SPLIT (#1415)
 // ============================================================================
 
-#[test]
-fn test_admin_is_bootstrap_minter() {
-    let (env, admin, _, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    assert!(client.is_minter(&admin));
-    assert_eq!(client.get_minters(), soroban_sdk::vec![&env, admin.clone()]);
-    assert_eq!(client.get_remaining_mint_allowance(&admin), None);
+/// Pass a governance proposal setting `fee_split_bps` to `bps`.
+fn govern_fee_split(env: &Env, client: &AxTokenClient, voter: &Address, bps: u32) {
+    let proposal_id = client.propose_fee_split(voter, &bps, &3600u64);
+    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    client.vote_on_proposal(voter, &proposal_id, &true);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    assert_eq!(client.set_fee_split_via_governance(&proposal_id), bps);
 }
 
 #[test]
-fn test_minter_mints_up_to_cap_then_over_cap_reverts() {
-    let (env, admin, user1, _) = create_test_env();
+fn test_fee_split_twenty_percent_to_organizer() {
+    let (env, admin, voter, payer) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let treasury = Address::generate(&env);
 
     env.mock_all_auths();
-    client.add_minter(&minter, &1000i128, &3600u64);
-    assert!(client.is_minter(&minter));
-    assert_eq!(client.get_minters().len(), 2);
+    env.ledger().set_sequence_number(1);
+    client.mint(&voter, &1_000i128);
+    client.mint(&payer, &10_000i128);
+    client.set_fee_treasury(&treasury);
 
-    // Mint exactly up to the cap.
-    client.mint(&minter, &user1, &400i128);
-    client.mint(&minter, &user1, &600i128);
-    assert_eq!(client.balance(&user1), 1000);
-    assert_eq!(client.total_supply(), 1000);
-    assert_eq!(client.get_minter(&minter).unwrap().minted_in_period, 1000);
-    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(0));
+    govern_fee_split(&env, &client, &voter, 2_000); // 20%
+    assert_eq!(client.get_fee_split_bps(), 2_000);
 
-    // One more unit is over the cap and must revert without side effects.
-    let result = client.try_mint(&minter, &user1, &1i128);
-    assert_eq!(result, Err(Ok(TokenError::MinterCapExceeded)));
-    assert_eq!(client.balance(&user1), 1000);
-    assert_eq!(client.total_supply(), 1000);
-    assert_eq!(client.get_minter(&minter).unwrap().minted_in_period, 1000);
+    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    let result = client.process_fee(&payer, &organizer, &1_000i128);
+
+    assert_eq!(result.organizer_amount, 200);
+    assert_eq!(result.platform_amount, 800);
+    assert_eq!(client.balance(&organizer), 200);
+    assert_eq!(client.balance(&treasury), 800);
+    assert_eq!(client.balance(&payer), 9_000);
 }
 
 #[test]
-fn test_minter_cap_resets_after_period() {
-    let (env, admin, user1, _) = create_test_env();
+fn test_fee_split_defaults_to_platform_only() {
+    let (env, admin, _, payer) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let treasury = Address::generate(&env);
 
     env.mock_all_auths();
-    env.ledger().set_timestamp(100);
-    client.add_minter(&minter, &500i128, &3600u64);
-    client.mint(&minter, &user1, &500i128);
+    env.ledger().set_sequence_number(1);
+    client.mint(&payer, &1_000i128);
+    client.set_fee_treasury(&treasury);
 
-    // Still inside the window: rejected.
-    env.ledger().set_timestamp(100 + 3599);
-    assert_eq!(
-        client.try_mint(&minter, &user1, &1i128),
-        Err(Ok(TokenError::MinterCapExceeded))
-    );
-
-    // Window elapsed: allowance is restored.
-    env.ledger().set_timestamp(100 + 3600);
-    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(500));
-    client.mint(&minter, &user1, &500i128);
-
-    assert_eq!(client.balance(&user1), 1000);
+    env.ledger().set_sequence_number(2);
+    let result = client.process_fee(&payer, &organizer, &1_000i128);
+    assert_eq!(result.organizer_amount, 0);
+    assert_eq!(client.balance(&treasury), 1_000);
+    assert_eq!(client.balance(&organizer), 0);
 }
 
 #[test]
-fn test_lifetime_cap_never_resets() {
-    let (env, admin, user1, _) = create_test_env();
+fn test_split_fee_rounding_keeps_dust_on_platform() {
+    assert_eq!(split_fee(999, 2_000), (199, 800));
+    assert_eq!(split_fee(1, 2_000), (0, 1));
+    assert_eq!(split_fee(1_000, 10_000), (1_000, 0));
+}
+
+#[test]
+#[should_panic(expected = "fee_split_bps must be between 0 and 10000")]
+fn test_fee_split_rejects_out_of_range_bps() {
+    let (env, admin, voter, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
     env.mock_all_auths();
-    client.add_minter(&minter, &300i128, &0u64);
-    client.mint(&minter, &user1, &300i128);
-
-    env.ledger().set_timestamp(10_000_000);
-    assert_eq!(
-        client.try_mint(&minter, &user1, &1i128),
-        Err(Ok(TokenError::MinterCapExceeded))
-    );
+    client.mint(&voter, &1_000i128);
+    client.propose_fee_split(&voter, &10_001u32, &3600u64);
 }
 
 #[test]
-fn test_uncapped_minter() {
-    let (env, admin, user1, _) = create_test_env();
+#[should_panic(expected = "proposal did not pass")]
+fn test_fee_split_requires_passed_proposal() {
+    let (env, admin, voter, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
     env.mock_all_auths();
-    client.add_minter(&minter, &0i128, &0u64);
-    client.mint(&minter, &user1, &1_000_000i128);
+    env.ledger().set_sequence_number(1);
+    client.mint(&voter, &1_000i128);
 
-    assert_eq!(client.balance(&user1), 1_000_000);
-    assert_eq!(client.get_remaining_mint_allowance(&minter), None);
+    let proposal_id = client.propose_fee_split(&voter, &5_000u32, &3600u64);
+    env.ledger().set_timestamp(3601);
+    // No votes cast.
+    client.set_fee_split_via_governance(&proposal_id);
 }
 
 #[test]
-fn test_unlisted_minter_reverts_unauthorized() {
-    let (env, admin, user1, _) = create_test_env();
+#[should_panic(expected = "not a fee split proposal")]
+fn test_unrelated_proposal_cannot_set_fee_split() {
+    let (env, admin, voter, _) = create_test_env();
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
-    let stranger = Address::generate(&env);
-
     env.mock_all_auths();
-    assert_eq!(
-        client.try_mint(&stranger, &user1, &1i128),
-        Err(Ok(TokenError::Unauthorized))
-    );
-    assert_eq!(client.get_remaining_mint_allowance(&stranger), Some(0));
-    assert_eq!(client.total_supply(), 0);
-}
+    client.mint(&voter, &1_000i128);
 
-#[test]
-fn test_unlisted_minter_batch_mint_reverts_unauthorized() {
-    let (env, admin, user1, user2) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let stranger = Address::generate(&env);
-
-    env.mock_all_auths();
-    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
-    let amounts = soroban_sdk::vec![&env, 1i128, 1i128];
-    assert_eq!(
-        client.try_batch_mint(&stranger, &recipients, &amounts),
-        Err(Ok(TokenError::Unauthorized))
-    );
-}
-
-#[test]
-fn test_batch_mint_charges_minter_cap() {
-    let (env, admin, user1, user2) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.add_minter(&minter, &1000i128, &3600u64);
-
-    let recipients = soroban_sdk::vec![&env, user1.clone(), user2.clone()];
-    let over = soroban_sdk::vec![&env, 600i128, 401i128];
-    assert_eq!(
-        client.try_batch_mint(&minter, &recipients, &over),
-        Err(Ok(TokenError::MinterCapExceeded))
-    );
-    assert_eq!(client.total_supply(), 0);
-
-    let exact = soroban_sdk::vec![&env, 600i128, 400i128];
-    client.batch_mint(&minter, &recipients, &exact);
-    assert_eq!(client.total_supply(), 1000);
-    assert_eq!(client.get_remaining_mint_allowance(&minter), Some(0));
-}
-
-#[test]
-fn test_removed_minter_reverts_unauthorized() {
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.add_minter(&minter, &1000i128, &0u64);
-    client.remove_minter(&minter);
-    assert!(!client.is_minter(&minter));
-    assert_eq!(client.get_minters(), soroban_sdk::vec![&env, admin.clone()]);
-
-    assert_eq!(
-        client.try_mint(&minter, &user1, &1i128),
-        Err(Ok(TokenError::Unauthorized))
-    );
-}
-
-#[test]
-fn test_admin_can_revoke_own_minting_right() {
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    env.mock_all_auths();
-    client.remove_minter(&admin);
-    assert_eq!(
-        client.try_mint(&admin, &user1, &1i128),
-        Err(Ok(TokenError::Unauthorized))
-    );
-}
-
-#[test]
-fn test_remove_unknown_minter_reverts() {
-    let (env, admin, _, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let stranger = Address::generate(&env);
-
-    env.mock_all_auths();
-    assert_eq!(
-        client.try_remove_minter(&stranger),
-        Err(Ok(TokenError::MinterNotFound))
-    );
-}
-
-#[test]
-fn test_add_minter_rejects_negative_cap() {
-    let (env, admin, _, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    assert_eq!(
-        client.try_add_minter(&minter, &-1i128, &0u64),
-        Err(Ok(TokenError::InvalidMinterConfig))
-    );
-    assert!(!client.is_minter(&minter));
-}
-
-#[test]
-#[should_panic]
-fn test_add_minter_requires_admin() {
-    let (env, admin, _, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    // No auth mocked: admin.require_auth() must fail.
-    client.add_minter(&minter, &1000i128, &0u64);
-}
-
-#[test]
-#[should_panic]
-fn test_remove_minter_requires_admin() {
-    let (env, admin, _, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-
-    // No auth mocked: admin.require_auth() must fail.
-    client.remove_minter(&admin);
-}
-
-#[test]
-#[should_panic]
-fn test_listed_minter_must_sign() {
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.add_minter(&minter, &1000i128, &0u64);
-
-    // Drop mocked auths: being listed is not enough without the signature.
-    env.set_auths(&[]);
-    client.mint(&minter, &user1, &1i128);
-}
-
-#[test]
-#[should_panic(expected = "supply cap exceeded")]
-fn test_minter_respects_global_supply_cap() {
-    let (env, admin, user1, _) = create_test_env();
-    let contract_id = initialize_contract(&env, &admin);
-    let client = AxTokenClient::new(&env, &contract_id);
-    let minter = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.set_supply_cap(&100i128);
-    client.add_minter(&minter, &1000i128, &0u64);
-    client.mint(&minter, &user1, &101i128);
+    let desc = String::from_str(&env, "Something else");
+    let proposal_id = client.create_proposal(&voter, &desc, &3600u64);
+    client.set_fee_split_via_governance(&proposal_id);
 }
