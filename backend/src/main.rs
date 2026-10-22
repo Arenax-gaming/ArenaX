@@ -373,7 +373,9 @@ async fn main() -> io::Result<()> {
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
+            .app_data(web::Data::new(match_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
+            .app_data(web::Data::new(match_service.clone()))
             .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .app_data(web::Data::new(evidence_store.clone()))
@@ -512,6 +514,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::stellar_handler::configure_routes)
                     // Dispute resolution endpoints — ticketed, escalatable disputes (Issue #909)
                     .configure(crate::http::dispute_handler::configure_routes)
+                    // Match dispute evidence upload and retrieval
+                    .configure(crate::http::dispute_evidence_handler::configure_routes)
                     // Gas endpoints
                     .service(
                         web::scope("/gas")

@@ -15,6 +15,7 @@ use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
 use crate::models::{CreateDisputeRequest, JoinMatchmakingRequest, MatchType, ReportScoreRequest};
 use crate::service::match_service::MatchService;
+use crate::service::notification_service::{NewNotification, NotificationService};
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -45,7 +46,7 @@ pub struct ReportScoreBody {
     pub telemetry_data: Option<String>,
 }
 
-/// Body for `POST /api/matches/{id}/disputes`.
+/// Body for `POST /api/matches/{id}/dispute`.
 #[derive(Debug, Deserialize)]
 pub struct CreateMatchDisputeBody {
     pub reason: String,
@@ -226,24 +227,61 @@ pub async fn cancel_match(
     Ok(HttpResponse::Ok().json(cancelled))
 }
 
-/// `POST /api/matches/{id}/disputes` — file a dispute for a match.
+/// `POST /api/matches/{id}/dispute` — file a dispute for a match.
 pub async fn create_match_dispute(
     service: web::Data<Arc<MatchService>>,
+    notifications: web::Data<Arc<NotificationService>>,
     req: HttpRequest,
     path: web::Path<Uuid>,
     body: web::Json<CreateMatchDisputeBody>,
 ) -> Result<HttpResponse, ApiError> {
     let user_id = authenticated_user(&req)?;
+    if body.reason.trim().is_empty() {
+        return Err(ApiError::bad_request("Dispute reason must not be empty"));
+    }
     let request = CreateDisputeRequest {
-        reason: body.reason.clone(),
+        reason: body.reason.trim().to_string(),
         evidence_urls: body.evidence_urls.clone(),
     };
 
+    let match_id = path.into_inner();
     let dispute = service
-        .create_dispute(path.into_inner(), user_id, request)
+        .create_dispute(match_id, user_id, request)
         .await?;
 
+    let match_details = service.get_match(match_id, None).await.ok();
+    let opponent_id = match_details.as_ref().and_then(|m| {
+        if m.player1.id == user_id {
+            m.player2.as_ref().map(|p| p.id)
+        } else {
+            Some(m.player1.id)
+        }
+    });
+    for recipient in [Some(user_id), opponent_id].into_iter().flatten() {
+        let _ = notifications.create_and_fan_out(NewNotification {
+            user_id: recipient,
+            typ: "match_dispute".to_string(),
+            title: "Match dispute opened".to_string(),
+            message: format!("A dispute was opened for match {match_id}."),
+            link: Some(format!("/matches/{match_id}")),
+            link_label: Some("View match".to_string()),
+        }).await;
+    }
+
     Ok(HttpResponse::Created().json(dispute))
+}
+
+/// `GET /api/matches/disputes/pending` — admin review queue.
+pub async fn list_pending_match_disputes(
+    req: HttpRequest,
+    service: web::Data<Arc<MatchService>>,
+    query: web::Query<HistoryQuery>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(50).clamp(1, 200);
+    let disputes = service.get_pending_disputes(page, per_page).await?;
+    Ok(HttpResponse::Ok().json(disputes))
 }
 
 /// `GET /api/matches/{id}/disputes` — list a match's disputes.
@@ -255,15 +293,35 @@ pub async fn list_match_disputes(
     Ok(HttpResponse::Ok().json(disputes))
 }
 
+/// `POST /api/matches/{id}/disputes/{dispute_id}/review` — start admin review.
+pub async fn start_match_dispute_review(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+    path: web::Path<(Uuid, Uuid)>,
+) -> Result<HttpResponse, ApiError> {
+    let admin_id = require_admin(&req)?;
+    let (match_id, dispute_id) = path.into_inner();
+    let existing = service.get_dispute(dispute_id).await?;
+    if existing.match_id != match_id {
+        return Err(ApiError::not_found("Dispute not found for this match"));
+    }
+    let dispute = service.start_dispute_review(dispute_id, admin_id).await?;
+    Ok(HttpResponse::Ok().json(dispute))
+}
+
 /// `POST /api/matches/{id}/disputes/{dispute_id}/resolve` — admin resolution.
 pub async fn resolve_match_dispute(
     service: web::Data<Arc<MatchService>>,
+    notifications: web::Data<Arc<NotificationService>>,
     req: HttpRequest,
     path: web::Path<(Uuid, Uuid)>,
     body: web::Json<ResolveMatchDisputeBody>,
 ) -> Result<HttpResponse, ApiError> {
     let admin_id = require_admin(&req)?;
     let (match_id, dispute_id) = path.into_inner();
+    if body.resolution.trim().is_empty() {
+        return Err(ApiError::bad_request("Resolution must not be empty"));
+    }
 
     // Guard against resolving a dispute that belongs to a different match.
     let existing = service.get_dispute(dispute_id).await?;
@@ -275,18 +333,49 @@ pub async fn resolve_match_dispute(
         .resolve_dispute(dispute_id, admin_id, body.resolution.clone(), body.winner_id)
         .await?;
 
+    let match_details = service.get_match(match_id, None).await.ok();
+    let recipients = match_details.map(|m| {
+        let mut ids = vec![m.player1.id];
+        if let Some(player2) = m.player2 { ids.push(player2.id); }
+        ids
+    }).unwrap_or_default();
+    for recipient in recipients {
+        let _ = notifications.create_and_fan_out(NewNotification {
+            user_id: recipient,
+            typ: "match_dispute_resolved".to_string(),
+            title: "Match dispute resolved".to_string(),
+            message: format!("The dispute for match {match_id} was resolved."),
+            link: Some(format!("/matches/{match_id}")),
+            link_label: Some("View match".to_string()),
+        }).await;
+    }
+
     Ok(HttpResponse::Ok().json(dispute))
+}
+
+/// `GET /api/matches/disputes/review-queue` — admin review queue.
+pub async fn list_dispute_review_queue(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let disputes = service.list_dispute_review_queue().await?;
+    Ok(HttpResponse::Ok().json(disputes))
 }
 
 /// `POST /api/matches/{id}/disputes/{dispute_id}/reject` — admin rejection.
 pub async fn reject_match_dispute(
     service: web::Data<Arc<MatchService>>,
+    notifications: web::Data<Arc<NotificationService>>,
     req: HttpRequest,
     path: web::Path<(Uuid, Uuid)>,
     body: web::Json<RejectMatchDisputeBody>,
 ) -> Result<HttpResponse, ApiError> {
     let admin_id = require_admin(&req)?;
     let (match_id, dispute_id) = path.into_inner();
+    if body.reason.trim().is_empty() {
+        return Err(ApiError::bad_request("Rejection reason must not be empty"));
+    }
 
     let existing = service.get_dispute(dispute_id).await?;
     if existing.match_id != match_id {
@@ -296,6 +385,23 @@ pub async fn reject_match_dispute(
     let dispute = service
         .reject_dispute(dispute_id, admin_id, body.reason.clone())
         .await?;
+
+    let match_details = service.get_match(match_id, None).await.ok();
+    let recipients = match_details.map(|m| {
+        let mut ids = vec![m.player1.id];
+        if let Some(player2) = m.player2 { ids.push(player2.id); }
+        ids
+    }).unwrap_or_default();
+    for recipient in recipients {
+        let _ = notifications.create_and_fan_out(NewNotification {
+            user_id: recipient,
+            typ: "match_dispute_rejected".to_string(),
+            title: "Match dispute rejected".to_string(),
+            message: format!("The dispute for match {match_id} was rejected: {}", body.reason.trim()),
+            link: Some(format!("/matches/{match_id}")),
+            link_label: Some("View match".to_string()),
+        }).await;
+    }
 
     Ok(HttpResponse::Ok().json(dispute))
 }
@@ -381,14 +487,33 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/{id}/details", web::get().to(get_match_details))
         .route("/{id}/report", web::post().to(report_score))
         .route("/{id}/cancel", web::post().to(cancel_match))
+        .route("/disputes/pending", web::get().to(list_pending_match_disputes))
+        .route("/{id}/dispute", web::post().to(create_match_dispute))
         .route("/{id}/disputes", web::post().to(create_match_dispute))
+        .route("/disputes/review-queue", web::get().to(list_dispute_review_queue))
         .route("/{id}/disputes", web::get().to(list_match_disputes))
+        .route(
+            "/{id}/disputes/{dispute_id}/review",
+            web::post().to(start_match_dispute_review),
+        )
         .route(
             "/{id}/disputes/{dispute_id}/resolve",
             web::post().to(resolve_match_dispute),
         )
         .route(
             "/{id}/disputes/{dispute_id}/reject",
+            web::post().to(reject_match_dispute),
+        )
+        .route(
+            "/{id}/dispute/{dispute_id}/review",
+            web::post().to(start_match_dispute_review),
+        )
+        .route(
+            "/{id}/dispute/{dispute_id}/resolve",
+            web::post().to(resolve_match_dispute),
+        )
+        .route(
+            "/{id}/dispute/{dispute_id}/reject",
             web::post().to(reject_match_dispute),
         )
         .route("/players/{user_id}/elo", web::get().to(get_player_elo))
@@ -423,5 +548,13 @@ mod tests {
         let body: ReportScoreBody = serde_json::from_str(json).unwrap();
         assert_eq!(body.score, 5);
         assert_eq!(body.opponent_score, 3);
+    }
+
+    #[test]
+    fn dispute_body_accepts_evidence_urls() {
+        let json = r#"{"reason":"score mismatch","evidence_urls":["https://example.com/proof.png"]}"#;
+        let body: CreateMatchDisputeBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.reason, "score mismatch");
+        assert_eq!(body.evidence_urls.unwrap().len(), 1);
     }
 }
