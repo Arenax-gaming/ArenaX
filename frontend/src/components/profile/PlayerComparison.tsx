@@ -294,7 +294,7 @@ export function PlayerComparison({
               ))}
             </div>
             <p className="text-center text-xs text-muted-foreground">
-              Retrieving players' statistics in a single batch request...
+              Retrieving players&apos; statistics in a single batch request...
             </p>
           </div>
         ) : isError ? (
