@@ -15,11 +15,27 @@
 
 use crate::api_error::ApiError;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // ─── Response types ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerComparisonStats {
+    pub player_id: Uuid,
+    pub win_rate: f64,
+    pub average_elo: f64,
+    pub matches_played: i64,
+    pub tournament_wins: i64,
+    pub reputation_score: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchPlayerStatsResponse {
+    pub players: HashMap<String, PlayerComparisonStats>,
+}
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct WinRateByMode {
@@ -418,4 +434,82 @@ impl PlayerStatsService {
             last_played: row.last_played,
         })
     }
+
+    // ── 5. Batch player stats comparison (Issue #1398) ─────────────────────────
+
+    /// Retrieve the five comparison stats for a batch of player IDs in a single query:
+    /// 1. Win rate
+    /// 2. Average ELO
+    /// 3. Matches played
+    /// 4. Tournament wins
+    /// 5. Reputation score
+    pub async fn get_batch_player_stats(
+        &self,
+        player_ids: &[Uuid],
+    ) -> Result<BatchPlayerStatsResponse, ApiError> {
+        let mut players = HashMap::new();
+        for &user_id in player_ids {
+            let totals = sqlx::query!(
+                r#"
+                SELECT
+                    COALESCE(SUM(games_played), 0)                 AS "total_matches!: i64",
+                    COALESCE(SUM(wins), 0)                         AS "total_wins!: i64",
+                    COALESCE(AVG(current_rating), 1200.0)::float8  AS "avg_elo!: f64"
+                FROM user_elo
+                WHERE user_id = $1
+                "#,
+                user_id
+            )
+            .fetch_one(&self.db)
+            .await
+            .map_err(ApiError::database_error)?;
+
+            let win_rate = if totals.total_matches > 0 {
+                (totals.total_wins as f64 / totals.total_matches as f64 * 100.0 * 10.0).round()
+                    / 10.0
+            } else {
+                0.0
+            };
+
+            let tournament_wins: i64 = sqlx::query_scalar!(
+                r#"
+                SELECT COALESCE(COUNT(*), 0) AS "wins!: i64"
+                FROM tournament_participants
+                WHERE user_id = $1 AND final_rank = 1
+                "#,
+                user_id
+            )
+            .fetch_one(&self.db)
+            .await
+            .map_err(ApiError::database_error)?;
+
+            let reputation_score: i32 = sqlx::query_scalar!(
+                r#"
+                SELECT COALESCE(fair_play_score, 100) AS "score!: i32"
+                FROM users
+                WHERE id = $1
+                "#,
+                user_id
+            )
+            .fetch_optional(&self.db)
+            .await
+            .map_err(ApiError::database_error)?
+            .unwrap_or(100);
+
+            players.insert(
+                user_id.to_string(),
+                PlayerComparisonStats {
+                    player_id: user_id,
+                    win_rate,
+                    average_elo: totals.avg_elo,
+                    matches_played: totals.total_matches,
+                    tournament_wins,
+                    reputation_score,
+                },
+            );
+        }
+
+        Ok(BatchPlayerStatsResponse { players })
+    }
 }
+
