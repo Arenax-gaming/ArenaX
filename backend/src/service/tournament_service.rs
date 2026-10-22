@@ -663,13 +663,17 @@ impl TournamentService {
         })
     }
 
-    /// Join a tournament
+    /// Join a tournament, or its FIFO waitlist when every slot is taken.
+    ///
+    /// Capacity is decided inside a transaction that locks the tournament row,
+    /// so two concurrent registrations can never both claim the last slot and
+    /// a withdrawal can never race a registration into over-filling (#1401).
     pub async fn join_tournament(
         &self,
         user_id: Uuid,
         tournament_id: Uuid,
         request: JoinTournamentRequest,
-    ) -> Result<TournamentParticipant, ApiError> {
+    ) -> Result<JoinTournamentOutcome, ApiError> {
         // ── Pre-transaction reads & external verification ────────────────────
         // These must run outside the transaction: reads are non-mutating, and
         // the external payment-provider call must not hold a DB connection open.
@@ -681,31 +685,46 @@ impl TournamentService {
             return Err(ApiError::bad_request("User is already a participant"));
         }
 
-        // For ArenaX token payments, verify the wallet balance before we
-        // open a transaction so we fail fast without acquiring a connection.
-        if request.payment_method == "arenax_token" {
-            let wallet = self.get_user_wallet(user_id).await?;
-            let balance = wallet.balance_arenax_tokens.unwrap_or(0);
-            if balance < tournament.entry_fee {
-                return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
+        if let Some(entry) = self.waitlist_entry(tournament_id, user_id).await? {
+            if entry.status == WaitlistStatus::Waiting {
+                return Err(ApiError::bad_request("User is already on the waitlist"));
             }
         }
 
-        // For fiat payments, call the external provider API before the
-        // transaction so network latency never blocks a DB connection.
-        if request.payment_method == "fiat" {
-            let reference = request
-                .payment_reference
-                .as_ref()
-                .ok_or_else(|| ApiError::bad_request("Payment reference is required for fiat payments"))?;
+        // Only verify payment when a slot is actually available. A full
+        // tournament must not charge anyone for a waitlist position.
+        let has_capacity_before_tx = self.get_participant_count(tournament_id).await?
+            < tournament.max_participants;
+        let mut payment_verified = false;
 
-            let payment_verified = self
-                .verify_payment_with_provider(reference, tournament.entry_fee)
-                .await?;
-
-            if !payment_verified {
-                return Err(ApiError::bad_request("Payment verification failed"));
+        if has_capacity_before_tx {
+            // For ArenaX token payments, verify the wallet balance before we
+            // open a transaction so we fail fast without acquiring a connection.
+            if request.payment_method == "arenax_token" {
+                let wallet = self.get_user_wallet(user_id).await?;
+                let balance = wallet.balance_arenax_tokens.unwrap_or(0);
+                if balance < tournament.entry_fee {
+                    return Err(ApiError::bad_request("Insufficient ArenaX token balance"));
+                }
             }
+
+            // For fiat payments, call the external provider API before the
+            // transaction so network latency never blocks a DB connection.
+            if request.payment_method == "fiat" {
+                let reference = request.payment_reference.as_ref().ok_or_else(|| {
+                    ApiError::bad_request("Payment reference is required for fiat payments")
+                })?;
+
+                let verified = self
+                    .verify_payment_with_provider(reference, tournament.entry_fee)
+                    .await?;
+
+                if !verified {
+                    return Err(ApiError::bad_request("Payment verification failed"));
+                }
+            }
+
+            payment_verified = true;
         }
 
         // ── Atomic DB writes inside a transaction ────────────────────────────
@@ -715,6 +734,87 @@ impl TournamentService {
             .begin()
             .await
             .map_err(|e| ApiError::database_error(e))?;
+
+        // Serialize capacity decisions for this tournament. Concurrent joins
+        // and withdrawals now queue behind this row lock instead of both
+        // reading a stale count.
+        sqlx::query("SELECT id FROM tournaments WHERE id = $1 FOR UPDATE")
+            .bind(tournament_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+
+        let participant_count = self
+            .get_participant_count_in_tx(tournament_id, &mut tx)
+            .await?;
+
+        if participant_count >= tournament.max_participants {
+            // The tournament is full: place the player on the ordered
+            // waitlist. Re-joining is allowed after a previous entry was
+            // cancelled or promoted, so the row is revived rather than
+            // rejected by the unique constraint.
+            let entry = sqlx::query_as::<_, TournamentWaitlistEntry>(
+                r#"
+                INSERT INTO tournament_waitlist (tournament_id, user_id, status, joined_at)
+                VALUES ($1, $2, 'waiting', NOW())
+                ON CONFLICT (tournament_id, user_id) DO UPDATE
+                    SET status = 'waiting',
+                        joined_at = NOW(),
+                        promoted_at = NULL,
+                        cancelled_at = NULL
+                    WHERE tournament_waitlist.status <> 'waiting'
+                RETURNING id, tournament_id, user_id, status, joined_at, promoted_at, cancelled_at
+                "#,
+            )
+            .bind(tournament_id)
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .ok_or_else(|| ApiError::conflict("User is already on the waitlist"))?;
+
+            // Keep the tournament marked closed while it stays full.
+            // Status codes are the integers defined in the core migration:
+            // 2 = registration_open, 3 = registration_closed.
+            sqlx::query(
+                r#"UPDATE tournaments SET status = 3, updated_at = NOW()
+                   WHERE id = $1 AND status = 2"#,
+            )
+            .bind(tournament_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            tx.commit()
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+            let position = self
+                .waitlist_position(tournament_id, user_id)
+                .await?
+                .unwrap_or(1);
+
+            let _ = self
+                .publish_tournament_event(serde_json::json!({
+                    "type": "waitlist_joined",
+                    "tournament_id": tournament_id,
+                    "user_id": user_id,
+                    "position": position,
+                }))
+                .await;
+
+            return Ok(JoinTournamentOutcome::Waitlisted { entry, position });
+        }
+
+        // A slot opened between the pre-check and the lock. The payment path
+        // was skipped, so refusing here is the only safe option: never let an
+        // unverified fiat payment or an unchecked token balance register.
+        if !payment_verified {
+            return Err(ApiError::conflict(
+                "Tournament capacity changed during registration; please retry",
+            ));
+        }
 
         // Step 1: record the payment (wallet debit + transaction log)
         self.process_entry_fee_payment_in_tx(user_id, &tournament, &request, &mut tx)
@@ -779,7 +879,272 @@ impl TournamentService {
             }))
             .await;
 
-        Ok(participant)
+        Ok(JoinTournamentOutcome::Registered { participant })
+    }
+
+    /// Withdraw a registered player from a tournament. The freed slot goes to
+    /// the first waiting player, atomically and with an in-app notification.
+    pub async fn withdraw_from_tournament(
+        &self,
+        user_id: Uuid,
+        tournament_id: Uuid,
+    ) -> Result<TournamentWithdrawalResult, ApiError> {
+        let mut tx = self
+            .db_pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        // Lock the tournament so a concurrent withdrawal cannot promote the
+        // same waiting player twice (or over-fill the bracket).
+        let tournament = sqlx::query("SELECT name FROM tournaments WHERE id = $1 FOR UPDATE")
+            .bind(tournament_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?
+            .ok_or_else(|| ApiError::not_found("Tournament not found"))?;
+        let tournament_name: String = tournament
+            .try_get("name")
+            .map_err(|e| ApiError::database_error(e))?;
+
+        let participant = sqlx::query(
+            r#"SELECT id FROM tournament_participants
+               WHERE tournament_id = $1 AND user_id = $2 AND status <> 5
+               FOR UPDATE"#,
+        )
+        .bind(tournament_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        if participant.is_none() {
+            return Err(ApiError::not_found(
+                "You are not registered for this tournament",
+            ));
+        }
+
+        // 5 = withdrawn (core migration status code).
+        sqlx::query(
+            r#"UPDATE tournament_participants SET status = 5
+               WHERE tournament_id = $1 AND user_id = $2"#,
+        )
+        .bind(tournament_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Promote exactly one waiting player. The inner `FOR UPDATE` locks the
+        // chosen row so no other transaction can promote the same entry.
+        let promoted = sqlx::query_as::<_, TournamentWaitlistEntry>(
+            r#"
+            UPDATE tournament_waitlist
+               SET status = 'promoted', promoted_at = NOW()
+             WHERE id = (
+                 SELECT id FROM tournament_waitlist
+                  WHERE tournament_id = $1 AND status = 'waiting'
+                  ORDER BY joined_at, id
+                  LIMIT 1
+                  FOR UPDATE
+             )
+            RETURNING id, tournament_id, user_id, status, joined_at, promoted_at, cancelled_at
+            "#,
+        )
+        .bind(tournament_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        if let Some(entry) = &promoted {
+            // Reactivate a previously withdrawn row instead of failing on the
+            // (tournament_id, user_id) unique constraint.
+            sqlx::query(
+                r#"
+                INSERT INTO tournament_participants
+                    (id, tournament_id, user_id, registered_at, entry_fee_paid, status)
+                VALUES ($1, $2, $3, NOW(), FALSE, 0)
+                ON CONFLICT (tournament_id, user_id) DO UPDATE
+                    SET status = 0,
+                        entry_fee_paid = FALSE,
+                        registered_at = NOW()
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tournament_id)
+            .bind(entry.user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+            // In-app notification is written in the same transaction as the
+            // promotion, so a promoted player can never be left unnotified.
+            sqlx::query(
+                r#"INSERT INTO notifications (user_id, type, title, message, link, link_label)
+                   VALUES ($1, 'tournament', $2, $3, $4, $5)"#,
+            )
+            .bind(entry.user_id)
+            .bind("Tournament spot confirmed")
+            .bind(format!(
+                "A spot opened in {} and you were promoted from the waitlist. Complete your entry-fee payment to lock it in.",
+                tournament_name
+            ))
+            .bind(format!("/tournaments/{}", tournament_id))
+            .bind("View tournament")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        } else {
+            // Nobody is waiting: reopen registration while it is still before
+            // the deadline so the newly freed slot can be filled directly.
+            sqlx::query(
+                r#"UPDATE tournaments SET status = 2, updated_at = NOW()
+                   WHERE id = $1 AND status = 3
+                     AND registration_deadline > NOW()"#,
+            )
+            .bind(tournament_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::database_error(e))?;
+
+        let promoted_user_id = promoted.as_ref().map(|entry| entry.user_id);
+
+        if let Some(promoted_id) = promoted_user_id {
+            let _ = self
+                .publish_tournament_event(serde_json::json!({
+                    "type": "waitlist_promoted",
+                    "tournament_id": tournament_id,
+                    "user_id": promoted_id,
+                }))
+                .await;
+        }
+
+        Ok(TournamentWithdrawalResult {
+            tournament_id,
+            user_id,
+            promoted_user_id,
+        })
+    }
+
+    /// Leave the waitlist. Returns `true` when a waiting entry was cancelled.
+    pub async fn leave_waitlist(
+        &self,
+        user_id: Uuid,
+        tournament_id: Uuid,
+    ) -> Result<bool, ApiError> {
+        let result = sqlx::query(
+            r#"UPDATE tournament_waitlist
+                  SET status = 'cancelled', cancelled_at = NOW()
+                WHERE tournament_id = $1 AND user_id = $2 AND status = 'waiting'"#,
+        )
+        .bind(tournament_id)
+        .bind(user_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Current waitlist state for a player, including 1-based FIFO position.
+    pub async fn get_waitlist_status(
+        &self,
+        user_id: Uuid,
+        tournament_id: Uuid,
+    ) -> Result<TournamentWaitlistStatus, ApiError> {
+        let entry = self.waitlist_entry(tournament_id, user_id).await?;
+
+        let Some(entry) = entry else {
+            return Ok(TournamentWaitlistStatus {
+                tournament_id,
+                waitlisted: false,
+                position: None,
+                status: None,
+                joined_at: None,
+            });
+        };
+
+        let position = if entry.status == WaitlistStatus::Waiting {
+            self.waitlist_position(tournament_id, user_id).await?
+        } else {
+            None
+        };
+
+        Ok(TournamentWaitlistStatus {
+            tournament_id,
+            waitlisted: entry.status == WaitlistStatus::Waiting,
+            position,
+            status: Some(entry.status),
+            joined_at: Some(entry.joined_at),
+        })
+    }
+
+    async fn waitlist_entry(
+        &self,
+        tournament_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<TournamentWaitlistEntry>, ApiError> {
+        sqlx::query_as::<_, TournamentWaitlistEntry>(
+            r#"SELECT id, tournament_id, user_id, status, joined_at, promoted_at, cancelled_at
+                 FROM tournament_waitlist
+                WHERE tournament_id = $1 AND user_id = $2"#,
+        )
+        .bind(tournament_id)
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))
+    }
+
+    async fn waitlist_position(
+        &self,
+        tournament_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<i64>, ApiError> {
+        let position = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT (
+                SELECT COUNT(*)
+                  FROM tournament_waitlist w, tournament_waitlist me
+                 WHERE me.tournament_id = $1
+                   AND me.user_id = $2
+                   AND me.status = 'waiting'
+                   AND w.tournament_id = me.tournament_id
+                   AND w.status = 'waiting'
+                   AND (w.joined_at, w.id) <= (me.joined_at, me.id)
+            )
+            "#,
+        )
+        .bind(tournament_id)
+        .bind(user_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(Some(position.max(1)))
+    }
+
+    async fn get_participant_count_in_tx(
+        &self,
+        tournament_id: Uuid,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<i32, ApiError> {
+        // 5 = withdrawn; withdrawn rows must not occupy a capacity slot.
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*) FROM tournament_participants
+                WHERE tournament_id = $1 AND status <> 5"#,
+        )
+        .bind(tournament_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(count as i32)
     }
 
     async fn lock_tournament(
@@ -1035,7 +1400,12 @@ impl TournamentService {
         tournament: &Tournament,
         user_id: Uuid,
     ) -> Result<(), ApiError> {
-        if tournament.status != TournamentStatus::RegistrationOpen {
+        // RegistrationClosed means capacity was reached; the waitlist is
+        // still open until the registration deadline.
+        if !matches!(
+            tournament.status,
+            TournamentStatus::RegistrationOpen | TournamentStatus::RegistrationClosed
+        ) {
             return Err(ApiError::bad_request(
                 "Tournament is not accepting registrations",
             ));
@@ -1045,11 +1415,9 @@ impl TournamentService {
             return Err(ApiError::bad_request("Registration deadline has passed"));
         }
 
-        // Check participant count
-        let current_count = self.get_participant_count(tournament.id).await?;
-        if current_count >= tournament.max_participants {
-            return Err(ApiError::bad_request("Tournament is full"));
-        }
+        // Capacity is deliberately not checked here: a full tournament
+        // places the player on the waitlist once the transaction has locked
+        // the tournament row (see `join_tournament`).
 
         // Check skill level requirements
         if let (Some(min_skill), Some(max_skill)) =
@@ -1414,15 +1782,9 @@ impl TournamentService {
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
-        let count_row = sqlx::query!(
-            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
-            tournament_id
-        )
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(|e| ApiError::database_error(e))?;
-
-        let participant_count = count_row.count.unwrap_or(0) as i32;
+        let participant_count = self
+            .get_participant_count_in_tx(tournament_id, tx)
+            .await?;
         let max_participants = row.max_participants;
 
         // Only close if we just filled the last spot.
@@ -1653,8 +2015,12 @@ impl TournamentService {
             return Ok(false);
         }
 
-        // Check tournament status
-        if tournament.status != TournamentStatus::RegistrationOpen {
+        // Check tournament status. RegistrationClosed is still joinable via
+        // the waitlist (until the deadline).
+        if !matches!(
+            tournament.status,
+            TournamentStatus::RegistrationOpen | TournamentStatus::RegistrationClosed
+        ) {
             return Ok(false);
         }
 
@@ -1663,25 +2029,27 @@ impl TournamentService {
             return Ok(false);
         }
 
-        // Check participant limit
-        let current_count = self.get_participant_count(tournament_id).await?;
-        if current_count >= tournament.max_participants {
-            return Ok(false);
+        // Check whether the player already holds a waitlist spot
+        if let Some(entry) = self.waitlist_entry(tournament_id, user_id).await? {
+            if entry.status == WaitlistStatus::Waiting {
+                return Ok(false);
+            }
         }
 
         Ok(true)
     }
 
     async fn get_participant_count(&self, tournament_id: Uuid) -> Result<i32, ApiError> {
-        let count = sqlx::query!(
-            "SELECT COUNT(*) as count FROM tournament_participants WHERE tournament_id = $1",
-            tournament_id
+        // Withdrawn registrations free their slot, so they are excluded from
+        // the capacity count (Issue #1401). 5 = withdrawn in the core schema.
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*) FROM tournament_participants
+                WHERE tournament_id = $1 AND status <> 5"#,
         )
+        .bind(tournament_id)
         .fetch_one(&self.db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?
-        .count
-        .unwrap_or(0);
+        .map_err(|e| ApiError::database_error(e))?;
 
         Ok(count as i32)
     }

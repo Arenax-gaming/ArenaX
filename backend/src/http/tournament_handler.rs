@@ -4,8 +4,8 @@ use crate::db::DbPool;
 use crate::middleware::security::validate_uuid;
 use crate::middleware::tenant_context::{with_tenant_scope, TenantContext};
 use crate::models::{
-    CreateTournamentRequest, JoinTournamentRequest, PaginatedResponse, TournamentParticipant,
-    TournamentStatus,
+    CreateTournamentRequest, JoinTournamentOutcome, JoinTournamentRequest, PaginatedResponse,
+    TournamentParticipant, TournamentStatus,
 };
 use crate::service::tournament_service::TournamentService;
 use actix_web::{web, HttpRequest, HttpResponse};
@@ -218,11 +218,100 @@ pub async fn register_for_tournament(
         "Tournament registration request"
     );
 
-    let participant = svc
+    let outcome = svc
         .join_tournament(user_id, tournament_id, body.into_inner())
         .await?;
 
-    Ok(HttpResponse::Created().json(participant))
+    match outcome {
+        JoinTournamentOutcome::Registered { participant } => {
+            Ok(HttpResponse::Created().json(participant))
+        }
+        // Full tournament: the player is queued. 202 Accepted communicates that
+        // registration is pending a slot rather than rejected.
+        JoinTournamentOutcome::Waitlisted { entry, position } => {
+            Ok(HttpResponse::Accepted().json(serde_json::json!({
+                "message": "Tournament is full — you have been added to the waitlist",
+                "registration_status": "waitlisted",
+                "position": position,
+                "entry": entry,
+            })))
+        }
+    }
+}
+
+/// DELETE /api/tournaments/{id}/register
+///
+/// Withdraw a registration. The first waitlisted player is promoted into the
+/// freed slot in the same transaction (#1401).
+pub async fn withdraw_from_tournament(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let tournament_id = path.into_inner();
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+
+    info!(
+        user_id = %user_id,
+        tournament_id = %tournament_id,
+        "Tournament withdrawal request"
+    );
+
+    let result = svc
+        .withdraw_from_tournament(user_id, tournament_id)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "Withdrawal confirmed",
+        "promoted_user_id": result.promoted_user_id,
+    })))
+}
+
+/// GET /api/tournaments/{id}/waitlist
+///
+/// The caller's waitlist position, or `waitlisted: false` when they are not
+/// queued for this tournament.
+pub async fn get_waitlist_status(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let tournament_id = path.into_inner();
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+
+    let status = svc.get_waitlist_status(user_id, tournament_id).await?;
+
+    Ok(HttpResponse::Ok().json(status))
+}
+
+/// DELETE /api/tournaments/{id}/waitlist
+///
+/// Give up a waitlist position at any time.
+pub async fn leave_waitlist(
+    svc: web::Data<Arc<TournamentService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let tournament_id = path.into_inner();
+    let user_id = req
+        .user_id()
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+
+    let removed = svc.leave_waitlist(user_id, tournament_id).await?;
+
+    if !removed {
+        return Err(ApiError::not_found(
+            "No waiting waitlist entry found for this tournament",
+        ));
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "Removed from the waitlist"
+    })))
 }
 
 /// POST /api/tournaments/{id}/start
@@ -500,6 +589,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::delete().to(cancel_tournament))
             .route("/{id}/participants", web::get().to(get_tournament_participants))
             .route("/{id}/register", web::post().to(register_for_tournament))
+            .route("/{id}/register", web::delete().to(withdraw_from_tournament))
+            .route("/{id}/waitlist", web::get().to(get_waitlist_status))
+            .route("/{id}/waitlist", web::delete().to(leave_waitlist))
             .route("/{id}/start", web::post().to(start_tournament))
             .route("/{id}/advance", web::post().to(advance_bracket))
             .route("/{id}/generate-bracket", web::post().to(generate_bracket_job))

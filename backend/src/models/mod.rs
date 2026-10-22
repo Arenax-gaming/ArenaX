@@ -54,10 +54,12 @@ pub use stellar_transaction::{
     StellarTransactionStatus, StellarTransactionType,
 };
 pub use tournament::{
-    BracketType, CreateTournamentRequest, JoinTournamentRequest, ParticipantStatus, PrizePool,
-    RoundStatus, RoundType, Tournament, TournamentListResponse, TournamentMatch,
-    TournamentParticipant, TournamentResponse, TournamentRound, TournamentStanding,
-    TournamentStatus, TournamentType, TournamentVisibility, UpdateTournamentRequest,
+    BracketType, CreateTournamentRequest, JoinTournamentOutcome, JoinTournamentRequest,
+    ParticipantStatus, PrizePool, RoundStatus, RoundType, Tournament, TournamentListResponse,
+    TournamentMatch, TournamentParticipant, TournamentResponse, TournamentRound,
+    TournamentStanding, TournamentStatus, TournamentType, TournamentVisibility,
+    TournamentWaitlistEntry, TournamentWaitlistStatus, TournamentWithdrawalResult,
+    UpdateTournamentRequest, WaitlistStatus,
 };
 pub use tournament_finance::*;
 pub use user::*;
