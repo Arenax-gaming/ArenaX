@@ -1,36 +1,37 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMatchmakingQueue } from '@/hooks/useMatchmakingQueue';
 
 interface MatchmakingQueueProps {
+  /** Game title used by the matchmaking API, e.g. "arenax". */
+  game?: string;
   gameMode: string;
   onCancel: () => void;
-  onMatchFound: (sessionId: string) => void;
+  onMatchFound: (matchIdOrSessionId: string) => void;
 }
 
-export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: MatchmakingQueueProps) {
-  const [waitTime, setWaitTime] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState(30);
-  const [playerCount, setPlayerCount] = useState(0);
-  const [isSearching, setIsSearching] = useState(true);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setWaitTime(prev => prev + 1);
-    }, 1000);
-
-    // Simulate finding a match
-    const matchTimer = setTimeout(() => {
-      setIsSearching(false);
-      const mockSessionId = `session_${Date.now()}`;
-      onMatchFound(mockSessionId);
-    }, estimatedTime * 1000);
-
-    return () => {
-      clearInterval(timer);
-      clearTimeout(matchTimer);
-    };
-  }, [estimatedTime, onMatchFound]);
+export default function MatchmakingQueue({
+  game = 'arenax',
+  gameMode,
+  onCancel,
+  onMatchFound,
+}: MatchmakingQueueProps) {
+  const {
+    position,
+    queueSize,
+    estimatedWaitTime,
+    waitTime,
+    isSearching,
+    isConnected,
+    isReconnecting,
+    connectionError,
+    matchId,
+    reconnect,
+  } = useMatchmakingQueue({
+    game,
+    gameMode,
+    onMatchFound,
+  });
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -38,7 +39,12 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const progressPercent = Math.min((waitTime / estimatedTime) * 100, 100);
+  const progressPercent =
+    estimatedWaitTime && estimatedWaitTime > 0
+      ? Math.min((waitTime / estimatedWaitTime) * 100, 100)
+      : 0;
+
+  const searching = isSearching && !matchId;
 
   return (
     <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
@@ -52,7 +58,7 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
           </div>
 
           <h2 className="text-3xl font-bold text-foreground mb-4">
-            Finding Opponents...
+            {matchId ? 'Match Found!' : 'Finding Opponents...'}
           </h2>
 
           <p className="text-foreground/80 mb-6">
@@ -66,20 +72,55 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
             <p className="text-muted-foreground text-sm">Wait Time</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-muted/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-primary">{playerCount}</div>
-              <div className="text-muted-foreground text-xs">Players Found</div>
+              <div className="text-2xl font-bold text-primary">
+                {position ?? '—'}
+              </div>
+              <div className="text-muted-foreground text-xs">Queue Position</div>
             </div>
             <div className="bg-muted/50 rounded-lg p-4">
-              {waitTime >= estimatedTime ? (
-                <div className="text-2xl font-bold text-success/80">Almost there...</div>
-              ) : (
-                <div className="text-2xl font-bold text-success/80">~{Math.max(0, estimatedTime - waitTime)}s</div>
-              )}
-              <div className="text-muted-foreground text-xs">Estimated</div>
+              <div className="text-2xl font-bold text-primary">{queueSize}</div>
+              <div className="text-muted-foreground text-xs">Players in Queue</div>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 gap-3 mb-6">
+            <div className="bg-muted/50 rounded-lg p-4 flex items-center justify-between">
+              <span className="text-muted-foreground text-sm">Estimated wait</span>
+              <span className="text-foreground font-semibold">
+                {estimatedWaitTime != null ? `~${formatTime(estimatedWaitTime)}` : 'Calculating…'}
+              </span>
+            </div>
+            <div className="rounded-lg p-3 border border-border flex items-center justify-between">
+              <span className="text-muted-foreground text-xs">Live updates</span>
+              <span
+                className={`text-xs font-medium ${
+                  isConnected ? 'text-success' : isReconnecting ? 'text-warning' : 'text-muted-foreground'
+                }`}
+              >
+                {isConnected ? 'Connected' : isReconnecting ? 'Reconnecting…' : 'Offline'}
+              </span>
+            </div>
+          </div>
+
+          {connectionError && (
+            <div
+              role="alert"
+              className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              <p>{connectionError}</p>
+              {!isReconnecting && (
+                <button
+                  type="button"
+                  onClick={reconnect}
+                  className="mt-2 underline underline-offset-2"
+                >
+                  Retry connection
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="space-y-3">
             <div
@@ -88,27 +129,30 @@ export default function MatchmakingQueue({ gameMode, onCancel, onMatchFound }: M
               aria-label="Matchmaking progress"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={progressPercent}
+              aria-valuenow={Math.round(progressPercent)}
             >
               <div
                 className="bg-primary h-2 rounded-full transition-all duration-1000"
-                style={{ width: `${Math.min((waitTime / estimatedTime) * 100, 100)}%` }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
 
             <button
               type="button"
               onClick={onCancel}
-              className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive rounded-lg transition-colors duration-200 border border-destructive/30"
+              disabled={Boolean(matchId)}
+              className="w-full px-6 py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive rounded-lg transition-colors duration-200 border border-destructive/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel Matchmaking
             </button>
           </div>
 
           <p role="status" aria-live="polite" className="sr-only">
-            {isSearching
-              ? `Searching for opponents in ${gameMode} mode`
-              : 'Match found'}
+            {matchId
+              ? 'Match found'
+              : searching
+                ? `Searching for opponents in ${gameMode} mode, position ${position ?? 'unknown'}`
+                : 'Not searching'}
           </p>
         </div>
       </div>

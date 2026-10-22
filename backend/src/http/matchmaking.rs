@@ -2,6 +2,8 @@ use crate::api_error::ApiError;
 use crate::auth::Claims;
 use crate::db::DbPool;
 use crate::models::matchmaker::*;
+use crate::realtime::event_bus::EventBus;
+use crate::realtime::events::RealtimeEvent;
 use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig, QueueEntry};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use actix_web::{web, HttpResponse, Result};
@@ -74,6 +76,7 @@ pub struct GameModeStats {
 pub async fn join_queue(
     db_pool: web::Data<DbPool>,
     matchmaker: web::Data<MatchmakerService>,
+    event_bus: web::Data<EventBus>,
     claims: web::ReqData<Claims>,
     request: web::Json<JoinQueueRequest>,
 ) -> Result<HttpResponse> {
@@ -122,6 +125,25 @@ pub async fn join_queue(
     let estimated_wait_time =
         Some(MatchmakerService::estimate_wait_time_from_size(queue_size, current_elo));
 
+    // Push the initial queue state so the client can render position without
+    // waiting for its first poll (#1216).
+    event_bus
+        .publish_to_user(
+            user_id,
+            &RealtimeEvent::QueueStatusUpdate {
+                game: game.clone(),
+                game_mode: game_mode.clone(),
+                status: "waiting".to_string(),
+                position: Some(queue_size),
+                queue_size,
+                estimated_wait_time,
+                wait_time_so_far: Some(0),
+                match_id: None,
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        )
+        .await;
+
     Ok(HttpResponse::Ok().json(JoinQueueResponse {
         success: true,
         queue_position: Some(queue_size),
@@ -134,6 +156,7 @@ pub async fn join_queue(
 pub async fn leave_queue(
     db_pool: web::Data<DbPool>,
     matchmaker: web::Data<MatchmakerService>,
+    event_bus: web::Data<EventBus>,
     claims: web::ReqData<Claims>,
     request: web::Json<LeaveQueueRequest>,
 ) -> Result<HttpResponse> {
@@ -163,6 +186,27 @@ pub async fn leave_queue(
     }
 
     update_database_queue_status(&db_pool, user_id, &game, &game_mode).await?;
+
+    // Tell the (still-open) WebSocket that this player is no longer queued.
+    event_bus
+        .publish_to_user(
+            user_id,
+            &RealtimeEvent::QueueStatusUpdate {
+                game: game.clone(),
+                game_mode: game_mode.clone(),
+                status: "left".to_string(),
+                position: None,
+                queue_size: matchmaker
+                    .get_queue_size(&game, &game_mode)
+                    .await
+                    .unwrap_or(0),
+                estimated_wait_time: None,
+                wait_time_so_far: None,
+                match_id: None,
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        )
+        .await;
 
     Ok(HttpResponse::Ok().json(LeaveQueueResponse {
         success: true,

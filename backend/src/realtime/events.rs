@@ -26,6 +26,23 @@ pub enum RealtimeEvent {
         to_status: String,
         timestamp: String,
     },
+    /// Live matchmaking queue state for one player (Issue #1216).
+    ///
+    /// Pushed on join, on leave, and when the matchmaker pairs the player.
+    /// `position` is 1-based while `status == "waiting"`; `match_id` is set
+    /// only when `status == "matched"`.
+    QueueStatusUpdate {
+        game: String,
+        game_mode: String,
+        /// `waiting` | `matched` | `left`
+        status: String,
+        position: Option<usize>,
+        queue_size: usize,
+        estimated_wait_time: Option<i32>,
+        wait_time_so_far: Option<i64>,
+        match_id: Option<Uuid>,
+        timestamp: String,
+    },
     Notification {
         id: Uuid,
         title: String,
