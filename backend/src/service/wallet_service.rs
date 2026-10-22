@@ -556,6 +556,85 @@ impl WalletService {
         Ok(())
     }
 
+    /// Refund entry fee for a cancelled tournament registrant.
+    /// Supports both fiat (NGN, etc.) and ArenaX tokens.
+    /// Idempotent: checks for existing completed transaction with the specified reference.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, amount, currency = %currency, reference = %reference))]
+    pub async fn refund_entry_fee(
+        &self,
+        user_id: Uuid,
+        amount: i64,
+        currency: &str,
+        reference: &str,
+        description: &str,
+    ) -> Result<Transaction, WalletError> {
+        // Idempotency check: see if a transaction with this reference already exists
+        if let Some(existing) = sqlx::query_as!(
+            Transaction,
+            r#"
+            SELECT id, user_id,
+                transaction_type as "transaction_type: TransactionType",
+                amount, currency,
+                status as "status: TransactionStatus",
+                reference, description, metadata,
+                stellar_transaction_id, created_at, updated_at, completed_at
+            FROM transactions
+            WHERE reference = $1
+            "#,
+            reference
+        )
+        .fetch_optional(&*self.db_pool)
+        .await?
+        {
+            return Ok(existing);
+        }
+
+        // Credit the balance depending on original payment method
+        if currency == "ARENAX_TOKEN" {
+            sqlx::query!(
+                r#"
+                UPDATE wallets
+                SET balance_arenax_tokens = balance_arenax_tokens + $1,
+                    updated_at = $2
+                WHERE user_id = $3
+                "#,
+                amount,
+                Utc::now(),
+                user_id
+            )
+            .execute(&*self.db_pool)
+            .await?;
+        } else {
+            sqlx::query!(
+                r#"
+                UPDATE wallets
+                SET balance_ngn = balance_ngn + $1,
+                    updated_at = $2
+                WHERE user_id = $3
+                "#,
+                amount,
+                Utc::now(),
+                user_id
+            )
+            .execute(&*self.db_pool)
+            .await?;
+        }
+
+        // Create the completed refund transaction record
+        let txn = self
+            .create_transaction(
+                user_id,
+                TransactionType::Refund,
+                amount,
+                currency.to_string(),
+                description.to_string(),
+                Some(reference.to_string()),
+            )
+            .await?;
+
+        Ok(txn)
+    }
+
     // ========================================================================
     // TRANSACTION MANAGEMENT
     // ========================================================================

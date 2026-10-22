@@ -79,6 +79,51 @@ impl RewardSettlementService {
         }
     }
 
+    /// Settle refund for a cancelled tournament registrant.
+    /// Idempotent: checks for existing settlement with key `refund:{tournament_id}:{user_id}`.
+    pub async fn settle_tournament_refund(
+        &self,
+        tournament_id: &str,
+        user_id: &str,
+        amount: &str,
+        asset: &str,
+    ) -> Result<RewardSettlement, ApiError> {
+        let refund_match_id = format!("refund:{}:{}", tournament_id, user_id);
+
+        if let Some(existing) = self.get_settlement(&refund_match_id).await? {
+            if existing.is_settled() {
+                return Ok(existing);
+            }
+            if existing.status != Some(SettlementStatus::Failed) {
+                return Ok(existing);
+            }
+        }
+
+        let mut settlement = RewardSettlement::new(
+            refund_match_id.clone(),
+            user_id.to_string(),
+            amount.to_string(),
+            asset.to_string(),
+        );
+
+        self.persist_settlement(&settlement)?;
+
+        match self.call_settlement_contract(&settlement).await {
+            Ok(tx_hash) => {
+                settlement.tx_hash = Some(tx_hash);
+                settlement.status = Some(SettlementStatus::Confirmed);
+                settlement.settled_at = Some(Utc::now());
+                self.persist_settlement(&settlement)?;
+                Ok(settlement)
+            }
+            Err(e) => {
+                settlement.status = Some(SettlementStatus::Failed);
+                self.persist_settlement(&settlement)?;
+                Err(e)
+            }
+        }
+    }
+
     /// Compute rewards deterministically based on stake amount.
     /// Winner receives the full stake amount (deterministic calculation).
     fn compute_reward(&self, stake_amount: &str) -> Result<String, ApiError> {

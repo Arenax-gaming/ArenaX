@@ -22,7 +22,8 @@ import i18nRoutes from './i18n.routes';
 import paymentWebhookRoutes from './payment-webhook.routes';
 import currencyRoutes from './currency.routes';
 import anchorRoutes from './anchor.routes';
-import * as authController from '../controllers/auth.controller';
+import notificationRoutes from './notification.routes';
+import { getMyPreferences, updatePreferences } from '../controllers/notification.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 
 
@@ -79,6 +80,14 @@ mountVersioned('/soroban', sorobanRoutes);
 mountVersioned('/wallets', walletRoutes);
 mountVersioned('/wallet', walletRoutes);
 mountVersioned('/analytics', analyticsRoutes);
+mountVersioned('/notifications', notificationRoutes);
+
+const mePreferencesRouter = Router();
+mePreferencesRouter.get('/', authenticateJWT, getMyPreferences);
+mePreferencesRouter.post('/', authenticateJWT, updatePreferences);
+mePreferencesRouter.put('/', authenticateJWT, updatePreferences);
+mePreferencesRouter.patch('/', authenticateJWT, updatePreferences);
+mountVersioned('/me/preferences', mePreferencesRouter);
 router.use('/v1/achievements', achievementRoutes);
 router.use('/v1/tournaments', tournamentRoutes);
 router.use('/v1/search', searchRoutes);

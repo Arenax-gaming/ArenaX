@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
 import { Users, Trophy, Clock, Zap } from "lucide-react";
+import { TournamentSponsorBadge } from "@/components/sponsors/TournamentSponsorBadges";
 
 interface TournamentCardProps {
   tournament: Tournament;
@@ -70,6 +71,7 @@ export function TournamentCard({ tournament }: TournamentCardProps) {
       {/* Header with Status */}
       <div className="flex items-start justify-between border-b p-4">
         <div className="flex-1">
+          <TournamentSponsorBadge tournament={tournament} size="sm" className="mb-1.5" />
           <h3 className="text-lg font-semibold line-clamp-2 text-foreground">
             {tournament.name}
           </h3>
