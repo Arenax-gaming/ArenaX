@@ -45,7 +45,7 @@ pub struct ReportScoreBody {
     pub telemetry_data: Option<String>,
 }
 
-/// Body for `POST /api/matches/{id}/disputes`.
+/// Body for `POST /api/matches/{id}/dispute`.
 #[derive(Debug, Deserialize)]
 pub struct CreateMatchDisputeBody {
     pub reason: String,
@@ -226,7 +226,7 @@ pub async fn cancel_match(
     Ok(HttpResponse::Ok().json(cancelled))
 }
 
-/// `POST /api/matches/{id}/disputes` — file a dispute for a match.
+/// `POST /api/matches/{id}/dispute` — file a dispute for a match.
 pub async fn create_match_dispute(
     service: web::Data<Arc<MatchService>>,
     req: HttpRequest,
@@ -276,6 +276,16 @@ pub async fn resolve_match_dispute(
         .await?;
 
     Ok(HttpResponse::Ok().json(dispute))
+}
+
+/// `GET /api/matches/disputes/review-queue` — admin review queue.
+pub async fn list_dispute_review_queue(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let disputes = service.list_dispute_review_queue().await?;
+    Ok(HttpResponse::Ok().json(disputes))
 }
 
 /// `POST /api/matches/{id}/disputes/{dispute_id}/reject` — admin rejection.
@@ -381,7 +391,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/{id}/details", web::get().to(get_match_details))
         .route("/{id}/report", web::post().to(report_score))
         .route("/{id}/cancel", web::post().to(cancel_match))
+        .route("/{id}/dispute", web::post().to(create_match_dispute))
         .route("/{id}/disputes", web::post().to(create_match_dispute))
+        .route("/disputes/review-queue", web::get().to(list_dispute_review_queue))
         .route("/{id}/disputes", web::get().to(list_match_disputes))
         .route(
             "/{id}/disputes/{dispute_id}/resolve",

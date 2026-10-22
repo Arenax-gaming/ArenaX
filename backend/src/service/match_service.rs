@@ -236,6 +236,20 @@ impl MatchService {
         user_id: Uuid,
         request: CreateDisputeRequest,
     ) -> Result<MatchDispute, ApiError> {
+        let reason = request.reason.trim();
+        if reason.is_empty() {
+            return Err(ApiError::bad_request("Dispute reason is required"));
+        }
+
+        match &request.evidence_urls {
+            Some(urls) if !urls.is_empty() => {
+                if urls.iter().any(|url| url.trim().is_empty()) {
+                    return Err(ApiError::bad_request("Evidence URLs must not be empty"));
+                }
+            }
+            _ => return Err(ApiError::bad_request("At least one evidence URL is required")),
+        }
+
         // Validate dispute creation
         let match_record = self.get_match_by_id(match_id).await?;
         self.validate_dispute_creation(&match_record, user_id)
@@ -255,7 +269,7 @@ impl MatchService {
             Uuid::new_v4(),
             match_id,
             user_id,
-            request.reason,
+            reason,
             request
                 .evidence_urls
                 .map(|urls| serde_json::to_string(&urls).unwrap_or_default()),
@@ -276,8 +290,16 @@ impl MatchService {
             "match_id": match_id,
             "tournament_id": match_record.tournament_id,
             "user_id": user_id,
-            "reason": request.reason
+            "reason": reason
         }))
+        .await?;
+
+        self.notify_match_participants(
+            &match_record,
+            "Match dispute opened",
+            &format!("A dispute was opened for match {}. Review is pending.", match_id),
+            &format!("/matches/{}", match_id),
+        )
         .await?;
 
         Ok(dispute)
@@ -1224,11 +1246,12 @@ impl MatchService {
             return Err(ApiError::bad_request("Match is not completed"));
         }
 
-        // Check if there's already a pending dispute
+        // Check if there's already an active dispute
         let existing_dispute = sqlx::query!(
-            "SELECT id FROM match_disputes WHERE match_id = $1 AND status = $2",
+            "SELECT id FROM match_disputes WHERE match_id = $1 AND status IN ($2, $3)",
             match_record.id,
-            DisputeStatus::Pending as _
+            DisputeStatus::Pending as _,
+            DisputeStatus::UnderReview as _
         )
         .fetch_optional(&self.db_pool)
         .await
@@ -2034,6 +2057,13 @@ impl MatchService {
 
         // Update match record if winner needs to be reassigned
         if let Some(new_winner) = winner_id {
+            let match_record = self.get_match_by_id(dispute.match_id).await?;
+            if new_winner != match_record.player1_id
+                && match_record.player2_id != Some(new_winner)
+            {
+                return Err(ApiError::bad_request("Winner must be a match participant"));
+            }
+
             sqlx::query!(
                 "UPDATE matches SET winner_id = $1, updated_at = $2 WHERE id = $3",
                 new_winner,
@@ -2049,6 +2079,17 @@ impl MatchService {
             self.update_elo_ratings(&match_record, Some(new_winner))
                 .await?;
         }
+
+        let match_record = self.get_match_by_id(dispute.match_id).await?;
+        self.update_match_status(dispute.match_id, match_record.status, MatchStatus::Completed)
+            .await?;
+        self.notify_match_participants(
+            &match_record,
+            "Match dispute upheld",
+            &format!("The dispute for match {} was upheld.", dispute.match_id),
+            &format!("/matches/{}", dispute.match_id),
+        )
+        .await?;
 
         tracing::info!("Dispute {} resolved by admin {}", dispute_id, admin_id);
         Ok(dispute)
@@ -2078,6 +2119,17 @@ impl MatchService {
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
+
+        let match_record = self.get_match_by_id(dispute.match_id).await?;
+        self.update_match_status(dispute.match_id, match_record.status, MatchStatus::Completed)
+            .await?;
+        self.notify_match_participants(
+            &match_record,
+            "Match dispute rejected",
+            &format!("The dispute for match {} was rejected.", dispute.match_id),
+            &format!("/matches/{}", dispute.match_id),
+        )
+        .await?;
 
         tracing::info!("Dispute {} rejected by admin {}", dispute_id, admin_id);
         Ok(dispute)
@@ -2262,6 +2314,51 @@ impl MatchService {
         .await
         .map_err(|e| ApiError::database_error(e))?
         .ok_or(ApiError::not_found("Dispute not found".to_string()))
+    }
+
+    /// List pending and under-review disputes for administrators.
+    pub async fn list_dispute_review_queue(&self) -> Result<Vec<MatchDispute>, ApiError> {
+        sqlx::query_as!(
+            MatchDispute,
+            r#"
+            SELECT * FROM match_disputes
+            WHERE status IN ($1, $2)
+            ORDER BY created_at ASC
+            "#,
+            DisputeStatus::Pending as _,
+            DisputeStatus::UnderReview as _
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))
+    }
+
+    async fn notify_match_participants(
+        &self,
+        match_record: &Match,
+        title: &str,
+        message: &str,
+        link: &str,
+    ) -> Result<(), ApiError> {
+        for player_id in [Some(match_record.player1_id), match_record.player2_id]
+            .into_iter()
+            .flatten()
+        {
+            sqlx::query(
+                r#"
+                INSERT INTO notifications (user_id, type, title, message, link, link_label)
+                VALUES ($1, 'match_dispute', $2, $3, $4, 'View match')
+                "#,
+            )
+            .bind(player_id)
+            .bind(title)
+            .bind(message)
+            .bind(link)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::database_error)?;
+        }
+        Ok(())
     }
 
     /// Get all disputes for a match

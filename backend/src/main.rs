@@ -372,6 +372,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
+            .app_data(web::Data::new(match_service.clone()))
             .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .app_data(web::Data::new(evidence_store.clone()))
