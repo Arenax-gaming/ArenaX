@@ -1,4 +1,6 @@
 use crate::models::{StellarAccount, StellarTransaction};
+use crate::security::PiiDataProtector;
+use crate::service::stellar_sdk_service::StellarSdkService;
 use anyhow::Result;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -319,14 +321,18 @@ impl StellarService {
         prize_pool_account: &str,
         amount: i64,
     ) -> Result<String, StellarError> {
-        // TODO: Implement actual Stellar payment transaction
-        // This would:
-        // 1. Get the admin account keypair
-        // 2. Build a payment operation
-        // 3. Sign and submit the transaction
-        // 4. Record the transaction in the database
-
-        let tx_hash = format!("escrow-{}", Uuid::new_v4());
+        let admin_secret = self.admin_secret.as_deref().ok_or_else(|| {
+            StellarError::TransactionFailed("STELLAR_ADMIN_SECRET not configured".to_string())
+        })?;
+        let sdk = self.sdk_service()?;
+        let envelope = sdk
+            .build_payment_tx(admin_secret, prize_pool_account, amount)
+            .await
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+        let (tx_hash, _) = sdk
+            .submit_and_confirm(&envelope, admin_secret)
+            .await
+            .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
         // The source account must be identified by its *public* key — never
         // the admin secret itself, which must never appear in a log line,
@@ -349,7 +355,7 @@ impl StellarService {
         );
 
         // Record transaction
-        self.record_transaction(
+        let recorded = self.record_transaction(
             &tx_hash,
             &admin_public,
             prize_pool_account,
@@ -360,6 +366,15 @@ impl StellarService {
             Some(format!("Entry fee escrow for tournament {}", tournament_id)),
             None,
         )
+        .await?;
+        sqlx::query(
+            r#"UPDATE stellar_transactions
+               SET status = 'confirmed', completed_at = $1
+               WHERE transaction_hash = $2"#,
+        )
+        .bind(Utc::now())
+        .bind(&tx_hash)
+        .execute(&*self.db_pool)
         .await?;
 
         log_stellar_event(
@@ -384,16 +399,24 @@ impl StellarService {
         let mut transaction_hashes = Vec::new();
 
         for (user_id, amount) in winners {
-            // Get user's Stellar account
             let user_account = self.get_account(user_id).await?;
-
-            // TODO: Implement actual Stellar payment
-            // This would:
-            // 1. Decrypt the prize pool secret key
-            // 2. Build a payment operation
-            // 3. Sign and submit the transaction
-
-            let tx_hash = format!("prize-{}", Uuid::new_v4());
+            let pool_account = self
+                .get_account_by_public_key(prize_pool_account)
+                .await?;
+            let pool_secret = pool_account
+                .encrypted_secret_key
+                .as_deref()
+                .ok_or(StellarError::InvalidPublicKey)
+                .and_then(|encrypted| self.decrypt_secret_key(encrypted))?;
+            let sdk = self.sdk_service()?;
+            let envelope = sdk
+                .build_payment_tx(&pool_secret, &user_account.public_key, amount)
+                .await
+                .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+            let (tx_hash, _) = sdk
+                .submit_and_confirm(&envelope, &pool_secret)
+                .await
+                .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
             log_stellar_event(
                 StellarEventStatus::Submit,
@@ -405,7 +428,7 @@ impl StellarService {
             );
 
             // Record transaction
-            self.record_transaction(
+            let recorded = self.record_transaction(
                 &tx_hash,
                 prize_pool_account,
                 &user_account.public_key,
@@ -419,6 +442,15 @@ impl StellarService {
                 )),
                 Some(user_id),
             )
+            .await?;
+            sqlx::query(
+                r#"UPDATE stellar_transactions
+                   SET status = 'confirmed', completed_at = $1
+                   WHERE id = $2"#,
+            )
+            .bind(Utc::now())
+            .bind(recorded.id)
+            .execute(&*self.db_pool)
             .await?;
 
             log_stellar_event(
@@ -442,16 +474,15 @@ impl StellarService {
 
     /// Issue ArenaX token (one-time setup)
     pub async fn issue_arenax_token(&self) -> Result<(), StellarError> {
-        // TODO: Implement token issuance
-        // This would:
-        // 1. Create issuing account
-        // 2. Create distribution account
-        // 3. Create trustline from distribution to issuing account
-        // 4. Issue tokens from issuing to distribution account
-        // 5. Lock issuing account
-
-        tracing::info!("ArenaX token issuance not implemented yet");
-        Ok(())
+        let issuer_secret = self.admin_secret.as_deref().ok_or_else(|| {
+            StellarError::TransactionFailed("ArenaX token issuer secret not configured".to_string())
+        })?;
+        stellar_public_from_secret(issuer_secret)
+            .map_err(|e| StellarError::StellarSdkError(e))?;
+        Err(StellarError::TransactionFailed(
+            "ArenaX token issuance requires explicit issuer/distribution setup and trustlines"
+                .to_string(),
+        ))
     }
 
     /// Transfer ArenaX tokens between accounts
@@ -461,16 +492,29 @@ impl StellarService {
         to_public_key: &str,
         amount: i64,
     ) -> Result<String, StellarError> {
-        // Get sender's account
         let from_account = self.get_account(from_user_id).await?;
+        let issuer_secret = self.admin_secret.clone().ok_or_else(|| {
+            StellarError::TransactionFailed("ArenaX token issuer secret not configured".to_string())
+        })?;
+        let issuer_public = std::env::var("STELLAR_ARENAX_ISSUER")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| stellar_public_from_secret(&issuer_secret).unwrap_or_default());
+        if issuer_public.is_empty() {
+            return Err(StellarError::TransactionFailed(
+                "ArenaX token issuer public key could not be derived".to_string(),
+            ));
+        }
 
-        // TODO: Implement actual token transfer
-        // This would:
-        // 1. Decrypt sender's secret key
-        // 2. Build a payment operation with asset type
-        // 3. Sign and submit the transaction
-
-        let tx_hash = format!("token-{}", Uuid::new_v4());
+        let sdk = self.sdk_service()?;
+        let envelope = sdk
+            .build_asset_issue_tx(&issuer_secret, "ARENAX", to_public_key, amount)
+            .await
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+        let (tx_hash, _) = sdk
+            .submit_and_confirm(&envelope, &issuer_secret)
+            .await
+            .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
         log_stellar_event(
             StellarEventStatus::Submit,
@@ -482,17 +526,26 @@ impl StellarService {
         );
 
         // Record transaction
-        self.record_transaction(
+        let recorded = self.record_transaction(
             &tx_hash,
             &from_account.public_key,
             to_public_key,
             amount,
             "ARENAX",
-            Some("ISSUER_PUBLIC_KEY"), // Replace with actual issuer
+            Some(&issuer_public),
             "payment",
             Some("ArenaX token transfer".to_string()),
             Some(from_user_id),
         )
+        .await?;
+        sqlx::query(
+            r#"UPDATE stellar_transactions
+               SET status = 'confirmed', completed_at = $1
+               WHERE id = $2"#,
+        )
+        .bind(Utc::now())
+        .bind(recorded.id)
+        .execute(&*self.db_pool)
         .await?;
 
         log_stellar_event(
@@ -554,34 +607,32 @@ impl StellarService {
         Ok(transaction)
     }
 
-    /// Verify a Stellar transaction on the network
+    /// Verify a Stellar transaction on Horizon and update its database record.
     pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, StellarError> {
-        // TODO: Implement actual verification by querying Horizon
-        // let client = reqwest::Client::new();
-        // let response = client
-        //     .get(&format!("{}/transactions/{}", self.horizon_url, tx_hash))
-        //     .send()
-        //     .await
-        //     .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+        if tx_hash.is_empty() {
+            return Ok(false);
+        }
 
-        // if response.status().is_success() {
-        //     // Update transaction status in database
-        //     sqlx::query!(
-        //         r#"
-        //         UPDATE stellar_transactions
-        //         SET status = 'completed', completed_at = $1
-        //         WHERE transaction_hash = $2
-        //         "#,
-        //         Utc::now(),
-        //         tx_hash
-        //     )
-        //     .execute(&*self.db_pool)
-        //     .await?;
-        //     return Ok(true);
-        // }
+        let response = reqwest::Client::new()
+            .get(format!("{}/transactions/{}", self.horizon_url.trim_end_matches('/'), tx_hash))
+            .send()
+            .await
+            .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+        let verified = response.status().is_success();
 
-        tracing::warn!("Transaction verification not implemented, returning true");
-        Ok(true)
+        if verified {
+            sqlx::query(
+                r#"UPDATE stellar_transactions
+                   SET status = 'confirmed', completed_at = $1
+                   WHERE transaction_hash = $2"#,
+            )
+            .bind(Utc::now())
+            .bind(tx_hash)
+            .execute(&*self.db_pool)
+            .await?;
+        }
+
+        Ok(verified)
     }
 
     /// Get transaction by hash
@@ -622,18 +673,31 @@ impl StellarService {
         Ok((public_key, secret_key))
     }
 
-    /// Encrypt a secret key for storage
-    fn encrypt_secret_key(&self, secret_key: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual encryption using app secret
-        // For now, just base64 encode (NOT SECURE - implement proper encryption)
-        use base64::{engine::general_purpose, Engine as _};
-        Ok(general_purpose::STANDARD.encode(secret_key))
+    fn sdk_service(&self) -> Result<StellarSdkService, StellarError> {
+        if self.horizon_url.contains("testnet") {
+            StellarSdkService::testnet(&self.horizon_url)
+        } else {
+            StellarSdkService::public(&self.horizon_url)
+        }
+        .map_err(|e| StellarError::StellarSdkError(e.to_string()))
     }
 
-    /// Decrypt a secret key from storage
+    /// Encrypt a secret key with the application-wide AES-256-GCM protector.
+    fn encrypt_secret_key(&self, secret_key: &str) -> Result<String, StellarError> {
+        PiiDataProtector::from_env_or_default()
+            .encrypt_str(secret_key, "stellar.secret_key", None)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
+    }
+
+    /// Decrypt an encrypted secret key from storage.
     fn decrypt_secret_key(&self, encrypted: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual decryption
-        // For now, just base64 decode (NOT SECURE - implement proper decryption)
+        if encrypted.starts_with("enc:") {
+            return PiiDataProtector::from_env_or_default()
+                .decrypt_str(encrypted, "stellar.secret_key", None)
+                .map_err(|_| StellarError::InvalidPublicKey);
+        }
+
+        // Backward compatibility for secrets created before AES-GCM encryption.
         use base64::{engine::general_purpose, Engine as _};
         general_purpose::STANDARD
             .decode(encrypted)

@@ -438,6 +438,12 @@ impl MatchAuthorityService {
         )
         .await?;
 
+        // Step 5: Distribute a configured match prize. This is deliberately
+        // non-blocking for the match state: payout failures remain auditable and
+        // can be retried without reopening or duplicating match completion.
+        self.trigger_match_prize_payout(match_id, &match_entity, &dto.winner, signer_secret)
+            .await;
+
         info!(match_id = %match_id, "Match completed successfully");
 
         self.emit_match_state(
@@ -895,6 +901,151 @@ impl MatchAuthorityService {
             )
             .await
             .map_err(|e| format!("Soroban start_match failed: {}", e))
+    }
+
+    /// Trigger the configured prize payout after match verification.
+    /// Match metadata may contain `prize_pool_account`, `prize_amount`, and
+    /// optional `prize_asset` (defaults to XLM). Missing payout configuration
+    /// keeps casual matches free of unintended transfers.
+    async fn trigger_match_prize_payout(
+        &self,
+        match_id: Uuid,
+        match_entity: &MatchAuthorityEntity,
+        winner: &str,
+        signer_secret: &str,
+    ) {
+        let prize_amount = match match_entity.metadata.get("prize_amount").and_then(|v| v.as_i64()) {
+            Some(amount) if amount > 0 => amount,
+            _ => return,
+        };
+        let prize_pool_account = match match_entity.metadata.get("prize_pool_account").and_then(|v| v.as_str()) {
+            Some(account) if !account.is_empty() => account.to_string(),
+            _ => return,
+        };
+        let prize_asset = match_entity
+            .metadata
+            .get("prize_asset")
+            .and_then(|v| v.as_str())
+            .unwrap_or("XLM")
+            .to_string();
+
+        // Idempotency: a confirmed payout is never submitted twice.
+        if let Ok(Some(_)) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tx_hash FROM match_chain_sync
+            WHERE match_id = $1 AND operation_type = 'distribute_match_prize'
+              AND tx_status = 'confirmed'
+            LIMIT 1
+            "#,
+        )
+        .bind(match_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        {
+            info!(%match_id, "Match prize already distributed; skipping duplicate payout");
+            return;
+        }
+
+        let prize_contract = match_entity
+            .metadata
+            .get("prize_contract_id")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let Some(prize_contract) = prize_contract else {
+            warn!(
+                %match_id,
+                "Match prize configured but prize_contract_id is missing; payout was not submitted"
+            );
+            return;
+        };
+        let args = serde_json::json!({
+            "tournament_id": match_entity.id.to_string(),
+            "prize_pool_account": prize_pool_account,
+            "recipient": winner,
+            "winner": winner,
+            "amount": prize_amount,
+            "currency": prize_asset,
+            "asset": prize_asset,
+        });
+
+        match self
+            .soroban_service
+            .invoke(
+                &prize_contract,
+                "distribute",
+                &args,
+                signer_secret,
+            )
+            .await
+        {
+            Ok(result) if result.status == crate::service::soroban_service::TxStatus::Success => {
+                info!(
+                    %match_id,
+                    winner,
+                    tx_hash = %result.hash,
+                    amount = prize_amount,
+                    asset = %prize_asset,
+                    "Match prize distributed and transaction confirmed"
+                );
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &result.hash,
+                        "confirmed",
+                        None,
+                    )
+                    .await;
+
+                let mut metadata = match_entity.metadata.clone();
+                metadata["prize_tx_hash"] = serde_json::Value::String(result.hash);
+                metadata["prize_asset"] = serde_json::Value::String(prize_asset);
+                metadata["prize_amount"] = serde_json::json!(prize_amount);
+                if let Err(error) = sqlx::query(
+                    "UPDATE match_authority SET metadata = $1 WHERE id = $2",
+                )
+                .bind(metadata)
+                .bind(match_id)
+                .execute(&self.db_pool)
+                .await
+                {
+                    error!(%match_id, %error, "Prize payout confirmed but metadata update failed");
+                }
+            }
+            Ok(result) => {
+                let reason = result.error.unwrap_or_else(|| {
+                    format!("transaction status {:?}", result.status)
+                });
+                error!(%match_id, winner, tx_hash = %result.hash, %reason, "Match prize payout failed");
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &result.hash,
+                        "failed",
+                        Some(&reason),
+                    )
+                    .await;
+            }
+            Err(error) => {
+                error!(%match_id, winner, %error, "Failed to submit match prize payout");
+                let failure_ref = format!(
+                    "payout-failed-{}-{}",
+                    match_id,
+                    Utc::now().timestamp_millis()
+                );
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &failure_ref,
+                        "failed",
+                        Some(&error.to_string()),
+                    )
+                    .await;
+            }
+        }
     }
 
     /// Complete match on Soroban
