@@ -8,6 +8,7 @@ import { EloChart } from "@/components/profile/EloChart";
 import { MatchHistory } from "@/components/profile/MatchHistory";
 import { ProfileBio } from "@/components/profile/ProfileBio";
 import { ReputationBadge } from "@/components/profile/ReputationBadge";
+import { ReputationBalance } from "@/components/profile/ReputationBalance";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Button } from "@/components/ui/Button";
 import { useAuth, AUTH_PROFILE_QUERY_KEY } from "@/hooks/useAuth";
@@ -297,6 +298,7 @@ export default function ProfilePage() {
 
           {/* Right Column - Match History */}
           <div className="space-y-8">
+            <ReputationBalance userId={user.id} publicKey={user.stellarPublicKey} />
             {matchesLoading ? (
               <div className="h-64 bg-muted animate-pulse rounded-xl" />
             ) : (

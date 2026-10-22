@@ -40,6 +40,7 @@ export type DatabaseTransactionClient = Pick<
     | 'featureFlag'
     | 'featureFlagAuditLog'
     | 'apiKey'
+    | 'notificationPreference'
 >;
 
 export interface DatabaseClient extends DatabaseTransactionClient {

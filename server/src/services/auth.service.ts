@@ -15,6 +15,7 @@ import {
     resolveTwitchProfileFromAuthorizationCode,
     validateTwitchToken
 } from './twitch-oauth.service';
+import { notificationService } from './notification.service';
 
 const BCRYPT_ROUNDS = 12;
 const MAX_USERNAME_LENGTH = 24;
@@ -124,12 +125,14 @@ const createAccessToken = (user: {
     email: string;
     username: string;
     role: string;
+    isVerified?: boolean;
 }): string =>
     jwt.sign(
         {
             email: user.email,
             username: user.username,
-            role: user.role
+            role: user.role,
+            isVerified: user.isVerified ?? false
         },
         authConfig.signingKey,
         {
@@ -137,6 +140,21 @@ const createAccessToken = (user: {
             expiresIn:
                 authConfig.accessTokenTtl as jwt.SignOptions['expiresIn'],
             subject: user.id
+        }
+    );
+
+export const createVerificationToken = (userId: string, email: string): string =>
+    jwt.sign(
+        {
+            email,
+            type: 'email_verification'
+        },
+        authConfig.signingKey,
+        {
+            algorithm: authConfig.jwtAlgorithm,
+            expiresIn: '24h',
+            subject: userId,
+            jwtid: crypto.randomUUID()
         }
     );
 
@@ -206,6 +224,7 @@ interface UserForSession {
     socials: unknown;
     createdAt: Date;
     updatedAt: Date;
+    isVerified?: boolean;
 }
 
 const issueSessionTokens = async (
@@ -278,8 +297,8 @@ export const registerUser = async (input: RegisterInput) => {
                 return user;
             });
 
-            // Generate and send verification email
-            const verificationToken = crypto.randomBytes(32).toString('hex');
+            // Generate and send signed verification email (24-hour expiration)
+            const verificationToken = createVerificationToken(createdUser.id, normalizedEmail);
             const verificationTokenHash = toTokenHash(verificationToken);
             const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
@@ -300,6 +319,15 @@ export const registerUser = async (input: RegisterInput) => {
                     error: emailError
                 });
                 // Don't fail registration if email fails
+            }
+
+            try {
+                await notificationService.createDefaultPreferences(createdUser.id);
+            } catch (prefError) {
+                logger.warn('Failed to initialize default notification preferences', {
+                    userId: createdUser.id,
+                    error: prefError,
+                });
             }
 
             const tokens = await issueSessionTokens(createdUser);
@@ -350,6 +378,17 @@ export const loginUser = async (input: LoginInput) => {
     if (!isPasswordValid) {
         logger.warn('Failed login attempt', { email: normalizedEmail });
         throw new HttpError(401, 'Invalid credentials');
+    }
+
+    const twoFactor = getTwoFactorData(user.id);
+    if (twoFactor && twoFactor.enabled) {
+        const tempToken = createTemp2FAToken(user.id);
+        logger.info('User login requires 2FA second step', { userId: user.id });
+        return {
+            requires2FA: true,
+            tempToken,
+            message: 'Two-factor authentication code required'
+        };
     }
 
     const tokens = await issueSessionTokens(user);
@@ -558,6 +597,9 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
                         await stellarWalletService.registerUserWallet(newUser.id, tx);
                         return newUser;
                     });
+                    try {
+                        await notificationService.createDefaultPreferences(user.id);
+                    } catch {}
                     break;
                 } catch (error) {
                     if (isUniqueConstraintError(error, 'email')) {
@@ -658,26 +700,54 @@ export interface VerifyEmailInput {
 
 export const verifyEmail = async (input: VerifyEmailInput) => {
     const prisma = getDatabaseClient();
+
+    // Verify signed JWT if token is formatted as a JWT
+    let jwtPayload: { sub?: string; email?: string; type?: string } | null = null;
+    try {
+        const decoded = jwt.verify(input.token, authConfig.verificationKey, {
+            algorithms: [authConfig.jwtAlgorithm]
+        }) as { sub?: string; email?: string; type?: string };
+        if (decoded && decoded.type === 'email_verification') {
+            jwtPayload = decoded;
+        }
+    } catch (err) {
+        if (err instanceof jwt.TokenExpiredError) {
+            throw new HttpError(400, 'Verification token has expired');
+        }
+    }
+
     const tokenHash = toTokenHash(input.token);
-    
+
     const user = await prisma.user.findFirst({
         where: {
-            verificationToken: tokenHash
+            OR: [
+                { verificationToken: tokenHash },
+                { verificationToken: input.token },
+                ...(jwtPayload?.sub ? [{ id: jwtPayload.sub }] : [])
+            ]
         }
     });
-    
+
     if (!user) {
         throw new HttpError(400, 'Invalid verification token');
     }
-    
-    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
-        throw new HttpError(400, 'Verification token has expired');
-    }
-    
+
     if (user.isVerified) {
         throw new HttpError(400, 'Email already verified');
     }
-    
+
+    if (
+        user.verificationToken &&
+        user.verificationToken !== tokenHash &&
+        user.verificationToken !== input.token
+    ) {
+        throw new HttpError(400, 'Invalid verification token');
+    }
+
+    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Verification token has expired');
+    }
+
     await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -686,7 +756,7 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
             verificationTokenExpires: null
         }
     });
-    
+
     try {
         await emailService.sendWelcomeEmail(user.email, user.username);
     } catch (emailError) {
@@ -699,8 +769,8 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
     }
 
     logger.info('Email verified', { userId: user.id });
-    
-    return { message: 'Email verified successfully' };
+
+    return { message: 'Email verified successfully', isVerified: true };
 };
 
 export interface ResendVerificationEmailInput {
@@ -710,25 +780,25 @@ export interface ResendVerificationEmailInput {
 export const resendVerificationEmail = async (input: ResendVerificationEmailInput) => {
     const prisma = getDatabaseClient();
     const normalizedEmail = normalizeEmail(input.email);
-    
+
     const user = await prisma.user.findUnique({
         where: { email: normalizedEmail }
     });
-    
+
     // Always return success to prevent email enumeration
     if (!user) {
         return { message: 'If the email exists, a verification link has been sent' };
     }
-    
+
     if (user.isVerified) {
         return { message: 'Email already verified' };
     }
-    
-    // Generate new verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex');
+
+    // Generate new signed verification token (24-hour expiration)
+    const verificationToken = createVerificationToken(user.id, normalizedEmail);
     const verificationTokenHash = toTokenHash(verificationToken);
     const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    
+
     await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -736,15 +806,18 @@ export const resendVerificationEmail = async (input: ResendVerificationEmailInpu
             verificationTokenExpires
         }
     });
-    
+
     // Send verification email
     try {
         await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
     } catch (emailError) {
-        console.error('Failed to send verification email:', emailError);
-        // Don't fail if email fails
+        logger.warn('Failed to send verification email:', {
+            userId: user.id,
+            email: normalizedEmail,
+            error: emailError
+        });
     }
-    
+
     return { message: 'If the email exists, a verification link has been sent' };
 };
 
@@ -830,4 +903,261 @@ export const resetPassword = async (input: ResetPasswordInput) => {
     });
     
     return { message: 'Password reset successfully' };
+};
+
+// ─── Two-Factor Authentication (TOTP) Flow (#1431) ──────────────────────────
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+export const base32Encode = (buffer: Buffer): string => {
+    let bits = 0;
+    let value = 0;
+    let output = '';
+
+    for (let i = 0; i < buffer.length; i++) {
+        value = (value << 8) | buffer[i];
+        bits += 8;
+
+        while (bits >= 5) {
+            output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+            bits -= 5;
+        }
+    }
+
+    if (bits > 0) {
+        output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+    }
+
+    return output;
+};
+
+export const base32Decode = (input: string): Buffer => {
+    const cleaned = input.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
+    let bits = 0;
+    let value = 0;
+    const output: number[] = [];
+
+    for (let i = 0; i < cleaned.length; i++) {
+        const index = BASE32_ALPHABET.indexOf(cleaned[i]);
+        if (index === -1) {
+            continue;
+        }
+        value = (value << 5) | index;
+        bits += 5;
+
+        if (bits >= 8) {
+            output.push((value >>> (bits - 8)) & 255);
+            bits -= 8;
+        }
+    }
+
+    return Buffer.from(output);
+};
+
+export const generateTotpSecret = (): string => {
+    return base32Encode(crypto.randomBytes(20));
+};
+
+export const generateTotpUri = (
+    secret: string,
+    accountName: string,
+    issuer: string = 'ArenaX'
+): string => {
+    const encodedIssuer = encodeURIComponent(issuer);
+    const encodedAccount = encodeURIComponent(accountName);
+    return `otpauth://totp/${encodedIssuer}:${encodedAccount}?secret=${secret}&issuer=${encodedIssuer}&algorithm=SHA1&digits=6&period=30`;
+};
+
+export const computeTotpCode = (secret: string, counter: number): string => {
+    const key = base32Decode(secret);
+    const counterBuf = Buffer.alloc(8);
+    counterBuf.writeBigInt64BE(BigInt(counter));
+
+    const hmac = crypto.createHmac('sha1', key).update(counterBuf).digest();
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const codeNum =
+        ((hmac[offset] & 0x7f) << 24) |
+        ((hmac[offset + 1] & 0xff) << 16) |
+        ((hmac[offset + 2] & 0xff) << 8) |
+        (hmac[offset + 3] & 0xff);
+
+    return (codeNum % 1000000).toString().padStart(6, '0');
+};
+
+export const verifyTotpCode = (secret: string, code: string, window: number = 1): boolean => {
+    if (!code || code.length !== 6) {
+        return false;
+    }
+    const currentCounter = Math.floor(Date.now() / 1000 / 30);
+    for (let step = -window; step <= window; step++) {
+        if (computeTotpCode(secret, currentCounter + step) === code) {
+            return true;
+        }
+    }
+    return false;
+};
+
+export const generateBackupCodes = (count: number = 8): string[] => {
+    const codes: string[] = [];
+    for (let i = 0; i < count; i++) {
+        codes.push(crypto.randomBytes(5).toString('hex').toUpperCase());
+    }
+    return codes;
+};
+
+export interface TwoFactorData {
+    enabled: boolean;
+    secret?: string;
+    pendingSecret?: string;
+    backupCodes: string[];
+}
+
+const twoFactorStore = new Map<string, TwoFactorData>();
+
+export const getTwoFactorData = (userId: string): TwoFactorData | undefined => {
+    return twoFactorStore.get(userId);
+};
+
+export const getOrCreateTwoFactorData = (userId: string): TwoFactorData => {
+    let data = twoFactorStore.get(userId);
+    if (!data) {
+        data = {
+            enabled: false,
+            backupCodes: []
+        };
+        twoFactorStore.set(userId, data);
+    }
+    return data;
+};
+
+// In-memory store for pending 2FA login challenge tokens (expires in 5 minutes)
+const temp2FATokenStore = new Map<string, { userId: string; expiresAt: number }>();
+
+export const createTemp2FAToken = (userId: string): string => {
+    const token = crypto.randomBytes(32).toString('hex');
+    temp2FATokenStore.set(token, {
+        userId,
+        expiresAt: Date.now() + 5 * 60 * 1000
+    });
+    return token;
+};
+
+export const verifyTemp2FAToken = (token: string): string | null => {
+    const entry = temp2FATokenStore.get(token);
+    if (!entry) {
+        return null;
+    }
+    if (Date.now() > entry.expiresAt) {
+        temp2FATokenStore.delete(token);
+        return null;
+    }
+    return entry.userId;
+};
+
+export const consumeTemp2FAToken = (token: string): void => {
+    temp2FATokenStore.delete(token);
+};
+
+export const enroll2FA = async (userId: string) => {
+    const prisma = getDatabaseClient();
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        throw new HttpError(404, 'User not found');
+    }
+
+    const secret = generateTotpSecret();
+    const uri = generateTotpUri(secret, user.email, 'ArenaX');
+
+    const twoFactor = getOrCreateTwoFactorData(userId);
+    twoFactor.pendingSecret = secret;
+
+    return {
+        secret,
+        uri,
+        qrCodeUrl: uri
+    };
+};
+
+export const verifyAndEnable2FA = async (userId: string, code: string) => {
+    const twoFactor = getTwoFactorData(userId);
+    if (!twoFactor || !twoFactor.pendingSecret) {
+        throw new HttpError(400, 'No pending 2FA enrollment found. Please enroll first.');
+    }
+
+    const isValid = verifyTotpCode(twoFactor.pendingSecret, code.trim());
+    if (!isValid) {
+        throw new HttpError(400, 'Invalid 6-digit TOTP code');
+    }
+
+    twoFactor.enabled = true;
+    twoFactor.secret = twoFactor.pendingSecret;
+    twoFactor.pendingSecret = undefined;
+    const backupCodes = generateBackupCodes(8);
+    twoFactor.backupCodes = [...backupCodes];
+
+    logger.info('2FA enabled for user', { userId });
+
+    return {
+        enabled: true,
+        backupCodes,
+        message: 'Two-factor authentication enabled successfully'
+    };
+};
+
+export interface Login2FAInput {
+    tempToken: string;
+    code: string;
+}
+
+export const login2FA = async (input: Login2FAInput) => {
+    const userId = verifyTemp2FAToken(input.tempToken);
+    if (!userId) {
+        throw new HttpError(401, 'Invalid or expired temporary 2FA token');
+    }
+
+    const prisma = getDatabaseClient();
+    const user = await prisma.user.findUnique({
+        where: { id: userId }
+    });
+    if (!user) {
+        throw new HttpError(404, 'User not found');
+    }
+
+    const twoFactor = getTwoFactorData(userId);
+    if (!twoFactor || !twoFactor.enabled || !twoFactor.secret) {
+        throw new HttpError(400, '2FA is not enabled for this account');
+    }
+
+    const cleanedCode = input.code.trim();
+    const isTotpValid = verifyTotpCode(twoFactor.secret, cleanedCode);
+
+    if (!isTotpValid) {
+        // Check backup codes
+        const codeUpper = cleanedCode.toUpperCase();
+        const backupIndex = twoFactor.backupCodes.findIndex(
+            (bc) => bc.toUpperCase() === codeUpper
+        );
+        if (backupIndex !== -1) {
+            // Backup code used once each (#1431)
+            twoFactor.backupCodes.splice(backupIndex, 1);
+            logger.info('Backup code used for 2FA login', { userId });
+        } else {
+            throw new HttpError(400, 'Invalid 2FA code or backup code');
+        }
+    }
+
+    consumeTemp2FAToken(input.tempToken);
+
+    const tokens = await issueSessionTokens(user);
+    logger.info('User logged in with 2FA', { userId: user.id, username: user.username });
+
+    return {
+        user: mapUserToSafeUser(user),
+        tokens: {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenTtl: authConfig.accessTokenTtl,
+            refreshTokenTtl: authConfig.refreshTokenTtl
+        }
+    };
 };

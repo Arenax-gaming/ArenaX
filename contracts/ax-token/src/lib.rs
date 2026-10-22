@@ -9,6 +9,20 @@ use soroban_sdk::{
     Symbol, Vec,
 };
 
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum TokenError {
+    /// Caller is not in the authorized-minters registry.
+    Unauthorized = 1,
+    /// Mint would exceed the minter's cap for the current period.
+    MinterCapExceeded = 2,
+    /// `remove_minter` was called for an address that is not a minter.
+    MinterNotFound = 3,
+    /// Minter cap must not be negative.
+    InvalidMinterConfig = 4,
+}
+
 /// Minimal client for the staking-manager contract, used for composite
 /// voting power (AX checkpoints + stake weight + escrow).
 mod staking_client {
@@ -123,6 +137,20 @@ pub struct ScheduledUpgrade {
     pub executable_at: u64,
 }
 
+/// Authorized minter entry with an optional per-period mint cap.
+///
+/// `cap == 0` means the minter is uncapped. When `period == 0` the cap is a
+/// lifetime cap; otherwise the minted counter resets once `period` seconds
+/// have elapsed since `period_start`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinterConfig {
+    pub cap: i128,
+    pub period: u64,
+    pub period_start: u64,
+    pub minted_in_period: i128,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -164,36 +192,10 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
-    // Configurable fee split (#1415)
-    /// Organizer share of processed fees, in basis points (0..=10_000).
-    FeeSplitBps,
-    /// Platform treasury that receives the remainder of each fee.
-    FeeTreasury,
-    /// Fee split value a governance proposal was created for.
-    FeeSplitProposal(u64),
-}
-
-/// Maximum value of `fee_split_bps` (100%).
-pub const MAX_FEE_SPLIT_BPS: u32 = 10_000;
-
-/// Outcome of `process_fee` (#1415).
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FeeSplitResult {
-    pub organizer: Address,
-    pub organizer_amount: i128,
-    pub platform_amount: i128,
-    pub fee_split_bps: u32,
-}
-
-/// Split `amount` into (organizer, platform) shares. The organizer share is
-/// rounded down; the platform keeps the remainder, so no dust is lost.
-pub fn split_fee(amount: i128, fee_split_bps: u32) -> (i128, i128) {
-    let organizer = amount
-        .checked_mul(fee_split_bps as i128)
-        .expect("fee overflow")
-        / MAX_FEE_SPLIT_BPS as i128;
-    (organizer, amount - organizer)
+    // Authorized minters registry (#1418): `Minter` entries live in
+    // persistent storage; `MinterList` is a small instance-level index.
+    Minter(Address),
+    MinterList,
 }
 
 #[contract]
@@ -218,11 +220,179 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::ProposalCounter, &0u64);
+
+        // Bootstrap: the initial admin is the first (uncapped) authorized
+        // minter so the token can be seeded. It holds no implicit minting
+        // right beyond this entry and can be capped or removed like any other
+        // minter.
+        Self::write_minter(
+            env,
+            &admin,
+            &MinterConfig {
+                cap: 0,
+                period: 0,
+                period_start: env.ledger().timestamp(),
+                minted_in_period: 0,
+            },
+        );
     }
 
-    pub fn mint(env: &Env, to: Address, amount: i128) {
+    /// Mint `amount` to `to` on behalf of an authorized `minter`.
+    ///
+    /// `minter` must sign the call and be present in the authorized-minters
+    /// registry; any other address is rejected with
+    /// [`TokenError::Unauthorized`] before any state is touched. A capped
+    /// minter is rejected with [`TokenError::MinterCapExceeded`] when the mint
+    /// would push it past its cap for the current period. The global supply
+    /// cap still applies on top of the per-minter cap.
+    pub fn mint(env: &Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
+        minter.require_auth();
+
+        let config = Self::read_minter(env, &minter)
+            .ok_or(TokenError::Unauthorized)?;
+
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let config = Self::charge_minter(env, config, amount)?;
+        Self::write_minter(env, &minter, &config);
+
+        Self::mint_internal(env, to, amount);
+        Ok(())
+    }
+
+    /// Register (or reconfigure) an authorized minter. Admin only.
+    ///
+    /// `cap` is the maximum amount the minter may mint per `period` seconds;
+    /// pass `cap = 0` for an uncapped minter and `period = 0` to make the cap
+    /// a lifetime cap. Reconfiguring an existing minter resets its window.
+    pub fn add_minter(
+        env: &Env,
+        minter: Address,
+        cap: i128,
+        period: u64,
+    ) -> Result<(), TokenError> {
         Self::require_admin(env);
 
+        if cap < 0 {
+            return Err(TokenError::InvalidMinterConfig);
+        }
+
+        let config = MinterConfig {
+            cap,
+            period,
+            period_start: env.ledger().timestamp(),
+            minted_in_period: 0,
+        };
+        Self::write_minter(env, &minter, &config);
+
+        env.events()
+            .publish((Symbol::new(env, "minter_added"), minter), (cap, period));
+        Ok(())
+    }
+
+    /// Remove an authorized minter. Admin only.
+    pub fn remove_minter(env: &Env, minter: Address) -> Result<(), TokenError> {
+        Self::require_admin(env);
+
+        if !Self::is_minter(env, minter.clone()) {
+            return Err(TokenError::MinterNotFound);
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Minter(minter.clone()));
+
+        let mut list = Self::get_minters(env);
+        if let Some(idx) = list.first_index_of(&minter) {
+            list.remove(idx);
+            env.storage().instance().set(&DataKey::MinterList, &list);
+        }
+
+        env.events()
+            .publish((Symbol::new(env, "minter_removed"), minter), ());
+        Ok(())
+    }
+
+    pub fn is_minter(env: &Env, minter: Address) -> bool {
+        env.storage().persistent().has(&DataKey::Minter(minter))
+    }
+
+    pub fn get_minter(env: &Env, minter: Address) -> Option<MinterConfig> {
+        Self::read_minter(env, &minter)
+    }
+
+    pub fn get_minters(env: &Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinterList)
+            .unwrap_or(Vec::new(env))
+    }
+
+    /// Amount `minter` may still mint in its current period, or `None` when
+    /// it is uncapped. Returns `Some(0)` for an address that is not a minter.
+    pub fn get_remaining_mint_allowance(env: &Env, minter: Address) -> Option<i128> {
+        let config = match Self::read_minter(env, &minter) {
+            Some(config) => config,
+            None => return Some(0),
+        };
+        if config.cap == 0 {
+            return None;
+        }
+        let config = Self::roll_minter_period(env, config);
+        Some(config.cap - config.minted_in_period)
+    }
+
+    fn read_minter(env: &Env, minter: &Address) -> Option<MinterConfig> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Minter(minter.clone()))
+    }
+
+    fn write_minter(env: &Env, minter: &Address, config: &MinterConfig) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Minter(minter.clone()), config);
+
+        let mut list = Self::get_minters(env);
+        if !list.contains(minter) {
+            list.push_back(minter.clone());
+            env.storage().instance().set(&DataKey::MinterList, &list);
+        }
+    }
+
+    /// Start a fresh window once the current period has fully elapsed.
+    fn roll_minter_period(env: &Env, mut config: MinterConfig) -> MinterConfig {
+        let now = env.ledger().timestamp();
+        if config.period > 0 && now >= config.period_start.saturating_add(config.period) {
+            config.period_start = now;
+            config.minted_in_period = 0;
+        }
+        config
+    }
+
+    /// Charge `amount` against the minter's allowance for the current period.
+    /// Pure: callers persist the returned config only once every check has
+    /// passed, so a rejected mint leaves the minter's counter untouched.
+    fn charge_minter(
+        env: &Env,
+        config: MinterConfig,
+        amount: i128,
+    ) -> Result<MinterConfig, TokenError> {
+        let mut config = Self::roll_minter_period(env, config);
+        let minted = config
+            .minted_in_period
+            .checked_add(amount)
+            .ok_or(TokenError::MinterCapExceeded)?;
+        if config.cap > 0 && minted > config.cap {
+            return Err(TokenError::MinterCapExceeded);
+        }
+        config.minted_in_period = minted;
+        Ok(config)
+    }
+
+    fn mint_internal(env: &Env, to: Address, amount: i128) {
         if amount <= 0 {
             panic!("amount must be positive");
         }
@@ -268,8 +438,19 @@ impl AxToken {
     /// written once for the whole batch rather than once per entry. One
     /// mint event is still emitted per input entry, matching what calling
     /// `mint` that many times would have emitted.
-    pub fn batch_mint(env: &Env, recipients: Vec<Address>, amounts: Vec<i128>) {
-        Self::require_admin(env);
+    ///
+    /// Gated exactly like `mint`: `minter` must be an authorized minter, and
+    /// the batch total is charged against its per-period cap as one mint.
+    pub fn batch_mint(
+        env: &Env,
+        minter: Address,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+    ) -> Result<(), TokenError> {
+        minter.require_auth();
+
+        let config = Self::read_minter(env, &minter)
+            .ok_or(TokenError::Unauthorized)?;
 
         if recipients.len() != amounts.len() {
             panic!("recipients and amounts length mismatch");
@@ -306,6 +487,9 @@ impl AxToken {
             panic!("supply cap exceeded");
         }
 
+        let config = Self::charge_minter(env, config, total)?;
+        Self::write_minter(env, &minter, &config);
+
         for (to, delta) in per_recipient_delta.iter() {
             let current_balance = Self::balance(env, to.clone());
             let new_balance = current_balance
@@ -325,6 +509,7 @@ impl AxToken {
             let amount = amounts.get(i).unwrap();
             events::emit_mint(env, &to, amount);
         }
+        Ok(())
     }
 
     pub fn burn(env: &Env, from: Address, amount: i128) {

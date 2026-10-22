@@ -6,6 +6,7 @@ export {
   FriendRequestBadge,
 } from "./FriendRequests";
 export { InviteFriends, QuickInviteButton } from "./InviteFriends";
+export { FriendRequestButton } from "./FriendRequestButton";
 export { ChatInterface } from "./ChatInterface";
 export { PartyManager, PartyInviteNotification } from "./PartyManager";
 export { PartyChat } from "./PartyChat";

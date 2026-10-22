@@ -180,12 +180,16 @@ mod tests {
         // Valid DTO
         let valid_dto = CompleteMatchDTO {
             winner: "G".to_string() + &"A".repeat(55),
+            score_a: 2,
+            score_b: 1,
         };
         assert!(valid_dto.validate().is_ok());
 
         // Invalid DTO
         let invalid_dto = CompleteMatchDTO {
             winner: "SHORT".to_string(),
+            score_a: 2,
+            score_b: 1,
         };
         assert!(invalid_dto.validate().is_err());
     }

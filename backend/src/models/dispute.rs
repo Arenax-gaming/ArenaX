@@ -178,6 +178,7 @@ pub struct DisputeEvidence {
     pub content_type: Option<String>,
     pub size_bytes: Option<i64>,
     pub description: Option<String>,
+    pub ipfs_cid: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -198,6 +199,7 @@ pub struct AddEvidenceRequest {
     pub content_type: Option<String>,
     pub size_bytes: Option<i64>,
     pub description: Option<String>,
+    pub ipfs_cid: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

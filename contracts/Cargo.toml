@@ -27,6 +27,9 @@ members = [
     "upgrade-manager",
     "upgrade-system",
     "testing-infrastructure",
+    "sponsored-tournament",
+    "tournament-hooks-noop",
+    "match-outcome",
 ]
 resolver = "2"
 
