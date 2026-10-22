@@ -388,15 +388,93 @@ class ApiClient {
 
   async joinTournament(
     id: string,
-    paymentMethod?: "fiat" | "arenax",
+    paymentMethod?: "fiat" | "arenax" | "xlm" | string,
+    idempotencyKey?: string,
   ): Promise<{ message: string; transactionHash?: string }> {
     return this.request<{ message: string; transactionHash?: string }>(
       `/tournaments/${id}/register`,
       {
         method: "POST",
-        ...(paymentMethod && { body: JSON.stringify({ paymentMethod }) }),
+        headers: {
+          ...(idempotencyKey && { "Idempotency-Key": idempotencyKey }),
+        },
+        body: JSON.stringify({
+          ...(paymentMethod && { paymentMethod, payment_method: paymentMethod }),
+          ...(idempotencyKey && { idempotencyKey }),
+        }),
       },
     );
+  }
+
+  // ── Wallet / Payments ────────────────────────────────────────────────────────
+
+  async initiateDeposit(
+    data: {
+      amount: number;
+      currency: string;
+      payment_method: string;
+      idempotencyKey?: string;
+    },
+  ): Promise<{
+    transaction_id: string;
+    reference: string;
+    status: string;
+    amount: number;
+    currency: string;
+    payment_method: string;
+    message: string;
+    authorization_url?: string;
+  }> {
+    return this.request("/wallet/deposit", {
+      method: "POST",
+      headers: {
+        ...(data.idempotencyKey && { "Idempotency-Key": data.idempotencyKey }),
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async verifyDeposit(
+    data: {
+      reference: string;
+      provider: string;
+    },
+  ): Promise<{
+    status: "completed" | "failed" | "pending";
+    verified: boolean;
+    transaction?: unknown;
+  }> {
+    return this.request("/wallet/deposit/verify", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async initiateWithdrawal(
+    data: {
+      amount: number;
+      currency: string;
+      payment_method: string;
+      destination: string;
+      idempotencyKey?: string;
+    },
+  ): Promise<{
+    transaction_id: string;
+    reference: string;
+    status: string;
+    amount: number;
+    currency: string;
+    destination: string;
+    payment_method: string;
+    message: string;
+  }> {
+    return this.request("/wallet/withdraw", {
+      method: "POST",
+      headers: {
+        ...(data.idempotencyKey && { "Idempotency-Key": data.idempotencyKey }),
+      },
+      body: JSON.stringify(data),
+    });
   }
 
   /** Saves the admin-arranged bracket seed order (#1092). */

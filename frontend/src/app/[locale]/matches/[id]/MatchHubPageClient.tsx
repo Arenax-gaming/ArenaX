@@ -65,6 +65,7 @@ function MatchHubPageContent() {
     Array<{ id: string; type: string; message: string; createdAt: string }>
   >([]);
   const [statusAnnouncement, setStatusAnnouncement] = useState("");
+  const [alertAnnouncement, setAlertAnnouncement] = useState("");
 
   useEffect(() => {
     if (match) {
@@ -290,6 +291,7 @@ function MatchHubPageContent() {
     });
 
     if (!success) {
+      setAlertAnnouncement("Conflict detected: Your submission conflicts with the opponent report. ArenaX flagged the series for review.");
       setLiveFeed((previous) => [
         {
           id: `conflict-${Date.now()}`,
@@ -303,6 +305,7 @@ function MatchHubPageContent() {
     }
 
     setSubmitted(true);
+    setAlertAnnouncement("Your score report has been submitted and is waiting for final confirmation.");
     setLiveFeed((previous) => [
       {
         id: `submit-${Date.now()}`,
@@ -316,9 +319,12 @@ function MatchHubPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8">
+    <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8 pb-28 sm:pb-12">
       <div aria-live="polite" aria-atomic="true" className="sr-only">
         {statusAnnouncement}
+      </div>
+      <div aria-live="assertive" aria-atomic="true" className="sr-only">
+        {alertAnnouncement}
       </div>
       <div className="mx-auto max-w-7xl">
         <div className="mb-6">
@@ -477,25 +483,31 @@ function MatchHubPageContent() {
 
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-foreground">
+                  <label htmlFor="player1-score-input" className="mb-2 block text-sm font-medium text-foreground">
                     {match.player1.username} Score
                   </label>
                   <Input
+                    id="player1-score-input"
                     type="number"
                     min="0"
                     value={player1Score}
                     onChange={(event) => setPlayer1Score(event.target.value)}
+                    aria-label={`${match.player1.username} Score`}
+                    className="min-h-[44px]"
                   />
                 </div>
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-foreground">
+                  <label htmlFor="player2-score-input" className="mb-2 block text-sm font-medium text-foreground">
                     {match.player2.username} Score
                   </label>
                   <Input
+                    id="player2-score-input"
                     type="number"
                     min="0"
                     value={player2Score}
                     onChange={(event) => setPlayer2Score(event.target.value)}
+                    aria-label={`${match.player2.username} Score`}
+                    className="min-h-[44px]"
                   />
                 </div>
               </div>
@@ -504,7 +516,7 @@ function MatchHubPageContent() {
                 <Button
                   onClick={handleSubmitScore}
                   disabled={submissionLocked || isReporting || submitted}
-                  className="w-full"
+                  className="w-full min-h-[44px]"
                 >
                   {submitted ? (
                     <>
@@ -520,7 +532,7 @@ function MatchHubPageContent() {
                     "Submit Verified Score"
                   )}
                 </Button>
-                <Button variant="outline" className="w-full">
+                <Button variant="outline" className="w-full min-h-[44px]">
                   Open Dispute Evidence Flow
                 </Button>
               </div>
@@ -636,41 +648,41 @@ function CompetitorCard({
 }) {
   return (
     <div
-      className={`rounded-[28px] border p-5 ${isWinner ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
+      className={`rounded-[28px] border p-4 sm:p-5 min-w-0 ${isWinner ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
         }`}
     >
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5">
-            <User className="h-6 w-6 text-foreground/80" />
+      <div className="flex items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-12 w-12 sm:h-14 sm:w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/5">
+            <User className="h-5 w-5 sm:h-6 sm:w-6 text-foreground/80" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="text-lg font-semibold">{player.username}</p>
+              <p className="text-base sm:text-lg font-semibold truncate">{player.username}</p>
               {isCurrentUser ? (
-                <span className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-[11px] text-cyan-100">
+                <span className="flex-shrink-0 rounded-full bg-cyan-400/10 px-2 py-0.5 text-[11px] text-cyan-100">
                   You
                 </span>
               ) : null}
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground truncate">
               Seed {player.seed} | {player.region} | ELO {player.elo}
             </p>
           </div>
         </div>
-        <p className="text-5xl font-semibold">{score}</p>
+        <p className="text-3xl sm:text-5xl font-semibold flex-shrink-0">{score}</p>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-3 gap-2">
         {player.stats.map((stat) => (
           <div
             key={`${player.id}-${stat.label}`}
-            className="rounded-2xl border border-white/10 bg-black/10 px-3 py-2"
+            className="rounded-2xl border border-white/10 bg-black/10 px-2 sm:px-3 py-2 text-center sm:text-left min-w-0"
           >
-            <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.15em] sm:tracking-[0.2em] text-muted-foreground truncate">
               {stat.label}
             </p>
-            <p className="mt-1 text-sm font-medium text-white">{stat.value}</p>
+            <p className="mt-1 text-xs sm:text-sm font-medium text-white truncate">{stat.value}</p>
           </div>
         ))}
       </div>
