@@ -1,6 +1,6 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
-use crate::models::{Match, MatchType, MatchStatus, QueueStatus, UserElo};
+use crate::models::{Match, MatchResult, MatchType, MatchStatus, QueueStatus, UserElo};
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -854,17 +854,17 @@ impl EloEngine {
             .map_err(|e| ApiError::database_error(e))?;
         }
 
-        self.create_elo_history(
-            db_pool,
-            match_record.player1_id,
-            &match_record.game_mode,
-            match_record.player1_elo_before,
-            new_elo1,
-            match_id,
-        )
-        .await?;
+        let mut player2_id = None;
 
         if let Some(p2_id) = match_record.player2_id {
+            let result = if winner_id == Some(p2_id) {
+                MatchResult::Win
+            } else if winner_id == Some(match_record.player1_id) {
+                MatchResult::Loss
+            } else {
+                MatchResult::Draw
+            };
+
             self.create_elo_history(
                 db_pool,
                 p2_id,
@@ -872,13 +872,41 @@ impl EloEngine {
                 match_record.player2_elo_before.unwrap_or(1200),
                 new_elo2,
                 match_id,
+                Some(match_record.player1_id),
+                match_record.player1_elo_before,
+                result,
             )
             .await?;
+            player2_id = Some(p2_id);
         }
+
+        let player1_result = match winner_id {
+            Some(winner) if winner == match_record.player1_id => MatchResult::Win,
+            Some(winner) if Some(winner) == player2_id => MatchResult::Loss,
+            _ => MatchResult::Draw,
+        };
+
+        self.create_elo_history(
+            db_pool,
+            match_record.player1_id,
+            &match_record.game_mode,
+            match_record.player1_elo_before.unwrap_or(1200),
+            new_elo1,
+            match_id,
+            player2_id,
+            match_record.player2_elo_before,
+            player1_result,
+        )
+        .await?;
 
         Ok(())
     }
 
+    /// Writes one immutable ELO snapshot. The canonical `elo_history` columns
+    /// are `rating_before` / `rating_after` / `rating_change`; the opponent and
+    /// result columns make each row self-contained for progression charts and
+    /// head-to-head queries (#1400).
+    #[allow(clippy::too_many_arguments)]
     async fn create_elo_history(
         &self,
         db_pool: &DbPool,
@@ -887,18 +915,30 @@ impl EloEngine {
         old_elo: i32,
         new_elo: i32,
         match_id: Uuid,
+        opponent_id: Option<Uuid>,
+        opponent_rating: Option<i32>,
+        result: MatchResult,
     ) -> Result<(), ApiError> {
-        sqlx::query!(
-            "INSERT INTO elo_history (user_id, game, old_rating, new_rating, change_amount, match_id, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            user_id,
-            game,
-            old_elo,
-            new_elo,
-            new_elo - old_elo,
-            match_id,
-            Utc::now()
+        sqlx::query(
+            r#"INSERT INTO elo_history (
+                   id, user_id, game, match_id, rating_before, rating_after,
+                   rating_change, opponent_id, opponent_rating, result, created_at
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())"#,
         )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(game)
+        .bind(match_id)
+        .bind(old_elo)
+        .bind(new_elo)
+        .bind(new_elo - old_elo)
+        .bind(opponent_id)
+        .bind(opponent_rating)
+        .bind(match result {
+            MatchResult::Win => 0_i32,
+            MatchResult::Loss => 1_i32,
+            MatchResult::Draw => 2_i32,
+        })
         .execute(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
