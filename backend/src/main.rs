@@ -122,14 +122,17 @@ async fn main() -> io::Result<()> {
         crate::middleware::ip_list::seed_from_env(&mut seed_conn).await;
     }
 
+    // Realtime event bus (created before the matchmaker so queue-status
+    // updates can be pushed to players' WebSockets — Issue #1216).
+    let event_bus = EventBus::new(redis_conn.clone());
+
     // Initialize matchmaking service — pass the shared ConnectionManager so
     // the service never opens a new connection per request.
     let matchmaking_config = MatchmakingConfig::default();
-    let matchmaker_service = Arc::new(MatchmakerService::new(
-        db_pool.clone(),
-        redis_conn.clone(),
-        matchmaking_config,
-    ));
+    let matchmaker_service = Arc::new(
+        MatchmakerService::new(db_pool.clone(), redis_conn.clone(), matchmaking_config)
+            .with_event_bus(event_bus.clone()),
+    );
 
     // Build idempotency middleware policy from config
     let idempotency_policy = IdempotencyPolicy {
@@ -236,7 +239,6 @@ async fn main() -> io::Result<()> {
     ));
 
     // Initialize real-time infrastructure
-    let event_bus = EventBus::new(redis_conn.clone());
     let chat_service = Arc::new(crate::service::chat::ChatService::redis(
         redis_conn.clone(),
         Some(event_bus.clone()),

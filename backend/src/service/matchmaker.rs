@@ -1,6 +1,8 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::{Match, MatchType, MatchStatus, QueueStatus, UserElo};
+use crate::realtime::event_bus::EventBus;
+use crate::realtime::events::RealtimeEvent;
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -79,11 +81,58 @@ pub struct MatchmakerService {
     /// instead of opening a new connection on every call.
     redis: RedisConn,
     config: MatchmakingConfig,
+    /// Optional realtime publisher for queue-status pushes (#1216).
+    event_bus: Option<EventBus>,
 }
 
 impl MatchmakerService {
     pub fn new(db_pool: DbPool, redis: RedisConn, config: MatchmakingConfig) -> Self {
-        Self { db_pool, redis, config }
+        Self {
+            db_pool,
+            redis,
+            config,
+            event_bus: None,
+        }
+    }
+
+    /// Attach the realtime event bus so queue-status updates reach the
+    /// player's WebSocket (#1216).
+    pub fn with_event_bus(mut self, event_bus: EventBus) -> Self {
+        self.event_bus = Some(event_bus);
+        self
+    }
+
+    /// Push a queue-status event to one player. Best-effort: a Redis outage
+    /// must never fail the matchmaking operation itself.
+    async fn publish_queue_status(
+        &self,
+        user_id: Uuid,
+        game: &str,
+        game_mode: &str,
+        status: &str,
+        position: Option<usize>,
+        queue_size: usize,
+        estimated_wait_time: Option<i32>,
+        wait_time_so_far: Option<i64>,
+        match_id: Option<Uuid>,
+    ) {
+        let Some(event_bus) = &self.event_bus else {
+            return;
+        };
+
+        let event = RealtimeEvent::QueueStatusUpdate {
+            game: game.to_string(),
+            game_mode: game_mode.to_string(),
+            status: status.to_string(),
+            position,
+            queue_size,
+            estimated_wait_time,
+            wait_time_so_far,
+            match_id,
+            timestamp: Utc::now().to_rfc3339(),
+        };
+
+        event_bus.publish_to_user(user_id, &event).await;
     }
 
     /// Return a clone of the shared Redis connection manager.
@@ -155,10 +204,28 @@ impl MatchmakerService {
         let matches_found = pair_queue_entries(queue_entries);
 
         for candidate in matches_found {
-            self.create_match_from_candidate(&candidate).await?;
+            let match_record = self.create_match_from_candidate(&candidate).await?;
             self.record_candidate_metrics(conn, &candidate).await?;
             self.remove_from_queue(conn, &candidate.player1.user_id, game, game_mode).await?;
             self.remove_from_queue(conn, &candidate.player2.user_id, game, game_mode).await?;
+
+            // Push the found match to both players' WebSocket sessions so the
+            // queue UI can leave "searching" without polling (#1216).
+            for entry in [&candidate.player1, &candidate.player2] {
+                let wait_seconds = (Utc::now() - entry.joined_at).num_seconds();
+                self.publish_queue_status(
+                    entry.user_id,
+                    game,
+                    game_mode,
+                    "matched",
+                    None,
+                    0,
+                    None,
+                    Some(wait_seconds),
+                    Some(match_record.id),
+                )
+                .await;
+            }
         }
 
         Ok(())

@@ -905,10 +905,48 @@ class ApiClient {
     return this.request<{ date: string; elo: number }[]>(
       `/matchmaking/elo/${encodeURIComponent(game)}${qs ? `?${qs}` : ""}`,
     );
+  }  // ── Matchmaking queue (#1216) ────────────────────────────────────────────────
+
+  /** POST /api/matchmaking/join */
+  async joinMatchmaking(
+    game: string,
+    gameMode: string,
+  ): Promise<{
+    success: boolean;
+    queue_position?: number | null;
+    estimated_wait_time?: number | null;
+    message: string;
+  }> {
+    return this.request("/matchmaking/join", {
+      method: "POST",
+      body: JSON.stringify({ game, game_mode: gameMode }),
+    });
+  }
+
+  /** POST /api/matchmaking/leave */
+  async leaveMatchmaking(game: string, gameMode: string): Promise<{ success: boolean; message: string }> {
+    return this.request("/matchmaking/leave", {
+      method: "POST",
+      body: JSON.stringify({ game, game_mode: gameMode }),
+    });
+  }
+
+  /** GET /api/matchmaking/status/:game/:game_mode */
+  async getMatchmakingStatus(
+    game: string,
+    gameMode: string,
+  ): Promise<{
+    in_queue: boolean;
+    queue_size: number;
+    estimated_wait_time?: number | null;
+    wait_time_so_far?: number | null;
+  }> {
+    return this.request(
+      `/matchmaking/status/${encodeURIComponent(game)}/${encodeURIComponent(gameMode)}`,
+    );
   }
 
   // ── Leaderboards ───────────────────────────────────────────────────────────────
-
   async getLeaderboard(
     category: string,
     limit = 100,

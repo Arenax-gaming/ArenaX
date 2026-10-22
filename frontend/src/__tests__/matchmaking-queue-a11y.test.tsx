@@ -1,5 +1,6 @@
 /**
- * MatchmakingQueue accessibility tests (issue #732)
+ * MatchmakingQueue accessibility tests (issue #732, updated for live queue
+ * state in #1216).
  *
  * Covers:
  * - Cancel button has type="button" and the accessible name "Cancel Matchmaking"
@@ -9,27 +10,54 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import MatchmakingQueue from '@/components/game/MatchmakingQueue';
+import {
+  useMatchmakingQueue,
+  type UseMatchmakingQueueReturn,
+} from '@/hooks/useMatchmakingQueue';
+
+jest.mock('@/hooks/useMatchmakingQueue', () => ({
+  useMatchmakingQueue: jest.fn(),
+}));
+
+const mockUseQueue = useMatchmakingQueue as jest.MockedFunction<
+  typeof useMatchmakingQueue
+>;
+
+const baseState: UseMatchmakingQueueReturn = {
+  position: 2,
+  queueSize: 4,
+  estimatedWaitTime: 30,
+  waitTime: 0,
+  isSearching: true,
+  isConnected: true,
+  isReconnecting: false,
+  connectionError: null,
+  matchId: null,
+  leaveQueue: jest.fn(),
+  reconnect: jest.fn(),
+};
+
+const renderQueue = (
+  overrides: Partial<UseMatchmakingQueueReturn> = {},
+  props: Partial<React.ComponentProps<typeof MatchmakingQueue>> = {},
+) => {
+  mockUseQueue.mockReturnValue({ ...baseState, ...overrides });
+  return render(
+    <MatchmakingQueue
+      gameMode="Ranked 1v1"
+      onCancel={jest.fn()}
+      onMatchFound={jest.fn()}
+      {...props}
+    />,
+  );
+};
 
 describe('MatchmakingQueue — accessibility', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => {
-    jest.clearAllTimers();
-    jest.useRealTimers();
-  });
-
-  const renderQueue = (overrides: Partial<React.ComponentProps<typeof MatchmakingQueue>> = {}) =>
-    render(
-      <MatchmakingQueue
-        gameMode="Ranked 1v1"
-        onCancel={jest.fn()}
-        onMatchFound={jest.fn()}
-        {...overrides}
-      />,
-    );
+  beforeEach(() => jest.clearAllMocks());
 
   it('renders the cancel button with type="button"', () => {
     renderQueue();
@@ -46,7 +74,7 @@ describe('MatchmakingQueue — accessibility', () => {
 
   it('calls onCancel when the cancel button is clicked', () => {
     const onCancel = jest.fn();
-    renderQueue({ onCancel });
+    renderQueue({}, { onCancel });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Matchmaking' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
@@ -68,8 +96,7 @@ describe('MatchmakingQueue — accessibility', () => {
   });
 
   it('updates aria-valuenow as wait time progresses', () => {
-    renderQueue();
-    act(() => jest.advanceTimersByTime(3000));
+    renderQueue({ waitTime: 3, estimatedWaitTime: 30 });
     const bar = screen.getByRole('progressbar', { name: 'Matchmaking progress' });
     expect(bar).toHaveAttribute('aria-valuenow', '10');
   });
@@ -83,16 +110,12 @@ describe('MatchmakingQueue — accessibility', () => {
   });
 
   it('announces "Match found" once a match is found', () => {
-    const onMatchFound = jest.fn();
-    renderQueue({ onMatchFound });
-    act(() => jest.advanceTimersByTime(30000));
-    expect(onMatchFound).toHaveBeenCalledTimes(1);
+    renderQueue({ isSearching: false, matchId: 'match-1' });
     expect(screen.getByRole('status')).toHaveTextContent('Match found');
   });
 
   it('does not include the ticking wait timer inside the live region', () => {
-    renderQueue();
-    act(() => jest.advanceTimersByTime(5000));
+    renderQueue({ waitTime: 5 });
     const status = screen.getByRole('status');
     expect(status).not.toHaveTextContent('0:05');
   });
