@@ -580,7 +580,7 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
                         return newUser;
                     });
                     try {
-                        await notificationService.createDefaultPreferences(createdUser.id);
+                        await notificationService.createDefaultPreferences(user.id);
                     } catch {}
                     break;
                 } catch (error) {
