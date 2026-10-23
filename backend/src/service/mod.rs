@@ -41,6 +41,8 @@ pub mod staking_service;
 pub mod stellar_sdk_service;
 pub mod stellar_service;
 pub mod suspension_service;
+pub mod telemetry_retention;
+pub mod telemetry_upload;
 pub mod tournament_service;
 pub mod tournament_refund_tests;
 pub mod user_service;
@@ -72,6 +74,12 @@ pub use soroban_service::{
 };
 pub use stellar_sdk_service::{StellarSdkError, StellarSdkService};
 pub use stellar_service::StellarService;
+pub use telemetry_retention::{SweepReport, TelemetryRetentionService};
+pub use telemetry_upload::{
+    clamp_retention_days, InMemoryTelemetryIndex, PostgresTelemetryIndex, TelemetryIndex,
+    TelemetryUploadOutcome, TelemetryUploadService, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS, TELEMETRY_CONTENT_TYPE,
+};
 pub use tournament_service::TournamentService;
 pub use user_service::UserService;
 pub use wallet_service::WalletService;
