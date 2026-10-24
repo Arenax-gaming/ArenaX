@@ -18,8 +18,7 @@
 //! - Differential privacy noise is added to aggregate queries.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, String, Symbol,
-    Vec,
+    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -448,11 +447,11 @@ impl AnalyticsContract {
             .expect("contract not registered");
         reporter.require_auth();
 
-        let is_tx = event_type == Symbol::new(&env, "transaction")
-            || event_type == Symbol::new(&env, "tx");
+        let is_tx =
+            event_type == Symbol::new(&env, "transaction") || event_type == Symbol::new(&env, "tx");
         let is_volume = event_type == Symbol::new(&env, "volume");
-        let is_user = event_type == Symbol::new(&env, "user")
-            || event_type == Symbol::new(&env, "users");
+        let is_user =
+            event_type == Symbol::new(&env, "user") || event_type == Symbol::new(&env, "users");
         let is_fee =
             event_type == Symbol::new(&env, "fee") || event_type == Symbol::new(&env, "fees");
         if !(is_tx || is_volume || is_user || is_fee) {
@@ -504,17 +503,15 @@ impl AnalyticsContract {
         let hour = now / 3600;
         let slot = (hour % SNAPSHOT_WINDOW_HOURS) as u32;
         let key = DataKey::HourlySnapshot(slot);
-        let mut bucket: HourlySnapshot = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(HourlySnapshot {
+        let mut bucket: HourlySnapshot = env.storage().persistent().get(&key).unwrap_or(
+            HourlySnapshot {
                 hour,
                 total_transactions: 0,
                 total_volume: 0,
                 total_users: 0,
                 total_fees_collected: 0,
-            });
+            },
+        );
         if bucket.hour != hour {
             bucket = HourlySnapshot {
                 hour,

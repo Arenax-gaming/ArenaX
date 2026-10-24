@@ -2,6 +2,7 @@ use crate::api_error::ApiError;
 use crate::config::Config;
 use crate::db::DbPool;
 use crate::models::*;
+use crate::service::platform_links::PlatformVerificationClient;
 use crate::service::reputation_service::ReputationService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ pub struct MatchService {
     pub event_bus: Option<crate::realtime::event_bus::EventBus>,
     /// Match state stream (Issue #1254). Absent when Redis is not configured.
     pub match_events: Option<crate::realtime::event_stream::EventStream>,
+    /// Server-to-server platform verification client for console match reports.
+    pub platform_verification: Option<Arc<PlatformVerificationClient>>,
 }
 
 impl MatchService {
@@ -28,6 +31,7 @@ impl MatchService {
             reputation_service: None,
             event_bus: None,
             match_events: None,
+            platform_verification: None,
         }
     }
 
@@ -38,6 +42,11 @@ impl MatchService {
 
     pub fn with_match_events(mut self, stream: crate::realtime::event_stream::EventStream) -> Self {
         self.match_events = Some(stream);
+        self
+    }
+
+    pub fn with_platform_verification(mut self, client: PlatformVerificationClient) -> Self {
+        self.platform_verification = Some(Arc::new(client));
         self
     }
 
@@ -205,6 +214,15 @@ impl MatchService {
         self.update_match_score(match_id, user_id, request.score)
             .await?;
 
+        // Console platforms require server-to-server verification before the
+        // match result is trusted. Move to pending-verification and enqueue a
+        // platform API call; the response (or timeout) drives the final state.
+        if self.is_console_platform(&match_record).await? {
+            self.begin_platform_verification(match_id, &match_record)
+                .await?;
+            return Ok(score_record);
+        }
+
         // Publish score reported event
         self.publish_match_event(serde_json::json!({
             "type": "score_reported",
@@ -227,6 +245,251 @@ impl MatchService {
         }
 
         Ok(score_record)
+    }
+
+    /// Returns true when the match is for a console platform that requires
+    /// server-to-server verification of the reported result.
+    async fn is_console_platform(&self, match_record: &Match) -> Result<bool, ApiError> {
+        let platform = sqlx::query_scalar!(
+            r#"
+            SELECT platform FROM match_platform_links
+            WHERE match_id = $1
+            LIMIT 1
+            "#,
+            match_record.id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        Ok(matches!(
+            platform.as_deref(),
+            Some("xbox") | Some("playstation") | Some("switch")
+        ))
+    }
+
+    /// Transition the match to pending-verification and enqueue a platform API
+    /// verification job. The job records a deadline; if the platform does not
+    /// respond within `N` minutes the match is escalated to admin review.
+    async fn begin_platform_verification(
+        &self,
+        match_id: Uuid,
+        match_record: &Match,
+    ) -> Result<(), ApiError> {
+        const VERIFICATION_TIMEOUT_MINUTES: i64 = 10;
+        let deadline = Utc::now() + chrono::Duration::minutes(VERIFICATION_TIMEOUT_MINUTES);
+
+        sqlx::query!(
+            r#"
+            UPDATE matches
+            SET status = $1, verification_deadline = $2, updated_at = $3
+            WHERE id = $4
+            "#,
+            MatchStatus::PendingVerification as _,
+            deadline,
+            Utc::now(),
+            match_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "pending_verification",
+        )
+        .await;
+
+        // Enqueue the platform API call. The worker will invoke the platform
+        // client and call back into `apply_platform_verification_result`.
+        sqlx::query!(
+            r#"
+            INSERT INTO platform_verification_jobs
+                (id, match_id, status, deadline, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+            Uuid::new_v4(),
+            match_id,
+            "queued",
+            deadline,
+            Utc::now()
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "pending_verification",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "deadline": deadline
+        }))
+        .await?;
+
+        Ok(())
+    }
+
+    /// Apply the platform API's verification result to the match.
+    ///
+    /// - `Confirmed` with matching winner → verified
+    /// - `Mismatch` → auto-flagged for human review
+    /// - `Timeout` → escalated to admin review
+    pub async fn apply_platform_verification_result(
+        &self,
+        match_id: Uuid,
+        result: PlatformVerificationResult,
+    ) -> Result<(), ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+
+        match result {
+            PlatformVerificationResult::Confirmed { winner_id } => {
+                let expected = self.determine_winner(&match_record).await?;
+                if expected != winner_id {
+                    return self
+                        .flag_for_human_review(
+                            match_id,
+                            &match_record,
+                            "Platform confirmed a different winner than the reported score",
+                        )
+                        .await;
+                }
+
+                sqlx::query!(
+                    r#"
+                    UPDATE matches
+                    SET status = $1, verified_at = $2, updated_at = $3
+                    WHERE id = $4
+                    "#,
+                    MatchStatus::Verified as _,
+                    Utc::now(),
+                    Utc::now(),
+                    match_id
+                )
+                .execute(&self.db_pool)
+                .await
+                .map_err(|e| ApiError::database_error(e))?;
+
+                self.emit_match_state(
+                    match_id,
+                    Self::match_status_name(match_record.status),
+                    "verified",
+                )
+                .await;
+
+                self.publish_match_event(serde_json::json!({
+                    "type": "verified",
+                    "match_id": match_id,
+                    "tournament_id": match_record.tournament_id,
+                    "winner_id": winner_id
+                }))
+                .await?;
+
+                Ok(())
+            }
+            PlatformVerificationResult::Mismatch { reason } => {
+                self.flag_for_human_review(match_id, &match_record, &reason)
+                    .await
+            }
+            PlatformVerificationResult::Timeout => {
+                self.escalate_to_admin_review(
+                    match_id,
+                    &match_record,
+                    "Platform API did not respond before the verification deadline",
+                )
+                .await
+            }
+        }
+    }
+
+    async fn flag_for_human_review(
+        &self,
+        match_id: Uuid,
+        match_record: &Match,
+        reason: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE matches
+            SET status = $1, conflict_reason = $2, updated_at = $3
+            WHERE id = $4
+            "#,
+            MatchStatus::Conflict as _,
+            reason,
+            Utc::now(),
+            match_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "conflict",
+        )
+        .await;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "conflict_detected",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "conflict_reason": reason,
+        }))
+        .await?;
+
+        tracing::warn!(
+            match_id = %match_id,
+            reason = %reason,
+            "Platform verification mismatch — flagged for human review"
+        );
+
+        Ok(())
+    }
+
+    async fn escalate_to_admin_review(
+        &self,
+        match_id: Uuid,
+        match_record: &Match,
+        reason: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query!(
+            r#"
+            UPDATE matches
+            SET status = $1, conflict_reason = $2, updated_at = $3
+            WHERE id = $4
+            "#,
+            MatchStatus::Conflict as _,
+            reason,
+            Utc::now(),
+            match_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        self.emit_match_state(
+            match_id,
+            Self::match_status_name(match_record.status),
+            "conflict",
+        )
+        .await;
+
+        self.publish_match_event(serde_json::json!({
+            "type": "escalated_to_admin",
+            "match_id": match_id,
+            "tournament_id": match_record.tournament_id,
+            "reason": reason,
+        }))
+        .await?;
+
+        tracing::warn!(
+            match_id = %match_id,
+            reason = %reason,
+            "Platform verification timed out — escalated to admin review"
+        );
+
+        Ok(())
     }
 
     /// Create a match dispute
@@ -1253,6 +1516,8 @@ impl MatchService {
             MatchStatus::Disputed => "disputed",
             MatchStatus::Cancelled => "cancelled",
             MatchStatus::Abandoned => "abandoned",
+            MatchStatus::PendingVerification => "pending_verification",
+            MatchStatus::Verified => "verified",
         }
     }
 
@@ -1961,6 +2226,17 @@ pub struct LeaderboardEntry {
     pub draws: i32,
     pub win_rate: f64,
     pub win_streak: i32,
+}
+
+/// Result of a server-to-server platform API verification call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PlatformVerificationResult {
+    /// Platform confirmed the match result; `winner_id` is `None` for a draw.
+    Confirmed { winner_id: Option<Uuid> },
+    /// Platform reported a result that disagrees with the submitted score.
+    Mismatch { reason: String },
+    /// No response from the platform before the verification deadline.
+    Timeout,
 }
 
 impl MatchService {

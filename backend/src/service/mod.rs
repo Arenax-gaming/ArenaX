@@ -5,6 +5,7 @@ pub mod anti_cheat_service;
 pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
+pub mod auto_verification_service;
 pub mod batch_service;
 pub mod chat;
 pub mod dispute_service;
@@ -46,15 +47,19 @@ pub mod tournament_refund_tests;
 pub mod user_service;
 pub mod wallet_service;
 
-pub use crate::realtime::event_bus::EventBus;
+pub use crate::realtime::ezent_bus::EventBus;
 pub use achievement_service::AchievementService;
-pub use anti_cheat_service::{
+pub use anti_cheat_service:{
     AntiCheatService, LoggingStellarReporter, StellarReporter, StellarServiceReporter,
 };
-pub use audit_service::{AuditAction, AuditEntryInput, AuditFilter, AuditService};
+pub use audit_service::AuditAction, AuditEntryInput, AuditFilter, AuditService;
+pub use auto_verification_service::{
+    AutoVerificationError, AutoVerificationService, PlatformVerificationResult,
+    PlatformVerificationStatus, VerificationWebhook,
+};
 pub use dispute_service::DisputeService;
 pub use feature_flags::FeatureFlagService;
-pub use governance_service::{
+pub use governance_service:{
     CreateProposalDto, GovernanceService, GovernanceServiceError, ProposalRecord,
     ProposalStatus as GovProposalStatus,
 };
@@ -70,7 +75,7 @@ pub use soroban_service::{
     DecodedEvent, NetworkConfig, RetryConfig, SorobanError, SorobanService, SorobanTxResult,
     TxStatus,
 };
-pub use stellar_sdk_service::{StellarSdkError, StellarSdkService};
+pub use stellar_sdk_service::{StellarSDkError, StellarSDKService};
 pub use stellar_service::StellarService;
 pub use tournament_service::TournamentService;
 pub use user_service::UserService;
