@@ -16,7 +16,9 @@ jobs:
       redis:
         image: redis:7.4-alpine
         ports: ['6379:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-timeout 3s --health-retries 10
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
       postgres:
         image: postgres:16-alpine
         env:
@@ -24,14 +26,16 @@ jobs:
           POSTGRES_PASSWORD: realtime_test
           POSTGRES_DB: realtime_test
         ports: ['5432:5432']
-        options: --health-cmd 'pg_isready -U realtime_test' --health-interval 5s --health-timeout 3s --health-retries 10
+        options: >-
+          --health-cmd "pg_isready -U realtime_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Check library formatting
         run: cargo fmt --manifest-path backend/realtime/Cargo.toml --all -- --check
       - name: Exercise Redis, the public HTTP route, and prize-pool transactions
-        run: cargo test --manifest-path backend/realtime/Cargo.toml --locked --all-targets -- --include-ignored --test-threads=1
+        run: cargo test --manifest-path backend/realtime/Cargo.toml --locked --all-targets -j 2 -- --include-ignored --test-threads=1
         env:
           REDIS_TEST_URL: redis://127.0.0.1:6379
           DATABASE_TEST_URL: postgres://realtime_test:realtime_test@127.0.0.1:5432/realtime_test
