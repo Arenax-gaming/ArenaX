@@ -152,26 +152,7 @@ impl MatchmakerService {
             return Ok(());
         }
 
-        // Sort by wait time (longest waiting first) so they get priority.
-        let mut sorted_entries = queue_entries;
-        sorted_entries.sort_by(|a, b| a.joined_at.cmp(&b.joined_at));
-
-        let mut matches_found = Vec::new();
-        let mut processed_players = std::collections::HashSet::new();
-
-        for (i, entry) in sorted_entries.iter().enumerate() {
-            if processed_players.contains(&entry.user_id) {
-                continue;
-            }
-
-            if let Some(candidate) =
-                find_best_match_for_player(entry, &sorted_entries[i..], &processed_players)
-            {
-                processed_players.insert(candidate.player1.user_id);
-                processed_players.insert(candidate.player2.user_id);
-                matches_found.push(candidate);
-            }
-        }
+        let matches_found = pair_queue_entries(queue_entries);
 
         for candidate in matches_found {
             self.create_match_from_candidate(&candidate).await?;
@@ -597,6 +578,33 @@ impl MatchmakerService {
         Ok(match_record)
     }
 
+    /// Fetch all blocked pairs among the given user IDs from the database.
+    /// Returns a set of `(blocker_id, blocked_id)` tuples.
+    /// The matchmaker uses this to exclude pairs where either player has
+    /// blocked the other (#1407).
+    async fn get_blocked_pairs(
+        &self,
+        user_ids: &[Uuid],
+    ) -> Result<std::collections::HashSet<(Uuid, Uuid)>, ApiError> {
+        if user_ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+
+        let pairs = sqlx::query_as::<_, (Uuid, Uuid)>(
+            r#"
+            SELECT blocker_id, blocked_id
+            FROM player_blocks
+            WHERE blocker_id = ANY($1) AND blocked_id = ANY($1)
+            "#
+        )
+        .bind(user_ids)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e))?;
+
+        Ok(pairs.into_iter().collect())
+    }
+
     fn calculate_initial_elo_range(&self, current_elo: i32) -> (i32, i32) {
         let range = self.config.elo_bucket_size;
         ((current_elo - range).max(0), current_elo + range)
@@ -607,12 +615,53 @@ impl MatchmakerService {
 // Pure (sync) helpers — no async needed
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Redis key holding a serialized [`QueueEntry`].
+pub fn queue_entry_key(game: &str, game_mode: &str, user_id: &Uuid) -> String {
+    format!("{}{}", queue_entry_prefix(game, game_mode), user_id)
+}
+
+/// Key prefix shared by every queue entry of a (game, game_mode) queue.
+pub fn queue_entry_prefix(game: &str, game_mode: &str) -> String {
+    format!("{}:{}:{}:", QUEUE_ENTRY_PREFIX, game, game_mode)
+}
+
+/// Pair queued players into match candidates.
+///
+/// Longest-waiting players are considered first; each player appears in at
+/// most one candidate. Shared by [`MatchmakerService`] and the store-agnostic
+/// matchmaking pipeline so both use identical pairing rules.
+pub fn pair_queue_entries(mut entries: Vec<QueueEntry>) -> Vec<MatchCandidate> {
+    entries.sort_by(|a, b| a.joined_at.cmp(&b.joined_at));
+
+    let mut matches_found = Vec::new();
+    let mut processed_players = std::collections::HashSet::new();
+
+    for (i, entry) in entries.iter().enumerate() {
+        if processed_players.contains(&entry.user_id) {
+            continue;
+        }
+
+        if let Some(candidate) = find_best_match_for_player(entry, &entries[i..], &processed_players)
+        {
+            processed_players.insert(candidate.player1.user_id);
+            processed_players.insert(candidate.player2.user_id);
+            matches_found.push(candidate);
+        }
+    }
+
+    matches_found
+}
+
 /// Find the best opponent for `player` from `candidates`.
 /// This is pure CPU work — no I/O — so it does not need to be async.
+///
+/// `blocked_pairs` contains `(blocker_id, blocked_id)` tuples — pairs where
+/// either player has blocked the other are never matched (#1407).
 fn find_best_match_for_player(
     player: &QueueEntry,
     candidates: &[QueueEntry],
     processed_players: &std::collections::HashSet<Uuid>,
+    blocked_pairs: &std::collections::HashSet<(Uuid, Uuid)>,
 ) -> Option<MatchCandidate> {
     let mut best_candidate: Option<MatchCandidate> = None;
     let mut best_score = -1.0_f64;
@@ -622,6 +671,13 @@ fn find_best_match_for_player(
     for candidate in candidates {
         if candidate.user_id == player.user_id
             || processed_players.contains(&candidate.user_id)
+        {
+            continue;
+        }
+
+        // Skip blocked pairs — either direction (#1407)
+        if blocked_pairs.contains(&(player.user_id, candidate.user_id))
+            || blocked_pairs.contains(&(candidate.user_id, player.user_id))
         {
             continue;
         }

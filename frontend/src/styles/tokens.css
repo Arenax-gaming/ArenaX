@@ -1,0 +1,46 @@
+/*
+ * Contrast-audited colour tokens (Issue #1321).
+ *
+ * Imported AFTER both globals.css files (root and [locale]) so these values
+ * win on every route. Ratios are WCAG 2.1 contrast against the surfaces the
+ * dashboard widgets actually render on: --card, --muted, and the
+ * bg-muted/40 row hover. AA requires >= 4.5:1 for text and >= 3:1 for
+ * meaningful icons (1.4.11).
+ *
+ * Why separate *-text tokens instead of darkening --success / --destructive:
+ * those base tokens also fill buttons and badges (bg-success,
+ * bg-destructive). Text-on-surface and fill-behind-text need opposite
+ * adjustments, so each gets its own token.
+ */
+
+/* Doubled :root (0,2,0) outranks the globals.css :root / .dark (0,1,0)
+   regardless of stylesheet order, which Next.js does not guarantee once
+   the same file is imported from nested layouts. */
+:root:root {
+  /* was 215.4 16.3% 46.9% → 4.34:1 on --muted; now 5.63:1 (6.16:1 on card) */
+  --muted-foreground: 215.4 19% 40%;
+
+  /* text-success was 142 71% 45% → 2.30:1; now 5.83:1 on card, 5.32:1 on muted */
+  --success-text: 142 76% 26%;
+  /* text-destructive was 0 84.2% 60.2% → 3.76:1; now 6.41:1 / 5.85:1 */
+  --destructive-text: 0 74% 42%;
+  /* rank icon was yellow-500 → 1.92:1; now 4.62:1 / 4.22:1 (icon min 3:1) */
+  --rank-accent: 38 92% 33%;
+  /* streak text was orange-500 → 2.80:1; now 5.56:1 / 5.08:1 */
+  --streak-text: 21 90% 37%;
+}
+
+:root.dark {
+  /* unchanged value restated for clarity: 7.80:1 on card, 5.70:1 on muted */
+  --muted-foreground: 215 20.2% 65.1%;
+
+  /* 11.45:1 on card, 8.37:1 on muted */
+  --success-text: 142 69% 58%;
+  /* text-destructive was 0 62.8% 30.6% ([locale] dark) → 2.00:1;
+     now 7.27:1 on card, 5.31:1 on muted */
+  --destructive-text: 0 91% 71%;
+  /* 10.08:1 on card, 7.36:1 on muted */
+  --rank-accent: 45 93% 47%;
+  /* 8.83:1 on card, 6.45:1 on muted */
+  --streak-text: 27 96% 61%;
+}

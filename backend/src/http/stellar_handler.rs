@@ -105,6 +105,14 @@ fn map_stellar_error(err: StellarError) -> ApiError {
         }
         StellarError::DatabaseError(e) => ApiError::database_error(e),
         StellarError::StellarSdkError(message) => ApiError::StellarError(message),
+        StellarError::HorizonError(message) => {
+            tracing::warn!(error = %message, "Stellar Horizon request failed");
+            ApiError::ServiceUnavailable("Stellar Horizon request failed".to_string())
+        }
+        StellarError::HorizonUnavailable { retry_after_secs } => ApiError::DependencyUnavailable {
+            message: "Stellar Horizon is temporarily unavailable".to_string(),
+            retry_after: retry_after_secs,
+        },
     }
 }
 
@@ -373,6 +381,26 @@ mod tests {
         let err = map_stellar_error(StellarError::InvalidPublicKey);
         let response = actix_web::ResponseError::error_response(&err);
         assert_eq!(response.status().as_u16(), 400);
+    }
+
+    #[test]
+    fn map_horizon_unavailable_is_503_with_retry_after() {
+        let err = map_stellar_error(StellarError::HorizonUnavailable {
+            retry_after_secs: 17,
+        });
+        let response = actix_web::ResponseError::error_response(&err);
+        assert_eq!(response.status().as_u16(), 503);
+        assert_eq!(
+            response.headers().get("Retry-After").and_then(|v| v.to_str().ok()),
+            Some("17")
+        );
+    }
+
+    #[test]
+    fn map_horizon_error_is_503() {
+        let err = map_stellar_error(StellarError::HorizonError("timeout".into()));
+        let response = actix_web::ResponseError::error_response(&err);
+        assert_eq!(response.status().as_u16(), 503);
     }
 
     #[test]

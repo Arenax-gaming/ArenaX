@@ -1,7 +1,11 @@
 import { PrismaClient, TournamentFormat, TournamentStatus, TournamentRound } from '@prisma/client';
 import { logger } from './logger.service';
+import { HttpError } from '../utils/http-error';
+import { getDatabaseClient } from './database.service';
 
-const prisma = new PrismaClient();
+const prisma = new Proxy({} as PrismaClient, {
+  get: (_target, prop) => (getDatabaseClient() as any)[prop]
+});
 
 export interface TournamentConfig {
   name: string;
@@ -113,6 +117,15 @@ export class TournamentService {
 
       if (!tournament) {
         throw new Error('Tournament not found');
+      }
+
+      // Check if user is email-verified
+      const player = await prisma.user.findUnique({
+        where: { id: playerId },
+        select: { isVerified: true },
+      });
+      if (player && !player.isVerified) {
+        throw new HttpError(403, 'Email verification required');
       }
 
       // Check if registration is open
@@ -889,4 +902,6 @@ export class TournamentService {
     };
   }
 }
+
+export const tournamentService = new TournamentService();
 

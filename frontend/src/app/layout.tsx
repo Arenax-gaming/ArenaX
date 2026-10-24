@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import "../styles/globals.css";
+// Contrast-audited overrides (#1321) — must come after globals.css.
+import "../styles/tokens.css";
 import { NONCE_HEADER } from "@/lib/csp";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -17,6 +19,7 @@ import { NotificationProvider } from "@/contexts/NotificationContext";
 import { WebVitalsInit } from "@/components/providers/WebVitalsInit";
 import { AnalyticsProvider } from "@/components/providers/AnalyticsProvider";
 import { ConsentBanner } from "@/components/providers/ConsentBanner";
+import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
 import { defaultMetadata, organizationStructuredData, websiteStructuredData } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -77,6 +80,10 @@ export default function RootLayout({
                         <WebVitalsInit />
                         {children}
                         <ConsentBanner />
+                        {/* Custom install banner (#1414): deferred
+                            beforeinstallprompt on Android/desktop, Share-sheet
+                            steps on iOS Safari, hidden 30 days after dismissal. */}
+                        <PwaInstallPrompt />
                       </AnalyticsProvider>
                     </NotificationProvider>
                   </TxStatusProvider>

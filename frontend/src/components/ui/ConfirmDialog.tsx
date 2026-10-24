@@ -1,5 +1,6 @@
 "use client";
 
+import { useId, useRef } from "react";
 import { AlertTriangle, AlertCircle, Info } from "lucide-react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
@@ -20,6 +21,8 @@ export interface ConfirmDialogProps {
   variant?: ConfirmDialogVariant;
   /** Disable the confirm button while an async action is in flight */
   isPending?: boolean;
+  /** Close when the backdrop is clicked (default true). */
+  closeOnOverlayClick?: boolean;
 }
 
 // ─── Variant config ───────────────────────────────────────────────────────────
@@ -33,16 +36,16 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   danger: {
-    icon: <AlertTriangle className="h-6 w-6 text-destructive" aria-hidden="true" />,
+    icon: <AlertTriangle className="h-6 w-6 text-destructive-text" aria-hidden="true" />,
     iconBg: "bg-destructive/10",
     confirmClass:
       "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive",
   },
   warning: {
-    icon: <AlertCircle className="h-6 w-6 text-yellow-600" aria-hidden="true" />,
-    iconBg: "bg-yellow-100 dark:bg-yellow-900/30",
+    icon: <AlertCircle className="h-6 w-6 text-rank" aria-hidden="true" />,
+    iconBg: "bg-warning-muted",
     confirmClass:
-      "bg-yellow-600 text-white hover:bg-yellow-700 focus-visible:ring-yellow-600",
+      "bg-warning-muted-foreground text-background hover:opacity-90 focus-visible:ring-warning",
   },
   default: {
     icon: <Info className="h-6 w-6 text-primary" aria-hidden="true" />,
@@ -54,11 +57,14 @@ const VARIANT_CONFIG: Record<
 // ─── Component ────────────────────────────────────────────────────────────────
 
 /**
- * Accessible confirmation dialog.
+ * Accessible confirmation dialog (Issue #1327).
  *
- * - Pressing Escape or clicking the overlay cancels without confirming.
- * - The confirm button is styled destructively for the 'danger' variant.
- * - Focus is trapped inside the dialog while it is open (via Modal).
+ * - Rendered as `role="alertdialog"`, labelled by the title and described by
+ *   the description, and announced when it opens.
+ * - Initial focus lands on Cancel, so an accidental Enter never confirms a
+ *   destructive action.
+ * - Escape or a backdrop click cancels without confirming; focus returns to
+ *   the element that opened it, and Tab is trapped inside (via Modal).
  */
 export function ConfirmDialog({
   isOpen,
@@ -70,8 +76,11 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "default",
   isPending = false,
+  closeOnOverlayClick = true,
 }: ConfirmDialogProps) {
   const { icon, iconBg, confirmClass } = VARIANT_CONFIG[variant];
+  const descriptionId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   return (
     <Modal
@@ -79,8 +88,12 @@ export function ConfirmDialog({
       onClose={onCancel}
       title={title}
       size="sm"
-      closeOnOverlayClick={true}
-      closeOnEscape={true}
+      role="alertdialog"
+      ariaDescribedBy={descriptionId}
+      initialFocusRef={cancelRef}
+      announcement={`${title}. Confirmation required.`}
+      closeOnOverlayClick={closeOnOverlayClick && !isPending}
+      closeOnEscape={!isPending}
       showCloseButton={false}
     >
       <div className="space-y-4">
@@ -91,18 +104,17 @@ export function ConfirmDialog({
           >
             {icon}
           </div>
-          <div className="text-sm text-muted-foreground leading-relaxed pt-1.5">
+          <div
+            id={descriptionId}
+            className="text-sm text-muted-foreground leading-relaxed pt-1.5"
+          >
             {description}
           </div>
         </div>
 
         {/* Action buttons */}
         <div className="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            onClick={onCancel}
-            disabled={isPending}
-          >
+          <Button ref={cancelRef} variant="outline" onClick={onCancel} disabled={isPending}>
             {cancelLabel}
           </Button>
           <Button

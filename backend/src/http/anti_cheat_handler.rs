@@ -18,7 +18,7 @@ use crate::api_error::ApiError;
 use crate::auth::jwt_service::{Claims, JwtService};
 use crate::http::auth_handler::ACCESS_TOKEN_COOKIE;
 use crate::service::anti_cheat_service::{
-    AntiCheatService, ScreenshotAnalysisRequest, TelemetryFrame,
+    AntiCheatService, Finding, FindingSource, ScreenshotAnalysisRequest, TelemetryFrame,
 };
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Deserialize;
@@ -81,6 +81,74 @@ async fn post_screenshot(
         .await?;
 
     Ok(HttpResponse::Ok().json(finding))
+}
+
+/// Body for `POST /api/matches/{id}/analyze`.
+#[derive(Debug, Deserialize)]
+struct MatchAnalyzeRequest {
+    player_id: Uuid,
+    evidence_key: String,
+    #[serde(default)]
+    evidence_hash: Option<String>,
+    #[serde(default)]
+    content_type: Option<String>,
+}
+
+/// POST /api/matches/{id}/analyze — fetch a match screenshot from S3/MinIO and
+/// run the tampering analysis (Issue #1232).
+async fn post_match_analyze(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    service: web::Data<Arc<AntiCheatService>>,
+    path: web::Path<Uuid>,
+    body: web::Json<MatchAnalyzeRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = caller(&req, jwt.get_ref()).await?;
+    let body = body.into_inner();
+    assert_can_act_for(&claims, body.player_id)?;
+
+    let finding = service
+        .analyze_screenshot(
+            path.into_inner(),
+            body.player_id,
+            &body.evidence_key,
+            body.evidence_hash.as_deref(),
+            body.content_type.as_deref().unwrap_or("image/png"),
+        )
+        .await?;
+
+    Ok(HttpResponse::Ok().json(analysis_view(&finding)))
+}
+
+/// GET /api/matches/{id}/analysis — screenshot analysis results with confidence.
+async fn get_match_analysis(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    service: web::Data<Arc<AntiCheatService>>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    caller(&req, jwt.get_ref()).await?;
+    let results: Vec<_> = service
+        .list_findings(path.into_inner())
+        .await?
+        .iter()
+        .filter(|f| f.source == FindingSource::Screenshot)
+        .map(analysis_view)
+        .collect();
+    Ok(HttpResponse::Ok().json(results))
+}
+
+fn analysis_view(finding: &Finding) -> serde_json::Value {
+    serde_json::json!({
+        "finding_id": finding.id,
+        "match_id": finding.match_id,
+        "player_id": finding.player_id,
+        "manipulated": finding.flagged,
+        "confidence": finding.score as f64 / 100.0,
+        "reasons": finding.reasons,
+        "evidence_key": finding.evidence_key,
+        "analyzed_at": finding.created_at,
+    })
 }
 
 /// POST /api/anticheat/telemetry
@@ -163,5 +231,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/findings/{match_id}", web::get().to(get_findings))
             .route("/players/{player_id}/flags", web::get().to(get_player_flags))
             .route("/review-queue", web::get().to(get_review_queue)),
-    );
+    )
+    .route("/matches/{id}/analyze", web::post().to(post_match_analyze))
+    .route("/matches/{id}/analysis", web::get().to(get_match_analysis));
 }

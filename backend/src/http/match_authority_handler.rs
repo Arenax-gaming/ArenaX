@@ -37,6 +37,8 @@ pub struct CreateMatchRequest {
 #[derive(Debug, Deserialize)]
 pub struct CompleteMatchRequest {
     pub winner: String,
+    pub score_a: i64,
+    pub score_b: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +116,8 @@ pub async fn complete_match(
 
     let dto = CompleteMatchDTO {
         winner: req.winner.clone(),
+        score_a: req.score_a,
+        score_b: req.score_b,
     };
 
     let result = svc.complete_match(match_id, dto, &signer_secret).await?;
@@ -204,6 +208,15 @@ pub async fn get_match(
     Ok(HttpResponse::Ok().json(result))
 }
 
+/// GET /api/matches/{id}/verify
+pub async fn verify_match_outcome(
+    svc: web::Data<Arc<MatchAuthorityService>>,
+    path: web::Path<Uuid>,
+) -> Result<impl Responder, ApiError> {
+    let result = svc.verify_match_outcome(path.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(result))
+}
+
 /// POST /api/matches/{id}/reconcile
 pub async fn reconcile_match(
     svc: web::Data<Arc<MatchAuthorityService>>,
@@ -250,6 +263,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}/complete", web::post().to(complete_match))
             .route("/{id}/dispute", web::post().to(raise_dispute))
             .route("/{id}/finalize", web::post().to(finalize_match))
+            .route("/{id}/verify", web::get().to(verify_match_outcome))
             .route("/{id}/reconcile", web::post().to(reconcile_match))
             // Database-backed match microservice routes (Issue #1280) share this
             // scope so they don't collide with the on-chain authority routes.
@@ -271,12 +285,14 @@ mod tests {
 
     #[test]
     fn test_complete_match_request_deserialization() {
-        let json = r#"{"winner":"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}"#;
+        let json = r#"{"winner":"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","score_a":2,"score_b":1}"#;
         let req: CompleteMatchRequest = serde_json::from_str(json).unwrap();
         assert_eq!(
             req.winner,
             "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         );
+        assert_eq!(req.score_a, 2);
+        assert_eq!(req.score_b, 1);
     }
 
     #[test]
