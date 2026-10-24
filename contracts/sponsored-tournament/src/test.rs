@@ -135,8 +135,10 @@ fn test_lifecycle_with_noop_hook_contract() {
 fn test_cannot_change_hook_after_start() {
     let s = setup();
     let id = s.tournament_id;
-    s.tournament.register_player(&id, &Address::generate(&s.env));
-    s.tournament.register_player(&id, &Address::generate(&s.env));
+    s.tournament
+        .register_player(&id, &Address::generate(&s.env));
+    s.tournament
+        .register_player(&id, &Address::generate(&s.env));
     s.tournament.start_tournament(&id);
 
     let noop = s.env.register(NoopTournamentHooks, ());

@@ -32,8 +32,10 @@ test.describe("Auth journeys", () => {
     await page.fill("#password", "Password1!");
     await page.fill("#confirmPassword", "Password1!");
 
-    // Wait for username availability check to settle
-    await page.waitForTimeout(500);
+    // Wait for username availability check to settle deterministically
+    await page.waitForResponse(
+      (res) => res.url().includes("/api/v1/auth/check-username") && res.status() === 200
+    );
 
     await page.check("#agreeToTerms");
 
