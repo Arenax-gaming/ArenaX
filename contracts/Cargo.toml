@@ -29,6 +29,7 @@ members = [
     "testing-infrastructure",
     "sponsored-tournament",
     "tournament-hooks-noop",
+    "match-outcome",
 ]
 resolver = "2"
 

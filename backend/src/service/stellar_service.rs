@@ -1,11 +1,17 @@
 use crate::models::{StellarAccount, StellarTransaction};
+use crate::security::PiiDataProtector;
+use crate::service::stellar_sdk_service::StellarSdkService;
 use anyhow::Result;
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use redis::Client as RedisClient;
+use crate::middleware::horizon_circuit_breaker::{
+    BreakerSnapshot, BreakerState, HorizonBreakerConfig, HorizonCallError, HorizonCircuitBreaker,
+};
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -25,6 +31,37 @@ pub enum StellarError {
     DatabaseError(#[from] sqlx::Error),
     #[error("Stellar SDK error: {0}")]
     StellarSdkError(String),
+    /// Horizon is reachable but unhealthy (transport error, timeout, 5xx/429).
+    #[error("Stellar Horizon request failed: {0}")]
+    HorizonError(String),
+    /// The Horizon circuit breaker is open; the call was not attempted.
+    #[error("Stellar Horizon is temporarily unavailable (retry in {retry_after_secs}s)")]
+    HorizonUnavailable { retry_after_secs: u64 },
+}
+
+/// Per-request timeout for Horizon calls, so a hung Horizon counts as a
+/// failure in the circuit breaker instead of pinning a worker.
+const HORIZON_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Raw Horizon HTTP failure, classified for the circuit breaker.
+#[derive(Debug)]
+enum HorizonHttpError {
+    Transport(String),
+    Status(reqwest::StatusCode),
+}
+
+impl std::fmt::Display for HorizonHttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(e) => write!(f, "transport error: {}", e),
+            Self::Status(status) => write!(f, "Horizon returned {}", status),
+        }
+    }
+}
+
+/// Whether a Horizon HTTP status signals an outage rather than a bad request.
+fn is_horizon_outage_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
 pub type DbPool = Arc<PgPool>;
@@ -85,6 +122,9 @@ pub struct StellarService {
     horizon_url: String,
     network_passphrase: String,
     admin_secret: Option<String>,
+    http_client: reqwest::Client,
+    /// Shared across clones so every handler sees the same Horizon health.
+    horizon_breaker: Arc<HorizonCircuitBreaker>,
 }
 
 impl StellarService {
@@ -101,7 +141,84 @@ impl StellarService {
             horizon_url,
             network_passphrase,
             admin_secret,
+            http_client: reqwest::Client::builder()
+                .timeout(HORIZON_REQUEST_TIMEOUT)
+                .build()
+                .unwrap_or_default(),
+            horizon_breaker: Arc::new(HorizonCircuitBreaker::new(HorizonBreakerConfig::from_env())),
         }
+    }
+
+    /// Replace the Horizon circuit breaker (e.g. to share one across services
+    /// or inject a test clock).
+    pub fn with_horizon_breaker(mut self, breaker: Arc<HorizonCircuitBreaker>) -> Self {
+        self.horizon_breaker = breaker;
+        self
+    }
+
+    pub fn horizon_breaker(&self) -> &Arc<HorizonCircuitBreaker> {
+        &self.horizon_breaker
+    }
+
+    /// Current Horizon circuit breaker state for `/health/stellar`.
+    pub fn horizon_health(&self) -> BreakerSnapshot {
+        self.horizon_breaker.snapshot()
+    }
+
+    // ========================================================================
+    // HORIZON ACCESS (circuit-breaker guarded, Issue #1346)
+    // ========================================================================
+
+    /// `GET` a Horizon URL through the circuit breaker.
+    ///
+    /// Transport errors, timeouts, 5xx and 429 count as Horizon failures; any
+    /// other response (including 404) is returned to the caller and counts as
+    /// a healthy Horizon. While the breaker is open the request is not sent
+    /// and [`StellarError::HorizonUnavailable`] is returned instead.
+    async fn horizon_get(&self, url: &str) -> Result<reqwest::Response, StellarError> {
+        let client = &self.http_client;
+        let result = self
+            .horizon_breaker
+            .call(
+                |_: &HorizonHttpError| true,
+                || async {
+                    let response = client
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(|e| HorizonHttpError::Transport(e.to_string()))?;
+                    if is_horizon_outage_status(response.status()) {
+                        return Err(HorizonHttpError::Status(response.status()));
+                    }
+                    Ok(response)
+                },
+            )
+            .await;
+
+        match result {
+            Ok(response) => Ok(response),
+            Err(HorizonCallError::Open(open)) => Err(StellarError::HorizonUnavailable {
+                retry_after_secs: open.retry_after_secs,
+            }),
+            Err(HorizonCallError::Inner(e)) => Err(StellarError::HorizonError(e.to_string())),
+        }
+    }
+
+    /// Probe Horizon's root endpoint through the breaker.
+    ///
+    /// While half-open this doubles as the recovery probe, so the breaker can
+    /// close again even when no user traffic is hitting Stellar endpoints.
+    pub async fn probe_horizon(&self) -> bool {
+        self.horizon_get(self.horizon_url.trim_end_matches('/'))
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    }
+
+    /// Whether `/health/stellar` should send a probe: only once the open
+    /// cool-down has elapsed, so health checks never hammer a down Horizon.
+    pub fn horizon_wants_probe(&self) -> bool {
+        self.horizon_breaker.state() == BreakerState::HalfOpen
     }
 
     // ========================================================================
@@ -319,14 +436,18 @@ impl StellarService {
         prize_pool_account: &str,
         amount: i64,
     ) -> Result<String, StellarError> {
-        // TODO: Implement actual Stellar payment transaction
-        // This would:
-        // 1. Get the admin account keypair
-        // 2. Build a payment operation
-        // 3. Sign and submit the transaction
-        // 4. Record the transaction in the database
-
-        let tx_hash = format!("escrow-{}", Uuid::new_v4());
+        let admin_secret = self.admin_secret.as_deref().ok_or_else(|| {
+            StellarError::TransactionFailed("STELLAR_ADMIN_SECRET not configured".to_string())
+        })?;
+        let sdk = self.sdk_service()?;
+        let envelope = sdk
+            .build_payment_tx(admin_secret, prize_pool_account, amount)
+            .await
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+        let (tx_hash, _) = sdk
+            .submit_and_confirm(&envelope, admin_secret)
+            .await
+            .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
         // The source account must be identified by its *public* key — never
         // the admin secret itself, which must never appear in a log line,
@@ -349,7 +470,7 @@ impl StellarService {
         );
 
         // Record transaction
-        self.record_transaction(
+        let recorded = self.record_transaction(
             &tx_hash,
             &admin_public,
             prize_pool_account,
@@ -360,6 +481,15 @@ impl StellarService {
             Some(format!("Entry fee escrow for tournament {}", tournament_id)),
             None,
         )
+        .await?;
+        sqlx::query(
+            r#"UPDATE stellar_transactions
+               SET status = 'confirmed', completed_at = $1
+               WHERE transaction_hash = $2"#,
+        )
+        .bind(Utc::now())
+        .bind(&tx_hash)
+        .execute(&*self.db_pool)
         .await?;
 
         log_stellar_event(
@@ -384,16 +514,24 @@ impl StellarService {
         let mut transaction_hashes = Vec::new();
 
         for (user_id, amount) in winners {
-            // Get user's Stellar account
             let user_account = self.get_account(user_id).await?;
-
-            // TODO: Implement actual Stellar payment
-            // This would:
-            // 1. Decrypt the prize pool secret key
-            // 2. Build a payment operation
-            // 3. Sign and submit the transaction
-
-            let tx_hash = format!("prize-{}", Uuid::new_v4());
+            let pool_account = self
+                .get_account_by_public_key(prize_pool_account)
+                .await?;
+            let pool_secret = pool_account
+                .encrypted_secret_key
+                .as_deref()
+                .ok_or(StellarError::InvalidPublicKey)
+                .and_then(|encrypted| self.decrypt_secret_key(encrypted))?;
+            let sdk = self.sdk_service()?;
+            let envelope = sdk
+                .build_payment_tx(&pool_secret, &user_account.public_key, amount)
+                .await
+                .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+            let (tx_hash, _) = sdk
+                .submit_and_confirm(&envelope, &pool_secret)
+                .await
+                .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
             log_stellar_event(
                 StellarEventStatus::Submit,
@@ -405,7 +543,7 @@ impl StellarService {
             );
 
             // Record transaction
-            self.record_transaction(
+            let recorded = self.record_transaction(
                 &tx_hash,
                 prize_pool_account,
                 &user_account.public_key,
@@ -419,6 +557,15 @@ impl StellarService {
                 )),
                 Some(user_id),
             )
+            .await?;
+            sqlx::query(
+                r#"UPDATE stellar_transactions
+                   SET status = 'confirmed', completed_at = $1
+                   WHERE id = $2"#,
+            )
+            .bind(Utc::now())
+            .bind(recorded.id)
+            .execute(&*self.db_pool)
             .await?;
 
             log_stellar_event(
@@ -442,16 +589,15 @@ impl StellarService {
 
     /// Issue ArenaX token (one-time setup)
     pub async fn issue_arenax_token(&self) -> Result<(), StellarError> {
-        // TODO: Implement token issuance
-        // This would:
-        // 1. Create issuing account
-        // 2. Create distribution account
-        // 3. Create trustline from distribution to issuing account
-        // 4. Issue tokens from issuing to distribution account
-        // 5. Lock issuing account
-
-        tracing::info!("ArenaX token issuance not implemented yet");
-        Ok(())
+        let issuer_secret = self.admin_secret.as_deref().ok_or_else(|| {
+            StellarError::TransactionFailed("ArenaX token issuer secret not configured".to_string())
+        })?;
+        stellar_public_from_secret(issuer_secret)
+            .map_err(|e| StellarError::StellarSdkError(e))?;
+        Err(StellarError::TransactionFailed(
+            "ArenaX token issuance requires explicit issuer/distribution setup and trustlines"
+                .to_string(),
+        ))
     }
 
     /// Transfer ArenaX tokens between accounts
@@ -461,16 +607,29 @@ impl StellarService {
         to_public_key: &str,
         amount: i64,
     ) -> Result<String, StellarError> {
-        // Get sender's account
         let from_account = self.get_account(from_user_id).await?;
+        let issuer_secret = self.admin_secret.clone().ok_or_else(|| {
+            StellarError::TransactionFailed("ArenaX token issuer secret not configured".to_string())
+        })?;
+        let issuer_public = std::env::var("STELLAR_ARENAX_ISSUER")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| stellar_public_from_secret(&issuer_secret).unwrap_or_default());
+        if issuer_public.is_empty() {
+            return Err(StellarError::TransactionFailed(
+                "ArenaX token issuer public key could not be derived".to_string(),
+            ));
+        }
 
-        // TODO: Implement actual token transfer
-        // This would:
-        // 1. Decrypt sender's secret key
-        // 2. Build a payment operation with asset type
-        // 3. Sign and submit the transaction
-
-        let tx_hash = format!("token-{}", Uuid::new_v4());
+        let sdk = self.sdk_service()?;
+        let envelope = sdk
+            .build_asset_issue_tx(&issuer_secret, "ARENAX", to_public_key, amount)
+            .await
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+        let (tx_hash, _) = sdk
+            .submit_and_confirm(&envelope, &issuer_secret)
+            .await
+            .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
 
         log_stellar_event(
             StellarEventStatus::Submit,
@@ -482,17 +641,26 @@ impl StellarService {
         );
 
         // Record transaction
-        self.record_transaction(
+        let recorded = self.record_transaction(
             &tx_hash,
             &from_account.public_key,
             to_public_key,
             amount,
             "ARENAX",
-            Some("ISSUER_PUBLIC_KEY"), // Replace with actual issuer
+            Some(&issuer_public),
             "payment",
             Some("ArenaX token transfer".to_string()),
             Some(from_user_id),
         )
+        .await?;
+        sqlx::query(
+            r#"UPDATE stellar_transactions
+               SET status = 'confirmed', completed_at = $1
+               WHERE id = $2"#,
+        )
+        .bind(Utc::now())
+        .bind(recorded.id)
+        .execute(&*self.db_pool)
         .await?;
 
         log_stellar_event(
@@ -555,33 +723,35 @@ impl StellarService {
     }
 
     /// Verify a Stellar transaction on the network
+    ///
+    /// Queries Horizon's `/transactions/{hash}` through the circuit breaker:
+    /// a successful transaction yields `true`, an unknown or failed one
+    /// `false`. Horizon outages surface as [`StellarError::HorizonError`] /
+    /// [`StellarError::HorizonUnavailable`] (HTTP 503) rather than a guess.
     pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, StellarError> {
-        // TODO: Implement actual verification by querying Horizon
-        // let client = reqwest::Client::new();
-        // let response = client
-        //     .get(&format!("{}/transactions/{}", self.horizon_url, tx_hash))
-        //     .send()
-        //     .await
-        //     .map_err(|e| StellarError::TransactionFailed(e.to_string()))?;
+        let url = format!(
+            "{}/transactions/{}",
+            self.horizon_url.trim_end_matches('/'),
+            urlencoding_encode(tx_hash)
+        );
+        let response = self.horizon_get(&url).await?;
 
-        // if response.status().is_success() {
-        //     // Update transaction status in database
-        //     sqlx::query!(
-        //         r#"
-        //         UPDATE stellar_transactions
-        //         SET status = 'completed', completed_at = $1
-        //         WHERE transaction_hash = $2
-        //         "#,
-        //         Utc::now(),
-        //         tx_hash
-        //     )
-        //     .execute(&*self.db_pool)
-        //     .await?;
-        //     return Ok(true);
-        // }
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if !status.is_success() {
+            return Err(StellarError::TransactionFailed(format!(
+                "Horizon returned {} for transaction {}",
+                status, tx_hash
+            )));
+        }
 
-        tracing::warn!("Transaction verification not implemented, returning true");
-        Ok(true)
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| StellarError::HorizonError(e.to_string()))?;
+        Ok(body["successful"].as_bool().unwrap_or(false))
     }
 
     /// Get transaction by hash
@@ -622,18 +792,31 @@ impl StellarService {
         Ok((public_key, secret_key))
     }
 
-    /// Encrypt a secret key for storage
-    fn encrypt_secret_key(&self, secret_key: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual encryption using app secret
-        // For now, just base64 encode (NOT SECURE - implement proper encryption)
-        use base64::{engine::general_purpose, Engine as _};
-        Ok(general_purpose::STANDARD.encode(secret_key))
+    fn sdk_service(&self) -> Result<StellarSdkService, StellarError> {
+        if self.horizon_url.contains("testnet") {
+            StellarSdkService::testnet(&self.horizon_url)
+        } else {
+            StellarSdkService::public(&self.horizon_url)
+        }
+        .map_err(|e| StellarError::StellarSdkError(e.to_string()))
     }
 
-    /// Decrypt a secret key from storage
+    /// Encrypt a secret key with the application-wide AES-256-GCM protector.
+    fn encrypt_secret_key(&self, secret_key: &str) -> Result<String, StellarError> {
+        PiiDataProtector::from_env_or_default()
+            .encrypt_str(secret_key, "stellar.secret_key", None)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
+    }
+
+    /// Decrypt an encrypted secret key from storage.
     fn decrypt_secret_key(&self, encrypted: &str) -> Result<String, StellarError> {
-        // TODO: Implement actual decryption
-        // For now, just base64 decode (NOT SECURE - implement proper decryption)
+        if encrypted.starts_with("enc:") {
+            return PiiDataProtector::from_env_or_default()
+                .decrypt_str(encrypted, "stellar.secret_key", None)
+                .map_err(|_| StellarError::InvalidPublicKey);
+        }
+
+        // Backward compatibility for secrets created before AES-GCM encryption.
         use base64::{engine::general_purpose, Engine as _};
         general_purpose::STANDARD
             .decode(encrypted)

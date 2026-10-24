@@ -151,6 +151,8 @@ pub struct CreateMatchDTO {
 pub struct CompleteMatchDTO {
     #[validate(length(min = 56, max = 56))]
     pub winner: String,
+    pub score_a: i64,
+    pub score_b: i64,
 }
 
 /// Match Response DTO
@@ -201,6 +203,19 @@ pub struct ChainSyncStatusResponse {
     pub match_id: Uuid,
     pub pending_operations: Vec<MatchChainSync>,
     pub last_confirmed_operation: Option<MatchChainSync>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MatchOutcomeVerificationResponse {
+    pub match_id: Uuid,
+    pub on_chain_match_id: String,
+    pub winner: Option<String>,
+    pub score_a: Option<i64>,
+    pub score_b: Option<i64>,
+    pub timestamp: Option<i64>,
+    pub transaction_hash: Option<String>,
+    pub transaction_status: Option<String>,
+    pub verified: bool,
 }
 
 #[cfg(test)]

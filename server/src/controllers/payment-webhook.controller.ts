@@ -31,7 +31,7 @@ const dispatch = async (
             log: req.log,
         });
 
-        res.status(200).json({ ...result, status: 'ok' });
+        res.status(200).json(result);
     } catch (error) {
         next(error);
     }
