@@ -6,3 +6,5 @@ pub mod matches;
 pub use health::*;
 pub use tournaments::*;
 pub use matches::*;
+
+pub mod tournament_events;

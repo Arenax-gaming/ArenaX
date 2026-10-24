@@ -1,11 +1,11 @@
 use crate::api_error::ApiError;
-use crate::realtime::RedisClient;
 use crate::db::DbPool;
 use actix_web::{web, HttpResponse, Result};
+use arenax_tournament_realtime::TournamentHub;
 
 pub async fn health_check(
     db_pool: web::Data<DbPool>,
-    redis_client: Option<web::Data<RedisClient>>,
+    tournament_updates: Option<web::Data<TournamentHub>>,
 ) -> Result<HttpResponse, ApiError> {
     // Check database connectivity
     let db_health = match crate::db::health_check(&db_pool).await {
@@ -28,20 +28,17 @@ pub async fn health_check(
     };
 
     // Check Redis connection
-    let redis_health = if let Some(redis) = redis_client {
-        match redis.get_connection().await {
-            Ok(_) => serde_json::json!({
+    let redis_health = if let Some(updates) = tournament_updates {
+        if updates.is_ready() {
+            serde_json::json!({
                 "status": "healthy",
                 "connection": "connected"
-            }),
-            Err(e) => {
-                tracing::error!("Redis health check failed: {:?}", e);
-                serde_json::json!({
-                    "status": "unhealthy",
-                    "connection": "disconnected",
-                    "error": e.to_string()
-                })
-            }
+            })
+        } else {
+            serde_json::json!({
+                "status": "unhealthy",
+                "connection": "disconnected"
+            })
         }
     } else {
         serde_json::json!({

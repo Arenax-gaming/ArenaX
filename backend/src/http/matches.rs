@@ -1,3 +1,4 @@
+use arenax_tournament_realtime::TournamentHub;
 use actix_web::{web, HttpResponse, Result, HttpRequest};
 use crate::service::MatchService;
 use crate::models::match_models::*;
@@ -10,13 +11,15 @@ use serde_json::json;
 pub async fn get_match(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = None; // Placeholder - should come from auth middleware
     
     let match_id = path.into_inner();
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let match_data = match_service.get_match(match_id, user_id).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -29,6 +32,7 @@ pub async fn get_match(
 pub async fn report_score(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     path: web::Path<Uuid>,
     request: web::Json<ReportScoreRequest>,
 ) -> Result<HttpResponse, ApiError> {
@@ -36,7 +40,8 @@ pub async fn report_score(
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
     let match_id = path.into_inner();
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let score = match_service.report_score(match_id, user_id, request.into_inner()).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -49,6 +54,7 @@ pub async fn report_score(
 pub async fn create_dispute(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     path: web::Path<Uuid>,
     request: web::Json<CreateDisputeRequest>,
 ) -> Result<HttpResponse, ApiError> {
@@ -56,7 +62,8 @@ pub async fn create_dispute(
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
     let match_id = path.into_inner();
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let dispute = match_service.create_dispute(match_id, user_id, request.into_inner()).await?;
     
     Ok(HttpResponse::Created().json(json!({
@@ -69,12 +76,14 @@ pub async fn create_dispute(
 pub async fn join_matchmaking(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     request: web::Json<JoinMatchmakingRequest>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let queue_entry = match_service.join_matchmaking(user_id, request.into_inner()).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -87,11 +96,13 @@ pub async fn join_matchmaking(
 pub async fn get_matchmaking_status(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let status = match_service.get_matchmaking_status(user_id).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -104,11 +115,13 @@ pub async fn get_matchmaking_status(
 pub async fn leave_matchmaking(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     match_service.leave_matchmaking(user_id).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -121,13 +134,15 @@ pub async fn leave_matchmaking(
 pub async fn get_elo_rating(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     path: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
     let game = path.into_inner();
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let elo = match_service.get_user_elo_rating(user_id, &game).await?;
     
     Ok(HttpResponse::Ok().json(json!({
@@ -140,12 +155,14 @@ pub async fn get_elo_rating(
 pub async fn get_match_history(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     query: web::Query<MatchHistoryQuery>,
 ) -> Result<HttpResponse, ApiError> {
     // TODO: Extract user ID from JWT token
     let user_id = Uuid::new_v4(); // Placeholder - should come from auth middleware
     
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let history = match_service.get_user_match_history(
         user_id,
         query.page.unwrap_or(1),
@@ -163,9 +180,11 @@ pub async fn get_match_history(
 pub async fn get_leaderboard(
     req: HttpRequest,
     pool: web::Data<DbPool>,
+    updates: web::Data<TournamentHub>,
     query: web::Query<LeaderboardQuery>,
 ) -> Result<HttpResponse, ApiError> {
-    let match_service = MatchService::new(pool.get_ref().clone());
+    let match_service = MatchService::new(pool.get_ref().clone())
+        .with_tournament_updates(updates.get_ref().clone());
     let leaderboard = match_service.get_leaderboard(
         query.game.clone().unwrap_or_else(|| "default".to_string()),
         query.page.unwrap_or(1),
