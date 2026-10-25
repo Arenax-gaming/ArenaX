@@ -253,6 +253,10 @@ let _env: DerivedEnv | null = null;
  */
 export const getEnv = (): DerivedEnv => {
     if (!_env) {
+        if (process.env.NODE_ENV === 'test') {
+            _env = validateEnv();
+            return _env;
+        }
         throw new Error(
             '[env] getEnv() called before validateEnv(). ' +
             'Ensure server.ts calls validateEnv() at startup.'

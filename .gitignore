@@ -16,12 +16,8 @@ Thumbs.db
 *.swo
 *~
 
-# Logs
+# Logs (consolidated below under "Runtime logs")
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
 
 # Runtime data
 pids
@@ -146,6 +142,18 @@ test-results/
 playwright-report/
 test-results.xml
 
+# Soroban / Rust contract test snapshots
+test_snapshots/
+**/test_snapshots/
+
+# Runtime logs (server produces these; never commit them)
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
 # Design docs (local only)
 docs/superpowers/
 
@@ -157,4 +165,3 @@ PULL_REQUEST.md
 pr-*.md
 PR-*.md
 PR-issue-*.md
-logs/

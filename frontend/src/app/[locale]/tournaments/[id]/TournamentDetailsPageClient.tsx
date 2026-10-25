@@ -18,7 +18,10 @@ import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
 import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
-import { StellarPrizePoolCard } from "@/components/stellar/StellarPrizePoolCard";
+import {
+  getPrimarySponsor,
+  TournamentSponsorRow,
+} from "@/components/sponsors/TournamentSponsorBadges";
 
 export function TournamentDetailsPageClient() {
   const params = useParams();
@@ -113,9 +116,29 @@ export function TournamentDetailsPageClient() {
 
   const showBracket = tournament.status === "in_progress" || tournament.status === "completed";
   const highlightedMatchId = deepLinkedMatchId;
+  const primarySponsor = getPrimarySponsor(tournament);
+  const sponsorAccentColor = primarySponsor?.brandColor || primarySponsor?.color;
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8">
+    <div
+      className="min-h-screen bg-background px-4 py-8 relative transition-colors"
+      style={
+        sponsorAccentColor
+          ? ({
+              "--sponsor-accent": sponsorAccentColor,
+            } as React.CSSProperties)
+          : undefined
+      }
+    >
+      {/* Brand accent glow if sponsored */}
+      {sponsorAccentColor && (
+        <div
+          className="pointer-events-none absolute top-0 left-0 right-0 h-1"
+          style={{
+            background: `linear-gradient(90deg, transparent, ${sponsorAccentColor}, transparent)`,
+          }}
+        />
+      )}
       <div className="mb-6">
         <Button
           variant="ghost"
@@ -134,6 +157,9 @@ export function TournamentDetailsPageClient() {
             tournament={tournament}
             bannerSizes={TOURNAMENT_DETAIL_BANNER_SIZES}
           />
+
+          {/* Multiple Sponsors Display (Carousel / Stacked Row) */}
+          <TournamentSponsorRow tournament={tournament} />
 
 
           {showBracket && bracketData ? (

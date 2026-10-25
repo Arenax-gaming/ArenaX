@@ -10,7 +10,10 @@ import {
     verifyEmail,
     resendVerificationEmail,
     forgotPassword,
-    resetPassword
+    resetPassword,
+    enroll2FA,
+    verifyAndEnable2FA,
+    login2FA
 } from '../services/auth.service';
 import { HttpError } from '../utils/http-error';
 
@@ -130,9 +133,10 @@ export const guestSession = async (req: Request, res: Response, next: NextFuncti
 
 export const verifyEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const payload = parseBody(verifyEmailSchema, req.body);
-        await verifyEmail(payload);
-        res.status(200).json({ message: 'Email verified successfully' });
+        const token = req.body?.token || req.query?.token;
+        const payload = parseBody(verifyEmailSchema, { token });
+        const result = await verifyEmail(payload);
+        res.status(200).json(result);
     } catch (error) {
         next(error);
     }
@@ -163,6 +167,52 @@ export const resetPasswordHandler = async (req: Request, res: Response, next: Ne
         const payload = parseBody(resetPasswordSchema, req.body);
         await resetPassword(payload);
         res.status(200).json({ message: 'Password reset successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const verify2FASchema = z.object({
+    code: z.string().min(1).max(32)
+});
+
+const login2FASchema = z.object({
+    tempToken: z.string().min(1),
+    code: z.string().min(1).max(32)
+});
+
+export const enroll2FAHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any)?.id;
+        if (!userId) {
+            throw new HttpError(401, 'Authentication required');
+        }
+        const result = await enroll2FA(userId);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const verify2FAHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = (req.user as any)?.id;
+        if (!userId) {
+            throw new HttpError(401, 'Authentication required');
+        }
+        const payload = parseBody(verify2FASchema, req.body);
+        const result = await verifyAndEnable2FA(userId, payload.code);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const login2FAHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const payload = parseBody(login2FASchema, req.body);
+        const result = await login2FA(payload);
+        res.status(200).json(result);
     } catch (error) {
         next(error);
     }

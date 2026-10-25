@@ -7,6 +7,7 @@ declare global {
             role: string;
             email: string;
             username: string;
+            isVerified?: boolean;
         }
         interface Request {
             /** Legacy alias — equals correlationId. Kept for backward compatibility. */

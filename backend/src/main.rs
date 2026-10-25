@@ -16,6 +16,7 @@ mod service;
 mod orchestrator;
 mod security;
 mod telemetry;
+mod transaction;
 mod validators;
 
 use crate::config::Config;
@@ -206,12 +207,23 @@ async fn main() -> io::Result<()> {
             soroban_service.clone(),
             config.stellar.soroban_contract_match.clone(),
         )
+        .with_match_outcome_contract(config.stellar.soroban_contract_match_outcome.clone())
         .with_match_events(match_events.clone()),
     );
     // Store the signer secret in app_data using the SignerSecret newtype so
     // it doesn't collide with any other web::Data<String> entries.
     let protocol_signer_secret =
         crate::http::match_authority_handler::SignerSecret(config.stellar.admin_secret.clone());
+
+    // Reputation penalties burn tokens via the reputation contract — Issue #1231
+    let reputation_penalty_service = Arc::new(
+        crate::service::reputation_penalty_service::ReputationPenaltyService::new(
+            db_pool.clone(),
+            soroban_service.clone(),
+            config.stellar.soroban_contract_reputation.clone(),
+            config.stellar.admin_secret.clone(),
+        ),
+    );
 
     // Initialize BatchService — Issue #952
     let batch_service = Arc::new(BatchService::new(db_pool.clone()));
@@ -337,6 +349,8 @@ async fn main() -> io::Result<()> {
         stellar_reporter,
     ));
 
+    let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
@@ -356,6 +370,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(matchmaker_service.clone()))
             .app_data(web::Data::new(elo_engine.clone()))
             .app_data(web::Data::new(tournament_service.clone()))
+            .app_data(web::Data::new(sponsored_tokens.clone()))
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
@@ -364,6 +379,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .app_data(web::Data::new(evidence_store.clone()))
             .app_data(web::Data::new(anti_cheat_service.clone()))
+            .app_data(web::Data::new(reputation_penalty_service.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
@@ -395,6 +411,7 @@ async fn main() -> io::Result<()> {
                     .route("/health", web::get().to(crate::http::health::health_check))
                     .route("/health/live", web::get().to(crate::http::health::liveness_check))
                     .route("/health/ready", web::get().to(crate::http::health::readiness_check))
+                    .route("/health/stellar", web::get().to(crate::http::health::stellar_health_check))
                     .route("/csrf-token", web::get().to(csrf_token_handler))
                     // Batch operations endpoints — Issue #952
                     .configure(crate::http::batch_handler::configure_routes)
@@ -566,6 +583,9 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::cache_handler::configure)
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
+            // Tournament sponsorship packages and admin endpoints — Issue #1419
+            .configure(crate::service::sponsored_tokens::configure)
+            .configure(crate::service::sponsored_tokens::configure_admin)
             .configure(crate::realtime::user_ws::configure_ws_route)
             .configure(crate::service::chat::configure)
     })

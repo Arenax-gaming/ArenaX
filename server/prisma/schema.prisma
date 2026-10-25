@@ -55,6 +55,7 @@ model User {
   organizedTournaments     Tournament[]
   leaderboardEntries       LeaderboardEntry[]
   apiKeys                  ApiKey[]
+  notificationPreferences  NotificationPreference[]
 
   @@index([deletedAt])
   @@index([provider])
@@ -138,6 +139,21 @@ model AchievementNotification {
 
   @@index([userId, readAt])
   @@index([achievementId])
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  eventType String   @map("event_type")
+  channel   String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventType, channel])
+  @@index([userId])
+  @@map("notification_preferences")
 }
 
 model UserWallet {
@@ -976,15 +992,21 @@ model FeatureFlagAuditLog {
 }
 
 model ApiKey {
-  id        String    @id @default(uuid())
-  key       String    @unique
-  name      String
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  isActive  Boolean   @default(true)
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id             String    @id @default(uuid())
+  key            String    @unique
+  keyPrefix      String?
+  name           String
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes         String[]  @default([])
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
+  // Set on rotation: the old key stays valid until this instant (overlap period).
+  graceExpiresAt DateTime?
+  rotatedFromId  String?
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([userId])
 }

@@ -76,6 +76,165 @@ pub fn hash_evidence(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+pub fn base58_encode(data: &[u8]) -> String {
+    let mut zeroes = 0;
+    while zeroes < data.len() && data[zeroes] == 0 {
+        zeroes += 1;
+    }
+
+    let mut size = (data.len() - zeroes) * 138 / 100 + 1;
+    let mut b58 = vec![0u8; size];
+
+    for &byte in &data[zeroes..] {
+        let mut carry = byte as u32;
+        let mut i = 0;
+        for c in b58.iter_mut().rev() {
+            if carry == 0 && i >= size {
+                break;
+            }
+            carry += 256 * (*c as u32);
+            *c = (carry % 58) as u8;
+            carry /= 58;
+            i += 1;
+        }
+        size = i;
+    }
+
+    let mut result = String::new();
+    for _ in 0..zeroes {
+        result.push('1');
+    }
+    for &val in b58.iter().skip_while(|&&x| x == 0) {
+        result.push(BASE58_ALPHABET[val as usize] as char);
+    }
+    result
+}
+
+/// Compute content-addressed IPFS CIDv0 for evidence screenshot (#1423).
+pub fn compute_ipfs_cid(bytes: &[u8]) -> String {
+    let hash = Sha256::digest(bytes);
+    let mut multihash = Vec::with_capacity(34);
+    multihash.push(0x12); // sha2-256 code
+    multihash.push(0x20); // 32-byte digest length
+    multihash.extend_from_slice(&hash);
+    base58_encode(&multihash)
+}
+
+/// Compare recomputed CID with expected CID to verify evidence authenticity (#1423).
+pub fn verify_ipfs_cid(bytes: &[u8], expected_cid: &str) -> bool {
+    let computed = compute_ipfs_cid(bytes);
+    computed == expected_cid.trim()
+}
+
+/// Abstraction for pinning files to an IPFS node (#1423).
+#[async_trait::async_trait]
+pub trait IpfsPinner: Send + Sync {
+    async fn pin(&self, bytes: &[u8], file_name: &str) -> Result<String, ApiError>;
+}
+
+/// Real HTTP client pinning to an IPFS node API (e.g. Kubo /api/v0/add).
+pub struct HttpIpfsPinner {
+    node_url: String,
+    http: reqwest::Client,
+}
+
+impl HttpIpfsPinner {
+    pub fn new(node_url: String) -> Self {
+        Self {
+            node_url: node_url.trim_end_matches('/').to_string(),
+            http: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl IpfsPinner for HttpIpfsPinner {
+    async fn pin(&self, bytes: &[u8], file_name: &str) -> Result<String, ApiError> {
+        let url = format!("{}/api/v0/add", self.node_url);
+        let part = reqwest::multipart::Part::bytes(bytes.to_vec())
+            .file_name(file_name.to_string());
+        let form = reqwest::multipart::Form::new().part("file", part);
+
+        let response = self
+            .http
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| ApiError::ServiceUnavailable(format!("IPFS node unreachable: {e}")))?;
+
+        if !response.status().is_success() {
+            return Err(ApiError::ServiceUnavailable(format!(
+                "IPFS node rejected upload with status {}",
+                response.status()
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct IpfsAddResponse {
+            #[serde(rename = "Hash")]
+            hash: Option<String>,
+            #[serde(rename = "cid")]
+            cid: Option<String>,
+        }
+
+        let body: IpfsAddResponse = response
+            .json()
+            .await
+            .map_err(|e| ApiError::ServiceUnavailable(format!("Invalid IPFS response: {e}")))?;
+
+        body.hash.or(body.cid).ok_or_else(|| {
+            ApiError::ServiceUnavailable("No CID returned by IPFS node".to_string())
+        })
+    }
+}
+
+/// Mock IPFS pinner for tests and offline environments.
+pub struct MockIpfsPinner {
+    pub should_fail: bool,
+}
+
+impl MockIpfsPinner {
+    pub fn new(should_fail: bool) -> Self {
+        Self { should_fail }
+    }
+}
+
+#[async_trait::async_trait]
+impl IpfsPinner for MockIpfsPinner {
+    async fn pin(&self, bytes: &[u8], _file_name: &str) -> Result<String, ApiError> {
+        if self.should_fail {
+            Err(ApiError::ServiceUnavailable("Mock IPFS error".to_string()))
+        } else {
+            Ok(compute_ipfs_cid(bytes))
+        }
+    }
+}
+
+/// Pin evidence to IPFS, falling back to S3-only and logging a warning on failure (#1423).
+pub async fn pin_evidence_with_fallback(
+    pinner: Option<&std::sync::Arc<dyn IpfsPinner>>,
+    bytes: &[u8],
+    file_name: &str,
+) -> Option<String> {
+    if let Some(pinner) = pinner {
+        match pinner.pin(bytes, file_name).await {
+            Ok(cid) => {
+                tracing::info!(cid = %cid, file_name = %file_name, "Pinned evidence to IPFS");
+                Some(cid)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, file_name = %file_name, "IPFS pinning failed, falling back to S3-only");
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
 fn extension_for(content_type: &str) -> &'static str {
     match base_content_type(content_type) {
         "image/png" => "png",
@@ -390,5 +549,32 @@ mod tests {
             hash_at_upload,
             "tamper must be detectable by re-hashing"
         );
+    }
+
+    #[tokio::test]
+    async fn ipfs_cid_computation_and_verification() {
+        let bytes = b"dispute-screenshot-payload-evidence";
+        let cid = compute_ipfs_cid(bytes);
+        assert!(cid.starts_with("Qm"), "CIDv0 must start with Qm, got {cid}");
+        assert_eq!(cid.len(), 46, "CIDv0 string length should be 46 characters");
+        assert!(verify_ipfs_cid(bytes, &cid));
+        assert!(!verify_ipfs_cid(b"tampered-payload", &cid));
+    }
+
+    #[tokio::test]
+    async fn ipfs_pinning_success_and_fallback_on_failure() {
+        let bytes = b"dispute-screenshot-payload-evidence";
+
+        // Mock success
+        let success_pinner: Arc<dyn IpfsPinner> = Arc::new(MockIpfsPinner::new(false));
+        let cid = pin_evidence_with_fallback(Some(&success_pinner), bytes, "evidence.png").await;
+        assert!(cid.is_some());
+        let cid = cid.unwrap();
+        assert!(verify_ipfs_cid(bytes, &cid));
+
+        // Mock failure falls back silently to S3-only
+        let fail_pinner: Arc<dyn IpfsPinner> = Arc::new(MockIpfsPinner::new(true));
+        let fallback_cid = pin_evidence_with_fallback(Some(&fail_pinner), bytes, "evidence.png").await;
+        assert!(fallback_cid.is_none(), "Pinning failure must fall back without returning err");
     }
 }

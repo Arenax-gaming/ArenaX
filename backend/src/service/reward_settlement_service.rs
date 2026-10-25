@@ -79,6 +79,51 @@ impl RewardSettlementService {
         }
     }
 
+    /// Settle refund for a cancelled tournament registrant.
+    /// Idempotent: checks for existing settlement with key `refund:{tournament_id}:{user_id}`.
+    pub async fn settle_tournament_refund(
+        &self,
+        tournament_id: &str,
+        user_id: &str,
+        amount: &str,
+        asset: &str,
+    ) -> Result<RewardSettlement, ApiError> {
+        let refund_match_id = format!("refund:{}:{}", tournament_id, user_id);
+
+        if let Some(existing) = self.get_settlement(&refund_match_id).await? {
+            if existing.is_settled() {
+                return Ok(existing);
+            }
+            if existing.status != Some(SettlementStatus::Failed) {
+                return Ok(existing);
+            }
+        }
+
+        let mut settlement = RewardSettlement::new(
+            refund_match_id.clone(),
+            user_id.to_string(),
+            amount.to_string(),
+            asset.to_string(),
+        );
+
+        self.persist_settlement(&settlement)?;
+
+        match self.call_settlement_contract(&settlement).await {
+            Ok(tx_hash) => {
+                settlement.tx_hash = Some(tx_hash);
+                settlement.status = Some(SettlementStatus::Confirmed);
+                settlement.settled_at = Some(Utc::now());
+                self.persist_settlement(&settlement)?;
+                Ok(settlement)
+            }
+            Err(e) => {
+                settlement.status = Some(SettlementStatus::Failed);
+                self.persist_settlement(&settlement)?;
+                Err(e)
+            }
+        }
+    }
+
     /// Compute rewards deterministically based on stake amount.
     /// Winner receives the full stake amount (deterministic calculation).
     fn compute_reward(&self, stake_amount: &str) -> Result<String, ApiError> {
@@ -102,18 +147,10 @@ impl RewardSettlementService {
         updated.status = Some(SettlementStatus::Submitted);
         self.persist_settlement(&updated)?;
 
-        // TODO: Implement actual contract call to escrow/token contracts
-        // This would use Stellar SDK or Soroban client
-        // For now, return a placeholder transaction hash
         let _pool = &self.pool;
-        let tx_hash = format!(
-            "tx_{}_{}_{}",
-            settlement.match_id,
-            settlement.winner,
-            Utc::now().timestamp()
-        );
-
-        Ok(tx_hash)
+        Err(ApiError::internal_error(
+            "Match reward contract is not configured for on-chain settlement",
+        ))
     }
 
     /// Get existing settlement by match ID.
@@ -178,7 +215,6 @@ mod tests {
             Utc::now().timestamp_nanos_opt().unwrap_or(0)
         );
 
-        // First settlement
         let result1 = service
             .settle_match_reward(
                 match_id.clone(),
@@ -186,10 +222,9 @@ mod tests {
                 "1000".to_string(),
                 "XLM".to_string(),
             )
-            .await
-            .unwrap();
+            .await;
+        assert!(result1.is_err(), "unconfigured settlement must not report success");
 
-        // Second settlement attempt should return same result (idempotent)
         let result2 = service
             .settle_match_reward(
                 match_id.clone(),
@@ -197,11 +232,8 @@ mod tests {
                 "1000".to_string(),
                 "XLM".to_string(),
             )
-            .await
-            .unwrap();
-
-        assert_eq!(result1.match_id, result2.match_id);
-        assert_eq!(result1.tx_hash, result2.tx_hash);
+            .await;
+        assert!(result2.is_err(), "retry must also fail while settlement is unconfigured");
     }
 
     #[tokio::test]
@@ -212,20 +244,21 @@ mod tests {
             Utc::now().timestamp_nanos_opt().unwrap_or(0)
         );
 
-        service
+        let settlement_result = service
             .settle_match_reward(
                 match_id.clone(),
                 "winner1".to_string(),
                 "500".to_string(),
                 "USDC".to_string(),
             )
-            .await
-            .unwrap();
+            .await;
+        assert!(settlement_result.is_err());
 
         let retrieved = service.get_settlement(&match_id).await.unwrap();
         assert!(retrieved.is_some());
         let settlement = retrieved.unwrap();
         assert_eq!(settlement.winner, "winner1");
-        assert!(settlement.tx_hash.is_some());
+        assert!(settlement.tx_hash.is_none());
+        assert_eq!(settlement.status, Some(SettlementStatus::Failed));
     }
 }

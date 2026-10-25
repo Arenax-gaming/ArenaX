@@ -4,6 +4,8 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { routing, Locale } from "@/i18n/routing";
 import "./globals.css";
+// Contrast-audited overrides (#1321) — must come after globals.css.
+import "@/styles/tokens.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { AccessibilityProvider } from "@/components/providers/AccessibilityProvider";
