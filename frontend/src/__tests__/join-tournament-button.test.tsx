@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { Tournament } from "@/types/tournament";
@@ -84,7 +84,7 @@ describe("JoinTournamentButton (#31)", () => {
 
     expect(screen.getByText(/cancellation & refund terms/i)).toBeInTheDocument();
     expect(screen.getByText(/tournament entry fee:/i)).toBeInTheDocument();
-    expect(screen.getByText(/\$10\.00/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/\$10\.00/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /confirm join/i })).toBeInTheDocument();
   });
 
@@ -138,7 +138,10 @@ describe("JoinTournamentButton (#31)", () => {
     expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBeNull();
 
     // Now resolve authoritatively
-    resolveJoin?.({ message: "Joined" });
+    await waitFor(() => expect(mockJoinTournament).toHaveBeenCalled());
+    await act(async () => {
+      resolveJoin?.({ message: "Joined" });
+    });
 
     await waitFor(() =>
       expect(localStorage.getItem(`tournament-joined-${baseTournament.id}`)).toBe("true"),

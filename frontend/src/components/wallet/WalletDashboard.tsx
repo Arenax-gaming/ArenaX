@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { BalanceCards } from "@/components/wallet/BalanceCards";
 import { DepositModal, FiatProvider } from "@/components/wallet/DepositModal";
 import { CurrencySelector } from "@/components/wallet/CurrencySelector";
-import { DepositModal } from "@/components/wallet/DepositModal";
 import { ExchangeRateDisplay } from "@/components/wallet/ExchangeRateDisplay";
 import { TransactionHistory } from "@/components/wallet/TransactionHistory";
 import { TransactionToasts } from "@/components/wallet/TransactionToasts";

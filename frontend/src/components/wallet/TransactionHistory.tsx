@@ -12,16 +12,31 @@ import {
 import { EmptyState } from "@/components/common/EmptyState";
 import { TxHistoryItem } from "@/lib/wallet/types";
 import { Receipt, RefreshCw, ExternalLink } from "lucide-react";
+import { useDevice } from "@/hooks/useMobile";
+import { TransactionRowSkeleton } from "./TransactionRowSkeleton";
 
 interface TransactionHistoryProps {
   items: TxHistoryItem[];
   onClear: () => void;
   onVerifyItem?: (reference: string, provider?: string) => void;
+  /** Show skeleton rows in place of the list while history loads */
+  isLoading?: boolean;
 }
 
 // Skeleton rows roughly filling the viewport (#1319)
 const MOBILE_SKELETON_ROWS = 8;
 const DESKTOP_SKELETON_ROWS = 15;
+
+type TabType = "all" | "deposits" | "withdrawals" | "earnings";
+
+const formatTimestamp = (value: string) => {
+  try {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? value : d.toLocaleString();
+  } catch {
+    return value;
+  }
+};
 
 const statusStyles: Record<TxHistoryItem["status"], string> = {
   pending:
@@ -36,6 +51,7 @@ export function TransactionHistory({
   items,
   onClear,
   onVerifyItem,
+  isLoading = false,
 }: TransactionHistoryProps) {
   const [activeTab, setActiveTab] = useState<TabType>("all");
   const { isMobile } = useDevice();

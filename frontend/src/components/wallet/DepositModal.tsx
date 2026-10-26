@@ -357,7 +357,7 @@ export function DepositModal({
             <>
               {/* Rail Selection */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Payment Rail</label>
+                <span className="text-sm font-medium text-foreground block">Payment Rail</span>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"

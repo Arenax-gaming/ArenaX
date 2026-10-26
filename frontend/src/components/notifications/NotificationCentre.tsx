@@ -187,7 +187,6 @@ export function NotificationCentre({ className }: NotificationCentreProps) {
 
           {/* Notification list */}
           <ul
-            role="list"
             aria-label="Notification list"
             className="max-h-96 overflow-y-auto divide-y divide-border"
           >
