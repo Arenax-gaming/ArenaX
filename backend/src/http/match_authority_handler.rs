@@ -261,7 +261,6 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::get().to(get_match))
             .route("/{id}/start", web::post().to(start_match))
             .route("/{id}/complete", web::post().to(complete_match))
-            .route("/{id}/dispute", web::post().to(raise_dispute))
             .route("/{id}/finalize", web::post().to(finalize_match))
             .route("/{id}/verify", web::get().to(verify_match_outcome))
             .route("/{id}/reconcile", web::post().to(reconcile_match))
