@@ -22,6 +22,7 @@ import {
   getPrimarySponsor,
   TournamentSponsorRow,
 } from "@/components/sponsors/TournamentSponsorBadges";
+import { StellarPrizePoolCard } from "@/components/stellar/StellarPrizePoolCard";
 
 export function TournamentDetailsPageClient() {
   const params = useParams();
