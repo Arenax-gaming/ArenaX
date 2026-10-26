@@ -118,7 +118,7 @@ fn test_hourly_circular_overwrite_168_slots() {
 fn test_store_and_verify_snapshot() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin) = setup(&env);
+    let (client, _admin) = setup(&env);
 
     // Build a reporter and register them
     let reporter = Address::generate(&env);

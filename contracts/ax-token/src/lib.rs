@@ -5,8 +5,8 @@ use flash_loan_protection::FlashLoanGuard;
 
 use arenax_events::ax_token as events;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Map, String,
-    Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env,
+    Map, String, Symbol, Vec,
 };
 
 #[contracterror]
@@ -196,6 +196,36 @@ pub enum DataKey {
     // persistent storage; `MinterList` is a small instance-level index.
     Minter(Address),
     MinterList,
+    // Configurable fee split (#1415)
+    /// Organizer share of processed fees, in basis points (0..=10_000).
+    FeeSplitBps,
+    /// Platform treasury that receives the remainder of each fee.
+    FeeTreasury,
+    /// Fee split value a governance proposal was created for.
+    FeeSplitProposal(u64),
+}
+
+/// Maximum value of `fee_split_bps` (100%).
+pub const MAX_FEE_SPLIT_BPS: u32 = 10_000;
+
+/// Outcome of `process_fee` (#1415).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSplitResult {
+    pub organizer: Address,
+    pub organizer_amount: i128,
+    pub platform_amount: i128,
+    pub fee_split_bps: u32,
+}
+
+/// Split `amount` into (organizer, platform) shares. The organizer share is
+/// rounded down; the platform keeps the remainder, so no dust is lost.
+pub fn split_fee(amount: i128, fee_split_bps: u32) -> (i128, i128) {
+    let organizer = amount
+        .checked_mul(fee_split_bps as i128)
+        .expect("fee overflow")
+        / MAX_FEE_SPLIT_BPS as i128;
+    (organizer, amount - organizer)
 }
 
 #[contract]

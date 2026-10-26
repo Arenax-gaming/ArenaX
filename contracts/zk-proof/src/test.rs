@@ -52,6 +52,7 @@ fn groth16_fixture(env: &Env, input: u32, c: u32) -> (VerifyingKey, Bytes, Vec<B
 
 fn setup_verifier(env: &Env) -> (ZkProofClient<'_>, Address) {
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let contract_id = env.register(ZkProof, ());
     let client = ZkProofClient::new(env, &contract_id);
     client.initialize(&Address::generate(env));

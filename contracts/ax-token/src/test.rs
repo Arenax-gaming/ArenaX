@@ -1130,8 +1130,8 @@ fn test_fee_split_twenty_percent_to_organizer() {
 
     env.mock_all_auths();
     env.ledger().set_sequence_number(1);
-    client.mint(&voter, &1_000i128);
-    client.mint(&payer, &10_000i128);
+    client.mint(&admin, &voter, &1_000i128);
+    client.mint(&admin, &payer, &10_000i128);
     client.set_fee_treasury(&treasury);
 
     govern_fee_split(&env, &client, &voter, 2_000); // 20%
@@ -1158,7 +1158,7 @@ fn test_fee_split_defaults_to_platform_only() {
 
     env.mock_all_auths();
     env.ledger().set_sequence_number(1);
-    client.mint(&payer, &1_000i128);
+    client.mint(&admin, &payer, &1_000i128);
     client.set_fee_treasury(&treasury);
 
     env.ledger().set_sequence_number(2);
@@ -1182,7 +1182,7 @@ fn test_fee_split_rejects_out_of_range_bps() {
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
     env.mock_all_auths();
-    client.mint(&voter, &1_000i128);
+    client.mint(&admin, &voter, &1_000i128);
     client.propose_fee_split(&voter, &10_001u32, &3600u64);
 }
 
@@ -1194,7 +1194,7 @@ fn test_fee_split_requires_passed_proposal() {
     let client = AxTokenClient::new(&env, &contract_id);
     env.mock_all_auths();
     env.ledger().set_sequence_number(1);
-    client.mint(&voter, &1_000i128);
+    client.mint(&admin, &voter, &1_000i128);
 
     let proposal_id = client.propose_fee_split(&voter, &5_000u32, &3600u64);
     env.ledger().set_timestamp(3601);
@@ -1209,7 +1209,7 @@ fn test_unrelated_proposal_cannot_set_fee_split() {
     let contract_id = initialize_contract(&env, &admin);
     let client = AxTokenClient::new(&env, &contract_id);
     env.mock_all_auths();
-    client.mint(&voter, &1_000i128);
+    client.mint(&admin, &voter, &1_000i128);
 
     let desc = String::from_str(&env, "Something else");
     let proposal_id = client.create_proposal(&voter, &desc, &3600u64);

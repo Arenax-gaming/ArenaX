@@ -6,6 +6,7 @@ use soroban_sdk::{
     token::{StellarAssetClient, TokenClient},
     Env, Vec,
 };
+use time_lock::{TimeLock, TimeLockClient as FullTimeLockClient};
 
 struct TestSetup<'a> {
     client: TreasuryClient<'a>,
@@ -26,11 +27,12 @@ fn setup(env: &Env) -> TestSetup<'_> {
     let token_client = token::Client::new(env, &token);
 
     let timelock_id = env.register(TimeLock, ());
-    let timelock = TimeLockClient::new(env, &timelock_id);
+    let timelock = FullTimeLockClient::new(env, &timelock_id);
     timelock.initialize(&admin, &3600, &86400, &1);
 
     let contract_id = env.register(Treasury, ());
     let client = TreasuryClient::new(env, &contract_id);
+    timelock.add_governor(&admin, &contract_id);
 
     let mut signers = Vec::new(env);
     signers.push_back(admin.clone());
