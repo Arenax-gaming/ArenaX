@@ -1,3 +1,4 @@
+use arenax_tournament_realtime::{TournamentHub, TournamentUpdate, UpdateKind};
 use crate::models::tournament::*;
 use crate::models::user::User;
 use crate::models::wallet::*;
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 pub struct TournamentService {
     db_pool: DbPool,
     redis_client: Option<RedisClient>,
+    tournament_updates: Option<TournamentHub>,
 }
 
 impl TournamentService {
@@ -20,7 +22,13 @@ impl TournamentService {
         Self { 
             db_pool,
             redis_client: None,
+            tournament_updates: None,
         }
+    }
+
+    pub fn with_tournament_updates(mut self, updates: TournamentHub) -> Self {
+        self.tournament_updates = Some(updates);
+        self
     }
 
     pub fn with_redis(mut self, redis_client: RedisClient) -> Self {
@@ -339,6 +347,7 @@ impl TournamentService {
         tournament_id: Uuid,
         new_status: TournamentStatus,
     ) -> Result<Tournament, ApiError> {
+        let old_status = self.get_tournament_by_id(tournament_id).await?.status;
         let tournament = sqlx::query_as!(
             Tournament,
             r#"
@@ -369,7 +378,7 @@ impl TournamentService {
         // Publish status change event
         self.publish_tournament_event(TournamentEvent::status_changed(
             tournament_id,
-            self.get_tournament_by_id(tournament_id).await?.status,
+            old_status,
             new_status,
         )).await?;
 
@@ -569,20 +578,12 @@ impl TournamentService {
     }
 
     async fn update_prize_pool(&self, tournament_id: Uuid, entry_fee: i64) -> Result<(), ApiError> {
-        sqlx::query!(
-            r#"
-            UPDATE prize_pools 
-            SET total_amount = total_amount + $1, updated_at = $2
-            WHERE tournament_id = $3
-            "#,
-            entry_fee,
-            Utc::now(),
-            tournament_id
-        )
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| ApiError::DatabaseError(e))?;
-
+        let (amount, currency) = crate::realtime::tournament_mutations::add_to_prize_pool(
+            &self.db_pool, tournament_id, entry_fee,
+        ).await?;
+        self.publish_tournament_event(TournamentEvent::prize_pool_changed(
+            tournament_id, amount, currency,
+        )).await?;
         Ok(())
     }
 
@@ -1197,6 +1198,26 @@ impl TournamentService {
 
     // Real-time event publishing methods
     async fn publish_tournament_event(&self, event: TournamentEvent) -> Result<(), ApiError> {
+        if let Some(updates) = &self.tournament_updates {
+            use crate::realtime::TournamentEventType::*;
+            let kind = match &event.event_type {
+                Created => UpdateKind::Created,
+                PrizePoolChanged => UpdateKind::PrizePoolChanged,
+                MatchCompleted => UpdateKind::MatchResult,
+                ParticipantJoined | ParticipantLeft => UpdateKind::ParticipantsChanged,
+                RoundStarted | RoundCompleted => UpdateKind::BracketChanged,
+                _ => UpdateKind::StatusChanged,
+            };
+            match serde_json::to_value(&event) {
+                Ok(data) => {
+                    let update = TournamentUpdate::new(event.tournament_id, kind, data);
+                    if let Err(error) = updates.publish(&update).await {
+                        tracing::warn!(%error, "Tournament mutation succeeded but live delivery failed");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "Unable to serialize tournament update"),
+            }
+        }
         if let Some(ref redis_client) = self.redis_client {
             redis_client.publish_tournament_event(event.tournament_id, &event).await
                 .map_err(|e| ApiError::InternalServerError(format!("Failed to publish tournament event: {}", e)))?;

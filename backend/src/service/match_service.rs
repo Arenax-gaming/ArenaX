@@ -1,3 +1,4 @@
+use arenax_tournament_realtime::{TournamentHub, TournamentUpdate, UpdateKind};
 use crate::models::match_models::*;
 use crate::models::user::User;
 use crate::db::DbPool;
@@ -12,6 +13,7 @@ use std::cmp::Ordering;
 pub struct MatchService {
     db_pool: DbPool,
     redis_client: Option<RedisClient>,
+    tournament_updates: Option<TournamentHub>,
 }
 
 impl MatchService {
@@ -19,7 +21,13 @@ impl MatchService {
         Self { 
             db_pool,
             redis_client: None,
+            tournament_updates: None,
         }
+    }
+
+    pub fn with_tournament_updates(mut self, updates: TournamentHub) -> Self {
+        self.tournament_updates = Some(updates);
+        self
     }
 
     pub fn with_redis(mut self, redis_client: RedisClient) -> Self {
@@ -1374,6 +1382,22 @@ impl From<i32> for QueueStatus {
 impl MatchService {
     // Real-time event publishing methods
     async fn publish_match_event(&self, event: MatchEvent) -> Result<(), ApiError> {
+        if let (Some(updates), Some(tournament_id)) = (&self.tournament_updates, event.tournament_id) {
+            let kind = match &event.event_type {
+                crate::realtime::MatchEventType::Completed |
+                crate::realtime::MatchEventType::ScoreReported => UpdateKind::MatchResult,
+                _ => UpdateKind::BracketChanged,
+            };
+            match serde_json::to_value(&event) {
+                Ok(data) => {
+                    let update = TournamentUpdate::new(tournament_id, kind, data);
+                    if let Err(error) = updates.publish(&update).await {
+                        tracing::warn!(%error, "Match mutation succeeded but tournament delivery failed");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "Unable to serialize tournament match update"),
+            }
+        }
         if let Some(ref redis_client) = self.redis_client {
             redis_client.publish_match_event(event.match_id, &event).await
                 .map_err(|e| ApiError::InternalServerError(format!("Failed to publish match event: {}", e)))?;

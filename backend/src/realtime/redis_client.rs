@@ -1,73 +1,78 @@
-use redis::{Client, Connection, RedisResult};
 use crate::config::Config;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use redis::{aio::MultiplexedConnection, Client, RedisResult};
+use serde::Serialize;
 
+#[derive(Clone)]
 pub struct RedisClient {
     client: Client,
-    connection: Arc<Mutex<Option<Connection>>>,
 }
 
 impl RedisClient {
     pub fn new(config: &Config) -> RedisResult<Self> {
         let client = Client::open(config.redis.url.clone())?;
-        Ok(Self {
-            client,
-            connection: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self { client })
     }
 
-    pub async fn get_connection(&self) -> RedisResult<Connection> {
-        let mut conn_guard = self.connection.lock().await;
-        if conn_guard.is_none() {
-            *conn_guard = Some(self.client.get_connection()?);
-        }
-        Ok(conn_guard.as_ref().unwrap().clone())
+    pub async fn get_connection(&self) -> RedisResult<MultiplexedConnection> {
+        self.client.get_multiplexed_async_connection().await
     }
 
-    pub async fn publish_tournament_event(&self, tournament_id: uuid::Uuid, event: &TournamentEvent) -> RedisResult<()> {
+    pub async fn publish_tournament_event<T: Serialize>(
+        &self,
+        tournament_id: uuid::Uuid,
+        event: &T,
+    ) -> RedisResult<()> {
+        self.publish(&format!("tournament:{tournament_id}"), event)
+            .await
+    }
+
+    pub async fn publish_match_event<T: Serialize>(
+        &self,
+        match_id: uuid::Uuid,
+        event: &T,
+    ) -> RedisResult<()> {
+        self.publish(&format!("match:{match_id}"), event).await
+    }
+
+    pub async fn publish_global_event<T: Serialize>(&self, event: &T) -> RedisResult<()> {
+        self.publish("global", event).await
+    }
+
+    async fn publish<T: Serialize>(&self, channel: &str, event: &T) -> RedisResult<()> {
         let mut conn = self.get_connection().await?;
-        let channel = format!("tournament:{}", tournament_id);
-        let message = serde_json::to_string(event)?;
-        redis::cmd("PUBLISH").arg(channel).arg(message).execute(&mut conn);
+        let message = serde_json::to_string(event).map_err(|error| {
+            redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "Unable to serialize real-time event",
+                error.to_string(),
+            ))
+        })?;
+        let _: usize = redis::cmd("PUBLISH")
+            .arg(channel)
+            .arg(message)
+            .query_async(&mut conn)
+            .await?;
         Ok(())
     }
 
-    pub async fn publish_match_event(&self, match_id: uuid::Uuid, event: &MatchEvent) -> RedisResult<()> {
-        let mut conn = self.get_connection().await?;
-        let channel = format!("match:{}", match_id);
-        let message = serde_json::to_string(event)?;
-        redis::cmd("PUBLISH").arg(channel).arg(message).execute(&mut conn);
-        Ok(())
+    pub async fn subscribe_tournament(
+        &self,
+        tournament_id: uuid::Uuid,
+    ) -> RedisResult<redis::aio::PubSub> {
+        self.subscribe(&format!("tournament:{tournament_id}")).await
     }
 
-    pub async fn publish_global_event(&self, event: &GlobalEvent) -> RedisResult<()> {
-        let mut conn = self.get_connection().await?;
-        let message = serde_json::to_string(event)?;
-        redis::cmd("PUBLISH").arg("global").arg(message).execute(&mut conn);
-        Ok(())
+    pub async fn subscribe_match(&self, match_id: uuid::Uuid) -> RedisResult<redis::aio::PubSub> {
+        self.subscribe(&format!("match:{match_id}")).await
     }
 
-    pub async fn subscribe_tournament(&self, tournament_id: uuid::Uuid) -> RedisResult<redis::PubSub> {
-        let mut conn = self.get_connection().await?;
-        let mut pubsub = conn.as_pubsub();
-        let channel = format!("tournament:{}", tournament_id);
-        pubsub.subscribe(&channel)?;
-        Ok(pubsub)
+    pub async fn subscribe_global(&self) -> RedisResult<redis::aio::PubSub> {
+        self.subscribe("global").await
     }
 
-    pub async fn subscribe_match(&self, match_id: uuid::Uuid) -> RedisResult<redis::PubSub> {
-        let mut conn = self.get_connection().await?;
-        let mut pubsub = conn.as_pubsub();
-        let channel = format!("match:{}", match_id);
-        pubsub.subscribe(&channel)?;
-        Ok(pubsub)
-    }
-
-    pub async fn subscribe_global(&self) -> RedisResult<redis::PubSub> {
-        let mut conn = self.get_connection().await?;
-        let mut pubsub = conn.as_pubsub();
-        pubsub.subscribe("global")?;
+    async fn subscribe(&self, channel: &str) -> RedisResult<redis::aio::PubSub> {
+        let mut pubsub = self.client.get_async_pubsub().await?;
+        pubsub.subscribe(channel).await?;
         Ok(pubsub)
     }
 }

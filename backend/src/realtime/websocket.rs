@@ -1,10 +1,10 @@
-use actix::{Actor, Context, Handler, Message, Recipient};
+use crate::realtime::events::*;
+use actix::{Actor, ActorContext, Context, Handler, Message, Recipient, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::realtime::events::*;
 
 /// WebSocket connection actor
 pub struct WebSocketConnection {
@@ -15,6 +15,20 @@ pub struct WebSocketConnection {
 
 impl Actor for WebSocketConnection {
     type Context = ws::WebsocketContext<Self>;
+}
+
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WebSocketConnection {
+    fn handle(&mut self, message: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        match message {
+            Ok(ws::Message::Ping(payload)) => ctx.pong(&payload),
+            Ok(ws::Message::Close(reason)) => {
+                ctx.close(reason);
+                ctx.stop();
+            }
+            Err(_) => ctx.stop(),
+            _ => {}
+        }
+    }
 }
 
 /// Message for sending data to WebSocket
@@ -111,22 +125,15 @@ pub async fn tournament_websocket(
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, Error> {
     let tournament_id = path.into_inner();
-    let ws = ws::start(
+    ws::start(
         WebSocketConnection {
             id: Uuid::new_v4(),
             user_id: None, // TODO: Extract from JWT token
-            subscriptions: HashMap::new(),
+            subscriptions: HashMap::from([(format!("tournament:{tournament_id}"), true)]),
         },
         &req,
         stream,
-    )?;
-
-    // Subscribe to tournament channel
-    ws.do_send(Subscribe {
-        channel: format!("tournament:{}", tournament_id),
-    });
-
-    Ok(HttpResponse::Ok().json(ws))
+    )
 }
 
 /// WebSocket handler for match events
@@ -136,22 +143,15 @@ pub async fn match_websocket(
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, Error> {
     let match_id = path.into_inner();
-    let ws = ws::start(
+    ws::start(
         WebSocketConnection {
             id: Uuid::new_v4(),
             user_id: None, // TODO: Extract from JWT token
-            subscriptions: HashMap::new(),
+            subscriptions: HashMap::from([(format!("match:{match_id}"), true)]),
         },
         &req,
         stream,
-    )?;
-
-    // Subscribe to match channel
-    ws.do_send(Subscribe {
-        channel: format!("match:{}", match_id),
-    });
-
-    Ok(HttpResponse::Ok().json(ws))
+    )
 }
 
 /// WebSocket handler for global events
@@ -159,22 +159,15 @@ pub async fn global_websocket(
     req: HttpRequest,
     stream: web::Payload,
 ) -> Result<HttpResponse, Error> {
-    let ws = ws::start(
+    ws::start(
         WebSocketConnection {
             id: Uuid::new_v4(),
             user_id: None, // TODO: Extract from JWT token
-            subscriptions: HashMap::new(),
+            subscriptions: HashMap::from([("global".to_owned(), true)]),
         },
         &req,
         stream,
-    )?;
-
-    // Subscribe to global channel
-    ws.do_send(Subscribe {
-        channel: "global".to_string(),
-    });
-
-    Ok(HttpResponse::Ok().json(ws))
+    )
 }
 
 /// WebSocket handler for user-specific events
@@ -184,20 +177,13 @@ pub async fn user_websocket(
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, Error> {
     let user_id = path.into_inner();
-    let ws = ws::start(
+    ws::start(
         WebSocketConnection {
             id: Uuid::new_v4(),
             user_id: Some(user_id),
-            subscriptions: HashMap::new(),
+            subscriptions: HashMap::from([(format!("user:{user_id}"), true)]),
         },
         &req,
         stream,
-    )?;
-
-    // Subscribe to user-specific channels
-    ws.do_send(Subscribe {
-        channel: format!("user:{}", user_id),
-    });
-
-    Ok(HttpResponse::Ok().json(ws))
+    )
 }

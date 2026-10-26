@@ -16,6 +16,7 @@ pub struct TournamentEvent {
 pub enum TournamentEventType {
     Created,
     StatusChanged,
+    PrizePoolChanged,
     ParticipantJoined,
     ParticipantLeft,
     RegistrationOpened,
@@ -32,6 +33,7 @@ pub enum TournamentEventType {
 pub enum TournamentEventData {
     Created { name: String, game: String, max_participants: i32 },
     StatusChanged { old_status: TournamentStatus, new_status: TournamentStatus },
+    PrizePoolChanged { total_amount: String, currency: String },
     ParticipantJoined { user_id: Uuid, username: String, current_count: i32 },
     ParticipantLeft { user_id: Uuid, username: String, current_count: i32 },
     RegistrationOpened,
@@ -136,6 +138,15 @@ impl TournamentEvent {
             tournament_id,
             timestamp: Utc::now(),
             data: TournamentEventData::StatusChanged { old_status, new_status },
+        }
+    }
+
+    pub fn prize_pool_changed(tournament_id: Uuid, total_amount: String, currency: String) -> Self {
+        Self {
+            event_type: TournamentEventType::PrizePoolChanged,
+            tournament_id,
+            timestamp: Utc::now(),
+            data: TournamentEventData::PrizePoolChanged { total_amount, currency },
         }
     }
 

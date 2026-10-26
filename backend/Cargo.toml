@@ -27,3 +27,7 @@ actix-web-actors = "4.2"
 rust_decimal = { version = "1.32", features = ["serde"] }
 validator = { version = "0.16", features = ["derive"] }
 bcrypt = "0.14"
+
+# Real-time tournament delivery is independently testable without PostgreSQL.
+arenax-tournament-realtime = { path = "realtime" }
+actix = "0.13"
