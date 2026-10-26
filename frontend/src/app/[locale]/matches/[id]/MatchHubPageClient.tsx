@@ -13,6 +13,7 @@ import {
 import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
 import { SpectatorMode } from "@/components/match/SpectatorMode";
+import { StellarTransactionList } from "@/components/stellar/StellarTransactionList";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -434,6 +435,32 @@ function MatchHubPageContent() {
                   <InfoRow label="Bracket Type" value={match.bracketFormat.replace(/_/g, " ")} />
                   <InfoRow label="Prize Pool" value={`$${match.prizePool.toLocaleString()}`} />
                   <InfoRow label="Series Notes" value={match.notes} />
+                </div>
+              </div>
+
+              {match.screenshots && match.screenshots.length > 0 ? (
+                <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+                  <div className="text-sm font-semibold text-foreground">Screenshots</div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {match.screenshots.map((src, index) => (
+                      <a key={src} href={src} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt={`Match result screenshot ${index + 1}`}
+                          className="w-full rounded-2xl border border-border object-cover"
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="rounded-[32px] border border-border bg-white p-6 shadow-sm">
+                <div className="text-sm font-semibold text-foreground">Stellar Transactions</div>
+                <div className="mt-4">
+                  <StellarTransactionList transactions={match.stellarTransactions ?? []} />
                 </div>
               </div>
             </div>

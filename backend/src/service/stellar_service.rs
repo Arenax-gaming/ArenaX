@@ -772,6 +772,37 @@ impl StellarService {
         ))
     }
 
+    /// List every prize-pool transaction (entry fee escrows and prize
+    /// distributions) recorded for a tournament, newest first.
+    pub async fn get_tournament_prize_pool_transactions(
+        &self,
+        tournament_id: Uuid,
+    ) -> Result<Vec<StellarTransaction>, StellarError> {
+        let transactions = sqlx::query_as::<_, StellarTransaction>(
+            r#"
+            SELECT * FROM stellar_transactions
+            WHERE memo IN ($1, $2)
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(format!("Entry fee escrow for tournament {}", tournament_id))
+        .bind(format!("Prize distribution for tournament {}", tournament_id))
+        .fetch_all(&*self.db_pool)
+        .await?;
+
+        Ok(transactions)
+    }
+
+    /// Public Stellar explorer link for a transaction on the configured network.
+    pub fn explorer_url(&self, tx_hash: &str) -> String {
+        let network = if self.network_passphrase.contains("Public Global") {
+            "public"
+        } else {
+            "testnet"
+        };
+        format!("https://stellar.expert/explorer/{}/tx/{}", network, tx_hash)
+    }
+
     // ========================================================================
     // HELPER FUNCTIONS
     // ========================================================================

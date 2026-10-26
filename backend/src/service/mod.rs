@@ -1,5 +1,6 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
+pub mod weekly_leaderboard;
 pub mod analytics_service;
 pub mod anti_cheat_service;
 pub mod api_key_service;

@@ -31,6 +31,11 @@ impl MatchService {
         }
     }
 
+    pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
+        self.redis_client = Some(redis_client);
+        self
+    }
+
     pub fn with_event_bus(mut self, event_bus: crate::realtime::event_bus::EventBus) -> Self {
         self.event_bus = Some(event_bus);
         self
@@ -839,6 +844,9 @@ impl MatchService {
         // Create Elo history records
         self.create_elo_history(&match_record, winner_id).await?;
 
+        // Real-time weekly leaderboard update (Issue #1225)
+        self.update_weekly_leaderboard(&match_record, winner_id).await;
+
         // Update on-chain reputation (if service is available)
         if let Some(rep_service) = &self.reputation_service {
             let players = vec![match_record.player1_id];
@@ -894,6 +902,33 @@ impl MatchService {
         }
 
         Ok(())
+    }
+
+    async fn update_weekly_leaderboard(&self, match_record: &Match, winner_id: Option<Uuid>) {
+        use crate::service::weekly_leaderboard::{record_points, DRAW_POINTS, WIN_POINTS};
+
+        let Some(redis_client) = &self.redis_client else {
+            return;
+        };
+        let mut conn = match redis_client.get_multiplexed_async_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Weekly leaderboard: redis connection failed: {}", e);
+                return;
+            }
+        };
+
+        let players = std::iter::once(match_record.player1_id).chain(match_record.player2_id);
+        for player in players {
+            let points = match winner_id {
+                Some(winner) if winner == player => WIN_POINTS,
+                Some(_) => 0,
+                None => DRAW_POINTS,
+            };
+            if let Err(e) = record_points(&mut conn, player, points).await {
+                error!("Weekly leaderboard update failed for {}: {}", player, e);
+            }
+        }
     }
 
     async fn determine_winner(&self, match_record: &Match) -> Result<Option<Uuid>, ApiError> {
