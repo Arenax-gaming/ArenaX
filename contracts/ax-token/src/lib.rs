@@ -248,8 +248,7 @@ impl AxToken {
     pub fn mint(env: &Env, minter: Address, to: Address, amount: i128) -> Result<(), TokenError> {
         minter.require_auth();
 
-        let config = Self::read_minter(env, &minter)
-            .ok_or(TokenError::Unauthorized)?;
+        let config = Self::read_minter(env, &minter).ok_or(TokenError::Unauthorized)?;
 
         if amount <= 0 {
             panic!("amount must be positive");
@@ -449,8 +448,7 @@ impl AxToken {
     ) -> Result<(), TokenError> {
         minter.require_auth();
 
-        let config = Self::read_minter(env, &minter)
-            .ok_or(TokenError::Unauthorized)?;
+        let config = Self::read_minter(env, &minter).ok_or(TokenError::Unauthorized)?;
 
         if recipients.len() != amounts.len() {
             panic!("recipients and amounts length mismatch");
@@ -824,7 +822,8 @@ impl AxToken {
             panic!("fee_split_bps must be between 0 and 10000");
         }
         let description = String::from_str(&env, "Update fee_split_bps");
-        let proposal_id = Self::create_proposal(env.clone(), proposer, description, voting_duration);
+        let proposal_id =
+            Self::create_proposal(env.clone(), proposer, description, voting_duration);
         env.storage()
             .instance()
             .set(&DataKey::FeeSplitProposal(proposal_id), &new_bps);
@@ -859,7 +858,9 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
-        env.storage().instance().set(&DataKey::FeeSplitBps, &new_bps);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitBps, &new_bps);
 
         env.events()
             .publish((symbol_short!("FEE_BPS"), proposal_id), new_bps);
@@ -871,7 +872,12 @@ impl AxToken {
     /// `fee_split_bps` of it goes to `organizer`; the remainder goes to the
     /// platform treasury set by `set_fee_treasury`. Both legs move in one
     /// call under a single flash-loan sequence check.
-    pub fn process_fee(env: Env, payer: Address, organizer: Address, amount: i128) -> FeeSplitResult {
+    pub fn process_fee(
+        env: Env,
+        payer: Address,
+        organizer: Address,
+        amount: i128,
+    ) -> FeeSplitResult {
         payer.require_auth();
         if Self::is_paused(env.clone()) {
             panic!("contract is paused");

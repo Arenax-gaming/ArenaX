@@ -1149,12 +1149,16 @@ impl Treasury {
             .instance()
             .get(&DataKey::TotalFeesToOrganizers)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalFeesToOrganizers, &(routed + organizer_amount));
+        env.storage().instance().set(
+            &DataKey::TotalFeesToOrganizers,
+            &(routed + organizer_amount),
+        );
 
         env.events().publish(
-            (Symbol::new(&env, "Treasury"), Symbol::new(&env, "FEE_SPLIT")),
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT"),
+            ),
             (
                 payer,
                 organizer.clone(),

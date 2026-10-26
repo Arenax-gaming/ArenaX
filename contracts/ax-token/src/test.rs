@@ -1113,7 +1113,8 @@ fn test_datakey_variants_storage_round_trip() {
 /// Pass a governance proposal setting `fee_split_bps` to `bps`.
 fn govern_fee_split(env: &Env, client: &AxTokenClient, voter: &Address, bps: u32) {
     let proposal_id = client.propose_fee_split(voter, &bps, &3600u64);
-    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 1);
     client.vote_on_proposal(voter, &proposal_id, &true);
     env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
     assert_eq!(client.set_fee_split_via_governance(&proposal_id), bps);
@@ -1136,7 +1137,8 @@ fn test_fee_split_twenty_percent_to_organizer() {
     govern_fee_split(&env, &client, &voter, 2_000); // 20%
     assert_eq!(client.get_fee_split_bps(), 2_000);
 
-    env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+    env.ledger()
+        .set_sequence_number(env.ledger().sequence() + 1);
     let result = client.process_fee(&payer, &organizer, &1_000i128);
 
     assert_eq!(result.organizer_amount, 200);

@@ -232,9 +232,10 @@ impl AccessControl {
         env.storage()
             .persistent()
             .set(&DataKey::Role(account.clone(), ROLE_MINTER), &true);
-        env.storage()
-            .persistent()
-            .set(&DataKey::MinterCap(account.clone()), &MinterCap { cap, period });
+        env.storage().persistent().set(
+            &DataKey::MinterCap(account.clone()),
+            &MinterCap { cap, period },
+        );
 
         events::emit_role_granted(&env, &account, ROLE_MINTER, &admin);
 

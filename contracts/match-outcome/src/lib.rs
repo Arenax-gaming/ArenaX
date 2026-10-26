@@ -47,9 +47,7 @@ impl MatchOutcomeContract {
     }
 
     pub fn get_outcome(env: Env, match_id: BytesN<32>) -> Option<MatchOutcome> {
-        env.storage()
-            .instance()
-            .get(&DataKey::Outcome(match_id))
+        env.storage().instance().get(&DataKey::Outcome(match_id))
     }
 }
 
