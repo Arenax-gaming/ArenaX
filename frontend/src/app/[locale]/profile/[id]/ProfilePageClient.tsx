@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { isSectionVisible } from '@/lib/profile-utils';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
@@ -9,8 +10,9 @@ import { MatchHistory } from '@/components/profile/MatchHistory';
 import { AchievementShowcase } from '@/components/profile/AchievementShowcase';
 import { FriendsList } from '@/components/profile/FriendsList';
 import { ActivityFeed } from '@/components/profile/ActivityFeed';
+import { PlayerComparison } from '@/components/profile/PlayerComparison';
 import { Button } from '@/components/ui/Button';
-import { Share2, Settings, UserPlus, MessageCircle } from 'lucide-react';
+import { Share2, Settings, UserPlus, MessageCircle, Swords } from 'lucide-react';
 import type { PublicProfileViewProps } from '@/types/profile';
 
 export function ProfilePageClient({
@@ -22,6 +24,41 @@ export function ProfilePageClient({
   eloHistory,
 }: PublicProfileViewProps) {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Read opponent ID from query parameter
+  const opponentIdFromUrl = searchParams?.get('opponentId') || null;
+  const [isCompareOpen, setIsCompareOpen] = useState(Boolean(opponentIdFromUrl));
+
+  useEffect(() => {
+    if (opponentIdFromUrl) {
+      setIsCompareOpen(true);
+    }
+  }, [opponentIdFromUrl]);
+
+  const updateOpponentQuery = (newOpponentId: string | null) => {
+    const params = new URLSearchParams(searchParams ? Array.from(searchParams.entries()) : []);
+    if (newOpponentId) {
+      params.set('opponentId', newOpponentId);
+    } else {
+      params.delete('opponentId');
+    }
+    const qs = params.toString();
+    router.push(`${pathname}${qs ? `?${qs}` : ''}`);
+  };
+
+  const handleToggleCompare = () => {
+    if (isCompareOpen) {
+      if (opponentIdFromUrl) {
+        updateOpponentQuery(null);
+      }
+      setIsCompareOpen(false);
+    } else {
+      setIsCompareOpen(true);
+    }
+  };
 
   const viewerRelation: 'owner' | 'friend' | 'public' =
     user?.id === profile.id ? 'owner' : 
@@ -97,6 +134,17 @@ export function ProfilePageClient({
               Send Message
             </Button>
           )}
+
+          {/* Compare Button — Available on all profiles */}
+          <Button
+            variant={isCompareOpen ? "default" : "outline"}
+            onClick={handleToggleCompare}
+            data-testid="profile-compare-button"
+            aria-expanded={isCompareOpen}
+          >
+            <Swords className="h-4 w-4 mr-2" />
+            Compare
+          </Button>
         </div>
 
         <Button variant="outline" onClick={handleShareProfile}>
@@ -104,6 +152,25 @@ export function ProfilePageClient({
           Share Profile
         </Button>
       </div>
+
+      {/* Side-by-Side Comparison View */}
+      {isCompareOpen && (
+        <div className="mb-8">
+          <PlayerComparison
+            primaryProfile={profile}
+            primaryStats={stats}
+            availableFriends={friends}
+            selectedOpponentId={opponentIdFromUrl}
+            onSelectOpponent={(newOpponentId) => {
+              updateOpponentQuery(newOpponentId);
+            }}
+            onClose={() => {
+              updateOpponentQuery(null);
+              setIsCompareOpen(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

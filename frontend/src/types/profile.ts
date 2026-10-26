@@ -27,6 +27,23 @@ export interface PlayerStats {
     trend: 'up' | 'down' | 'stable';
     change: number;
   };
+  tournamentWins?: number;
+  reputationScore?: number;
+}
+
+export interface PlayerComparisonStats {
+  playerId: string;
+  username?: string;
+  avatar?: string;
+  winRate: number;
+  averageElo: number;
+  matchesPlayed: number;
+  tournamentWins: number;
+  reputationScore: number;
+}
+
+export interface BatchPlayerStatsResponse {
+  players: Record<string, PlayerComparisonStats>;
 }
 
 export interface Achievement {

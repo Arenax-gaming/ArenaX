@@ -1065,6 +1065,37 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // ── Player Comparison (Issue #1398) ──────────────────────────────────────────
+
+  /**
+   * GET /api/stats/compare?player_ids=id1,id2
+   *
+   * Fetch comparison statistics for multiple players in a single batch API call.
+   * Retrieves Win rate, Average ELO, Matches played, Tournament wins, Reputation score.
+   */
+  async getPlayerComparisonStats(
+    playerIds: string[]
+  ): Promise<import("../types/profile").BatchPlayerStatsResponse> {
+    if (!playerIds.length) {
+      return { players: {} };
+    }
+    const qs = new URLSearchParams({
+      player_ids: playerIds.join(","),
+    }).toString();
+    const res = await this.request<
+      | import("../types/profile").BatchPlayerStatsResponse
+      | { success?: boolean; data?: import("../types/profile").BatchPlayerStatsResponse }
+    >(`/stats/compare?${qs}`);
+
+    if (res && "players" in res) {
+      return res as import("../types/profile").BatchPlayerStatsResponse;
+    }
+    if (res && "data" in res && res.data && "players" in res.data) {
+      return res.data;
+    }
+    return { players: {} };
+  }
 }
 
 export const api = new ApiClient();
