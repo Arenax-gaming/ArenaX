@@ -9,14 +9,14 @@ use arenax_events::anti_cheat_oracle as events;
 use soroban_sdk::{contract, contractclient, contractimpl, Address, Bytes, Env, String, Vec};
 use storage::{
     AlertRecord, AnalyticsTotals, AntiCheatConfirmation, BatchProof, DataFeed, DataKey,
-    DetectionRule,
-    FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth, ALERT_CRITICAL,
-    ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE, FEED_STATUS_REVOKED,
-    FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY, ORACLE_HEALTHY,
-    ORACLE_OFFLINE, PROPOSAL_STATUS_ACTIVE, PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED,
-    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_EMERGENCY_PAUSE,
-    PROPOSAL_TYPE_UPDATE_QUORUM, RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE,
-    RULE_SCORE_SPIKE, RULE_STALENESS, RULE_VELOCITY,
+    DetectionRule, FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth,
+    ALERT_CRITICAL, ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE,
+    FEED_STATUS_REVOKED, FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_SCORE,
+    FEED_TYPE_TELEMETRY, ORACLE_HEALTHY, ORACLE_OFFLINE, PROPOSAL_STATUS_ACTIVE,
+    PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED, PROPOSAL_STATUS_PASSED,
+    PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_EMERGENCY_PAUSE, PROPOSAL_TYPE_UPDATE_QUORUM,
+    RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE, RULE_STALENESS,
+    RULE_VELOCITY,
 };
 
 pub use error::AntiCheatError;
@@ -1062,7 +1062,9 @@ impl AntiCheatOracle {
     /// Point the oracle at the zk-proof contract used by `batch_verify` (admin only).
     pub fn set_zk_verifier(env: Env, verifier: Address) -> Result<(), AntiCheatError> {
         Self::require_admin(&env)?;
-        env.storage().instance().set(&DataKey::ZkVerifier, &verifier);
+        env.storage()
+            .instance()
+            .set(&DataKey::ZkVerifier, &verifier);
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JoinTournamentButton } from "@/components/tournaments/JoinTournamentButton";
 import { Tournament } from "@/types/tournament";
@@ -75,7 +75,7 @@ describe("Issue #31 - Tournament Entry Resilience to Payment Latency", () => {
 
     // Fee breakdown visible
     expect(screen.getByText(/tournament entry fee:/i)).toBeInTheDocument();
-    expect(screen.getByText(/\$25\.00/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/\$25\.00/i).length).toBeGreaterThan(0);
 
     // Cancellation & refund policy visible
     expect(screen.getByText(/cancellation & refund terms:/i)).toBeInTheDocument();
@@ -116,14 +116,17 @@ describe("Issue #31 - Tournament Entry Resilience to Payment Latency", () => {
     expect(screen.queryByText(/successfully joined/i)).not.toBeInTheDocument();
 
     // Server completes round trip
-    completeResponse?.({
-      message: "Seat reserved",
-      transactionHash: "tx_authoritative_123",
+    await waitFor(() => expect(mockJoinTournament).toHaveBeenCalled());
+    await act(async () => {
+      completeResponse?.({
+        message: "Seat reserved",
+        transactionHash: "tx_authoritative_123",
+      });
     });
 
     // Authoritative response confirms seat
     await waitFor(() =>
-      expect(screen.getByText(/successfully joined/i)).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: /successfully joined/i })).toBeInTheDocument(),
     );
     expect(localStorage.getItem(`tournament-joined-${mockTournament.id}`)).toBe("true");
   });

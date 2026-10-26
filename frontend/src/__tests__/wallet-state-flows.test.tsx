@@ -246,7 +246,7 @@ describe("Issue #39 - Complete Deposit and Withdrawal State Flows", () => {
       );
 
       await waitFor(() =>
-        expect(screen.getByText(/deposit confirmed/i)).toBeInTheDocument(),
+        expect(screen.getByRole("heading", { name: /deposit confirmed/i })).toBeInTheDocument(),
       );
 
       // Replay / duplicate callback
@@ -262,7 +262,7 @@ describe("Issue #39 - Complete Deposit and Withdrawal State Flows", () => {
       );
 
       await waitFor(() =>
-        expect(screen.getByText(/deposit confirmed/i)).toBeInTheDocument(),
+        expect(screen.getByRole("heading", { name: /deposit confirmed/i })).toBeInTheDocument(),
       );
     });
 
@@ -307,7 +307,7 @@ describe("Issue #39 - Complete Deposit and Withdrawal State Flows", () => {
 
       const destInput = screen.getByLabelText(/destination address/i);
       fireEvent.change(destInput, {
-        target: { value: "GBDESTINATIONACCOUNT1234567890123456789012345678901234" },
+        target: { value: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
       });
 
       // Submit for review
@@ -334,7 +334,7 @@ describe("Issue #39 - Complete Deposit and Withdrawal State Flows", () => {
           expect.objectContaining({
             asset: "XLM",
             amount: 25,
-            destination: "GBDESTINATIONACCOUNT1234567890123456789012345678901234",
+            destination: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
           }),
         ),
       );
@@ -357,7 +357,7 @@ describe("Issue #39 - Complete Deposit and Withdrawal State Flows", () => {
 
       const destInput = screen.getByLabelText(/destination address/i);
       fireEvent.change(destInput, {
-        target: { value: "GBDESTINATIONACCOUNT1234567890123456789012345678901234" },
+        target: { value: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
       });
 
       fireEvent.click(screen.getByRole("button", { name: /review withdrawal/i }));

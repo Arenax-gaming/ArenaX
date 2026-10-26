@@ -176,8 +176,7 @@ use super::AirdropError;
 /// Off-chain style Merkle tree builder: sorted-pair hashing, odd nodes are
 /// promoted unchanged. Returns (root, proof for every leaf).
 fn build_tree(env: &Env, leaves: &[BytesN<32>]) -> (BytesN<32>, std::vec::Vec<Vec<BytesN<32>>>) {
-    let mut proofs: std::vec::Vec<Vec<BytesN<32>>> =
-        leaves.iter().map(|_| Vec::new(env)).collect();
+    let mut proofs: std::vec::Vec<Vec<BytesN<32>>> = leaves.iter().map(|_| Vec::new(env)).collect();
     // positions[i] = index of leaf i's ancestor in the current level.
     let mut positions: std::vec::Vec<usize> = (0..leaves.len()).collect();
     let mut level: std::vec::Vec<BytesN<32>> = leaves.to_vec();
@@ -251,7 +250,10 @@ fn token_drop_valid_proof_claims_tokens() {
             amount
         );
     }
-    assert_eq!(client.get_token_drop(&drop_token).unwrap().claimed, amount * 5);
+    assert_eq!(
+        client.get_token_drop(&drop_token).unwrap().claimed,
+        amount * 5
+    );
 }
 
 #[test]

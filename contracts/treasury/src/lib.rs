@@ -9,7 +9,33 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
-use time_lock::{TimeLockClient, CATEGORY_TREASURY, PRIORITY_MEDIUM};
+pub const CATEGORY_TREASURY: u32 = 1;
+pub const PRIORITY_MEDIUM: u32 = 1;
+
+mod timelock_client {
+    use soroban_sdk::{contractclient, Address, Bytes, BytesN, Env, Symbol};
+
+    #[contractclient(name = "TimeLockClient")]
+    #[allow(dead_code)]
+    pub trait TimeLockInterface {
+        #[allow(clippy::too_many_arguments)]
+        fn schedule_operation(
+            env: Env,
+            caller: Address,
+            operation_id: BytesN<32>,
+            target: Address,
+            function_name: Symbol,
+            args: Bytes,
+            delay: u64,
+            description: Symbol,
+            category: u32,
+            priority: u32,
+            custom_grace_period: u64,
+        );
+        fn execute_operation(env: Env, caller: Address, operation_id: BytesN<32>);
+    }
+}
+pub use timelock_client::TimeLockClient;
 
 // ---------------------------------------------------------------------------
 // Issue #918: Multi-sig treasury
@@ -235,12 +261,14 @@ pub fn split_fee(amount: i128, fee_split_bps: u32) -> (i128, i128) {
 #[contract]
 pub struct Treasury;
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl Treasury {
     // -----------------------------------------------------------------
     // Initialization
     // -----------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -1149,12 +1177,16 @@ impl Treasury {
             .instance()
             .get(&DataKey::TotalFeesToOrganizers)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalFeesToOrganizers, &(routed + organizer_amount));
+        env.storage().instance().set(
+            &DataKey::TotalFeesToOrganizers,
+            &(routed + organizer_amount),
+        );
 
         env.events().publish(
-            (Symbol::new(&env, "Treasury"), Symbol::new(&env, "FEE_SPLIT")),
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT"),
+            ),
             (
                 payer,
                 organizer.clone(),

@@ -125,7 +125,9 @@ mod mock_zk_verifier {
                 .get(&symbol_short!("calls"))
                 .unwrap_or(0)
                 + 1;
-            env.storage().instance().set(&symbol_short!("calls"), &calls);
+            env.storage()
+                .instance()
+                .set(&symbol_short!("calls"), &calls);
             calls
         }
 
@@ -149,13 +151,7 @@ fn proof(env: &Env, bytes: &[u8]) -> crate::OracleBatchProof {
     }
 }
 
-fn setup_batch(
-    env: &Env,
-) -> (
-    AntiCheatOracleClient<'_>,
-    MockZkVerifierClient<'_>,
-    Address,
-) {
+fn setup_batch(env: &Env) -> (AntiCheatOracleClient<'_>, MockZkVerifierClient<'_>, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let oracle = Address::generate(env);

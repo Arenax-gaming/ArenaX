@@ -266,7 +266,7 @@ export function WithdrawModal({
                   render={({ field }) => (
                     <FormItem>
                       <div className="flex justify-between items-center">
-                        <FormLabel>Amount</FormLabel>
+                        <FormLabel htmlFor="withdraw-amount-input">Amount</FormLabel>
                         <span className="text-xs text-muted-foreground">
                           Available: {selectedBalance.available.toLocaleString()} {watchedAsset}
                         </span>
@@ -298,7 +298,7 @@ export function WithdrawModal({
                   name="destination"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Destination Address</FormLabel>
+                      <FormLabel htmlFor="withdraw-destination-input">Destination Address</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -323,7 +323,7 @@ export function WithdrawModal({
                   name="memo"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Memo (Optional)</FormLabel>
+                      <FormLabel htmlFor="withdraw-memo-input">Memo (Optional)</FormLabel>
                       <FormControl>
                         <Input
                           {...field}

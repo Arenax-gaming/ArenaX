@@ -118,7 +118,7 @@ fn test_hourly_circular_overwrite_168_slots() {
 fn test_store_and_verify_snapshot() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin) = setup(&env);
+    let (client, _admin) = setup(&env);
 
     // Build a reporter and register them
     let reporter = Address::generate(&env);
@@ -133,9 +133,21 @@ fn test_store_and_verify_snapshot() {
 
     let entries = soroban_sdk::vec![
         &env,
-        LeaderboardEntry { player_hash: hash1.clone(), score: 9000, rank: 1 },
-        LeaderboardEntry { player_hash: hash2.clone(), score: 7500, rank: 2 },
-        LeaderboardEntry { player_hash: hash3.clone(), score: 6000, rank: 3 },
+        LeaderboardEntry {
+            player_hash: hash1.clone(),
+            score: 9000,
+            rank: 1
+        },
+        LeaderboardEntry {
+            player_hash: hash2.clone(),
+            score: 7500,
+            rank: 2
+        },
+        LeaderboardEntry {
+            player_hash: hash3.clone(),
+            score: 6000,
+            rank: 3
+        },
     ];
 
     let period_id: u64 = 1_700_000_000;

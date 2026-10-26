@@ -113,7 +113,7 @@ const FormLabel = React.forwardRef<
         error && "text-destructive",
         className
       )}
-      htmlFor={formItemId}
+      htmlFor={props.htmlFor || formItemId}
       {...props}
     />
   );
