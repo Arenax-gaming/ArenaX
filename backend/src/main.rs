@@ -46,6 +46,10 @@ use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine
 use crate::service::match_service::MatchService;
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
 use crate::service::stellar_service::StellarService;
+use crate::service::{
+    clamp_retention_days, PostgresTelemetryIndex, TelemetryRetentionService, TelemetryUploadService,
+    DEFAULT_RETENTION_DAYS,
+};
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
@@ -365,6 +369,36 @@ async fn main() -> io::Result<()> {
         stellar_reporter,
     ));
 
+    // Gameplay telemetry (anti-cheat): a recorded session is uploaded to the
+    // same S3/MinIO bucket under the `telemetry/` prefix and linked to its
+    // match, then purged once its retention window elapses.
+    let telemetry_retention_days = clamp_retention_days(
+        std::env::var("TELEMETRY_RETENTION_DAYS")
+            .ok()
+            .and_then(|value| value.trim().parse::<i64>().ok())
+            .unwrap_or(DEFAULT_RETENTION_DAYS),
+    );
+    let telemetry_index: Arc<PostgresTelemetryIndex> =
+        Arc::new(PostgresTelemetryIndex::new(db_pool.clone()));
+    let telemetry_upload_service = Arc::new(TelemetryUploadService::new(
+        evidence_store.clone(),
+        telemetry_index.clone(),
+        telemetry_retention_days,
+    ));
+    tracing::info!(
+        retention_days = telemetry_retention_days,
+        "Gameplay telemetry retention window"
+    );
+
+    // Hourly sweep of expired recordings. A bucket lifecycle rule on the
+    // `telemetry/` prefix is the second line of defence for objects this
+    // index never saw.
+    let telemetry_retention = Arc::new(TelemetryRetentionService::new(
+        evidence_store.clone(),
+        telemetry_index,
+    ));
+    telemetry_retention.run();
+
     let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
 
     let server = HttpServer::new(move || {
@@ -395,6 +429,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .app_data(web::Data::new(evidence_store.clone()))
             .app_data(web::Data::new(anti_cheat_service.clone()))
+            .app_data(web::Data::new(telemetry_upload_service.clone()))
             .app_data(web::Data::new(reputation_penalty_service.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
@@ -437,6 +472,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::anti_bot_handler::configure_routes)
                     // Anti-cheat microservice endpoints — Issue #1281
                     .configure(crate::http::anti_cheat_handler::configure_routes)
+                    // Gameplay telemetry upload + match linkage (anti-cheat)
+                    .configure(crate::http::telemetry_handler::configure_routes)
                     // IP whitelist/blacklist admin endpoints — Issue #975
                     .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904

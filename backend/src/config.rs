@@ -153,6 +153,10 @@ pub struct StorageConfig {
     pub s3_access_key: String,
     pub s3_secret_key: String,
     pub s3_bucket: String,
+    /// Region used to derive the SigV4 signing key. MinIO ignores it, but AWS
+    /// rejects requests signed for the wrong region, so it is configurable via
+    /// `S3_REGION` and defaults to `us-east-1`.
+    pub s3_region: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -295,6 +299,7 @@ impl Config {
         // so a deployment can never boot on a publicly-known default (#1161).
         let s3_secret_key = env_required_secret("S3_SECRET_KEY")?;
         let s3_bucket = env::var("S3_BUCKET")?;
+        let s3_region = env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
         let paystack_secret = env_required_secret("PAYSTACK_SECRET")?;
         let flutterwave_secret = env_required_secret("FLUTTERWAVE_SECRET")?;
         let jwt_secret = env_required_secret("JWT_SECRET")?;
@@ -357,6 +362,7 @@ impl Config {
                 s3_access_key,
                 s3_secret_key,
                 s3_bucket,
+                s3_region,
             },
             payments: PaymentsConfig {
                 paystack_secret,
