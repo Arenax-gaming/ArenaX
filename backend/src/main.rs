@@ -16,6 +16,7 @@ mod service;
 mod orchestrator;
 mod security;
 mod telemetry;
+mod transaction;
 mod validators;
 
 use crate::config::Config;
@@ -45,6 +46,10 @@ use crate::service::matchmaker::{MatchmakerService, MatchmakingConfig, EloEngine
 use crate::service::match_service::MatchService;
 use crate::service::soroban_service::{NetworkConfig, SorobanService};
 use crate::service::stellar_service::StellarService;
+use crate::service::{
+    clamp_retention_days, PostgresTelemetryIndex, TelemetryRetentionService, TelemetryUploadService,
+    DEFAULT_RETENTION_DAYS,
+};
 use crate::service::tournament_service::TournamentService;
 use crate::telemetry::init_telemetry;
 
@@ -206,6 +211,7 @@ async fn main() -> io::Result<()> {
             soroban_service.clone(),
             config.stellar.soroban_contract_match.clone(),
         )
+        .with_match_outcome_contract(config.stellar.soroban_contract_match_outcome.clone())
         .with_match_events(match_events.clone()),
     );
     // Store the signer secret in app_data using the SignerSecret newtype so
@@ -246,12 +252,29 @@ async fn main() -> io::Result<()> {
     // reporting, disputes, Elo ratings and matchmaking-queue management.
     let match_service = Arc::new(
         MatchService::new(db_pool.clone())
+            .with_redis(Arc::new(redis_client.clone()))
             .with_event_bus(event_bus.clone())
             .with_match_events(match_events.clone()),
     );
 
     // Response cache for read-heavy endpoints — Issue #910
     let response_cache = crate::middleware::cache::ResponseCache::new(redis_conn.clone());
+
+    // Weekly→monthly leaderboard rollup — Issue #1226
+    {
+        let monthly = crate::service::monthly_leaderboard::MonthlyLeaderboardService::new(
+            redis_conn.clone(),
+        );
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                if let Err(error) = monthly.rollup_completed_weeks().await {
+                    tracing::warn!(%error, "monthly leaderboard rollup failed");
+                }
+            }
+        });
+    }
 
     // Real-time leaderboard deltas — Issue #900
     let leaderboard_broadcaster = Arc::new(
@@ -346,6 +369,36 @@ async fn main() -> io::Result<()> {
         stellar_reporter,
     ));
 
+    // Gameplay telemetry (anti-cheat): a recorded session is uploaded to the
+    // same S3/MinIO bucket under the `telemetry/` prefix and linked to its
+    // match, then purged once its retention window elapses.
+    let telemetry_retention_days = clamp_retention_days(
+        std::env::var("TELEMETRY_RETENTION_DAYS")
+            .ok()
+            .and_then(|value| value.trim().parse::<i64>().ok())
+            .unwrap_or(DEFAULT_RETENTION_DAYS),
+    );
+    let telemetry_index: Arc<PostgresTelemetryIndex> =
+        Arc::new(PostgresTelemetryIndex::new(db_pool.clone()));
+    let telemetry_upload_service = Arc::new(TelemetryUploadService::new(
+        evidence_store.clone(),
+        telemetry_index.clone(),
+        telemetry_retention_days,
+    ));
+    tracing::info!(
+        retention_days = telemetry_retention_days,
+        "Gameplay telemetry retention window"
+    );
+
+    // Hourly sweep of expired recordings. A bucket lifecycle rule on the
+    // `telemetry/` prefix is the second line of defence for objects this
+    // index never saw.
+    let telemetry_retention = Arc::new(TelemetryRetentionService::new(
+        evidence_store.clone(),
+        telemetry_index,
+    ));
+    telemetry_retention.run();
+
     let sponsored_tokens = Arc::new(crate::service::sponsored_tokens::SponsoredTokens::new());
 
     let server = HttpServer::new(move || {
@@ -376,6 +429,7 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(protocol_signer_secret.clone()))
             .app_data(web::Data::new(evidence_store.clone()))
             .app_data(web::Data::new(anti_cheat_service.clone()))
+            .app_data(web::Data::new(telemetry_upload_service.clone()))
             .app_data(web::Data::new(reputation_penalty_service.clone()))
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
@@ -408,6 +462,7 @@ async fn main() -> io::Result<()> {
                     .route("/health", web::get().to(crate::http::health::health_check))
                     .route("/health/live", web::get().to(crate::http::health::liveness_check))
                     .route("/health/ready", web::get().to(crate::http::health::readiness_check))
+                    .route("/health/stellar", web::get().to(crate::http::health::stellar_health_check))
                     .route("/csrf-token", web::get().to(csrf_token_handler))
                     // Batch operations endpoints — Issue #952
                     .configure(crate::http::batch_handler::configure_routes)
@@ -417,6 +472,8 @@ async fn main() -> io::Result<()> {
                     .configure(crate::http::anti_bot_handler::configure_routes)
                     // Anti-cheat microservice endpoints — Issue #1281
                     .configure(crate::http::anti_cheat_handler::configure_routes)
+                    // Gameplay telemetry upload + match linkage (anti-cheat)
+                    .configure(crate::http::telemetry_handler::configure_routes)
                     // IP whitelist/blacklist admin endpoints — Issue #975
                     .configure(crate::http::ip_list_handler::configure_routes)
                     // Player statistics aggregation endpoints — Issue #904
@@ -553,7 +610,13 @@ async fn main() -> io::Result<()> {
                             .route("/health", web::get().to(crate::http::idempotency_examples::idempotency_health_check))
                             .route("/config", web::get().to(crate::http::idempotency_examples::get_idempotency_config))
                     )
+                    // Weekly leaderboard (Issue #1225)
+                    .route("/leaderboard", web::get().to(crate::http::leaderboard_handler::get_period_leaderboard))
                     // Leaderboard endpoints
+                    .route(
+                        "/leaderboard",
+                        web::get().to(crate::http::leaderboard_handler::get_leaderboard_by_period),
+                    )
                     .service(
                         web::scope("/leaderboards")
                             .route("/{category}", web::get().to(crate::http::leaderboard_handler::get_leaderboard))

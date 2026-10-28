@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMatchTabStatus } from "@/hooks/useMatchTabStatus";
+import { WinShareCard } from "@/components/match/WinShareCard";
 
 function isValidHttpUrl(value: string): boolean {
   try {
@@ -52,7 +53,11 @@ export function MatchDetailView({
   isYourTurn,
   notificationCount,
 }: MatchDetailViewProps) {
-  const isWinner = match.winnerId === currentUserId;
+  const isWinner =
+    match.status === "completed" &&
+    Boolean(currentUserId) &&
+    Boolean(match.winnerId) &&
+    match.winnerId === currentUserId;
   const player1Won = match.winnerId === match.player1Id;
   const player2Won = match.winnerId === match.player2Id;
   const isDisputed = match.status === "disputed";
@@ -198,6 +203,17 @@ export function MatchDetailView({
               </p>
             </div>
             <div className="flex gap-2">
+              {isWinner && (
+                <WinShareCard
+                  playerName={
+                    match.winnerId === match.player1Id
+                      ? match.player1Username
+                      : match.player2Username
+                  }
+                  gameName={match.gameType}
+                  tournamentName={match.tournamentName ?? "Tournament"}
+                />
+              )}
               {hasReplay && (
                 <Button variant="outline" size="sm" asChild>
                   <a

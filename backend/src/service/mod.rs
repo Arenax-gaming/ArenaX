@@ -1,5 +1,6 @@
 // Service layer module for ArenaX
 pub mod achievement_service;
+pub mod weekly_leaderboard;
 pub mod analytics_service;
 pub mod anti_cheat_service;
 pub mod api_key_service;
@@ -32,6 +33,7 @@ pub mod platform_links;
 pub mod player_stats_service;
 pub mod push_notification_service;
 pub mod reaper_service;
+pub mod monthly_leaderboard;
 pub mod reputation_service;
 pub mod reputation_penalty_service;
 pub mod reward_settlement_service;
@@ -42,6 +44,8 @@ pub mod staking_service;
 pub mod stellar_sdk_service;
 pub mod stellar_service;
 pub mod suspension_service;
+pub mod telemetry_retention;
+pub mod telemetry_upload;
 pub mod tournament_service;
 pub mod tournament_refund_tests;
 pub mod user_service;
@@ -77,6 +81,12 @@ pub use soroban_service::{
 };
 pub use stellar_sdk_service::{StellarSDkError, StellarSDKService};
 pub use stellar_service::StellarService;
+pub use telemetry_retention::{SweepReport, TelemetryRetentionService};
+pub use telemetry_upload::{
+    clamp_retention_days, InMemoryTelemetryIndex, PostgresTelemetryIndex, TelemetryIndex,
+    TelemetryUploadOutcome, TelemetryUploadService, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS,
+    MIN_RETENTION_DAYS, TELEMETRY_CONTENT_TYPE,
+};
 pub use tournament_service::TournamentService;
 pub use user_service::UserService;
 pub use wallet_service::WalletService;

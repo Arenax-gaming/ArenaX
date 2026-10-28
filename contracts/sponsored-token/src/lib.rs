@@ -5,6 +5,7 @@
 //! sponsor's pool. Distribution is the Soroban entry point the backend calls.
 
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, String, Symbol,
@@ -169,7 +170,7 @@ fn trustline_open(env: &Env, sponsor_id: &Symbol, account: &Address) -> bool {
 fn assert_asset_code(code: &String) {
     let bytes = code.to_bytes();
     let len = bytes.len();
-    if len < 1 || len > 12 {
+    if !(1..=12).contains(&len) {
         panic!("asset code must be 1-12 characters");
     }
     let mut index = 0u32;
@@ -183,7 +184,7 @@ fn assert_asset_code(code: &String) {
 }
 
 fn assert_brand(env: &Env, name: &String, logo_url: &String, color: &String) {
-    if name.len() < 1 || name.len() > 64 {
+    if name.is_empty() || name.len() > 64 {
         panic!("brand name must be 1-64 characters");
     }
     let color_bytes = color.to_bytes();

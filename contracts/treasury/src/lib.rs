@@ -9,7 +9,33 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
-use time_lock::{TimeLockClient, CATEGORY_TREASURY, PRIORITY_MEDIUM};
+pub const CATEGORY_TREASURY: u32 = 1;
+pub const PRIORITY_MEDIUM: u32 = 1;
+
+mod timelock_client {
+    use soroban_sdk::{contractclient, Address, Bytes, BytesN, Env, Symbol};
+
+    #[contractclient(name = "TimeLockClient")]
+    #[allow(dead_code)]
+    pub trait TimeLockInterface {
+        #[allow(clippy::too_many_arguments)]
+        fn schedule_operation(
+            env: Env,
+            caller: Address,
+            operation_id: BytesN<32>,
+            target: Address,
+            function_name: Symbol,
+            args: Bytes,
+            delay: u64,
+            description: Symbol,
+            category: u32,
+            priority: u32,
+            custom_grace_period: u64,
+        );
+        fn execute_operation(env: Env, caller: Address, operation_id: BytesN<32>);
+    }
+}
+pub use timelock_client::TimeLockClient;
 
 // ---------------------------------------------------------------------------
 // Issue #918: Multi-sig treasury
@@ -183,27 +209,66 @@ pub enum DataKey {
     StorageSchemaVersion,
     ScheduledUpgrade,
     PreviousWasmHash,
+    // Configurable fee split (#1415)
+    /// Organizer share of collected fees, in basis points (0..=10_000).
+    FeeSplitBps,
+    FeeSplitProposalCounter,
+    FeeSplitProposal(u64),
+    FeeSplitVote(u64, Address),
+    /// Running total of fees retained by the platform.
+    TotalFeesRetained,
+    /// Running total of fees routed to organizers.
+    TotalFeesToOrganizers,
 }
 
-/// Scheduled upgrade details (#1064).
+/// Maximum value of `fee_split_bps` (100%).
+pub const MAX_FEE_SPLIT_BPS: u32 = 10_000;
+
+/// Governance proposal to change `fee_split_bps` (#1415).
 #[contracttype]
 #[derive(Clone, Debug)]
-pub struct ScheduledUpgrade {
-    pub new_wasm_hash: soroban_sdk::BytesN<32>,
-    pub min_compatible_schema: u32,
-    pub scheduled_at: u64,
-    pub executable_at: u64,
+pub struct FeeSplitProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub new_bps: u32,
+    pub votes_for: Vec<Address>,
+    pub votes_against: Vec<Address>,
+    pub created_at: u64,
+    pub finalized: bool,
+    pub approved: bool,
+}
+
+/// Outcome of `collect_fee` (#1415).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSplitResult {
+    pub organizer: Address,
+    pub organizer_amount: i128,
+    pub platform_amount: i128,
+    pub fee_split_bps: u32,
+}
+
+/// Split `amount` into (organizer, platform) shares. The organizer share is
+/// rounded down; the platform keeps the remainder, so no dust is lost.
+pub fn split_fee(amount: i128, fee_split_bps: u32) -> (i128, i128) {
+    let organizer = amount
+        .checked_mul(fee_split_bps as i128)
+        .expect("fee overflow")
+        / MAX_FEE_SPLIT_BPS as i128;
+    (organizer, amount - organizer)
 }
 
 #[contract]
 pub struct Treasury;
 
+#[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl Treasury {
     // -----------------------------------------------------------------
     // Initialization
     // -----------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -1047,6 +1112,234 @@ impl Treasury {
             .instance()
             .get(&DataKey::DurationProposalCounter)
             .unwrap_or(0)
+    }
+
+    // -----------------------------------------------------------------
+    // Configurable fee split (#1415)
+    // -----------------------------------------------------------------
+
+    /// Organizer share of collected fees, in basis points. Defaults to 0
+    /// (the platform keeps everything) until governance sets it.
+    pub fn get_fee_split_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeSplitBps)
+            .unwrap_or(0)
+    }
+
+    /// Collect a tournament fee: pulls `amount` of the treasury token from
+    /// `payer`, forwards `fee_split_bps` of it to `organizer`, and keeps the
+    /// remainder in the treasury (credited to the internal balance).
+    pub fn collect_fee(
+        env: Env,
+        payer: Address,
+        organizer: Address,
+        amount: i128,
+    ) -> FeeSplitResult {
+        Self::require_not_paused(&env);
+        payer.require_auth();
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+
+        let bps = Self::get_fee_split_bps(env.clone());
+        let (organizer_amount, platform_amount) = split_fee(amount, bps);
+
+        let token_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .expect("not initialized");
+        let token_client = token::Client::new(&env, &token_id);
+        let treasury = env.current_contract_address();
+
+        // Pull the whole fee first so a failing transfer aborts before any
+        // payout; then forward the organizer's share out of the treasury.
+        token_client.transfer(&payer, &treasury, &amount);
+        if organizer_amount > 0 {
+            token_client.transfer(&treasury, &organizer, &organizer_amount);
+        }
+
+        let balance = Self::get_balance(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance, &(balance + platform_amount));
+        let retained: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalFeesRetained)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalFeesRetained, &(retained + platform_amount));
+        let routed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalFeesToOrganizers)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::TotalFeesToOrganizers,
+            &(routed + organizer_amount),
+        );
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT"),
+            ),
+            (
+                payer,
+                organizer.clone(),
+                amount,
+                organizer_amount,
+                platform_amount,
+                bps,
+            ),
+        );
+
+        FeeSplitResult {
+            organizer,
+            organizer_amount,
+            platform_amount,
+            fee_split_bps: bps,
+        }
+    }
+
+    /// (platform retained, routed to organizers) fee totals.
+    pub fn get_fee_totals(env: Env) -> (i128, i128) {
+        (
+            env.storage()
+                .instance()
+                .get(&DataKey::TotalFeesRetained)
+                .unwrap_or(0),
+            env.storage()
+                .instance()
+                .get(&DataKey::TotalFeesToOrganizers)
+                .unwrap_or(0),
+        )
+    }
+
+    /// Propose a new `fee_split_bps`. Signer-only; takes effect only after
+    /// the multi-sig threshold approves it via vote + finalize (no direct
+    /// admin setter).
+    pub fn propose_fee_split_update(env: Env, proposer: Address, new_bps: u32) -> u64 {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &proposer);
+        if new_bps > MAX_FEE_SPLIT_BPS {
+            panic!("fee_split_bps must be between 0 and 10000");
+        }
+
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeSplitProposalCounter)
+            .unwrap_or(0)
+            + 1;
+
+        let mut votes_for = Vec::new(&env);
+        votes_for.push_back(proposer.clone());
+        let proposal = FeeSplitProposal {
+            id: counter,
+            proposer: proposer.clone(),
+            new_bps,
+            votes_for,
+            votes_against: Vec::new(&env),
+            created_at: env.ledger().timestamp(),
+            finalized: false,
+            approved: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposal(counter), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposalCounter, &counter);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitVote(counter, proposer.clone()), &true);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT_PROPOSE"),
+            ),
+            (counter, proposer, new_bps),
+        );
+
+        counter
+    }
+
+    pub fn vote_fee_split_update(env: Env, signer: Address, proposal_id: u64, support: bool) {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &signer);
+
+        let vote_key = DataKey::FeeSplitVote(proposal_id, signer.clone());
+        if env.storage().instance().has(&vote_key) {
+            panic!("already voted");
+        }
+
+        let mut proposal = Self::get_fee_split_proposal(env.clone(), proposal_id)
+            .expect("fee split proposal not found");
+        if proposal.finalized {
+            panic!("fee split proposal already finalized");
+        }
+
+        if support {
+            proposal.votes_for.push_back(signer.clone());
+        } else {
+            proposal.votes_against.push_back(signer.clone());
+        }
+        env.storage().instance().set(&vote_key, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT_VOTE"),
+            ),
+            (proposal_id, signer, support),
+        );
+    }
+
+    /// Apply an approved fee split once the threshold of `for` votes is met.
+    pub fn finalize_fee_split_update(env: Env, caller: Address, proposal_id: u64) {
+        Self::require_not_paused(&env);
+        Self::require_signer(&env, &caller);
+
+        let mut proposal = Self::get_fee_split_proposal(env.clone(), proposal_id)
+            .expect("fee split proposal not found");
+        if proposal.finalized {
+            panic!("already finalized");
+        }
+        if proposal.votes_for.len() < Self::get_threshold(env.clone()) {
+            panic!("insufficient votes for quorum");
+        }
+
+        proposal.finalized = true;
+        proposal.approved = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeSplitBps, &proposal.new_bps);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "Treasury"),
+                Symbol::new(&env, "FEE_SPLIT_FINALIZE"),
+            ),
+            (proposal_id, proposal.new_bps),
+        );
+    }
+
+    pub fn get_fee_split_proposal(env: Env, proposal_id: u64) -> Option<FeeSplitProposal> {
+        env.storage()
+            .instance()
+            .get(&DataKey::FeeSplitProposal(proposal_id))
     }
 
     // -----------------------------------------------------------------

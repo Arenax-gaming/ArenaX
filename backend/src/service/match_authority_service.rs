@@ -1,7 +1,7 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::match_authority::*;
-use crate::service::soroban_service::{SorobanService, SorobanTxResult};
+use crate::service::soroban_service::{SorobanService, SorobanTxResult, TxStatus};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use chrono::Utc;
 use sqlx::Row;
@@ -10,11 +10,16 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
 
+fn sync_status_is_successful(status: Option<&str>) -> bool {
+    matches!(status.map(str::to_ascii_lowercase), Some(value) if matches!(value.as_str(), "success" | "confirmed" | "successful"))
+}
+
 /// Match Authority Service - FSM enforcer and blockchain coordinator
 pub struct MatchAuthorityService {
     db_pool: DbPool,
     soroban_service: Arc<SorobanService>,
     match_lifecycle_contract: String,
+    match_outcome_contract: Option<String>,
     /// Optional match-state stream (Issue #1254).
     match_events: Option<crate::realtime::event_stream::EventStream>,
 }
@@ -30,8 +35,14 @@ impl MatchAuthorityService {
             db_pool,
             soroban_service,
             match_lifecycle_contract,
+            match_outcome_contract: None,
             match_events: None,
         }
+    }
+
+    pub fn with_match_outcome_contract(mut self, contract_id: Option<String>) -> Self {
+        self.match_outcome_contract = contract_id.filter(|value| !value.trim().is_empty());
+        self
     }
 
     pub fn with_match_events(mut self, stream: crate::realtime::event_stream::EventStream) -> Self {
@@ -377,6 +388,10 @@ impl MatchAuthorityService {
         // Validate FSM transition
         self.validate_transition(&match_entity.state, &MatchAuthorityState::Completed)?;
 
+        if dto.score_a < 0 || dto.score_b < 0 {
+            return Err(ApiError::bad_request("Match scores must be non-negative"));
+        }
+
         // Validate winner is one of the players
         if dto.winner != match_entity.player_a && dto.winner != match_entity.player_b {
             return Err(ApiError::bad_request(
@@ -399,6 +414,28 @@ impl MatchAuthorityService {
                 ApiError::internal_error(format!("Blockchain completion failed: {}", e))
             })?;
 
+        let mut chain_result = chain_result;
+        if let Some(outcome_contract) = self.match_outcome_contract.clone() {
+            let outcome_args = serde_json::json!({
+                "match_id": match_entity.on_chain_match_id,
+                "winner": dto.winner,
+                "score_a": dto.score_a,
+                "score_b": dto.score_b,
+            });
+            chain_result = self.soroban_service
+                .invoke(
+                    &outcome_contract,
+                    "log_outcome",
+                    &outcome_args,
+                    signer_secret,
+                )
+                .await
+                .map_err(|e| {
+                    error!(error = %e, "Failed to log match outcome on blockchain");
+                    ApiError::internal_error(format!("Blockchain outcome logging failed: {}", e))
+                })?;
+        }
+
         // Step 2: Update match state
         sqlx::query!(
             r#"
@@ -406,24 +443,39 @@ impl MatchAuthorityService {
             SET state = 'COMPLETED'::match_authority_state,
                 winner = $1,
                 last_chain_tx = $2,
-                ended_at = NOW()
+                ended_at = NOW(),
+                metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb
             WHERE id = $3
             "#,
             dto.winner,
             chain_result.hash,
-            match_id
+            match_id,
+            serde_json::json!({
+                "outcome": {
+                    "match_id": match_entity.on_chain_match_id,
+                    "winner": dto.winner,
+                    "score_a": dto.score_a,
+                    "score_b": dto.score_b,
+                    "timestamp": Utc::now().timestamp()
+                }
+            })
         )
         .execute(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
 
         // Step 3: Record blockchain sync
+        let sync_status = match chain_result.status {
+            TxStatus::Success => "success",
+            TxStatus::Failed => "failed",
+            TxStatus::Pending => "pending",
+        };
         self.record_chain_sync(
             match_id,
             "complete_match",
             &chain_result.hash,
-            "pending",
-            None,
+            sync_status,
+            chain_result.error.as_deref(),
         )
         .await?;
 
@@ -437,6 +489,12 @@ impl MatchAuthorityService {
             None,
         )
         .await?;
+
+        // Step 5: Distribute a configured match prize. This is deliberately
+        // non-blocking for the match state: payout failures remain auditable and
+        // can be retried without reopening or duplicating match completion.
+        self.trigger_match_prize_payout(match_id, &match_entity, &dto.winner, signer_secret)
+            .await;
 
         info!(match_id = %match_id, "Match completed successfully");
 
@@ -620,6 +678,48 @@ impl MatchAuthorityService {
     /// Get match by ID
     pub async fn get_match(&self, match_id: Uuid) -> Result<MatchAuthorityResponse, ApiError> {
         self.get_match_with_transitions(match_id).await
+    }
+
+    /// Verify an outcome against the PostgreSQL transaction record.
+    pub async fn verify_match_outcome(
+        &self,
+        match_id: Uuid,
+    ) -> Result<MatchOutcomeVerificationResponse, ApiError> {
+        let entity = self.get_match_entity(match_id).await?;
+        let sync = sqlx::query_as::<_, (String, String)>(
+            r#"
+            SELECT tx_hash, tx_status
+            FROM match_chain_sync
+            WHERE match_id = $1 AND operation_type = 'complete_match'
+            ORDER BY submitted_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(match_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        let outcome = entity.metadata.get("outcome");
+        let score_a = outcome.and_then(|v| v.get("score_a")).and_then(|v| v.as_i64());
+        let score_b = outcome.and_then(|v| v.get("score_b")).and_then(|v| v.as_i64());
+        let timestamp = outcome.and_then(|v| v.get("timestamp")).and_then(|v| v.as_i64());
+        let transaction_status = sync.as_ref().map(|(_, status)| status.clone());
+        let transaction_hash = sync.map(|(hash, _)| hash);
+        let verified = entity.state == MatchAuthorityState::Completed
+            || entity.state == MatchAuthorityState::Finalized;
+
+        Ok(MatchOutcomeVerificationResponse {
+            match_id: entity.id,
+            on_chain_match_id: entity.on_chain_match_id,
+            winner: entity.winner,
+            score_a,
+            score_b,
+            timestamp,
+            transaction_hash,
+            transaction_status,
+            verified: verified && sync_status_is_successful(transaction_status.as_deref()),
+        })
     }
 
     /// Get match entity (internal)
@@ -895,6 +995,151 @@ impl MatchAuthorityService {
             )
             .await
             .map_err(|e| format!("Soroban start_match failed: {}", e))
+    }
+
+    /// Trigger the configured prize payout after match verification.
+    /// Match metadata may contain `prize_pool_account`, `prize_amount`, and
+    /// optional `prize_asset` (defaults to XLM). Missing payout configuration
+    /// keeps casual matches free of unintended transfers.
+    async fn trigger_match_prize_payout(
+        &self,
+        match_id: Uuid,
+        match_entity: &MatchAuthorityEntity,
+        winner: &str,
+        signer_secret: &str,
+    ) {
+        let prize_amount = match match_entity.metadata.get("prize_amount").and_then(|v| v.as_i64()) {
+            Some(amount) if amount > 0 => amount,
+            _ => return,
+        };
+        let prize_pool_account = match match_entity.metadata.get("prize_pool_account").and_then(|v| v.as_str()) {
+            Some(account) if !account.is_empty() => account.to_string(),
+            _ => return,
+        };
+        let prize_asset = match_entity
+            .metadata
+            .get("prize_asset")
+            .and_then(|v| v.as_str())
+            .unwrap_or("XLM")
+            .to_string();
+
+        // Idempotency: a confirmed payout is never submitted twice.
+        if let Ok(Some(_)) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tx_hash FROM match_chain_sync
+            WHERE match_id = $1 AND operation_type = 'distribute_match_prize'
+              AND tx_status = 'confirmed'
+            LIMIT 1
+            "#,
+        )
+        .bind(match_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        {
+            info!(%match_id, "Match prize already distributed; skipping duplicate payout");
+            return;
+        }
+
+        let prize_contract = match_entity
+            .metadata
+            .get("prize_contract_id")
+            .and_then(|v| v.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let Some(prize_contract) = prize_contract else {
+            warn!(
+                %match_id,
+                "Match prize configured but prize_contract_id is missing; payout was not submitted"
+            );
+            return;
+        };
+        let args = serde_json::json!({
+            "tournament_id": match_entity.id.to_string(),
+            "prize_pool_account": prize_pool_account,
+            "recipient": winner,
+            "winner": winner,
+            "amount": prize_amount,
+            "currency": prize_asset,
+            "asset": prize_asset,
+        });
+
+        match self
+            .soroban_service
+            .invoke(
+                &prize_contract,
+                "distribute",
+                &args,
+                signer_secret,
+            )
+            .await
+        {
+            Ok(result) if result.status == crate::service::soroban_service::TxStatus::Success => {
+                info!(
+                    %match_id,
+                    winner,
+                    tx_hash = %result.hash,
+                    amount = prize_amount,
+                    asset = %prize_asset,
+                    "Match prize distributed and transaction confirmed"
+                );
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &result.hash,
+                        "confirmed",
+                        None,
+                    )
+                    .await;
+
+                let mut metadata = match_entity.metadata.clone();
+                metadata["prize_tx_hash"] = serde_json::Value::String(result.hash);
+                metadata["prize_asset"] = serde_json::Value::String(prize_asset);
+                metadata["prize_amount"] = serde_json::json!(prize_amount);
+                if let Err(error) = sqlx::query(
+                    "UPDATE match_authority SET metadata = $1 WHERE id = $2",
+                )
+                .bind(metadata)
+                .bind(match_id)
+                .execute(&self.db_pool)
+                .await
+                {
+                    error!(%match_id, %error, "Prize payout confirmed but metadata update failed");
+                }
+            }
+            Ok(result) => {
+                let reason = result.error.unwrap_or_else(|| {
+                    format!("transaction status {:?}", result.status)
+                });
+                error!(%match_id, winner, tx_hash = %result.hash, %reason, "Match prize payout failed");
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &result.hash,
+                        "failed",
+                        Some(&reason),
+                    )
+                    .await;
+            }
+            Err(error) => {
+                error!(%match_id, winner, %error, "Failed to submit match prize payout");
+                let failure_ref = format!(
+                    "payout-failed-{}-{}",
+                    match_id,
+                    Utc::now().timestamp_millis()
+                );
+                let _ = self
+                    .record_chain_sync(
+                        match_id,
+                        "distribute_match_prize",
+                        &failure_ref,
+                        "failed",
+                        Some(&error.to_string()),
+                    )
+                    .await;
+            }
+        }
     }
 
     /// Complete match on Soroban

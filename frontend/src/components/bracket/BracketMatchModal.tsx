@@ -1,5 +1,4 @@
-"use client";
-
+import React, { useEffect, useRef } from "react";
 import { BracketMatch, PrizeDistribution } from "@/types/bracket";
 import { Button } from "@/components/ui/Button";
 import {
@@ -35,6 +34,45 @@ export function BracketMatchModal({
   onClose,
   prizeDistribution,
 }: BracketMatchModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      previouslyFocusedElement.current = document.activeElement as HTMLElement;
+      modalRef.current?.focus();
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClose();
+        } else if (e.key === "Tab") {
+          if (!modalRef.current) return;
+          const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      };
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => {
+        window.removeEventListener("keydown", handleKeyDown);
+        previouslyFocusedElement.current?.focus();
+      };
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen) {
     return null;
   }
@@ -42,14 +80,24 @@ export function BracketMatchModal({
   const players = [match.player1, match.player2];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 text-white shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+      role="presentation"
+    >
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="match-detail-title"
+        tabIndex={-1}
+        className="max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 text-white shadow-2xl focus:outline-none"
+      >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-slate-950/95 px-6 py-5 backdrop-blur">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-cyan-200/70">
               Match Detail
             </p>
-            <h2 className="mt-1 text-2xl font-semibold">
+            <h2 id="match-detail-title" className="mt-1 text-2xl font-semibold">
               {match.label ?? `Match ${match.matchNumber}`}
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -59,7 +107,7 @@ export function BracketMatchModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-white/10 p-2 text-foreground/80 transition hover:border-white/30 hover:text-white"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 p-2 text-foreground/80 transition hover:border-white/30 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Close match details"
           >
             <X className="h-5 w-5" />
@@ -267,7 +315,7 @@ export function BracketMatchModal({
         </div>
 
         <div className="flex justify-end border-t border-white/10 px-6 py-5">
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose} className="min-h-[44px] px-6">Close</Button>
         </div>
       </div>
     </div>

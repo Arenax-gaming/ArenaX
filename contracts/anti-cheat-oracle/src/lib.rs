@@ -6,19 +6,21 @@ mod storage;
 use arenax_events::anti_cheat as anticheat_events;
 use arenax_events::anti_cheat_oracle as events;
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, String, Vec};
+use soroban_sdk::{contract, contractclient, contractimpl, Address, Bytes, Env, String, Vec};
 use storage::{
-    AlertRecord, AnalyticsTotals, AntiCheatConfirmation, DataFeed, DataKey, DetectionRule,
-    FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth, ALERT_CRITICAL,
-    ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE, FEED_STATUS_REVOKED,
-    FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_SCORE, FEED_TYPE_TELEMETRY, ORACLE_HEALTHY,
-    ORACLE_OFFLINE, PROPOSAL_STATUS_ACTIVE, PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED,
-    PROPOSAL_STATUS_PASSED, PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_EMERGENCY_PAUSE,
-    PROPOSAL_TYPE_UPDATE_QUORUM, RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE,
-    RULE_SCORE_SPIKE, RULE_STALENESS, RULE_VELOCITY,
+    AlertRecord, AnalyticsTotals, AntiCheatConfirmation, BatchProof, DataFeed, DataKey,
+    DetectionRule, FeedReading, GovernanceProposal, MonitoringState, OracleConfig, OracleHealth,
+    ALERT_CRITICAL, ALERT_INFO, ALERT_OPEN, ALERT_RESOLVED, ALERT_WARNING, FEED_STATUS_ACTIVE,
+    FEED_STATUS_REVOKED, FEED_TYPE_BEHAVIOR, FEED_TYPE_EXTERNAL, FEED_TYPE_SCORE,
+    FEED_TYPE_TELEMETRY, ORACLE_HEALTHY, ORACLE_OFFLINE, PROPOSAL_STATUS_ACTIVE,
+    PROPOSAL_STATUS_EXECUTED, PROPOSAL_STATUS_EXPIRED, PROPOSAL_STATUS_PASSED,
+    PROPOSAL_STATUS_REJECTED, PROPOSAL_TYPE_EMERGENCY_PAUSE, PROPOSAL_TYPE_UPDATE_QUORUM,
+    RULE_ANOMALY_ML, RULE_CONSENSUS, RULE_FREQ_ABUSE, RULE_SCORE_SPIKE, RULE_STALENESS,
+    RULE_VELOCITY,
 };
 
 pub use error::AntiCheatError;
+pub use storage::BatchProof as OracleBatchProof;
 pub use storage::{
     AlertRecord as OracleAlert, AnalyticsTotals as OracleAnalytics, DataFeed as OracleDataFeed,
     DetectionRule as OracleDetectionRule, FeedReading as OracleFeedReading,
@@ -46,6 +48,19 @@ const SCORE_SPIKE_DEFAULT_THRESHOLD: i64 = 500; // absolute value jump
 const VELOCITY_DEFAULT_THRESHOLD: i64 = 200; // delta per second
 const STALENESS_DEFAULT_THRESHOLD: i64 = 300; // seconds without update
 const FREQ_ABUSE_DEFAULT_THRESHOLD: i64 = 5; // submissions per minute
+
+// ─── ZK proof batching (#1413) ────────────────────────────────────────────────
+/// Mirrors `zk_proof::MAX_BATCH_SIZE`; checked here too so oversized batches
+/// are rejected before any cross-contract call is paid for.
+pub const MAX_PROOF_BATCH_SIZE: u32 = 8;
+
+/// Interface of the zk-proof contract's batch accumulator.
+#[contractclient(name = "ZkVerifierClient")]
+pub trait ZkVerifier {
+    /// Verifies every proof in one accumulated pairing check; panics (and so
+    /// reverts) if any proof is invalid. Returns the verifier's batch id.
+    fn batch_verify(env: Env, verifier: Address, batch: Vec<BatchProof>) -> u64;
+}
 
 #[contract]
 pub struct AntiCheatOracle;
@@ -1038,6 +1053,99 @@ impl AntiCheatOracle {
             .instance()
             .get::<DataKey, bool>(&DataKey::EmergencyPaused)
             .unwrap_or(false)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ZK PROOF BATCH VERIFICATION (#1413)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Point the oracle at the zk-proof contract used by `batch_verify` (admin only).
+    pub fn set_zk_verifier(env: Env, verifier: Address) -> Result<(), AntiCheatError> {
+        Self::require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ZkVerifier, &verifier);
+        Ok(())
+    }
+
+    pub fn get_zk_verifier(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ZkVerifier)
+    }
+
+    /// Verify a batch of anti-cheat ZK proofs in a single invocation.
+    ///
+    /// - Only authorized oracles may submit, and not while paused.
+    /// - The batch must hold 1..=`MAX_PROOF_BATCH_SIZE` proofs, bounding the
+    ///   pairing work to what fits in one transaction.
+    /// - Verification is atomic: the zk-proof contract checks the whole batch
+    ///   in one accumulated pairing check, and if any proof fails this call
+    ///   returns `ProofBatchVerificationFailed`, reverting every state change
+    ///   and event of the invocation.
+    /// - On success emits one `PROOF_VERIFIED` event per proof plus a
+    ///   `PROOF_BATCH` summary, and returns the oracle's batch id.
+    pub fn batch_verify(
+        env: Env,
+        oracle: Address,
+        batch: Vec<BatchProof>,
+    ) -> Result<u64, AntiCheatError> {
+        Self::check_not_paused(&env)?;
+        oracle.require_auth();
+        Self::require_oracle(&env, &oracle)?;
+
+        let size = batch.len();
+        if size == 0 {
+            return Err(AntiCheatError::EmptyProofBatch);
+        }
+        if size > MAX_PROOF_BATCH_SIZE {
+            return Err(AntiCheatError::ProofBatchTooLarge);
+        }
+
+        let verifier: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ZkVerifier)
+            .ok_or(AntiCheatError::ZkVerifierNotSet)?;
+
+        // Any failure inside the verifier (invalid proof, malformed input,
+        // verifier paused) surfaces here as an error and aborts the batch.
+        match ZkVerifierClient::new(&env, &verifier)
+            .try_batch_verify(&env.current_contract_address(), &batch)
+        {
+            Ok(Ok(_)) => {}
+            _ => return Err(AntiCheatError::ProofBatchVerificationFailed),
+        }
+
+        let batch_id: u64 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::ProofBatchCounter)
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(AntiCheatError::ArithmeticOverflow)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ProofBatchCounter, &batch_id);
+
+        for (index, item) in batch.iter().enumerate() {
+            events::emit_batch_proof_accepted(
+                &env,
+                batch_id,
+                index as u32,
+                &oracle,
+                item.public_inputs.len(),
+            );
+        }
+        events::emit_proof_batch_verified(&env, batch_id, &oracle, size);
+
+        Ok(batch_id)
+    }
+
+    /// Number of proof batches accepted by `batch_verify`.
+    pub fn get_proof_batch_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::ProofBatchCounter)
+            .unwrap_or(0)
     }
 
     // ══════════════════════════════════════════════════════════════════════════

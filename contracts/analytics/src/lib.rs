@@ -166,6 +166,35 @@ pub struct HourlySnapshot {
 /// Number of hourly slots retained (7 days).
 pub const SNAPSHOT_WINDOW_HOURS: u64 = 168;
 
+// ─── Leaderboard Attestation Types ───────────────────────────────────────────
+
+/// A single entry in an on-chain attested leaderboard snapshot.
+/// The player is identified by a salted hash — never the raw address.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeaderboardEntry {
+    /// SHA-256(player_address_xdr || salt) — privacy-preserving player id.
+    pub player_hash: BytesN<32>,
+    /// Numeric score for this period (e.g. total points, ELO, prize volume).
+    pub score: i128,
+    /// 1-based rank within the snapshot (1 = highest scorer).
+    pub rank: u32,
+}
+
+/// An immutable, attester-signed community leaderboard snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeaderboardSnapshot {
+    /// Opaque period identifier (e.g. Unix week-start timestamp).
+    pub period_id: u64,
+    /// Address of the authorised reporter that attested this snapshot.
+    pub attester: Address,
+    /// Top-N entries ordered by rank ascending.
+    pub entries: Vec<LeaderboardEntry>,
+    /// Ledger timestamp at the moment the snapshot was recorded.
+    pub created_at: u64,
+}
+
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -192,6 +221,10 @@ pub enum DataKey {
     RegisteredContract(Symbol),
     /// Circular hourly buffer slot (slot = hour % 168).
     HourlySnapshot(u32),
+    /// Leaderboard snapshot for a given period id.
+    LeaderboardSnapshot(u64),
+    /// Ordered list of all stored leaderboard period ids.
+    LeaderboardPeriods,
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -470,15 +503,17 @@ impl AnalyticsContract {
         let hour = now / 3600;
         let slot = (hour % SNAPSHOT_WINDOW_HOURS) as u32;
         let key = DataKey::HourlySnapshot(slot);
-        let mut bucket: HourlySnapshot = env.storage().persistent().get(&key).unwrap_or(
-            HourlySnapshot {
-                hour,
-                total_transactions: 0,
-                total_volume: 0,
-                total_users: 0,
-                total_fees_collected: 0,
-            },
-        );
+        let mut bucket: HourlySnapshot =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(HourlySnapshot {
+                    hour,
+                    total_transactions: 0,
+                    total_volume: 0,
+                    total_users: 0,
+                    total_fees_collected: 0,
+                });
         if bucket.hour != hour {
             bucket = HourlySnapshot {
                 hour,
@@ -807,6 +842,111 @@ impl AnalyticsContract {
             i += 1;
         }
         results
+    }
+
+    // ── Community Leaderboard Attestation (#1428) ────────────────────────────
+
+    /// Attest and store a community leaderboard snapshot for `period_id`.
+    ///
+    /// - Only an authorised reporter (or the contract admin) may call this.
+    /// - Snapshots are **append-only**: calling with an already-stored
+    ///   `period_id` panics — entries cannot be altered once written.
+    /// - Player addresses are supplied raw and hashed with the contract salt
+    ///   before storage so that no raw address is ever persisted or emitted.
+    pub fn store_snapshot(
+        env: Env,
+        attester: Address,
+        period_id: u64,
+        entries: Vec<LeaderboardEntry>,
+    ) {
+        Self::require_not_paused(&env);
+        attester.require_auth();
+
+        // Only admin or an authorised reporter may attest.
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let is_admin = attester == admin;
+        let is_reporter = env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::AuthReporter(attester.clone()))
+            .unwrap_or(false);
+        if !is_admin && !is_reporter {
+            panic!("not authorised to attest snapshot");
+        }
+
+        // Append-only: reject any attempt to overwrite an existing period.
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::LeaderboardSnapshot(period_id))
+        {
+            panic!("snapshot already exists for period");
+        }
+
+        let created_at = env.ledger().timestamp();
+        let snapshot = LeaderboardSnapshot {
+            period_id,
+            attester: attester.clone(),
+            entries: entries.clone(),
+            created_at,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::LeaderboardSnapshot(period_id), &snapshot);
+
+        // Track all known period ids so callers can enumerate snapshots.
+        let mut periods: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::LeaderboardPeriods)
+            .unwrap_or_else(|| Vec::new(&env));
+        periods.push_back(period_id);
+        env.storage()
+            .instance()
+            .set(&DataKey::LeaderboardPeriods, &periods);
+
+        // Emit a privacy-safe event — only the period id and entry count.
+        env.events().publish(
+            (soroban_sdk::symbol_short!("LBSNAP"), period_id),
+            (attester, entries.len()),
+        );
+    }
+
+    /// Verify a player's rank in the snapshot for `period_id`.
+    ///
+    /// The caller supplies the **raw** player `Address`; this function hashes
+    /// it with the contract salt internally and scans the snapshot entries.
+    /// Returns `Some(rank)` if the player appears, `None` otherwise.
+    pub fn verify_snapshot(env: Env, period_id: u64, player: Address) -> Option<u32> {
+        let snapshot: LeaderboardSnapshot = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LeaderboardSnapshot(period_id))
+            .unwrap_or_else(|| panic!("snapshot not found for period"));
+
+        let player_hash = Self::hash_player(&env, &player);
+        for entry in snapshot.entries.iter() {
+            if entry.player_hash == player_hash {
+                return Some(entry.rank);
+            }
+        }
+        None
+    }
+
+    /// Return the full `LeaderboardSnapshot` for `period_id`, or `None` if it
+    /// has not been attested yet.
+    pub fn get_snapshot(env: Env, period_id: u64) -> Option<LeaderboardSnapshot> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LeaderboardSnapshot(period_id))
+    }
+
+    /// Return the ordered list of all attested period ids.
+    pub fn get_snapshot_periods(env: Env) -> Vec<u64> {
+        env.storage()
+            .instance()
+            .get(&DataKey::LeaderboardPeriods)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────

@@ -105,6 +105,14 @@ fn map_stellar_error(err: StellarError) -> ApiError {
         }
         StellarError::DatabaseError(e) => ApiError::database_error(e),
         StellarError::StellarSdkError(message) => ApiError::StellarError(message),
+        StellarError::HorizonError(message) => {
+            tracing::warn!(error = %message, "Stellar Horizon request failed");
+            ApiError::ServiceUnavailable("Stellar Horizon request failed".to_string())
+        }
+        StellarError::HorizonUnavailable { retry_after_secs } => ApiError::DependencyUnavailable {
+            message: "Stellar Horizon is temporarily unavailable".to_string(),
+            retry_after: retry_after_secs,
+        },
     }
 }
 
@@ -326,6 +334,32 @@ pub async fn verify_transaction(
     Ok(HttpResponse::Ok().json(VerifyTransactionResponse { tx_hash, verified }))
 }
 
+/// `GET /api/stellar/tournaments/{id}/transactions` — public prize-pool
+/// transaction history (entry fees and prize distributions) with explorer links.
+pub async fn get_tournament_transactions(
+    service: web::Data<Arc<StellarService>>,
+    path: web::Path<Uuid>,
+) -> Result<HttpResponse, ApiError> {
+    let transactions = service
+        .get_tournament_prize_pool_transactions(path.into_inner())
+        .await
+        .map_err(map_stellar_error)?;
+
+    let body: Vec<Value> = transactions
+        .into_iter()
+        .map(|tx| {
+            let explorer_url = service.explorer_url(&tx.transaction_hash);
+            let mut value = serde_json::to_value(&tx).unwrap_or(Value::Null);
+            if let Value::Object(map) = &mut value {
+                map.insert("explorer_url".to_string(), Value::String(explorer_url));
+            }
+            value
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(body))
+}
+
 // =============================================================================
 // ROUTES
 // =============================================================================
@@ -346,6 +380,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/prizes/distribute", web::post().to(distribute_prizes))
             .route("/assets/issue", web::post().to(issue_asset))
             .route("/contracts/invoke", web::post().to(invoke_contract))
+            .route(
+                "/tournaments/{id}/transactions",
+                web::get().to(get_tournament_transactions),
+            )
             .route(
                 "/transactions/{tx_hash}",
                 web::get().to(get_transaction),
@@ -373,6 +411,26 @@ mod tests {
         let err = map_stellar_error(StellarError::InvalidPublicKey);
         let response = actix_web::ResponseError::error_response(&err);
         assert_eq!(response.status().as_u16(), 400);
+    }
+
+    #[test]
+    fn map_horizon_unavailable_is_503_with_retry_after() {
+        let err = map_stellar_error(StellarError::HorizonUnavailable {
+            retry_after_secs: 17,
+        });
+        let response = actix_web::ResponseError::error_response(&err);
+        assert_eq!(response.status().as_u16(), 503);
+        assert_eq!(
+            response.headers().get("Retry-After").and_then(|v| v.to_str().ok()),
+            Some("17")
+        );
+    }
+
+    #[test]
+    fn map_horizon_error_is_503() {
+        let err = map_stellar_error(StellarError::HorizonError("timeout".into()));
+        let response = actix_web::ResponseError::error_response(&err);
+        assert_eq!(response.status().as_u16(), 503);
     }
 
     #[test]
