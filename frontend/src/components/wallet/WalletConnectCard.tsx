@@ -10,15 +10,12 @@ import {
 } from "@/components/ui/Card";
 import { useWallet } from "@/hooks/useWallet";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { AddressDisplay } from "./AddressDisplay";
 
 interface WalletConnectCardProps {
   onOpenDeposit: () => void;
   onOpenWithdraw: () => void;
 }
-
-const truncateAddress = (value: string) => {
-  return `${value.slice(0, 6)}...${value.slice(-6)}`;
-};
 
 export function WalletConnectCard({
   onOpenDeposit,
@@ -83,9 +80,8 @@ export function WalletConnectCard({
               </div>
               <div>
                 <p className="text-muted-foreground">Address</p>
-                <p className="font-medium" title={publicKey ?? undefined}>
-                  {publicKey ? truncateAddress(publicKey) : "-"}
-                </p>
+                <AddressDisplay address={publicKey} />
+
               </div>
             </div>
 

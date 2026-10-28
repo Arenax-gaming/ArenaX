@@ -5,8 +5,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { useNavigationGuard } from "@/hooks/useNavigationGuard";
 
-const push = jest.fn();
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+const mockPush = jest.fn();
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }));
 
 function fireBeforeUnload() {
   const event = new Event("beforeunload", { cancelable: true });
@@ -25,7 +25,7 @@ function clickLink(href: string) {
 }
 
 describe("useNavigationGuard", () => {
-  beforeEach(() => push.mockClear());
+  beforeEach(() => mockPush.mockClear());
 
   it("warns on tab close only while active, and cleans up on unmount", () => {
     const { rerender, unmount } = renderHook(({ when }) => useNavigationGuard(when), {
@@ -51,10 +51,10 @@ describe("useNavigationGuard", () => {
     });
     expect(prevented).toBe(true);
     expect(result.current.isBlocked).toBe(true);
-    expect(push).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
 
     act(() => result.current.confirm());
-    expect(push).toHaveBeenCalledWith("/tournaments");
+    expect(mockPush).toHaveBeenCalledWith("/tournaments");
     expect(result.current.isBlocked).toBe(false);
   });
 
@@ -65,7 +65,7 @@ describe("useNavigationGuard", () => {
     });
     act(() => result.current.cancel());
     expect(result.current.isBlocked).toBe(false);
-    expect(push).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("does not intercept links while inactive", () => {

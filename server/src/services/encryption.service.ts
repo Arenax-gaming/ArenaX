@@ -57,6 +57,12 @@ class EncryptionService {
         });
 
         if (configuredKeys.length === 0) {
+            if (process.env.NODE_ENV === 'test') {
+                const defaultTestKey = deriveKey('default-test-wallet-encryption-secret-123456', 1);
+                this.masterKeys.set(1, defaultTestKey);
+                this.activeKeyVersion = 1;
+                return;
+            }
             throw new Error(
                 'Wallet encryption master keys are not configured. Set WALLET_MASTER_KEYS or ENCRYPTION_SECRET.'
             );

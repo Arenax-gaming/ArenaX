@@ -40,6 +40,54 @@ impl Default for TransactionConfig {
     }
 }
 
+/// Exponential backoff with jitter for retrying transient failures
+/// (Issue #1345). Shared by DB serialization retries and Soroban submission
+/// retries so both spread their retries instead of stampeding in lock-step.
+#[derive(Debug, Clone)]
+pub struct BackoffPolicy {
+    /// Retries after the first attempt (so up to `max_retries + 1` attempts).
+    pub max_retries: u32,
+    pub initial_delay: Duration,
+    pub max_delay: Duration,
+    pub multiplier: f64,
+    /// Fraction (0.0–1.0) of each delay that is randomised; `0.0` is
+    /// deterministic, `1.0` is "full jitter".
+    pub jitter: f64,
+}
+
+impl Default for BackoffPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_delay: Duration::from_millis(500),
+            max_delay: Duration::from_secs(10),
+            multiplier: 2.0,
+            jitter: 0.5,
+        }
+    }
+}
+
+impl BackoffPolicy {
+    /// Delay before retry number `attempt` (0-based), with random jitter.
+    pub fn delay_for(&self, attempt: u32) -> Duration {
+        self.delay_with_unit(attempt, rand::random::<f64>())
+    }
+
+    /// Delay before retry number `attempt` given a jitter sample `unit` in
+    /// `[0, 1]`. Deterministic, so the curve can be unit-tested.
+    ///
+    /// `capped = min(initial * multiplier^attempt, max)`; the result keeps
+    /// `(1 - jitter)` of `capped` and randomises the remaining `jitter` share.
+    pub fn delay_with_unit(&self, attempt: u32, unit: f64) -> Duration {
+        let exponential =
+            self.initial_delay.as_secs_f64() * self.multiplier.max(1.0).powi(attempt.min(32) as i32);
+        let capped = exponential.min(self.max_delay.as_secs_f64());
+        let jitter = self.jitter.clamp(0.0, 1.0);
+        let secs = capped * (1.0 - jitter) + capped * jitter * unit.clamp(0.0, 1.0);
+        Duration::from_secs_f64(secs)
+    }
+}
+
 /// Execute a transaction with automatic retry on serialization failures
 pub async fn execute_transaction<F, R, E>(
     pool: &PgPool,
@@ -76,8 +124,16 @@ where
                     // Rollback is automatic on drop, but we explicitly close
                     let _ = tx.rollback().await;
                     
-                    // Exponential backoff
-                    let delay = config.retry_delay * 2_u32.pow(attempt);
+                    // Exponential backoff with jitter, so concurrent
+                    // conflicting transactions don't retry in lock-step.
+                    let delay = BackoffPolicy {
+                        max_retries: config.max_retries,
+                        initial_delay: config.retry_delay,
+                        max_delay: config.retry_delay * 2_u32.pow(config.max_retries.min(16)),
+                        multiplier: 2.0,
+                        jitter: 0.5,
+                    }
+                    .delay_for(attempt);
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
@@ -186,5 +242,38 @@ mod tests {
         assert_eq!(IsolationLevel::ReadCommitted.as_str(), "READ COMMITTED");
         assert_eq!(IsolationLevel::RepeatableRead.as_str(), "REPEATABLE READ");
         assert_eq!(IsolationLevel::Serializable.as_str(), "SERIALIZABLE");
+    }
+
+    fn policy(jitter: f64) -> BackoffPolicy {
+        BackoffPolicy {
+            max_retries: 5,
+            initial_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(1_000),
+            multiplier: 2.0,
+            jitter,
+        }
+    }
+
+    #[test]
+    fn backoff_grows_exponentially_and_caps() {
+        let p = policy(0.0);
+        assert_eq!(p.delay_with_unit(0, 0.7), Duration::from_millis(100));
+        assert_eq!(p.delay_with_unit(1, 0.7), Duration::from_millis(200));
+        assert_eq!(p.delay_with_unit(2, 0.7), Duration::from_millis(400));
+        assert_eq!(p.delay_with_unit(3, 0.7), Duration::from_millis(800));
+        assert_eq!(p.delay_with_unit(4, 0.7), Duration::from_millis(1_000));
+        assert_eq!(p.delay_with_unit(30, 0.7), Duration::from_millis(1_000));
+    }
+
+    #[test]
+    fn backoff_jitter_stays_within_bounds() {
+        let p = policy(0.5);
+        // attempt 2 → capped 400ms; jitter keeps 200ms fixed + up to 200ms random.
+        assert_eq!(p.delay_with_unit(2, 0.0), Duration::from_millis(200));
+        assert_eq!(p.delay_with_unit(2, 1.0), Duration::from_millis(400));
+        for _ in 0..100 {
+            let d = p.delay_for(2);
+            assert!(d >= Duration::from_millis(200) && d <= Duration::from_millis(400));
+        }
     }
 }

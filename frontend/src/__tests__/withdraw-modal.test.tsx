@@ -20,7 +20,7 @@ describe("Withdraw validation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /submit withdrawal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /review withdrawal/i }));
 
     // Form validation runs asynchronously on submit (zodResolver). An empty
     // amount fails the required check before the positive-number refine.
@@ -40,7 +40,7 @@ describe("Withdraw validation", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /submit withdrawal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /review withdrawal/i }));
 
     await waitFor(() => {
       expect(

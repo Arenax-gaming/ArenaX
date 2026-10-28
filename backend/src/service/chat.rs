@@ -147,6 +147,8 @@ pub struct ChatService {
     store: Store,
     bus: Option<EventBus>,
     published: Mutex<Vec<ChatLine>>,
+    /// Optional DB pool for block-list enforcement (#1407).
+    db_pool: Option<sqlx::PgPool>,
 }
 
 impl ChatService {
@@ -155,6 +157,7 @@ impl ChatService {
             store: Store::Memory(Mutex::new(HashMap::new())),
             bus: None,
             published: Mutex::new(Vec::new()),
+            db_pool: None,
         }
     }
 
@@ -163,7 +166,35 @@ impl ChatService {
             store: Store::Redis(conn),
             bus,
             published: Mutex::new(Vec::new()),
+            db_pool: None,
         }
+    }
+
+    /// Attach a DB pool so the chat service can enforce the player block list
+    /// (#1407).  When set, `send` will reject DMs between blocked players.
+    pub fn with_db_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.db_pool = Some(pool);
+        self
+    }
+
+    /// Check if either user has blocked the other.  Returns `true` if blocked,
+    /// `false` if not blocked or if no DB pool is configured.
+    async fn is_blocked(&self, a: Uuid, b: Uuid) -> bool {
+        let Some(pool) = &self.db_pool else {
+            return false;
+        };
+        let result: Result<i64, _> = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM player_blocks
+            WHERE (blocker_id = $1 AND blocked_id = $2)
+               OR (blocker_id = $2 AND blocked_id = $1)
+            "#,
+        )
+        .bind(a)
+        .bind(b)
+        .fetch_one(pool)
+        .await;
+        result.map(|c| c > 0).unwrap_or(false)
     }
 
     pub async fn send(&self, sender_id: Uuid, room_id: &str, body: &str) -> Result<ChatLine, ChatError> {
@@ -171,6 +202,16 @@ impl ChatService {
             ChatAuthError::Forbidden(reason) => ChatError::Forbidden(reason),
             ChatAuthError::Invalid(reason) => ChatError::InvalidRoom(reason),
         })?;
+
+        // Block-list enforcement for direct messages (#1407).
+        if let Some(other_id) = dm_recipient(sender_id, room_id) {
+            if self.is_blocked(sender_id, other_id).await {
+                return Err(ChatError::Forbidden(
+                    "Cannot send messages to a blocked player".into(),
+                ));
+            }
+        }
+
         let body = body.trim();
         if body.is_empty() {
             return Err(ChatError::Empty);
@@ -280,6 +321,25 @@ impl ChatService {
                     .collect())
             }
         }
+    }
+}
+
+/// Extract the other participant's UUID from a `dm:{a}:{b}` room ID.
+/// Returns `None` if the room is not a DM or the sender is not a participant.
+fn dm_recipient(sender: Uuid, room_id: &str) -> Option<Uuid> {
+    let rest = room_id.strip_prefix("dm:")?;
+    let mut parts = rest.split(':');
+    let left = parts.next().and_then(|p| Uuid::parse_str(p).ok())?;
+    let right = parts.next().and_then(|p| Uuid::parse_str(p).ok())?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if left == sender {
+        Some(right)
+    } else if right == sender {
+        Some(left)
+    } else {
+        None
     }
 }
 

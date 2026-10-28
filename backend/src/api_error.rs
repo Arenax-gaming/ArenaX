@@ -84,6 +84,12 @@ pub enum ApiError {
     /// "something is broken in a way retrying will not help".
     #[error("Service unavailable: {0}")]
     ServiceUnavailable(String),
+
+    /// An upstream dependency is temporarily shed (e.g. its circuit breaker is
+    /// open). Answers 503 with a `Retry-After` header so clients back off for
+    /// `retry_after` seconds instead of hammering a known-down dependency.
+    #[error("Service unavailable: {message}")]
+    DependencyUnavailable { message: String, retry_after: u64 },
 }
 
 // Helper methods for convenience
@@ -178,7 +184,7 @@ impl ResponseError for ApiError {
                 actix_web::http::StatusCode::TOO_MANY_REQUESTS,
                 self.to_string(),
             ),
-            ApiError::ServiceUnavailable(_) => (
+            ApiError::ServiceUnavailable(_) | ApiError::DependencyUnavailable { .. } => (
                 actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),
             ),
@@ -212,6 +218,10 @@ impl ResponseError for ApiError {
             builder.insert_header(("RateLimit-Reset", reset.to_string()));
             builder.insert_header(("Retry-After", retry_after.to_string()));
             builder.insert_header(("Access-Control-Expose-Headers", "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
+        }
+        if let ApiError::DependencyUnavailable { retry_after, .. } = self {
+            builder.insert_header(("Retry-After", retry_after.to_string()));
+            builder.insert_header(("Access-Control-Expose-Headers", "Retry-After"));
         }
         builder.json(error_response)
     }

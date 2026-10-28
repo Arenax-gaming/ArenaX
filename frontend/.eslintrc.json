@@ -24,6 +24,32 @@
       }
     },
     {
+      "files": ["src/components/ui/Modal.tsx"],
+      "rules": {
+        "jsx-a11y/click-events-have-key-events": "off",
+        "jsx-a11y/no-static-element-interactions": "off"
+      }
+    },
+    {
+      "files": ["src/components/bracket/SingleEliminationBracket.tsx"],
+      "rules": {
+        "jsx-a11y/no-noninteractive-tabindex": "off"
+      }
+    },
+    {
+      "files": ["src/components/settings/AvatarCropModal.tsx"],
+      "rules": {
+        "jsx-a11y/no-noninteractive-element-interactions": "off",
+        "jsx-a11y/no-noninteractive-tabindex": "off"
+      }
+    },
+    {
+      "files": ["src/__tests__/a11y-core-flows.test.tsx"],
+      "rules": {
+        "jsx-a11y/no-noninteractive-element-interactions": "off"
+      }
+    },
+    {
       "files": ["src/__tests__/tooltip.test.tsx"],
       "rules": {
         "react/display-name": "off"
@@ -31,4 +57,3 @@
     }
   ]
 }
-

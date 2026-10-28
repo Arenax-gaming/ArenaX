@@ -177,8 +177,8 @@ All functions shown live in [ax-token/src/lib.rs](file:///C:/Users/s-barau/Docum
 ### Step 1: Mint Tokens
 
 **Function**: [`AxToken::mint`](file:///C:/Users/s-barau/Documents/GitHub/ArenaX/contracts/ax-token/src/lib.rs#L119-L148)
-- Access: **Admin only**
-- Panics: `amount <= 0`, supply cap exceeded
+- Access: **Authorized minters only** (`minter` must sign and be in the registry; the initial admin is seeded as an uncapped minter). Admin manages the list with `add_minter(minter, cap, period)` / `remove_minter(minter)`.
+- Errors: `Unauthorized` (unlisted minter), `MinterCapExceeded` (per-period cap); panics on `amount <= 0` or supply cap exceeded
 
 #### CLI
 
@@ -189,7 +189,7 @@ soroban contract invoke \
   --source-account admin \
   --network testnet \
   -- \
-  mint --to "$ALICE_PUBKEY" --amount 10000000000000
+  mint --minter "$ADMIN_PUBKEY" --to "$ALICE_PUBKEY" --amount 10000000000000
 
 # Verify balance
 soroban contract invoke \
@@ -206,7 +206,7 @@ use soroban_clients::ax_token::Client as AxTokenClient;
 
 async fn mint_to_alice(env: &Env, token_id: Address, admin: Address, alice: Address) {
     let client = AxTokenClient::new(env, &token_id);
-    client.mint(&alice, &1_000_000_0000000_i128);
+    client.mint(&admin, &alice, &1_000_000_0000000_i128);
     assert_eq!(client.balance(&alice), 1_000_000_0000000_i128);
 }
 ```
@@ -262,7 +262,7 @@ batch_ops.batch_transfer(
 ### Step 3: Burn Tokens
 
 **Function**: [`AxToken::burn`](file:///C:/Users/s-barau/Documents/GitHub/ArenaX/contracts/ax-token/src/lib.rs#L150-L185)
-- Access: **Admin only**
+- Access: **Authorized minters only** (`minter` must sign and be in the registry; the initial admin is seeded as an uncapped minter). Admin manages the list with `add_minter(minter, cap, period)` / `remove_minter(minter)`.
 - Side effects: decrements `TotalSupply`, *reduces* the supply cap by the same amount (so the cap is a hard lifetime ceiling)
 - Safety: same-sequence flash-loan guard
 

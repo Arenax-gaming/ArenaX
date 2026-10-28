@@ -39,7 +39,15 @@ class EmailService {
     this.transporter = nodemailer.createTransport(config);
   }
 
+  public lastSentEmail?: { to: string; subject: string; html: string; text: string; token?: string };
+
   private async sendEmail(to: string, template: EmailTemplate): Promise<void> {
+    this.lastSentEmail = { to, ...template };
+
+    if (process.env.NODE_ENV === 'test' && !process.env.EMAIL_HOST) {
+      return;
+    }
+
     if (!this.transporter) {
       throw new Error('Email transporter not initialized');
     }
@@ -58,8 +66,12 @@ class EmailService {
     }
   }
 
+  public lastSentToken?: string;
+
   async sendVerificationEmail(email: string, token: string): Promise<void> {
-    const verificationUrl = `${process.env.FRONTEND_URL}/auth/verify-email?token=${token}`;
+    this.lastSentToken = token;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const verificationUrl = `${frontendUrl}/auth/verify-email?token=${token}`;
     
     const template: EmailTemplate = {
       subject: 'Verify your ArenaX account',
@@ -210,4 +222,5 @@ class EmailService {
   }
 }
 
-export default new EmailService();
+export const emailService = new EmailService();
+export default emailService;

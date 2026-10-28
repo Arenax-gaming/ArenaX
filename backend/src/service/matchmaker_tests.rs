@@ -422,6 +422,75 @@ mod tests {
         assert!(res.p95 >= 90.0);
         assert!(res.p99 >= 90.0);
     }
+
+    #[test]
+    fn test_find_best_match_excludes_blocked_pairs() {
+        use crate::service::matchmaker::find_best_match_for_player;
+
+        let now = Utc::now();
+        let player_a = Uuid::from_u128(100);
+        let player_b = Uuid::from_u128(101);
+        let player_c = Uuid::from_u128(102);
+
+        let entry_a = QueueEntry {
+            user_id: player_a,
+            game: "test".to_string(),
+            game_mode: "ranked".to_string(),
+            current_elo: 1200,
+            min_elo: 1100,
+            max_elo: 1300,
+            joined_at: now,
+            wait_time_multiplier: 1.0,
+        };
+
+        let entry_b = QueueEntry {
+            user_id: player_b,
+            game: "test".to_string(),
+            game_mode: "ranked".to_string(),
+            current_elo: 1210,
+            min_elo: 1110,
+            max_elo: 1310,
+            joined_at: now,
+            wait_time_multiplier: 1.0,
+        };
+
+        let entry_c = QueueEntry {
+            user_id: player_c,
+            game: "test".to_string(),
+            game_mode: "ranked".to_string(),
+            current_elo: 1220,
+            min_elo: 1120,
+            max_elo: 1320,
+            joined_at: now,
+            wait_time_multiplier: 1.0,
+        };
+
+        let candidates = vec![entry_b.clone(), entry_c.clone()];
+        let processed = std::collections::HashSet::new();
+
+        // Without any blocks, player A should match with B (closest ELO).
+        let no_blocks = std::collections::HashSet::new();
+        let candidate = find_best_match_for_player(&entry_a, &candidates, &processed, &no_blocks);
+        assert!(candidate.is_some(), "should match without blocks");
+        assert_eq!(candidate.unwrap().player2.user_id, player_b);
+
+        // With A blocking B, player A should match with C instead.
+        let mut blocked = std::collections::HashSet::new();
+        blocked.insert((player_a, player_b));
+        blocked.insert((player_b, player_a));
+        let candidate = find_best_match_for_player(&entry_a, &candidates, &processed, &blocked);
+        assert!(candidate.is_some(), "should match with C when B is blocked");
+        assert_eq!(
+            candidate.unwrap().player2.user_id, player_c,
+            "blocked player B should never be matched"
+        );
+
+        // If both B and C are blocked, no match should be found.
+        blocked.insert((player_a, player_c));
+        blocked.insert((player_c, player_a));
+        let candidate = find_best_match_for_player(&entry_a, &candidates, &processed, &blocked);
+        assert!(candidate.is_none(), "should not match when all candidates are blocked");
+    }
 }
 
 // Integration tests

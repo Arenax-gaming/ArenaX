@@ -125,12 +125,14 @@ const createAccessToken = (user: {
     email: string;
     username: string;
     role: string;
+    isVerified?: boolean;
 }): string =>
     jwt.sign(
         {
             email: user.email,
             username: user.username,
-            role: user.role
+            role: user.role,
+            isVerified: user.isVerified ?? false
         },
         authConfig.signingKey,
         {
@@ -138,6 +140,21 @@ const createAccessToken = (user: {
             expiresIn:
                 authConfig.accessTokenTtl as jwt.SignOptions['expiresIn'],
             subject: user.id
+        }
+    );
+
+export const createVerificationToken = (userId: string, email: string): string =>
+    jwt.sign(
+        {
+            email,
+            type: 'email_verification'
+        },
+        authConfig.signingKey,
+        {
+            algorithm: authConfig.jwtAlgorithm,
+            expiresIn: '24h',
+            subject: userId,
+            jwtid: crypto.randomUUID()
         }
     );
 
@@ -207,6 +224,7 @@ interface UserForSession {
     socials: unknown;
     createdAt: Date;
     updatedAt: Date;
+    isVerified?: boolean;
 }
 
 const issueSessionTokens = async (
@@ -279,8 +297,8 @@ export const registerUser = async (input: RegisterInput) => {
                 return user;
             });
 
-            // Generate and send verification email
-            const verificationToken = crypto.randomBytes(32).toString('hex');
+            // Generate and send signed verification email (24-hour expiration)
+            const verificationToken = createVerificationToken(createdUser.id, normalizedEmail);
             const verificationTokenHash = toTokenHash(verificationToken);
             const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
@@ -580,7 +598,7 @@ export const authenticateSocial = async (input: SocialAuthInput) => {
                         return newUser;
                     });
                     try {
-                        await notificationService.createDefaultPreferences(createdUser.id);
+                        await notificationService.createDefaultPreferences(user.id);
                     } catch {}
                     break;
                 } catch (error) {
@@ -682,26 +700,54 @@ export interface VerifyEmailInput {
 
 export const verifyEmail = async (input: VerifyEmailInput) => {
     const prisma = getDatabaseClient();
+
+    // Verify signed JWT if token is formatted as a JWT
+    let jwtPayload: { sub?: string; email?: string; type?: string } | null = null;
+    try {
+        const decoded = jwt.verify(input.token, authConfig.verificationKey, {
+            algorithms: [authConfig.jwtAlgorithm]
+        }) as { sub?: string; email?: string; type?: string };
+        if (decoded && decoded.type === 'email_verification') {
+            jwtPayload = decoded;
+        }
+    } catch (err) {
+        if (err instanceof jwt.TokenExpiredError) {
+            throw new HttpError(400, 'Verification token has expired');
+        }
+    }
+
     const tokenHash = toTokenHash(input.token);
-    
+
     const user = await prisma.user.findFirst({
         where: {
-            verificationToken: tokenHash
+            OR: [
+                { verificationToken: tokenHash },
+                { verificationToken: input.token },
+                ...(jwtPayload?.sub ? [{ id: jwtPayload.sub }] : [])
+            ]
         }
     });
-    
+
     if (!user) {
         throw new HttpError(400, 'Invalid verification token');
     }
-    
-    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
-        throw new HttpError(400, 'Verification token has expired');
-    }
-    
+
     if (user.isVerified) {
         throw new HttpError(400, 'Email already verified');
     }
-    
+
+    if (
+        user.verificationToken &&
+        user.verificationToken !== tokenHash &&
+        user.verificationToken !== input.token
+    ) {
+        throw new HttpError(400, 'Invalid verification token');
+    }
+
+    if (!user.verificationTokenExpires || user.verificationTokenExpires.getTime() <= Date.now()) {
+        throw new HttpError(400, 'Verification token has expired');
+    }
+
     await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -710,7 +756,7 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
             verificationTokenExpires: null
         }
     });
-    
+
     try {
         await emailService.sendWelcomeEmail(user.email, user.username);
     } catch (emailError) {
@@ -723,8 +769,8 @@ export const verifyEmail = async (input: VerifyEmailInput) => {
     }
 
     logger.info('Email verified', { userId: user.id });
-    
-    return { message: 'Email verified successfully' };
+
+    return { message: 'Email verified successfully', isVerified: true };
 };
 
 export interface ResendVerificationEmailInput {
@@ -734,25 +780,25 @@ export interface ResendVerificationEmailInput {
 export const resendVerificationEmail = async (input: ResendVerificationEmailInput) => {
     const prisma = getDatabaseClient();
     const normalizedEmail = normalizeEmail(input.email);
-    
+
     const user = await prisma.user.findUnique({
         where: { email: normalizedEmail }
     });
-    
+
     // Always return success to prevent email enumeration
     if (!user) {
         return { message: 'If the email exists, a verification link has been sent' };
     }
-    
+
     if (user.isVerified) {
         return { message: 'Email already verified' };
     }
-    
-    // Generate new verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex');
+
+    // Generate new signed verification token (24-hour expiration)
+    const verificationToken = createVerificationToken(user.id, normalizedEmail);
     const verificationTokenHash = toTokenHash(verificationToken);
     const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    
+
     await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -760,15 +806,18 @@ export const resendVerificationEmail = async (input: ResendVerificationEmailInpu
             verificationTokenExpires
         }
     });
-    
+
     // Send verification email
     try {
         await emailService.sendVerificationEmail(normalizedEmail, verificationToken);
     } catch (emailError) {
-        console.error('Failed to send verification email:', emailError);
-        // Don't fail if email fails
+        logger.warn('Failed to send verification email:', {
+            userId: user.id,
+            email: normalizedEmail,
+            error: emailError
+        });
     }
-    
+
     return { message: 'If the email exists, a verification link has been sent' };
 };
 

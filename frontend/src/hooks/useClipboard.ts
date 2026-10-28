@@ -4,7 +4,8 @@
  * useClipboard — copy text to the clipboard with feedback state.
  *
  * Features:
- *  - Uses the modern Clipboard API with a document.execCommand fallback
+ *  - Uses the modern Clipboard API with a textarea/execCommand fallback on
+ *    insecure origins or when the Clipboard API rejects (see lib/clipboard)
  *  - Provides a `hasCopied` flag that auto-resets after a configurable delay
  *  - Tracks the last copied value
  *
@@ -16,6 +17,7 @@
  */
 
 import { useState, useCallback, useRef } from "react";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export interface UseClipboardOptions {
   /** How long the `hasCopied` flag stays true in ms (default 2000). */
@@ -45,39 +47,8 @@ export function useClipboard(
   const copy = useCallback(
     async (text: string): Promise<boolean> => {
       setError(null);
-
-      // Modern Clipboard API
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(text);
-          setValue(text);
-          setHasCopied(true);
-          if (timeoutRef.current) clearTimeout(timeoutRef.current);
-          timeoutRef.current = setTimeout(
-            () => setHasCopied(false),
-            resetAfterMs
-          );
-          return true;
-        } catch (caught) {
-          const err =
-            caught instanceof Error ? caught : new Error("Clipboard write failed");
-          setError(err);
-          return false;
-        }
-      }
-
-      // Legacy fallback (execCommand)
       try {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.cssText =
-          "position:fixed;top:0;left:0;opacity:0;pointer-events:none;";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        const ok = document.execCommand("copy");
-        document.body.removeChild(textarea);
-        if (!ok) throw new Error("execCommand copy failed");
+        await copyToClipboard(text);
         setValue(text);
         setHasCopied(true);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);

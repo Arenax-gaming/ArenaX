@@ -161,7 +161,7 @@ export function TournamentSponsorRow({
               style={{
                 borderColor: `${color}50`,
                 backgroundColor: `${color}08`,
-                ringColor: color,
+                ...(isFeatured ? { ['--tw-ring-color' as any]: color } : {}),
               }}
             >
               {logo ? (

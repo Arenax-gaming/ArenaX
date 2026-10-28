@@ -60,4 +60,14 @@ pub enum AntiCheatError {
     EmergencyPaused = 31,
     ReputationNotSet = 32,
     ArithmeticOverflow = 33,
+
+    // ── ZK proof batching (#1413) ────────────────────────────────────────────
+    /// `batch_verify` called with no proofs.
+    EmptyProofBatch = 34,
+    /// Batch exceeds `MAX_PROOF_BATCH_SIZE`.
+    ProofBatchTooLarge = 35,
+    /// At least one proof in the batch failed; the whole batch is rejected.
+    ProofBatchVerificationFailed = 36,
+    /// No zk-proof verifier contract configured.
+    ZkVerifierNotSet = 37,
 }

@@ -13,6 +13,7 @@ pub mod reward_settlement;
 pub mod social;
 pub mod stellar_account;
 pub mod stellar_transaction;
+pub mod telemetry;
 pub mod tournament;
 pub mod tournament_finance;
 pub mod user;
@@ -52,6 +53,11 @@ pub use stellar_account::{
 pub use stellar_transaction::{
     CreateStellarTransactionRequest, StellarTransaction, StellarTransactionResponse,
     StellarTransactionStatus, StellarTransactionType,
+};
+pub use telemetry::{
+    retention_deadline, telemetry_object_key, ClientMetrics, TelemetryEnvelope, TelemetryEvent,
+    TelemetryInput, TelemetryReference, TelemetrySummary, TelemetryUploadRequest,
+    MAX_TELEMETRY_BYTES, MAX_TELEMETRY_EVENTS, TELEMETRY_KEY_PREFIX, TELEMETRY_SCHEMA_VERSION,
 };
 pub use tournament::{
     BracketType, CreateTournamentRequest, JoinTournamentRequest, ParticipantStatus, PrizePool,

@@ -18,10 +18,13 @@ pub const ROLE_ANALYTICS_VIEWER: u32 = 8;
 pub const ROLE_ANALYST: u32 = 11; // Central RBAC Analyst role
 pub const ROLE_STAKING_MANAGER: u32 = 9;
 pub const ROLE_CROSS_GAME_ADMIN: u32 = 10;
+/// Authorized token minter (#1418). Unlike other roles, minting authority is
+/// never implied by `ROLE_ADMIN`: see [`AccessControl::is_minter`].
+pub const ROLE_MINTER: u32 = 12;
 
 /// Canonical role ids. `has_role` keys storage by this integer, so a duplicate
 /// value makes two roles indistinguishable.
-const ALL_ROLE_IDS: [u32; 11] = [
+const ALL_ROLE_IDS: [u32; 12] = [
     ROLE_ADMIN,
     ROLE_GOVERNANCE,
     ROLE_OPERATOR,
@@ -33,6 +36,7 @@ const ALL_ROLE_IDS: [u32; 11] = [
     ROLE_ANALYST,
     ROLE_STAKING_MANAGER,
     ROLE_CROSS_GAME_ADMIN,
+    ROLE_MINTER,
 ];
 
 const fn role_ids_are_unique(roles: &[u32]) -> bool {
@@ -67,6 +71,20 @@ pub enum DataKey {
     TimeRestriction(Address, u32),    // (Account, Role) -> TimeRestriction
     AuditLog(u64),                    // (EntryId) -> AuditEntry
     AuditCounter,
+    MinterCap(Address), // (Minter) -> MinterCap
+}
+
+/// Per-period mint cap attached to a `ROLE_MINTER` grant.
+///
+/// `cap == 0` means uncapped. `period == 0` makes `cap` a lifetime cap;
+/// otherwise it is the maximum mintable amount per `period` seconds. Token
+/// contracts (e.g. ax-token) enforce the cap; this registry is the
+/// authority-level record of what each minter is allowed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinterCap {
+    pub cap: i128,
+    pub period: u64,
 }
 
 #[contracttype]
@@ -197,6 +215,81 @@ impl AccessControl {
             account.clone(),
             String::from_str(&env, "Role revoked by admin"),
         );
+    }
+
+    // ── Authorized Minters ─────────────────────────────────────────────────
+
+    /// Add `account` to the authorized-minters list with an optional
+    /// per-period cap. Admin only. Re-granting replaces the existing cap.
+    pub fn grant_minter(env: Env, account: Address, cap: i128, period: u64) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
+
+        if cap < 0 {
+            panic!("cap must not be negative");
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Role(account.clone(), ROLE_MINTER), &true);
+        env.storage().persistent().set(
+            &DataKey::MinterCap(account.clone()),
+            &MinterCap { cap, period },
+        );
+
+        events::emit_role_granted(&env, &account, ROLE_MINTER, &admin);
+
+        Self::record_audit_entry_internal(
+            &env,
+            admin.clone(),
+            String::from_str(&env, "GRANT_MINTER"),
+            account.clone(),
+            String::from_str(&env, "Minter authorized by admin"),
+        );
+    }
+
+    /// Remove `account` from the authorized-minters list. Admin only.
+    pub fn revoke_minter(env: Env, account: Address) {
+        let admin = Self::get_admin(env.clone());
+        admin.require_auth();
+
+        if !Self::is_minter(env.clone(), account.clone()) {
+            panic!("not a minter");
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Role(account.clone(), ROLE_MINTER));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::MinterCap(account.clone()));
+
+        events::emit_role_revoked(&env, &account, ROLE_MINTER, &admin);
+
+        Self::record_audit_entry_internal(
+            &env,
+            admin.clone(),
+            String::from_str(&env, "REVOKE_MINTER"),
+            account.clone(),
+            String::from_str(&env, "Minter revoked by admin"),
+        );
+    }
+
+    /// Whether `account` is explicitly listed as a minter. Deliberately does
+    /// not go through `has_role`, so the admin is not an implicit minter.
+    pub fn is_minter(env: Env, account: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get::<DataKey, bool>(&DataKey::Role(account, ROLE_MINTER))
+            .unwrap_or(false)
+    }
+
+    /// Cap configuration for a listed minter, or `None` if not a minter.
+    pub fn get_minter_cap(env: Env, account: Address) -> Option<MinterCap> {
+        if !Self::is_minter(env.clone(), account.clone()) {
+            return None;
+        }
+        env.storage().persistent().get(&DataKey::MinterCap(account))
     }
 
     /// Delegate a role to another account for a limited time duration
@@ -435,6 +528,7 @@ impl AccessControl {
             ROLE_ANALYST,
             ROLE_STAKING_MANAGER,
             ROLE_CROSS_GAME_ADMIN,
+            ROLE_MINTER,
         ];
         let mut has_perm = false;
         let mut i = 0;

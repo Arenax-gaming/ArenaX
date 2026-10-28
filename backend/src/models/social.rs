@@ -134,3 +134,21 @@ pub struct FriendsListResponse {
     pub total_count: i32,
     pub online_count: i32,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockEntry {
+    pub blocker_id: Uuid,
+    pub blocked_id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockListResponse {
+    pub blocks: Vec<BlockEntry>,
+    pub total_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockRequest {
+    pub user_id: Uuid,
+}

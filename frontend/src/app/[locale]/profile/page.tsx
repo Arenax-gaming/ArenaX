@@ -11,6 +11,7 @@ import { ReputationBadge } from "@/components/profile/ReputationBadge";
 import { ReputationBalance } from "@/components/profile/ReputationBalance";
 import { ProtectedPage } from "@/components/navigation/ProtectedPage";
 import { Button } from "@/components/ui/Button";
+import { Swords } from "lucide-react";
 import { useAuth, AUTH_PROFILE_QUERY_KEY } from "@/hooks/useAuth";
 import { useMatches } from "@/hooks/useMatches";
 import { useNotifications } from "@/contexts/NotificationContext";
@@ -276,14 +277,25 @@ export default function ProfilePage() {
                   </Button>
                 </>
               ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleEnterEdit}
-                  data-testid="profile-edit"
-                >
-                  Edit Profile
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleEnterEdit}
+                    data-testid="profile-edit"
+                  >
+                    Edit Profile
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push(`/profile/${user.id}?compare=true`)}
+                    data-testid="profile-compare-button"
+                  >
+                    <Swords className="h-4 w-4 mr-2" />
+                    Compare
+                  </Button>
+                </>
               )}
             </div>
           </div>

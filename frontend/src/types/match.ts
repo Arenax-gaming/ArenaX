@@ -1,4 +1,5 @@
 import type { BracketMatch, ScoreReport } from "./bracket";
+import type { StellarTransactionRecord } from "@/lib/stellarExplorer";
 
 // Match-related types
 export interface Match {
@@ -139,6 +140,10 @@ export interface MatchHubDetails {
   reports: ScoreReport[];
   feed: MatchHubEvent[];
   canDisputeUntil: string;
+  /** Uploaded result screenshots */
+  screenshots?: string[];
+  /** On-chain Stellar records tied to this match (escrow, payouts) */
+  stellarTransactions?: StellarTransactionRecord[];
   /** Spectator mode configuration */
   spectatorLimit?: number;
   replayUrl?: string;

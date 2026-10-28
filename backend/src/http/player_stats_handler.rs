@@ -83,6 +83,11 @@ pub async fn get_win_rate_by_mode(
     Ok(HttpResponse::Ok().json(rates))
 }
 
+#[derive(Deserialize)]
+pub struct CompareQuery {
+    pub player_ids: String,
+}
+
 /// GET /api/stats/player/{user_id}/head-to-head?opponent_id=<uuid>
 ///
 /// Returns the head-to-head record between two players: wins, losses, draws,
@@ -101,12 +106,52 @@ pub async fn get_head_to_head(
     Ok(HttpResponse::Ok().json(record))
 }
 
+/// GET /api/stats/compare?player_ids=<uuid1>,<uuid2>
+///
+/// Batch statistics comparison endpoint — Issue #1398.
+/// Returns the 5 required stats for all requested player IDs in a single response:
+/// - win_rate
+/// - average_elo
+/// - matches_played
+/// - tournament_wins
+/// - reputation_score
+pub async fn compare_players_stats(
+    db: web::Data<PgPool>,
+    query: web::Query<CompareQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let raw_ids: Vec<&str> = query
+        .player_ids
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if raw_ids.is_empty() {
+        return Err(ApiError::BadRequest("No player IDs provided".to_string()));
+    }
+
+    let mut uuids = Vec::with_capacity(raw_ids.len());
+    for raw in raw_ids {
+        let u = validate_uuid(raw).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+        uuids.push(u);
+    }
+
+    let svc = PlayerStatsService::new(db.get_ref().clone());
+    let response = svc.get_batch_player_stats(&uuids).await?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/stats/player/{user_id}")
-            .route("/summary",           web::get().to(get_player_stats_summary))
-            .route("/daily",             web::get().to(get_daily_stats_snapshots))
-            .route("/win-rate-by-mode",  web::get().to(get_win_rate_by_mode))
-            .route("/head-to-head",      web::get().to(get_head_to_head)),
+        web::scope("/stats")
+            .route("/compare", web::get().to(compare_players_stats))
+            .service(
+                web::scope("/player/{user_id}")
+                    .route("/summary", web::get().to(get_player_stats_summary))
+                    .route("/daily", web::get().to(get_daily_stats_snapshots))
+                    .route("/win-rate-by-mode", web::get().to(get_win_rate_by_mode))
+                    .route("/head-to-head", web::get().to(get_head_to_head)),
+            ),
     );
 }
+

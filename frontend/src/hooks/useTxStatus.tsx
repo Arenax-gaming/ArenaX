@@ -50,6 +50,8 @@ interface AppendHistoryArgs extends Omit<TxMeta, "kind"> {
   kind?: TxKind;
   status?: TxStatus;
   hash?: string;
+  reference?: string;
+  provider?: string;
   reason?: string;
 }
 
@@ -58,6 +60,7 @@ interface TxStatusContextValue {
   history: TxHistoryItem[];
   trackTx: (input: TrackTxInput, meta: TrackTxMeta) => Promise<string>;
   appendHistory: (entry: AppendHistoryArgs) => void;
+  updateHistoryItem: (idOrReference: string, patch: Partial<TxHistoryItem>) => void;
   dismissToast: (id: string) => void;
   clearHistory: () => void;
 }
@@ -116,6 +119,8 @@ export const TxStatusProvider = ({ children }: { children: React.ReactNode }) =>
       asset,
       amount,
       hash,
+      reference,
+      provider,
       reason,
       kind = "classic",
       status = "pending",
@@ -131,6 +136,8 @@ export const TxStatusProvider = ({ children }: { children: React.ReactNode }) =>
         kind,
         status,
         hash,
+        reference,
+        provider,
         reason,
         explorerUrl,
         timestamp,
@@ -139,6 +146,22 @@ export const TxStatusProvider = ({ children }: { children: React.ReactNode }) =>
       prependHistory(entry);
     },
     [prependHistory],
+  );
+
+  const updateHistoryItem = useCallback(
+    (idOrReference: string, patch: Partial<TxHistoryItem>) => {
+      setHistory((current) => {
+        const next = current.map((item) => {
+          if (item.id === idOrReference || (item.reference && item.reference === idOrReference)) {
+            return { ...item, ...patch };
+          }
+          return item;
+        });
+        writeHistory(next);
+        return next;
+      });
+    },
+    [],
   );
 
   const dismissToast = useCallback((id: string) => {
@@ -293,10 +316,11 @@ export const TxStatusProvider = ({ children }: { children: React.ReactNode }) =>
       history,
       trackTx,
       appendHistory,
+      updateHistoryItem,
       dismissToast,
       clearHistory,
     }),
-    [toasts, history, trackTx, appendHistory, dismissToast, clearHistory],
+    [toasts, history, trackTx, appendHistory, updateHistoryItem, dismissToast, clearHistory],
   );
 
   return (

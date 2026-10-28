@@ -16,7 +16,9 @@ function escrowKey(currency: Currency): LedgerEscrowKey {
 }
 
 export class WalletService {
-    private db = getDatabaseClient();
+    private get db() {
+        return getDatabaseClient();
+    }
 
     /** Get or create the ledger row for a user. */
     async getOrCreateLedger(userId: string) {
@@ -69,6 +71,14 @@ export class WalletService {
         return this.db.$transaction(async (tx) => {
             const existing = await (tx as any).walletTransaction.findUnique({ where: { idempotencyKey } });
             if (existing) return existing;
+
+            const user = await (tx as any).user.findUnique({
+                where: { id: userId },
+                select: { isVerified: true }
+            });
+            if (user && !user.isVerified) {
+                throw new HttpError(403, 'Email verification required');
+            }
 
             const ledger = await this._getOrCreateLedgerTx(tx, userId);
             const bKey = balanceKey(currency);
@@ -225,6 +235,14 @@ export class WalletService {
                 where: { idempotencyKey: `${idempotencyKey}:debit` },
             });
             if (existing) return existing;
+
+            const fromUser = await (tx as any).user.findUnique({
+                where: { id: fromUserId },
+                select: { isVerified: true }
+            });
+            if (fromUser && !fromUser.isVerified) {
+                throw new HttpError(403, 'Email verification required');
+            }
 
             const bKey = balanceKey(currency);
             const eKey = escrowKey(currency);

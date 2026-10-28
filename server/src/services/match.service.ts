@@ -2,6 +2,7 @@ import { getDatabaseClient } from './database.service';
 import { MatchStatus } from '@prisma/client';
 import { AuditService } from './audit.service';
 import { createNotificationService } from './notification.service';
+import { uploadMatchScreenshot } from './storage.service';
 
 const notificationService = createNotificationService();
 import os from 'node:os';
@@ -112,18 +113,135 @@ export class MatchService {
     }
 
     /**
-     * Report score for a match.
+     * Save a player's score report and compare it with the opponent's report.
      */
-    async reportScore(matchId: string, winnerId: string) {
+    async submitScoreReport(
+        matchId: string,
+        reporterId: string,
+        scoreA: number,
+        scoreB: number,
+        file: { buffer: Buffer; mimetype: string }
+    ) {
         const prisma = getDatabaseClient();
-        return await prisma.match.update({
+        const match = await prisma.match.findUnique({
             where: { id: matchId },
-            data: {
-                winnerId,
-                status: MatchStatus.COMPLETED,
-                endedAt: new Date(),
-            },
         });
+
+        if (!match) throw new Error('Match not found');
+
+        if (reporterId !== match.playerAId && reporterId !== match.playerBId) {
+            throw new Error('Only players in this match can report scores');
+        }
+
+        if (
+            match.status === MatchStatus.DISPUTED ||
+            match.status === MatchStatus.FINALIZED
+        ) {
+            throw new Error('This match is not accepting score reports');
+        }
+
+        const screenshotUrl = await uploadMatchScreenshot(
+            matchId,
+            reporterId,
+            file
+        );
+
+        const metadata =
+            match.metadata &&
+            typeof match.metadata === 'object' &&
+            !Array.isArray(match.metadata)
+                ? (match.metadata as Record<string, any>)
+                : {};
+
+        const previousReports =
+            metadata.scoreReports &&
+            typeof metadata.scoreReports === 'object'
+                ? (metadata.scoreReports as Record<string, any>)
+                : {};
+
+        const reports = {
+            ...previousReports,
+            [reporterId]: {
+                scoreA,
+                scoreB,
+                screenshotUrl,
+                submittedAt: new Date().toISOString(),
+            },
+        };
+
+        const bothReported = Boolean(
+            reports[match.playerAId] && reports[match.playerBId]
+        );
+
+        const mismatch =
+            bothReported &&
+            (
+                reports[match.playerAId].scoreA !== reports[match.playerBId].scoreA ||
+                reports[match.playerAId].scoreB !== reports[match.playerBId].scoreB
+            );
+
+        let status: MatchStatus = match.status;
+        let winnerId = match.winnerId;
+
+        if (mismatch) {
+            status = MatchStatus.DISPUTED;
+            winnerId = null;
+        } else if (bothReported) {
+            status = MatchStatus.COMPLETED;
+
+            const finalScoreA = reports[match.playerAId].scoreA;
+            const finalScoreB = reports[match.playerAId].scoreB;
+
+            winnerId =
+                finalScoreA === finalScoreB
+                    ? null
+                    : finalScoreA > finalScoreB
+                        ? match.playerAId
+                        : match.playerBId;
+        }
+
+        const updatedMatch = await prisma.$transaction(async (tx) => {
+            const updated = await tx.match.update({
+                where: { id: matchId },
+                data: {
+                    metadata: { ...metadata, scoreReports: reports } as any,
+                    status,
+                    winnerId,
+                    ...(bothReported && !mismatch
+                        ? { endedAt: new Date() }
+                        : {}),
+                },
+            });
+
+            if (mismatch) {
+                await tx.dispute.create({
+                    data: {
+                        matchId,
+                        reporterId,
+                        reason: 'Players submitted conflicting score reports',
+                        evidenceUrls: [
+                            reports[match.playerAId].screenshotUrl,
+                            reports[match.playerBId].screenshotUrl,
+                        ],
+                        status: 'OPEN',
+                    },
+                });
+            }
+
+            return updated;
+        });
+
+        return {
+            match: updatedMatch,
+            reportCount: Object.keys(reports).length,
+            awaitingOpponent: !bothReported,
+            discrepancy: mismatch,
+            message: mismatch
+                ? 'Score reports disagree. The match has been flagged for review.'
+                : bothReported
+                    ? 'Both score reports match.'
+                    : 'Score report saved. Waiting for the other player.',
+        };
     }
 
     /**

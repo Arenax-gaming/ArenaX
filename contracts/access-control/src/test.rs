@@ -197,3 +197,71 @@ fn test_analyst_and_analytics_viewer_do_not_alias() {
     assert!(!client.has_role(&analyst, &ROLE_ANALYST));
     assert!(client.has_role(&viewer, &ROLE_ANALYTICS_VIEWER));
 }
+
+#[test]
+fn test_minter_registry_admin_managed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    // Admin is not an implicit minter.
+    assert!(!client.is_minter(&admin));
+    assert!(!client.is_minter(&stranger));
+    assert_eq!(client.get_minter_cap(&stranger), None);
+
+    client.grant_minter(&minter, &1_000i128, &3_600u64);
+    assert!(client.is_minter(&minter));
+    assert!(client.has_role(&minter, &ROLE_MINTER));
+    assert_eq!(
+        client.get_minter_cap(&minter),
+        Some(MinterCap {
+            cap: 1_000,
+            period: 3_600
+        })
+    );
+
+    client.revoke_minter(&minter);
+    assert!(!client.is_minter(&minter));
+    assert_eq!(client.get_minter_cap(&minter), None);
+}
+
+#[test]
+#[should_panic]
+fn test_grant_minter_requires_admin() {
+    let env = Env::default();
+
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    // Drop mocked auths: admin has not signed this grant.
+    env.set_auths(&[]);
+    client.grant_minter(&minter, &1_000i128, &0u64);
+}
+
+#[test]
+#[should_panic(expected = "not a minter")]
+fn test_revoke_unknown_minter_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    let contract_id = env.register(AccessControl, ());
+    let client = AccessControlClient::new(&env, &contract_id);
+    client.initialize(&admin);
+
+    client.revoke_minter(&stranger);
+}
