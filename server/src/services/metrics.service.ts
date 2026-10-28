@@ -55,6 +55,13 @@ const dbQueryTotal = getOrCreateCounter({
   labelNames: ['operation', 'table', 'status'],
 });
 
+// Slow query counter — tracks queries exceeding the configurable threshold (#1406)
+const dbSlowQueriesTotal = getOrCreateCounter({
+  name: 'db_slow_queries_total',
+  help: 'Total number of slow database queries that exceeded the threshold',
+  labelNames: ['model', 'operation'],
+});
+
 // Error metrics
 const errorsTotal = getOrCreateCounter({
   name: 'errors_total',
@@ -148,6 +155,11 @@ export class MetricsService {
   recordDbQuery(operation: string, table: string, duration: number, status: 'success' | 'error') {
     dbQueryDuration.observe({ operation, table }, duration);
     dbQueryTotal.inc({ operation, table, status });
+  }
+
+  // Slow query metrics (#1406)
+  recordSlowQuery(model: string, operation: string) {
+    dbSlowQueriesTotal.inc({ model, operation });
   }
 
   // Error metrics

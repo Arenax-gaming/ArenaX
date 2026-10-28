@@ -1,3 +1,4 @@
+import React, { Suspense } from 'react';
 import { getProfileById } from '@/data/user';
 import { ProfilePageClient } from './ProfilePageClient';
 
@@ -29,13 +30,21 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <ProfilePageClient
-      profile={data.profile}
-      stats={data.stats}
-      achievements={data.achievements}
-      friends={data.friends}
-      activities={data.activities}
-      eloHistory={data.eloHistory}
-    />
+    <Suspense
+      fallback={
+        <div className="container mx-auto px-4 py-8 animate-pulse">
+          <div className="h-32 bg-muted rounded-xl mb-6" />
+        </div>
+      }
+    >
+      <ProfilePageClient
+        profile={data.profile}
+        stats={data.stats}
+        achievements={data.achievements}
+        friends={data.friends}
+        activities={data.activities}
+        eloHistory={data.eloHistory}
+      />
+    </Suspense>
   );
 }

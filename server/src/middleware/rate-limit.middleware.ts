@@ -183,6 +183,25 @@ export const apiKeyRateLimiter = rateLimit({
     }
 });
 
+// 6. Resend Verification Email: 3 requests per hour (Issue #1403)
+export const emailVerificationResendRateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    limit: 3,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: shouldSkipRateLimit,
+    store: createRateLimitStore(60 * 60 * 1000, 'rl:resend-email:'),
+    keyGenerator: (req: Request) => {
+        const email = req.body?.email ? String(req.body.email).trim().toLowerCase() : 'anon';
+        return `${req.ip}-${email}`;
+    },
+    message: {
+        error: 'Too many verification email requests. Please try again after 1 hour.',
+        code: 'RATE_LIMIT_EXCEEDED',
+        retryAfter: 3600
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Exports for monitoring
 // ---------------------------------------------------------------------------

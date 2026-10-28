@@ -109,6 +109,37 @@ export function clearPromptSuppression(): void {
   }
 }
 
+const OUTCOME_KEY = "arenax:pwa:last-outcome";
+
+export type RecordedInstallOutcome = "accepted" | "dismissed" | "unavailable";
+
+/** Remember what the user chose at the browser's install dialog (#1414). */
+export function recordInstallOutcome(
+  outcome: RecordedInstallOutcome,
+  now: number = Date.now()
+): void {
+  safeSet(OUTCOME_KEY, JSON.stringify({ outcome, at: now }));
+}
+
+export function getLastInstallOutcome(): { outcome: RecordedInstallOutcome; at: number } | null {
+  const raw = safeGet(OUTCOME_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { outcome?: unknown; at?: unknown };
+    if (
+      (parsed.outcome === "accepted" ||
+        parsed.outcome === "dismissed" ||
+        parsed.outcome === "unavailable") &&
+      typeof parsed.at === "number"
+    ) {
+      return { outcome: parsed.outcome, at: parsed.at };
+    }
+  } catch {
+    // Corrupt value — treat as unknown.
+  }
+  return null;
+}
+
 export function recordPromptShown(now: number = Date.now()): void {
   safeSet(SHOWN_KEY, String(now));
 }

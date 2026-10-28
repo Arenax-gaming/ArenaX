@@ -10,6 +10,7 @@ use crate::api_error::ApiError;
 use crate::config::StorageConfig;
 use chrono::Utc;
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Actix `PayloadConfig` limit for evidence uploads (#1076).
@@ -267,6 +268,97 @@ pub trait EvidenceStore: Send + Sync {
     /// screenshot pipeline to re-hash and analyse evidence that was uploaded
     /// earlier, without trusting anything the caller supplies beyond the key.
     async fn get(&self, key: &str) -> Result<Vec<u8>, ApiError>;
+
+    /// Remove the object at `key`. Used by the telemetry retention sweeper to
+    /// purge expired recordings. Deleting a key that is already gone succeeds,
+    /// so a re-run after a partial failure is safe.
+    async fn delete(&self, key: &str) -> Result<(), ApiError>;
+}
+
+/// How many times, and how patiently, an upload is retried before it is
+/// reported as failed.
+///
+/// The delay doubles per attempt (exponential backoff), which gives a transient
+/// S3/MinIO outage or a network blip time to clear without a retry storm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    pub max_attempts: u32,
+    pub base_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(200),
+        }
+    }
+}
+
+impl RetryPolicy {
+    pub fn new(max_attempts: u32, base_delay: Duration) -> Self {
+        Self {
+            // At least one attempt always runs, even if a caller passes 0.
+            max_attempts: max_attempts.max(1),
+            base_delay,
+        }
+    }
+
+    /// Delay before attempt number `attempt` (1-based).
+    fn delay_before(&self, attempt: u32) -> Duration {
+        let exponent = attempt.saturating_sub(1).min(6);
+        self.base_delay * 2u32.pow(exponent)
+    }
+}
+
+/// Whether an error is worth retrying. Only a dependency being unavailable
+/// qualifies — a rejected payload or a validation failure will fail identically
+/// on every attempt and must be surfaced immediately.
+fn is_transient(error: &ApiError) -> bool {
+    matches!(
+        error,
+        ApiError::ServiceUnavailable(_) | ApiError::DependencyUnavailable { .. }
+    )
+}
+
+/// Upload `bytes` to `key`, retrying transient (network/5xx) failures with
+/// exponential backoff.
+///
+/// This is the upload path used for gameplay telemetry: a recording is precious
+/// evidence that the client cannot easily re-send, so a single dropped
+/// connection must not lose it. Non-transient errors short-circuit.
+pub async fn put_with_retry(
+    store: &dyn EvidenceStore,
+    key: &str,
+    content_type: &str,
+    bytes: &[u8],
+    policy: RetryPolicy,
+) -> Result<(), ApiError> {
+    let mut attempt = 1;
+    loop {
+        match store.put(key, content_type, bytes).await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= policy.max_attempts || !is_transient(&error) => {
+                if attempt > 1 {
+                    tracing::warn!(
+                        key, attempt, error = %error,
+                        "Object upload failed after retries"
+                    );
+                }
+                return Err(error);
+            }
+            Err(error) => {
+                let delay = policy.delay_before(attempt);
+                tracing::warn!(
+                    key, attempt, max_attempts = policy.max_attempts,
+                    delay_ms = delay.as_millis() as u64, error = %error,
+                    "Object upload failed; retrying"
+                );
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+            }
+        }
+    }
 }
 
 /// Real S3/MinIO-compatible store: a single-shot `PUT` signed with AWS
@@ -285,10 +377,10 @@ impl S3EvidenceStore {
     pub fn new(config: &StorageConfig) -> Self {
         Self {
             endpoint: config.s3_endpoint.trim_end_matches('/').to_string(),
-            // Not present in `StorageConfig` today; every deployment target
-            // for this project (MinIO, AWS in af-south-1 mirrors) accepts
-            // "us-east-1" as the SigV4 region for path-style requests.
-            region: "us-east-1".to_string(),
+            // SigV4 requires a region to derive the signing key. MinIO ignores
+            // it, but AWS does not, so it is configurable via `S3_REGION` and
+            // defaults to the value every current deployment target accepts.
+            region: config.s3_region.clone(),
             bucket: config.s3_bucket.clone(),
             access_key: config.s3_access_key.clone(),
             secret_key: config.s3_secret_key.clone(),
@@ -400,6 +492,34 @@ impl EvidenceStore for S3EvidenceStore {
             .await
             .map(|bytes| bytes.to_vec())
             .map_err(|e| ApiError::ServiceUnavailable(format!("Evidence storage read failed: {e}")))
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), ApiError> {
+        let (url, host, amz_date, authorization) = self.sign("DELETE", key, EMPTY_SHA256);
+
+        let response = self
+            .http
+            .delete(&url)
+            .header("host", host)
+            .header("x-amz-content-sha256", EMPTY_SHA256)
+            .header("x-amz-date", amz_date)
+            .header("Authorization", authorization)
+            .send()
+            .await
+            .map_err(|e| ApiError::ServiceUnavailable(format!("Object storage delete failed: {e}")))?;
+
+        // 404 means the object is already gone, which is the desired end state —
+        // treating it as success keeps the retention sweep idempotent.
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::ServiceUnavailable(format!(
+                "Object storage rejected delete with status {}",
+                response.status()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -515,6 +635,113 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("Evidence object not found"))
         }
+
+        async fn delete(&self, key: &str) -> Result<(), ApiError> {
+            // Mirrors S3: deleting a missing key is a no-op, not an error.
+            self.objects.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+
+    /// Store that fails the first `fail_times` uploads, then succeeds —
+    /// stands in for a transient MinIO/network outage.
+    struct FlakyStore {
+        fail_times: std::sync::atomic::AtomicU32,
+        attempts: std::sync::atomic::AtomicU32,
+        error: fn() -> ApiError,
+    }
+
+    impl FlakyStore {
+        fn new(fail_times: u32, error: fn() -> ApiError) -> Self {
+            Self {
+                fail_times: std::sync::atomic::AtomicU32::new(fail_times),
+                attempts: std::sync::atomic::AtomicU32::new(0),
+                error,
+            }
+        }
+
+        fn attempts(&self) -> u32 {
+            self.attempts.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EvidenceStore for FlakyStore {
+        async fn put(&self, _key: &str, _content_type: &str, _bytes: &[u8]) -> Result<(), ApiError> {
+            use std::sync::atomic::Ordering;
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            if self.fail_times.load(Ordering::SeqCst) > 0 {
+                self.fail_times.fetch_sub(1, Ordering::SeqCst);
+                return Err((self.error)());
+            }
+            Ok(())
+        }
+
+        async fn get(&self, _key: &str) -> Result<Vec<u8>, ApiError> {
+            Err(ApiError::not_found("not used"))
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), ApiError> {
+            Ok(())
+        }
+    }
+
+    /// No-sleep retry policy so the retry tests stay fast.
+    fn instant_policy(max_attempts: u32) -> RetryPolicy {
+        RetryPolicy::new(max_attempts, Duration::from_millis(0))
+    }
+
+    #[tokio::test]
+    async fn upload_retries_transient_failures_until_it_succeeds() {
+        let store = FlakyStore::new(2, || ApiError::ServiceUnavailable("minio down".into()));
+
+        put_with_retry(
+            &store,
+            "telemetry/k",
+            "application/json",
+            b"payload",
+            instant_policy(3),
+        )
+        .await
+        .expect("third attempt should succeed");
+
+        assert_eq!(store.attempts(), 3);
+    }
+
+    #[tokio::test]
+    async fn upload_gives_up_after_the_attempt_budget() {
+        let store = FlakyStore::new(10, || ApiError::ServiceUnavailable("minio down".into()));
+
+        let error = put_with_retry(
+            &store,
+            "telemetry/k",
+            "application/json",
+            b"payload",
+            instant_policy(3),
+        )
+        .await
+        .expect_err("should surface the failure");
+
+        assert!(matches!(error, ApiError::ServiceUnavailable(_)));
+        assert_eq!(store.attempts(), 3, "must not exceed max_attempts");
+    }
+
+    #[tokio::test]
+    async fn upload_does_not_retry_a_rejected_payload() {
+        let store = FlakyStore::new(10, || ApiError::ValidationError("bad payload".into()));
+
+        let error = put_with_retry(
+            &store,
+            "telemetry/k",
+            "application/json",
+            b"payload",
+            instant_policy(3),
+        )
+        .await
+        .expect_err("validation failures are terminal");
+
+        assert!(matches!(error, ApiError::ValidationError(_)));
+        assert_eq!(store.attempts(), 1, "non-transient errors must not be retried");
     }
 
     #[tokio::test]

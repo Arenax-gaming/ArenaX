@@ -25,6 +25,8 @@ jest.mock('@/hooks/useAuth', () => ({
 }));
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/profile/user-123',
 }));
 
 // We need to mock getProfileById so we can control data per test

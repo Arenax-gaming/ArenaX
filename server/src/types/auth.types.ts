@@ -3,4 +3,5 @@ export interface AuthenticatedUser {
     email: string;
     username: string;
     role: string;
+    isVerified: boolean;
 }

@@ -171,6 +171,13 @@ REDIS_URL=redis://localhost:6379
 # Storage
 S3_ENDPOINT=http://localhost:9000
 S3_ACCESS_KEY=minio
+# Region the SigV4 signing key is derived for (MinIO ignores it; AWS rejects
+# requests signed for the wrong region). Defaults to us-east-1.
+S3_REGION=us-east-1
+
+# Gameplay telemetry (anti-cheat): days a recording is kept before the
+# retention sweep purges it. Clamped to the 30-90 day policy band; default 90.
+TELEMETRY_RETENTION_DAYS=90
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 # Every secret must be at least 32 characters long and must not be a known
@@ -282,10 +289,16 @@ Each service follows a consistent pattern:
 - **Screenshot Analysis**: Detect manipulated images
 - **Telemetry Analysis**: Identify abnormal gameplay patterns
 - **Automated Flagging**: Flag suspicious activity for review
+- **Telemetry Archive**: Recorded sessions are stored in S3/MinIO
+  (`telemetry/` prefix), linked to the match record and purged by a background
+  retention sweep once their window elapses (30-90 days)
 
 **Key Endpoints**:
 - `POST /matches/:id/analyze` - Submit telemetry for analysis
 - `GET /matches/:id/analysis` - Get anti-cheat results
+- `POST /api/telemetry` - Upload a recorded session; stores it and links it to the match
+- `GET /api/telemetry/:match_id` - Every recording linked to a match (admin)
+- `GET /api/telemetry/:match_id/players/:player_id` - One player's recording metadata
 
 ### 🏅 Leaderboard Service
 - **Real-time Rankings**: Live player leaderboards

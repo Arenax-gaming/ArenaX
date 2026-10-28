@@ -244,3 +244,46 @@ pub fn emit_monitoring_snapshot(
     }
     .publish(env);
 }
+
+/// One proof in an accepted batch (#1413). Emitted only when the whole
+/// batch verifies — a failing batch reverts with no events.
+#[contractevent(topics = ["AntiCheatOracle", "PROOF_VERIFIED"])]
+pub struct BatchProofAccepted {
+    pub batch_id: u64,
+    pub index: u32,
+    pub oracle: Address,
+    pub public_input_count: u32,
+}
+
+/// Summary of an accepted proof batch (#1413).
+#[contractevent(topics = ["AntiCheatOracle", "PROOF_BATCH"])]
+pub struct ProofBatchVerified {
+    pub batch_id: u64,
+    pub oracle: Address,
+    pub size: u32,
+}
+
+pub fn emit_batch_proof_accepted(
+    env: &Env,
+    batch_id: u64,
+    index: u32,
+    oracle: &Address,
+    public_input_count: u32,
+) {
+    BatchProofAccepted {
+        batch_id,
+        index,
+        oracle: oracle.clone(),
+        public_input_count,
+    }
+    .publish(env);
+}
+
+pub fn emit_proof_batch_verified(env: &Env, batch_id: u64, oracle: &Address, size: u32) {
+    ProofBatchVerified {
+        batch_id,
+        oracle: oracle.clone(),
+        size,
+    }
+    .publish(env);
+}

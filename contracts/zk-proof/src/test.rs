@@ -52,6 +52,7 @@ fn groth16_fixture(env: &Env, input: u32, c: u32) -> (VerifyingKey, Bytes, Vec<B
 
 fn setup_verifier(env: &Env) -> (ZkProofClient<'_>, Address) {
     env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
     let contract_id = env.register(ZkProof, ());
     let client = ZkProofClient::new(env, &contract_id);
     client.initialize(&Address::generate(env));
@@ -275,4 +276,85 @@ fn test_unpause_restores_mutations() {
     let proof_data = Bytes::from_array(&env, &[9, 9, 9]);
     let proof_id = client.generate_proof(&user, &2u32, &proof_data, &Vec::new(&env));
     assert_eq!(proof_id, 1);
+}
+
+// ── Batch accumulator (#1413) ────────────────────────────────────────────────
+
+fn batch_item(proof_data: Bytes, public_inputs: Vec<Bytes>) -> crate::BatchProof {
+    crate::BatchProof {
+        proof_data,
+        public_inputs,
+    }
+}
+
+/// Valid proofs for different public inputs all share the fixture's key.
+fn valid_batch(env: &Env, inputs: &[u32]) -> (VerifyingKey, Vec<crate::BatchProof>) {
+    let mut batch = Vec::new(env);
+    let mut key = None;
+    for input in inputs {
+        let (vk, proof_data, public_inputs) = groth16_fixture(env, *input, 9);
+        key = Some(vk);
+        batch.push_back(batch_item(proof_data, public_inputs));
+    }
+    (key.unwrap(), batch)
+}
+
+#[test]
+fn test_batch_verify_accepts_all_valid_proofs() {
+    let env = Env::default();
+    let (client, user) = setup_verifier(&env);
+    let (vk, batch) = valid_batch(&env, &[42, 77, 1001]);
+    client.set_verifying_key(&vk);
+
+    assert_eq!(client.batch_verify(&user, &batch), 1);
+    assert_eq!(client.get_batch_count(), 1);
+}
+
+#[test]
+fn test_batch_with_one_invalid_proof_reverts_entire_batch() {
+    let env = Env::default();
+    let (client, user) = setup_verifier(&env);
+    let (vk, mut batch) = valid_batch(&env, &[42, 77]);
+    client.set_verifying_key(&vk);
+
+    // Third proof's C does not match the scalar folded into A.
+    let (_, bad_proof, bad_inputs) = groth16_fixture(&env, 5, 10);
+    batch.push_back(batch_item(bad_proof, bad_inputs));
+
+    assert!(client.try_batch_verify(&user, &batch).is_err());
+    // Nothing was committed: no batch recorded.
+    assert_eq!(client.get_batch_count(), 0);
+}
+
+#[test]
+fn test_batch_with_wrong_public_input_reverts() {
+    let env = Env::default();
+    let (client, user) = setup_verifier(&env);
+    let (vk, proof_data, _) = groth16_fixture(&env, 42, 9);
+    client.set_verifying_key(&vk);
+
+    let mut wrong = Vec::new(&env);
+    wrong.push_back(Bytes::from(fr(&env, 43).to_bytes()));
+    let mut batch = Vec::new(&env);
+    batch.push_back(batch_item(proof_data, wrong));
+
+    assert!(client.try_batch_verify(&user, &batch).is_err());
+    assert_eq!(client.get_batch_count(), 0);
+}
+
+#[test]
+fn test_batch_size_bounds_enforced() {
+    let env = Env::default();
+    let (client, user) = setup_verifier(&env);
+    let (vk, _, _) = groth16_fixture(&env, 1, 9);
+    client.set_verifying_key(&vk);
+
+    let empty: Vec<crate::BatchProof> = Vec::new(&env);
+    assert!(client.try_batch_verify(&user, &empty).is_err());
+
+    let inputs: [u32; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let (_, oversized) = valid_batch(&env, &inputs);
+    assert!(oversized.len() > crate::MAX_BATCH_SIZE);
+    assert!(client.try_batch_verify(&user, &oversized).is_err());
+    assert_eq!(client.get_batch_count(), 0);
 }

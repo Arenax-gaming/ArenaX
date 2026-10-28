@@ -62,6 +62,26 @@ describe("MatchDetailView — ARIA live announcements (#1087)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("");
   });
 
+  it("shows the share card action to the winning player only", () => {
+    render(
+      <MatchDetailView
+        match={baseMatch({ status: "completed", winnerId: "p1", tournamentName: "Finals" })}
+        currentUserId="p1"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Share win card" })).toBeInTheDocument();
+  });
+
+  it("does not show the share card action to the losing player", () => {
+    render(
+      <MatchDetailView
+        match={baseMatch({ status: "completed", winnerId: "p1", tournamentName: "Finals" })}
+        currentUserId="p2"
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Share win card" })).not.toBeInTheDocument();
+  });
+
   it("announces a score update politely, debounced by 500ms", () => {
     const { rerender } = render(<MatchDetailView match={baseMatch()} />);
 

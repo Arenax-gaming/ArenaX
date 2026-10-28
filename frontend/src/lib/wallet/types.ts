@@ -60,6 +60,8 @@ export interface TxHistoryItem extends TxMeta {
   status: TxStatus;
   phase?: TxPhase;
   hash?: string;
+  reference?: string;
+  provider?: string;
   explorerUrl?: string;
   reason?: string;
   timestamp: string;

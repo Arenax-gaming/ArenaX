@@ -178,6 +178,46 @@ pub async fn readiness_check(
     }
 }
 
+/// GET /api/health/stellar
+///
+/// Reports the Stellar Horizon circuit breaker state (Issue #1346). When the
+/// breaker's open cool-down has elapsed (`half_open`) this check sends one
+/// recovery probe to Horizon, so the breaker can close even with no user
+/// traffic. Answers 503 + `Retry-After` while the breaker is open, 200 otherwise.
+pub async fn stellar_health_check(
+    stellar: web::Data<std::sync::Arc<crate::service::stellar_service::StellarService>>,
+) -> Result<HttpResponse, ApiError> {
+    use crate::middleware::horizon_circuit_breaker::BreakerState;
+
+    let probed = if stellar.horizon_wants_probe() {
+        Some(stellar.probe_horizon().await)
+    } else {
+        None
+    };
+
+    let breaker = stellar.horizon_health();
+    let status = match breaker.state {
+        BreakerState::Closed => "healthy",
+        BreakerState::HalfOpen => "recovering",
+        BreakerState::Open => "unavailable",
+    };
+
+    let body = json!({
+        "status": status,
+        "circuit_breaker": breaker,
+        "probe_succeeded": probed,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    if breaker.state == BreakerState::Open {
+        Ok(HttpResponse::ServiceUnavailable()
+            .insert_header(("Retry-After", breaker.retry_after_secs.to_string()))
+            .json(body))
+    } else {
+        Ok(HttpResponse::Ok().json(body))
+    }
+}
+
 /// Probe the Soroban RPC endpoint for reachability within the 2s budget.
 ///
 /// A plain client `GET` is sufficient — reaching the endpoint (any HTTP

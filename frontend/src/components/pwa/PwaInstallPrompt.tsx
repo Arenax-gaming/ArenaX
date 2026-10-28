@@ -11,14 +11,12 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Bell, Download, Gauge, WifiOff, X } from "lucide-react";
-import { usePwaInstall } from "@/hooks/usePwaInstall";
+import { Bell, Download, Gauge, PlusSquare, Share, WifiOff, X } from "lucide-react";
+import { usePWAInstall } from "@/hooks/usePWAInstall";
 import {
   DISMISSAL_DAYS,
   getPwaCohort,
-  isPromptSuppressed,
   recordPromptShown,
-  suppressPromptAfterDismissal,
   trackPwaEvent,
   type PwaCohort,
 } from "@/lib/pwaInstall";
@@ -56,45 +54,48 @@ const BENEFITS: Record<PwaCohort, { headline: string; sub: string; benefits: Ben
 };
 
 export function PwaInstallPrompt() {
-  const { isInstallable, isInstalled, install } = usePwaInstall();
-  const [dismissed, setDismissed] = useState(false);
-  // Suppression is read once on mount rather than during render: localStorage
-  // is unavailable on the server, and reading it during render would make the
-  // first client paint disagree with the server's HTML.
-  const [suppressed, setSuppressed] = useState(true);
+  const { shouldShow, isInstalled, isIOS, isIOSNonSafari, promptInstall, dismiss } =
+    usePWAInstall();
   const [cohort, setCohort] = useState<PwaCohort>("benefits");
+  // iOS has no programmatic prompt: "Install" reveals the manual steps.
+  const [showIosSteps, setShowIosSteps] = useState(false);
 
   useEffect(() => {
-    setSuppressed(isPromptSuppressed());
     setCohort(getPwaCohort());
   }, []);
 
-  const visible = isInstallable && !isInstalled && !dismissed && !suppressed;
+  const visible = shouldShow;
 
   // Fires once per appearance, not once per render, so the funnel denominator
   // is "times a user saw it" rather than "times React re-rendered".
   useEffect(() => {
     if (!visible) return;
     recordPromptShown();
-    trackPwaEvent("pwa_prompt_shown");
-  }, [visible]);
+    trackPwaEvent("pwa_prompt_shown", { platform: isIOS ? "ios" : "prompt" });
+  }, [visible, isIOS]);
 
   useEffect(() => {
     if (isInstalled) trackPwaEvent("pwa_installed");
   }, [isInstalled]);
 
   const handleDismiss = useCallback(() => {
-    const until = suppressPromptAfterDismissal();
-    setDismissed(true);
+    const until = dismiss();
     trackPwaEvent("pwa_prompt_dismissed", {
       suppressed_until: new Date(until).toISOString(),
       suppression_days: DISMISSAL_DAYS,
     });
-  }, []);
+  }, [dismiss]);
 
   const handleInstall = useCallback(async () => {
+    if (isIOS) {
+      // Not an install yet — iOS gives no signal back, so only
+      // `pwa_installed` (standalone launch) counts it.
+      setShowIosSteps(true);
+      return;
+    }
+
     try {
-      const outcome = await install();
+      const outcome = await promptInstall();
 
       // Tracked on the browser's answer, not on the click: a user who taps
       // "Install App" and then cancels the system dialog has not installed,
@@ -107,17 +108,60 @@ export function PwaInstallPrompt() {
       trackPwaEvent("pwa_install_declined", { reason: outcome });
       // A cancelled system dialog is a soft no — suppress for the same window
       // as an explicit dismissal rather than re-offering on the next route.
-      suppressPromptAfterDismissal();
-      setDismissed(true);
+      dismiss();
     } catch {
       trackPwaEvent("pwa_install_declined", { reason: "prompt_failed" });
-      setDismissed(true);
+      dismiss();
     }
-  }, [install]);
+  }, [isIOS, promptInstall, dismiss]);
 
   if (!visible) return null;
 
   const copy = BENEFITS[cohort];
+
+  if (isIOS && showIosSteps) {
+    return (
+      <div
+        className="fixed bottom-20 left-4 right-4 z-50 mx-auto max-w-sm"
+        role="dialog"
+        aria-labelledby="pwa-ios-title"
+        data-testid="pwa-ios-instructions"
+      >
+        <div className="rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <p id="pwa-ios-title" className="text-sm font-semibold text-white">
+              Add ArenaX to your Home Screen
+            </p>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="shrink-0 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+              aria-label={`Dismiss install instructions for ${DISMISSAL_DAYS} days`}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {isIOSNonSafari && (
+            <p className="mb-2 text-xs text-amber-300">
+              Open this page in Safari to add it to your Home Screen.
+            </p>
+          )}
+          <ol className="flex flex-col gap-2.5 text-xs text-gray-300">
+            <li className="flex items-center gap-2.5">
+              <Share className="h-4 w-4 shrink-0 text-indigo-400" aria-hidden="true" />
+              Tap the <span className="font-semibold text-white">Share</span> button in
+              Safari&apos;s toolbar.
+            </li>
+            <li className="flex items-center gap-2.5">
+              <PlusSquare className="h-4 w-4 shrink-0 text-indigo-400" aria-hidden="true" />
+              Choose <span className="font-semibold text-white">Add to Home Screen</span>, then
+              tap Add.
+            </li>
+          </ol>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

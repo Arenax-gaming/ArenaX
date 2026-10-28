@@ -8,8 +8,8 @@
 //! scope owned by [`crate::http::match_authority_handler`] (see its
 //! `configure_routes`), so all paths are relative to `/api/matches`. Every
 //! path must stay distinct from the on-chain authority routes
-//! (`""`, `/{id}`, `/{id}/start`, `/{id}/complete`, `/{id}/dispute`,
-//! `/{id}/finalize`, `/{id}/reconcile`).
+//! (`""`, `/{id}`, `/{id}/start`, `/{id}/complete`, `/{id}/finalize`,
+//! `/{id}/reconcile`). The database-backed dispute paths are documented here.
 
 use crate::api_error::ApiError;
 use crate::auth::middleware::ClaimsExt;
@@ -91,6 +91,13 @@ pub struct HistoryQuery {
     pub page: Option<i32>,
     pub per_page: Option<i32>,
     pub game: Option<String>,
+}
+
+/// Query parameters for admin dispute queues.
+#[derive(Debug, Deserialize)]
+pub struct PaginationQuery {
+    pub page: Option<i32>,
+    pub per_page: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -226,6 +233,19 @@ pub async fn cancel_match(
     Ok(HttpResponse::Ok().json(cancelled))
 }
 
+/// `POST /api/matches/{id}/dispute` — file a dispute for a match.
+///
+/// This singular route is the public issue #1219 API. The plural
+/// `/disputes` route remains supported for existing clients.
+pub async fn create_match_dispute_singular(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+    path: web::Path<Uuid>,
+    body: web::Json<CreateMatchDisputeBody>,
+) -> Result<HttpResponse, ApiError> {
+    create_match_dispute(service, req, path, body).await
+}
+
 /// `POST /api/matches/{id}/disputes` — file a dispute for a match.
 pub async fn create_match_dispute(
     service: web::Data<Arc<MatchService>>,
@@ -246,16 +266,47 @@ pub async fn create_match_dispute(
     Ok(HttpResponse::Created().json(dispute))
 }
 
+/// `GET /api/matches/disputes` — admin queue of pending match disputes.
+pub async fn list_pending_match_disputes(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+    query: web::Query<PaginationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
+    let response = service.get_pending_disputes(page, per_page).await?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
 /// `GET /api/matches/{id}/disputes` — list a match's disputes.
 pub async fn list_match_disputes(
     service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
     path: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
     let disputes = service.get_match_disputes(path.into_inner()).await?;
     Ok(HttpResponse::Ok().json(disputes))
 }
 
-/// `POST /api/matches/{id}/disputes/{dispute_id}/resolve` — admin resolution.
+/// `POST /api/matches/{id}/disputes/{dispute_id}/review` — move a ticket into review.
+pub async fn review_match_dispute(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+    path: web::Path<(Uuid, Uuid)>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&req)?;
+    let (match_id, dispute_id) = path.into_inner();
+    let existing = service.get_dispute(dispute_id).await?;
+    if existing.match_id != match_id {
+        return Err(ApiError::not_found("Dispute not found for this match"));
+    }
+    let dispute = service.start_dispute_review(dispute_id).await?;
+    Ok(HttpResponse::Ok().json(dispute))
+}
+
+/// `POST /api/matches/{id}/disputes/{dispute_id}/resolve` — admin resolution (uphold).
 pub async fn resolve_match_dispute(
     service: web::Data<Arc<MatchService>>,
     req: HttpRequest,
@@ -381,8 +432,14 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/{id}/details", web::get().to(get_match_details))
         .route("/{id}/report", web::post().to(report_score))
         .route("/{id}/cancel", web::post().to(cancel_match))
+        .route("/{id}/dispute", web::post().to(create_match_dispute_singular))
         .route("/{id}/disputes", web::post().to(create_match_dispute))
         .route("/{id}/disputes", web::get().to(list_match_disputes))
+        .route("/disputes", web::get().to(list_pending_match_disputes))
+        .route(
+            "/{id}/disputes/{dispute_id}/review",
+            web::post().to(review_match_dispute),
+        )
         .route(
             "/{id}/disputes/{dispute_id}/resolve",
             web::post().to(resolve_match_dispute),

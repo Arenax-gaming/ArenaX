@@ -12,7 +12,7 @@ import {
     rotateWalletEncryption,
     slashEscrow
 } from '../controllers/wallet.controller';
-import { authenticateJWT, restrictTo } from '../middleware/auth.middleware';
+import { authenticateJWT, requireEmailVerified, restrictTo } from '../middleware/auth.middleware';
 import { paymentRateLimiter, publicRateLimiter } from '../middleware/rate-limit.middleware';
 
 const router: Router = Router();
@@ -32,17 +32,20 @@ const walletRecoveryLimiter = rateLimit({
 
 router.use(authenticateJWT);
 
+// Browsing / read-only endpoints (accessible to unverified users to browse)
 router.get('/me', publicRateLimiter, getMyWallet);
-router.post('/me/recovery/challenges', walletRecoveryLimiter, createRecoveryChallenge);
-router.post('/me/recovery/export', walletRecoveryLimiter, exportMyWallet);
-router.post('/me/rotate-encryption', paymentRateLimiter, rotateWalletEncryption);
-router.post('/rotate-encryption', restrictTo('ADMIN'), paymentRateLimiter, rotateWalletEncryption);
-
 router.get('/ledger', publicRateLimiter, getLedger);
 router.get('/transactions', publicRateLimiter, getTransactions);
-router.post('/escrow/lock', paymentRateLimiter, lockEscrow);
-router.post('/escrow/release', paymentRateLimiter, releaseEscrow);
-router.post('/escrow/slash', paymentRateLimiter, slashEscrow);
-router.post('/transfer', paymentRateLimiter, internalTransfer);
+
+// Wallet operations (blocked for unverified users)
+router.post('/me/recovery/challenges', requireEmailVerified, walletRecoveryLimiter, createRecoveryChallenge);
+router.post('/me/recovery/export', requireEmailVerified, walletRecoveryLimiter, exportMyWallet);
+router.post('/me/rotate-encryption', requireEmailVerified, paymentRateLimiter, rotateWalletEncryption);
+router.post('/rotate-encryption', restrictTo('ADMIN'), paymentRateLimiter, rotateWalletEncryption);
+
+router.post('/escrow/lock', requireEmailVerified, paymentRateLimiter, lockEscrow);
+router.post('/escrow/release', requireEmailVerified, paymentRateLimiter, releaseEscrow);
+router.post('/escrow/slash', requireEmailVerified, paymentRateLimiter, slashEscrow);
+router.post('/transfer', requireEmailVerified, paymentRateLimiter, internalTransfer);
 
 export default router;

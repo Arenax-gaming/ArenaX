@@ -106,6 +106,20 @@ pub enum DataKey {
     // Monitoring (persistent)
     MonitoringState, // MonitoringState
     LastHeartbeat,   // u64 timestamp
+
+    // ZK proof batch verification (instance) — Issue #1413
+    ZkVerifier,        // Address of the zk-proof contract
+    ProofBatchCounter, // u64 — batches accepted by batch_verify
+}
+
+/// One (proof, public inputs) pair for `batch_verify`. Field-for-field
+/// identical to `zk_proof::BatchProof`, so it crosses the contract boundary
+/// unchanged.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchProof {
+    pub proof_data: soroban_sdk::Bytes,
+    pub public_inputs: soroban_sdk::Vec<soroban_sdk::Bytes>,
 }
 
 // ─── Structs ─────────────────────────────────────────────────────────────────

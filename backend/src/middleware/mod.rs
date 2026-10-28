@@ -5,6 +5,7 @@ pub mod cache;
 pub mod authorization;
 pub mod circuit_breaker;
 pub mod csrf;
+pub mod horizon_circuit_breaker;
 pub mod idempotency_middleware;
 pub mod ip_list;
 pub mod metrics_middleware;
@@ -28,6 +29,9 @@ pub use circuit_breaker::{
     CircuitBreakerStats, CircuitState, ExternalCircuitBreakerMiddleware,
 };
 pub use csrf::{csrf_protection, csrf_token_handler, CSRF_COOKIE, CSRF_HEADER};
+pub use horizon_circuit_breaker::{
+    BreakerOpen, BreakerSnapshot, BreakerState, HorizonBreakerConfig, HorizonCircuitBreaker,
+};
 pub use idempotency_middleware::IdempotencyMiddleware;
 pub use metrics_middleware::RequestMetrics;
 pub use rate_limit::RateLimitMiddleware;

@@ -113,7 +113,7 @@ impl SponsoredTournamentContract {
             let client = token::Client::new(&env, &token_addr);
             client.transfer(
                 &organizer,
-                &env.current_contract_address(),
+                env.current_contract_address(),
                 &prize_pool_amount,
             );
         }

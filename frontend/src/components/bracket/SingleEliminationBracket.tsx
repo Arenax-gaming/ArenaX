@@ -48,6 +48,8 @@ export function SingleEliminationBracket({
   highlightedMatchId,
 }: SingleEliminationBracketProps) {
   const [selectedMatch, setSelectedMatch] = useState<BracketMatch | null>(null);
+  const [mobileView, setMobileView] = useState<"rounds" | "bracket">("rounds");
+  const [activeRoundNumber, setActiveRoundNumber] = useState<number>(1);
 
   // Deep link (#1089): scroll the shared match into view once its card exists.
   useEffect(() => {
@@ -76,6 +78,15 @@ export function SingleEliminationBracket({
     };
   }, [bracketData, currentUserId]);
 
+  const primarySection = processedBracketData.sections[0];
+  const allRounds = useMemo(() => {
+    return primarySection?.rounds ?? [];
+  }, [primarySection]);
+
+  const selectedRound = useMemo(() => {
+    return allRounds.find((r) => r.roundNumber === activeRoundNumber) ?? allRounds[0];
+  }, [allRounds, activeRoundNumber]);
+
   return (
     <div className="space-y-8">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -101,7 +112,105 @@ export function SingleEliminationBracket({
             </div>
           </div>
 
-          <div className="space-y-8 overflow-x-auto pb-3">
+          {/* Mobile view (< md): Alternate round view vs scrollable bracket tree */}
+          <div className="md:hidden">
+            <div className="mb-4 flex items-center rounded-xl border border-white/10 bg-slate-900/80 p-1">
+              <button
+                type="button"
+                onClick={() => setMobileView("rounds")}
+                className={cn(
+                  "flex-1 rounded-lg py-2 px-3 text-xs font-medium transition-colors min-h-[38px]",
+                  mobileView === "rounds"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-muted-foreground hover:text-white"
+                )}
+              >
+                Round View
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileView("bracket")}
+                className={cn(
+                  "flex-1 rounded-lg py-2 px-3 text-xs font-medium transition-colors min-h-[38px]",
+                  mobileView === "bracket"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-muted-foreground hover:text-white"
+                )}
+              >
+                Bracket Tree
+              </button>
+            </div>
+
+            {mobileView === "rounds" ? (
+              <div className="space-y-4">
+                <div
+                  className="flex gap-2 overflow-x-auto pb-2 scrollbar-none"
+                  role="tablist"
+                  aria-label="Tournament rounds"
+                >
+                  {allRounds.map((round) => (
+                    <button
+                      key={round.roundNumber}
+                      role="tab"
+                      aria-selected={round.roundNumber === (selectedRound?.roundNumber ?? 1)}
+                      onClick={() => setActiveRoundNumber(round.roundNumber)}
+                      className={cn(
+                        "whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-medium transition-colors min-h-[44px]",
+                        round.roundNumber === (selectedRound?.roundNumber ?? 1)
+                          ? "border border-cyan-400/40 bg-cyan-500/20 text-cyan-200"
+                          : "bg-white/5 text-muted-foreground hover:bg-white/10"
+                      )}
+                    >
+                      {round.roundName ?? `Round ${round.roundNumber}`} ({round.matches.length})
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-3">
+                  {selectedRound?.matches.map((match) => (
+                    <MatchCard
+                      key={match.id}
+                      match={match}
+                      isActive={processedBracketData.activeMatchIds?.includes(match.id) ?? false}
+                      onClick={() => setSelectedMatch(match)}
+                      isHighlighted={match.id === highlightedMatchId}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-2 flex items-center justify-between rounded-lg bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
+                  <span>← Swipe horizontally to explore →</span>
+                  <span className="font-mono text-[10px] uppercase">Scrollable</span>
+                </div>
+                <div
+                  role="region"
+                  aria-label="Tournament bracket scroll area"
+                  tabIndex={0}
+                  className="space-y-8 overflow-x-auto pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl"
+                >
+                  {processedBracketData.sections.map((section) => (
+                    <BracketSectionBoard
+                      key={section.id}
+                      section={section}
+                      activeMatchIds={processedBracketData.activeMatchIds ?? []}
+                      onMatchClick={setSelectedMatch}
+                      highlightedMatchId={highlightedMatchId ?? null}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Desktop view (>= md): Full horizontal scrollable bracket */}
+          <div
+            role="region"
+            aria-label="Tournament bracket tree"
+            tabIndex={0}
+            className="hidden md:block space-y-8 overflow-x-auto pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl"
+          >
             {processedBracketData.sections.map((section) => (
               <BracketSectionBoard
                 key={section.id}
@@ -329,9 +438,11 @@ function MatchCard({
       <button
         type="button"
         onClick={onClick}
+        aria-label={`${match.label ?? `Match ${match.matchNumber}`}: ${match.player1?.username ?? "TBD"} vs ${match.player2?.username ?? "TBD"}`}
         className={cn(
-          "w-full rounded-[24px] border p-4 text-left transition duration-200",
+          "w-full rounded-[24px] border p-4 text-left transition duration-200 min-h-[44px]",
           "bg-slate-950/80 shadow-[0_16px_40px_-30px_rgba(15,23,42,1)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
           isCurrentUserMatch && "border-cyan-400/70 bg-cyan-400/10 shadow-[0_20px_50px_-35px_rgba(34,211,238,0.8)]",
           isActive && "border-emerald-400/70 bg-emerald-400/10 shadow-[0_20px_50px_-35px_rgba(52,211,153,0.8)]",
           match.status === "disputed" && "border-rose-400/70 bg-rose-500/10",

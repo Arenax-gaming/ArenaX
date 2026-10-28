@@ -45,7 +45,8 @@ export const configurePassport = (
                             id: true,
                             email: true,
                             username: true,
-                            role: true
+                            role: true,
+                            isVerified: true
                         }
                     });
 
@@ -137,6 +138,22 @@ export const restrictTo =
 
         return next();
     };
+
+export const requireEmailVerified = (
+    req: Request,
+    _res: Response,
+    next: NextFunction
+): void => {
+    if (!req.user) {
+        return next(new HttpError(401, 'Unauthorized'));
+    }
+
+    if (!req.user.isVerified) {
+        return next(new HttpError(403, 'Email verification required'));
+    }
+
+    return next();
+};
 
 // Simple role -> scopes mapping for finer-grained admin permissions
 const roleScopes: Record<string, string[]> = {

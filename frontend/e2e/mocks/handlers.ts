@@ -1,9 +1,7 @@
 import { Page } from "@playwright/test";
 
-// NOTE: the app client prefixes every endpoint with /api/v1 (see API_BASE in
-// src/lib/constants.ts), so mocks must include the /v1 infix or they never
-// match and requests fall through to the (absent in E2E) backend.
-const BASE = "**/api/v1";
+// Support both unversioned (/api) and versioned (/api/v1) endpoints.
+const BASE = "**/api{/v1,}";
 
 export const mockUser = {
   id: "user-1",
@@ -42,7 +40,7 @@ export async function mockAuthHandlers(page: Page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ user: mockUser, tokens: mockTokens }),
+      body: JSON.stringify({ user: mockUser, tokens: mockTokens, expires_in: 900 }),
     })
   );
 
@@ -50,7 +48,7 @@ export async function mockAuthHandlers(page: Page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ user: mockUser, tokens: mockTokens }),
+      body: JSON.stringify({ user: mockUser, tokens: mockTokens, expires_in: 900 }),
     })
   );
 

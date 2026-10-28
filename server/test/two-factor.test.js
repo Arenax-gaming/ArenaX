@@ -48,7 +48,8 @@ test('Two-Factor Authentication (TOTP) flow: enroll, verify, 2-step login, backu
                 refreshTokens.push(record);
                 return record;
             }
-        }
+        },
+        $transaction: async (cb) => cb(mockPrisma)
     };
 
     setDatabaseClientForTesting(mockPrisma);

@@ -1,4 +1,5 @@
 import { logger } from './logger.service';
+import { metricsService } from './metrics.service';
 
 export interface SlowQueryRecord {
   query: string;
@@ -13,6 +14,14 @@ const MAX_RECORDS = parseInt(process.env.SLOW_QUERY_MAX_RECORDS || '1000', 10);
 
 const slowQueries: SlowQueryRecord[] = [];
 
+/**
+ * Records a query execution.  Queries that exceed the configurable threshold
+ * (default 500 ms) are logged at WARN and a Prometheus counter is incremented
+ * so operators can alert on slow-query volume.
+ *
+ * Wired into database.service.ts via the Prisma `$use` middleware so every
+ * query flowing through the client is instrumented automatically.
+ */
 export function recordQueryExecution(
   model: string,
   query: string,
@@ -39,6 +48,15 @@ export function recordQueryExecution(
       threshold: SLOW_QUERY_THRESHOLD_MS,
       query: truncateQuery(query),
     });
+
+    // Export to Prometheus so Grafana / alert-manager can fire on slow-query
+    // volume per model + operation.
+    try {
+      metricsService.recordSlowQuery(model, query);
+    } catch {
+      // Metrics service may not be initialised in some test contexts — never
+      // let a metrics error block the query path.
+    }
   }
 }
 

@@ -72,3 +72,46 @@ describe("cohort assignment", () => {
     expect(["benefits", "speed"]).toContain(getPwaCohort());
   });
 });
+
+// ── Custom install flow (#1414) ──────────────────────────────────────────────
+
+import { getLastInstallOutcome, recordInstallOutcome } from "@/lib/pwaInstall";
+import { isIosDevice, isIosSafari } from "@/hooks/usePWAInstall";
+
+const IPHONE_SAFARI =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+const IPHONE_CHROME =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0 Mobile/15E148 Safari/604.1";
+const IPADOS_DESKTOP_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+const ANDROID_CHROME =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
+
+describe("install platform detection", () => {
+  it("treats iPhone and touch-enabled iPadOS as iOS", () => {
+    expect(isIosDevice(IPHONE_SAFARI, 5)).toBe(true);
+    expect(isIosDevice(IPADOS_DESKTOP_UA, 5)).toBe(true);
+    expect(isIosDevice(IPADOS_DESKTOP_UA, 0)).toBe(false);
+    expect(isIosDevice(ANDROID_CHROME, 5)).toBe(false);
+  });
+
+  it("distinguishes Safari from other iOS browsers", () => {
+    expect(isIosSafari(IPHONE_SAFARI)).toBe(true);
+    expect(isIosSafari(IPHONE_CHROME)).toBe(false);
+  });
+});
+
+describe("install outcome", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("records the user's choice", () => {
+    expect(getLastInstallOutcome()).toBeNull();
+    recordInstallOutcome("dismissed", 1234);
+    expect(getLastInstallOutcome()).toEqual({ outcome: "dismissed", at: 1234 });
+  });
+
+  it("ignores corrupt stored values", () => {
+    window.localStorage.setItem("arenax:pwa:last-outcome", "{not json");
+    expect(getLastInstallOutcome()).toBeNull();
+  });
+});

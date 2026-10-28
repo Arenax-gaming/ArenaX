@@ -28,6 +28,8 @@ export type AnalyticsEventName =
   | "wallet_connected"
   | "wallet_deposited"
   | "wallet_withdrawn"
+  | "deposit_completed"
+  | "deposit_initiated_stellar"
   | "auth_signup"
   | "auth_login"
   | "auth_logout"
