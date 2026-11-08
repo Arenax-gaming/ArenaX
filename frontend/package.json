@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node init && next dev",
+    "build": "node init && next build",
     "analyze": "ANALYZE=true next build",
     "postbuild": "node scripts/upload-datadog-sourcemaps.mjs",
     "upload:sourcemaps": "node scripts/upload-datadog-sourcemaps.mjs",
-    "start": "next start",
+    "start": "node init && next start",
     "lint": "next lint && npm run check:routes",
     "check:routes": "node scripts/check-no-duplicate-routes.mjs",
     "check:pwa-assets": "node scripts/check-pwa-assets.js",
@@ -16,7 +16,7 @@
     "test:watch": "jest --watch",
     "test:e2e": "playwright test",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "node init && storybook build"
   },
   "dependencies": {
     "@albedo-link/intent": "^0.13.0",
