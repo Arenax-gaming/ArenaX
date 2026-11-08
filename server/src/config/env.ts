@@ -78,6 +78,7 @@ const envSchema = z.object({
 
     // ── CORS / Origins ───────────────────────────────────────────────────────
     ARENAX_ALLOWED_ORIGINS: z.string().optional(),
+    CORS_ALLOWED_ORIGINS: z.string().optional(),
     FRONTEND_URL: z.string().url().default('http://localhost:3000'),
     BACKEND_URL: z.string().url().default('http://localhost:3001'),
 
