@@ -28,32 +28,15 @@ import xss from 'xss-clean';
 import hpp from 'hpp';
 import { setupSwagger, setupRedoc } from './openapi/swagger';
 import { logger } from './services/logger.service';
-
-const defaultArenaXOrigins = [
-    'https://arenax.gg',
-    'https://www.arenax.gg',
-    'https://app.arenax.gg'
-];
-
-const buildAllowedOrigins = (isProductionLike: boolean): string[] => {
-    const env = getEnv();
-    const configuredOrigins = env.ARENAX_ALLOWED_ORIGINS
-        ? env.ARENAX_ALLOWED_ORIGINS.split(',')
-              .map((origin) => origin.trim())
-              .filter(Boolean)
-        : defaultArenaXOrigins;
-
-    return isProductionLike
-        ? configuredOrigins
-        : [...configuredOrigins, 'http://localhost:3000', 'http://localhost:5173'];
-};
+import { getCorsOptions, resolveAllowedOrigins } from './config/cors.config';
 
 export const createApp = (): Express => {
     const app: Express = express();
     const env = getEnv();
     const { isProductionLike } = env;
-    const allowedOrigins = buildAllowedOrigins(isProductionLike);
-    const cspConnectSources = [...new Set(["'self'", ...allowedOrigins])];
+    const allowedOrigins = resolveAllowedOrigins(env.NODE_ENV, env.CORS_ALLOWED_ORIGINS || env.ARENAX_ALLOWED_ORIGINS);
+    const originList = allowedOrigins === '*' ? ['*'] : allowedOrigins;
+    const cspConnectSources = [...new Set(["'self'", ...originList])];
 
     configurePassport(passport);
 
@@ -83,19 +66,7 @@ export const createApp = (): Express => {
             }
         })
     );
-    app.use(
-        cors({
-            origin: (origin, callback) => {
-                if (!origin || allowedOrigins.includes(origin)) {
-                    callback(null, true);
-                    return;
-                }
-
-                callback(new Error('CORS policy: origin not allowed'));
-            },
-            credentials: true
-        })
-    );
+    app.use(cors(getCorsOptions()));
     // Capture the raw body while parsing JSON so signature-verifying
     // middleware (e.g. Paystack / Flutterwave webhooks) can recompute HMACs
     // over the exact bytes the provider signed.
