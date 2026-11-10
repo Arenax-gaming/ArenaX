@@ -34,15 +34,21 @@ test.describe("Match journeys", () => {
     await page.reload();
 
     // Choose the first game mode card (1v1 Duel)
-    const firstMode = page.locator('button').filter({ hasText: /1v1 Duel|Quick Play|Casual/i }).first();
+    const firstMode = page
+      .locator("button")
+      .filter({ hasText: /1v1 Duel|Quick Play|Casual/i })
+      .first();
     await expect(firstMode).toBeVisible({ timeout: 10_000 });
     await firstMode.click();
 
     // Matchmaking queue UI should appear
     await expect(
-      page.locator('text=Finding Opponents, text=Finding')
+      page
+        .locator("text=Finding Opponents")
+        .or(page.locator("text=Finding"))
         .or(page.locator('[data-testid="matchmaking-queue"]'))
-        .or(page.locator('text=Cancel Matchmaking'))
+        .or(page.locator("text=Cancel Matchmaking"))
+        .first()
     ).toBeVisible({ timeout: 8_000 });
   });
 
@@ -51,18 +57,25 @@ test.describe("Match journeys", () => {
     await seedAuth(page);
     await page.reload();
 
-    const firstMode = page.locator('button').filter({ hasText: /1v1 Duel|Casual|Quick Play/i }).first();
+    const firstMode = page
+      .locator("button")
+      .filter({ hasText: /1v1 Duel|Casual|Quick Play/i })
+      .first();
     await expect(firstMode).toBeVisible({ timeout: 10_000 });
     await firstMode.click();
 
-    const cancelBtn = page.locator('button:has-text("Cancel Matchmaking"), button:has-text("Cancel")').first();
+    const cancelBtn = page
+      .locator('button:has-text("Cancel Matchmaking"), button:has-text("Cancel")')
+      .first();
     await expect(cancelBtn).toBeVisible({ timeout: 8_000 });
     await cancelBtn.click();
 
     // Should be back to mode selection with heading "Choose Your Battle" or game mode grid
     await expect(
-      page.locator('h1:has-text("Choose"), [data-testid="game-mode-selector"]')
-        .or(page.locator('button').filter({ hasText: /1v1 Duel/i }).first())
+      page
+        .locator('h1:has-text("Choose"), [data-testid="game-mode-selector"]')
+        .or(page.locator("button").filter({ hasText: /1v1 Duel/i }).first())
+        .first()
     ).toBeVisible({ timeout: 8_000 });
   });
 
@@ -84,28 +97,34 @@ test.describe("Match journeys", () => {
     await page.reload();
 
     // If a "Report Score" button exists, click it
-    const reportBtn = page.locator(
-      'button:has-text("Report Score"), button:has-text("Report"), button:has-text("Submit Score")'
-    ).first();
+    const reportBtn = page
+      .locator(
+        'button:has-text("Report Score"), button:has-text("Report"), button:has-text("Submit Score")'
+      )
+      .first();
 
     if (await reportBtn.isVisible({ timeout: 5_000 })) {
       await reportBtn.click();
 
       // Fill score if a dialog appears
-      const scoreInput = page.locator('input[name="score"], input[placeholder*="score" i]').first();
+      const scoreInput = page
+        .locator('input[name="score"], input[placeholder*="score" i]')
+        .first();
       if (await scoreInput.isVisible({ timeout: 3_000 })) {
         await scoreInput.fill("3");
       }
 
-      const submitBtn = page.locator('button[type="submit"]:has-text("Submit"), button:has-text("Confirm")').first();
+      const submitBtn = page
+        .locator('button[type="submit"]:has-text("Submit"), button:has-text("Confirm")')
+        .first();
       if (await submitBtn.isVisible({ timeout: 3_000 })) {
         await submitBtn.click();
       }
 
       // Either the API was called or a success message appears
-      await expect(
-        page.locator('[role="alert"], [data-toast]').first()
-      ).toBeVisible({ timeout: 8_000 });
+      await expect(page.locator('[role="alert"], [data-toast]').first()).toBeVisible({
+        timeout: 8_000,
+      });
     } else {
       // The page renders content (not 404)
       await expect(page.locator("body")).not.toHaveText("404", { timeout: 5_000 });
