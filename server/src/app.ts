@@ -29,6 +29,11 @@ import hpp from 'hpp';
 import { setupSwagger, setupRedoc } from './openapi/swagger';
 import { logger } from './services/logger.service';
 
+// ── #1384: CORS per-environment hardening ─────────────────────────────────────
+// Production only allows origins listed in ARENAX_ALLOWED_ORIGINS env var.
+// Staging/dev broaden the list to include localhost origins.
+// Credentialed requests use credentials:true only for whitelisted origins.
+
 const defaultArenaXOrigins = [
     'https://arenax.gg',
     'https://www.arenax.gg',
@@ -43,9 +48,13 @@ const buildAllowedOrigins = (isProductionLike: boolean): string[] => {
               .filter(Boolean)
         : defaultArenaXOrigins;
 
-    return isProductionLike
-        ? configuredOrigins
-        : [...configuredOrigins, 'http://localhost:3000', 'http://localhost:5173'];
+    // Production: locked to configured list only — no localhost ever.
+    if (isProductionLike && env.isProduction) {
+        return configuredOrigins;
+    }
+
+    // Staging / development: add local dev origins.
+    return [...configuredOrigins, 'http://localhost:3000', 'http://localhost:5173'];
 };
 
 export const createApp = (): Express => {
@@ -83,17 +92,31 @@ export const createApp = (): Express => {
             }
         })
     );
+    // #1384 — Pre-flight OPTIONS handled globally before any authenticated route.
+    app.options('*', cors({
+        origin: (origin, callback) => {
+            // No Origin = server-to-server; always allow.
+            if (!origin) { callback(null, true); return; }
+            if (allowedOrigins.includes(origin)) { callback(null, true); return; }
+            callback(new Error(`CORS policy: origin '${origin}' is not allowed`));
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
+        optionsSuccessStatus: 204,
+    }));
     app.use(
         cors({
             origin: (origin, callback) => {
-                if (!origin || allowedOrigins.includes(origin)) {
-                    callback(null, true);
-                    return;
-                }
-
-                callback(new Error('CORS policy: origin not allowed'));
+                // No Origin = server-to-server; always allow.
+                if (!origin) { callback(null, true); return; }
+                if (allowedOrigins.includes(origin)) { callback(null, true); return; }
+                callback(new Error(`CORS policy: origin '${origin}' is not allowed`));
             },
-            credentials: true
+            credentials: true,
+            methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
+            optionsSuccessStatus: 204,
         })
     );
     // Capture the raw body while parsing JSON so signature-verifying

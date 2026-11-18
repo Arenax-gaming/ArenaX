@@ -21,6 +21,7 @@ import { startHealthMonitor } from './services/health.service';
 import { Server as SocketIOServer } from 'socket.io';
 import { initGameSocket } from './websockets/game.socket';
 import { MaintenanceService } from './services/maintenance.service';
+import { setSocketIOServer } from './services/socket-io.service';
 import { getDatabaseClient, warmPool, startPoolHealthCheck, drainPool } from './services/database.service';
 import eventMonitoringService from './services/event-monitoring.service';
 
@@ -183,6 +184,8 @@ if (env.NODE_ENV !== 'test') {
                     credentials: true
                 }
             });
+            // #1388 — Register singleton so soroban-monitor.worker can push events.
+            setSocketIOServer(io);
             initGameSocket(io);
             MaintenanceService.getInstance().setSocketServer(io);
 
