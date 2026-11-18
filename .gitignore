@@ -10,7 +10,6 @@ ehthumbs.db
 Thumbs.db
 
 # IDE files
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -61,10 +60,8 @@ jspm_packages/
 # Committed (safe defaults, no secrets):
 #   .env, .env.example, .env.development, .env.staging, .env.test
 # Git-ignored (machine-local overrides and production secrets):
-.env.local
 .env.*.local
 # The base .env is also ignored — use .env.development for local defaults
-.env
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -91,7 +88,6 @@ tmp/
 temp/
 
 # Editor directories and files
-.vscode/*
 !.vscode/extensions.json
 .idea
 *.suo
@@ -165,3 +161,4 @@ PULL_REQUEST.md
 pr-*.md
 PR-*.md
 PR-issue-*.md
+config.bat
