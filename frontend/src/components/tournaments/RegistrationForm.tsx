@@ -26,6 +26,8 @@ import {
 import { useFormAnalytics } from "@/hooks/useFormAnalytics";
 import { useWallet } from "@/hooks/useWallet";
 import { fetchWalletBalances } from "@/lib/wallet";
+import { isTeamTournament, getTournamentTeamSize } from "@/hooks/useTournaments";
+import { TeamRosterBuilder } from "@/components/tournaments/TeamRosterBuilder";
 
 export type RegistrationPaymentMethod = "fiat" | "arenax";
 
@@ -79,6 +81,16 @@ export function RegistrationForm({
     useState<RegistrationPaymentMethod>("fiat");
   const [transactionHash, setTransactionHash] = useState<string | null>(null);
 
+  // ── Team roster step (issue #1565) ─────────────────────────────────────────
+  const isTeamBased = isTeamTournament(tournament);
+  const teamSize = getTournamentTeamSize(tournament);
+  const [step, setStep] = useState<"roster" | "details">(
+    isTeamBased ? "roster" : "details",
+  );
+  const [roster, setRoster] = useState<Array<string | null>>(() =>
+    new Array(teamSize.max).fill(null),
+  );
+
   // Restore the saved preference after mount (localStorage is client-only).
   useEffect(() => {
     setPaymentMethod(readStoredPaymentMethod());
@@ -130,6 +142,8 @@ export function RegistrationForm({
       const result = await api.joinTournament(
         tournament.id,
         isPaid ? paymentMethod : undefined,
+        undefined,
+        isTeamBased ? (roster.filter(Boolean) as string[]) : undefined,
       );
       setTransactionHash(result?.transactionHash ?? null);
       analytics.trackSubmit({ success: true });
@@ -190,6 +204,18 @@ export function RegistrationForm({
     );
   }
 
+  if (step === "roster") {
+    return (
+      <TeamRosterBuilder
+        tournament={tournament}
+        value={roster}
+        onChange={setRoster}
+        onContinue={() => setStep("details")}
+        onCancel={onCancel}
+      />
+    );
+  }
+
   return (
     <Form {...form}>
       <form
@@ -197,6 +223,16 @@ export function RegistrationForm({
         className="space-y-5"
         noValidate
       >
+        {isTeamBased && (
+          <button
+            type="button"
+            onClick={() => setStep("roster")}
+            className="text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            ← Edit roster ({roster.filter(Boolean).length}/{teamSize.max})
+          </button>
+        )}
+
         {/* Tournament summary */}
         <div className="rounded-lg border bg-muted/40 p-4 space-y-2">
           <p className="text-sm font-semibold text-foreground">{tournament.name}</p>

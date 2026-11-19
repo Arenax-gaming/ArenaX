@@ -6,6 +6,8 @@ import prisma from '../services/database.service';
 import { createAdminService, AdminService } from '../services/admin.service';
 import { confirmationService } from '../services/confirmation.service';
 import { MaintenanceService } from '../services/maintenance.service';
+import { extractAssetKey, generateSignedAssetUrl } from '../services/storage.service';
+import { logger } from '../services/logger.service';
 
 const matchService = new MatchService();
 const adminService: AdminService = createAdminService();
@@ -44,6 +46,63 @@ export const resolveDispute = async (req: Request, res: Response): Promise<void>
         res.status(200).json(result);
     } catch (error) {
         res.status(400).json({ error: (error as Error).message });
+    }
+};
+
+/**
+ * Generate a short-lived signed URL for a piece of dispute evidence
+ * (screenshots, replay data) instead of exposing the underlying S3 object
+ * directly (#1570).
+ *
+ * The requested `asset` (a URL previously stored on the dispute's
+ * `evidenceUrls`) is cross-checked against the dispute record before a
+ * signed URL is minted, so an admin cannot use this endpoint to sign
+ * arbitrary S3 keys outside the dispute they're reviewing.
+ */
+export const getDisputeEvidenceSignedUrl = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const asset = req.query.asset as string | undefined;
+
+        if (!asset) {
+            res.status(400).json({ error: 'asset query parameter is required' });
+            return;
+        }
+
+        const dispute = await prisma.dispute.findUnique({ where: { id } });
+
+        if (!dispute) {
+            res.status(404).json({ error: 'Dispute not found' });
+            return;
+        }
+
+        // Permission check: the requested asset must actually belong to this
+        // dispute's evidence set. Anything else is denied, not signed.
+        if (!dispute.evidenceUrls.includes(asset)) {
+            res.status(403).json({ error: 'Asset does not belong to this dispute' });
+            return;
+        }
+
+        const key = extractAssetKey(asset);
+
+        if (!key) {
+            // Already a fully public/external asset — no signed URL needed.
+            res.status(200).json({ url: asset, expiresAt: null });
+            return;
+        }
+
+        const { url, expiresAt } = await generateSignedAssetUrl(key, { userId: req.user!.id });
+
+        logger.info('Dispute evidence signed URL issued', {
+            disputeId: id,
+            assetKey: key,
+            userId: req.user!.id,
+            expiresAt: expiresAt.toISOString(),
+        });
+
+        res.status(200).json({ url, expiresAt });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
     }
 };
 
@@ -275,21 +334,26 @@ export const getModerationQueue = async (req: Request, res: Response): Promise<v
 
 export const reviewContent = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { contentId, action } = req.body as { contentId: string; action: 'approve' | 'reject' | 'remove' };
+        const { contentId, action, reason } = req.body as { contentId: string; action: 'approve' | 'reject' | 'remove'; reason?: string };
 
         if (!contentId || !action) {
             res.status(400).json({ error: 'contentId and action are required' });
             return;
         }
 
-        await adminService.reviewContent(contentId, action);
+        if (action === 'reject' && !reason) {
+            res.status(400).json({ error: 'reason is required to reject content' });
+            return;
+        }
+
+        await adminService.reviewContent(contentId, action, { reviewerId: req.user!.id, reason });
 
         await AuditService.logAction({
             adminId: req.user!.id,
             action: 'REVIEW_CONTENT',
             targetType: 'CONTENT',
             targetId: contentId,
-            details: { action },
+            details: { action, reason },
             requestId: req.auditContext?.requestId,
             ipAddress: req.auditContext?.ipAddress,
             userAgent: req.auditContext?.userAgent

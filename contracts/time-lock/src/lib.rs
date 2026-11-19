@@ -5,7 +5,10 @@
 // block itself, so this needs to be crate-level to cover them too.
 #![allow(clippy::too_many_arguments)]
 
+mod config;
+
 use arenax_events::time_lock as events;
+use config::EmergencyOverrideRecord;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
@@ -56,6 +59,12 @@ pub enum DataKey {
     AnalyticsTotal,
     AnalyticsByCategory(u32),
     LastExecution,
+
+    // Emergency role / override (Issue #1554)
+    EmergencyRoles,              // instance: Vec<Address>
+    EmergencyGrantVotes(Address), // persistent: Vec<Address> of governor votes
+    EmergencyRevokeVotes(Address), // persistent: Vec<Address> of governor votes
+    EmergencyOverrideLog,        // persistent: Vec<EmergencyOverrideRecord>
 }
 
 // ─── Structs ──────────────────────────────────────────────────────────────────
@@ -494,6 +503,217 @@ impl TimeLock {
         events::emit_governance_override(&env, &operation_id, &caller, &reason);
     }
 
+    // ── Emergency Role & Override (Issue #1554) ──────────────────────────────
+
+    /// Cast a governor vote to grant `EMERGENCY_ROLE` to `candidate`. The role
+    /// is granted once the number of distinct governor votes reaches the
+    /// configured `accel_quorum` — i.e. `EMERGENCY_ROLE` can only be granted
+    /// by a governance vote, never unilaterally.
+    pub fn vote_grant_emergency_role(env: Env, voter: Address, candidate: Address) {
+        voter.require_auth();
+        Self::require_governor(&env, &voter);
+        Self::require_not_paused(&env);
+
+        if Self::has_emergency_role(&env, &candidate) {
+            panic!("address already has the emergency role");
+        }
+
+        let votes_key = DataKey::EmergencyGrantVotes(candidate.clone());
+        let mut votes: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&votes_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for existing in votes.iter() {
+            if existing == voter {
+                panic!("already voted to grant the emergency role to this address");
+            }
+        }
+        votes.push_back(voter.clone());
+
+        let quorum: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccelQuorum)
+            .unwrap_or(1);
+
+        if votes.len() >= quorum {
+            let mut roles: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::EmergencyRoles)
+                .unwrap_or_else(|| Vec::new(&env));
+            roles.push_back(candidate.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::EmergencyRoles, &roles);
+            env.storage().persistent().remove(&votes_key);
+            events::emit_emergency_role_granted(&env, &candidate, &voter);
+        } else {
+            env.storage().persistent().set(&votes_key, &votes);
+        }
+    }
+
+    /// Cast a governor vote to revoke `EMERGENCY_ROLE` from `target`. Mirrors
+    /// `vote_grant_emergency_role`: the role is only revoked once the vote
+    /// reaches `accel_quorum`.
+    pub fn vote_revoke_emergency_role(env: Env, voter: Address, target: Address) {
+        voter.require_auth();
+        Self::require_governor(&env, &voter);
+        Self::require_not_paused(&env);
+
+        if !Self::has_emergency_role(&env, &target) {
+            panic!("address does not have the emergency role");
+        }
+
+        let votes_key = DataKey::EmergencyRevokeVotes(target.clone());
+        let mut votes: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&votes_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for existing in votes.iter() {
+            if existing == voter {
+                panic!("already voted to revoke the emergency role from this address");
+            }
+        }
+        votes.push_back(voter.clone());
+
+        let quorum: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccelQuorum)
+            .unwrap_or(1);
+
+        if votes.len() >= quorum {
+            let roles: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::EmergencyRoles)
+                .unwrap_or_else(|| Vec::new(&env));
+            let mut new_roles: Vec<Address> = Vec::new(&env);
+            for r in roles.iter() {
+                if r != target {
+                    new_roles.push_back(r);
+                }
+            }
+            env.storage()
+                .instance()
+                .set(&DataKey::EmergencyRoles, &new_roles);
+            env.storage().persistent().remove(&votes_key);
+            events::emit_emergency_role_revoked(&env, &target, &voter);
+        } else {
+            env.storage().persistent().set(&votes_key, &votes);
+        }
+    }
+
+    /// Execute a scheduled operation early via the reduced
+    /// `EMERGENCY_DELAY_SECONDS` (1 hour) path. Only callers holding
+    /// `EMERGENCY_ROLE` (itself only grantable/revocable by governance vote,
+    /// see `vote_grant_emergency_role`) may use this. Every use is appended
+    /// to the on-chain emergency override log and emits
+    /// `emergency_override_used` for observability.
+    ///
+    /// Non-emergency roles must continue to use `execute_operation`, which
+    /// still enforces the full standard delay.
+    pub fn emergency_execute_operation(env: Env, caller: Address, operation_id: BytesN<32>) {
+        caller.require_auth();
+        if !Self::has_emergency_role(&env, &caller) {
+            panic!("caller does not hold the emergency role");
+        }
+        Self::require_not_paused(&env);
+
+        let key = DataKey::Operation(operation_id.clone());
+        let mut op: Operation = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("operation not found");
+
+        if op.status != STATUS_SCHEDULED {
+            panic!("operation is not in scheduled state");
+        }
+
+        let now = env.ledger().timestamp();
+
+        // Still honour the grace-window expiry check.
+        if now > op.execute_before {
+            op.status = STATUS_EXPIRED;
+            env.storage().persistent().set(&key, &op);
+            Self::decrement_active(&env);
+            let mut totals = Self::get_analytics_totals(&env);
+            totals.total_expired += 1;
+            env.storage()
+                .persistent()
+                .set(&DataKey::AnalyticsTotal, &totals);
+            events::emit_operation_expired(&env, &operation_id, op.execute_before);
+            panic!("operation execution window has expired");
+        }
+
+        // Reduced delay check instead of the standard `execute_after` wait.
+        let elapsed = now.saturating_sub(op.scheduled_at);
+        if elapsed < config::EMERGENCY_DELAY_SECONDS {
+            panic!("emergency override delay has not elapsed yet");
+        }
+
+        let actual_delay = now - op.scheduled_at;
+        op.status = STATUS_EXECUTED;
+        env.storage().persistent().set(&key, &op);
+
+        let mut totals = Self::get_analytics_totals(&env);
+        totals.total_executed += 1;
+        totals.cumulative_delay_secs += actual_delay;
+        env.storage()
+            .persistent()
+            .set(&DataKey::AnalyticsTotal, &totals);
+        Self::increment_category_executed(&env, op.category);
+        env.storage()
+            .persistent()
+            .set(&DataKey::LastExecution, &now);
+        Self::decrement_active(&env);
+
+        // Auditable trail: append a record every time the reduced-delay path
+        // is taken, so all emergency overrides are stored in contract state.
+        let mut log: Vec<EmergencyOverrideRecord> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EmergencyOverrideLog)
+            .unwrap_or_else(|| Vec::new(&env));
+        log.push_back(EmergencyOverrideRecord {
+            operation_id: operation_id.clone(),
+            executor: caller.clone(),
+            used_at: now,
+        });
+        env.storage()
+            .persistent()
+            .set(&DataKey::EmergencyOverrideLog, &log);
+
+        events::emit_emergency_override_used(&env, &operation_id, &caller, now);
+    }
+
+    /// List addresses currently holding `EMERGENCY_ROLE`.
+    pub fn get_emergency_roles(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::EmergencyRoles)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Check whether an address currently holds `EMERGENCY_ROLE`.
+    pub fn is_emergency_role(env: Env, address: Address) -> bool {
+        Self::has_emergency_role(&env, &address)
+    }
+
+    /// Full audit log of every emergency-override execution.
+    pub fn get_emergency_override_log(env: Env) -> Vec<EmergencyOverrideRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::EmergencyOverrideLog)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
     // ── Governor Management ───────────────────────────────────────────────────
 
     /// Add a new governor.  Only the admin may call this.
@@ -825,6 +1045,20 @@ impl TimeLock {
         if Self::is_paused(env.clone()) {
             panic!("contract is paused");
         }
+    }
+
+    fn has_emergency_role(env: &Env, address: &Address) -> bool {
+        let roles: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::EmergencyRoles)
+            .unwrap_or_else(|| Vec::new(env));
+        for r in roles.iter() {
+            if &r == address {
+                return true;
+            }
+        }
+        false
     }
 
     fn get_analytics_totals(env: &Env) -> AnalyticsTotals {

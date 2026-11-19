@@ -304,3 +304,85 @@ fn token_drop_unknown_token_and_budget() {
         Err(Ok(AirdropError::InsufficientBalance))
     );
 }
+
+// ── Reputation-weighted distribution (#1553) ─────────────────────────────────
+
+use soroban_sdk::Map;
+
+#[test]
+fn weighted_recipient_receives_proportional_allocation() {
+    let (env, client, _, _, token_addr, contract_id) = setup();
+
+    let weight_two = Address::generate(&env);
+    let weight_one = Address::generate(&env);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(weight_two.clone());
+    recipients.push_back(weight_one.clone());
+
+    let mut weights = Map::new(&env);
+    weights.set(weight_two.clone(), 2u32);
+    weights.set(weight_one.clone(), 1u32);
+
+    let allocations =
+        client.distribute_weighted_airdrop(&token_addr, &recipients, &300i128, &weights);
+
+    assert_eq!(allocations.get(weight_two.clone()).unwrap(), 200);
+    assert_eq!(allocations.get(weight_one.clone()).unwrap(), 100);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    assert_eq!(token_client.balance(&weight_two), 200);
+    assert_eq!(token_client.balance(&weight_one), 100);
+    assert_eq!(token_client.balance(&contract_id), 1_000_000 - 300);
+}
+
+#[test]
+fn weighted_distribution_sums_exactly_to_the_total_supply() {
+    let (env, client, _, _, token_addr, _) = setup();
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(a.clone());
+    recipients.push_back(b.clone());
+    recipients.push_back(c.clone());
+
+    let mut weights = Map::new(&env);
+    weights.set(a.clone(), 1u32);
+    weights.set(b.clone(), 1u32);
+    weights.set(c.clone(), 1u32);
+
+    // 100 does not divide evenly by 3; the contract must still pay out
+    // exactly 100 in total.
+    let allocations =
+        client.distribute_weighted_airdrop(&token_addr, &recipients, &100i128, &weights);
+
+    let sum = allocations.get(a).unwrap() + allocations.get(b).unwrap() + allocations.get(c).unwrap();
+    assert_eq!(sum, 100);
+}
+
+#[test]
+fn no_weights_provided_falls_back_to_equal_distribution() {
+    let (env, client, _, _, token_addr, _) = setup();
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(a.clone());
+    recipients.push_back(b.clone());
+
+    let empty_weights: Map<Address, u32> = Map::new(&env);
+
+    let allocations =
+        client.distribute_weighted_airdrop(&token_addr, &recipients, &200i128, &empty_weights);
+
+    assert_eq!(allocations.get(a.clone()).unwrap(), 100);
+    assert_eq!(allocations.get(b.clone()).unwrap(), 100);
+
+    let token_client = token::Client::new(&env, &token_addr);
+    assert_eq!(token_client.balance(&a), 100);
+    assert_eq!(token_client.balance(&b), 100);
+}

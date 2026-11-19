@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { loginSchema, type LoginFormData } from "@/lib/validations/auth";
 import { cn } from "@/lib/utils";
+import { sanitizeReturnPath } from "@/hooks/useAuth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -66,8 +67,11 @@ export default function LoginPage() {
         duration: 3000,
       });
       const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-      const redirect = params.get("redirect") ?? "/";
-      router.replace(redirect);
+      // "returnTo" takes priority — set by deep-link flows (e.g. match
+      // invites, issue #1562) that need to land back on a specific screen
+      // rather than the generic post-login "redirect" target.
+      const target = params.get("returnTo") ?? params.get("redirect") ?? "/";
+      router.replace(sanitizeReturnPath(target));
     }
   }, [user, router, addToast]);
 

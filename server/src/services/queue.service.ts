@@ -21,6 +21,7 @@ export type JobName =
     | 'notification.batch'
     | 'blockchain.monitor'
     | 'data.cleanup'
+    | 'profile.moderation'
 
 export type JobPriority = 'critical' | 'high' | 'normal' | 'low'
 

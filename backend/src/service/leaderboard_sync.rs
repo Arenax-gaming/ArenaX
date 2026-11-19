@@ -7,6 +7,7 @@
 //! two instances that observed the same concurrent writes converge.
 
 use crate::realtime::event_stream::{Delivery, EventStream};
+use crate::service::weekly_leaderboard::WeeklyRolloverSummary;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,6 +15,10 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 pub const LEADERBOARD_STREAM: &str = "leaderboard:updates";
+/// Dedicated stream for weekly rollover summaries (Issue #1572), kept
+/// separate from `LEADERBOARD_STREAM` so consumers don't need to filter two
+/// different payload shapes out of one feed.
+pub const WEEKLY_ROLLOVER_STREAM: &str = "leaderboard:weekly_rollover";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LeaderboardUpdate {
@@ -50,6 +55,7 @@ pub fn should_apply(current: &LeaderboardUpdate, incoming: &LeaderboardUpdate) -
 pub struct LeaderboardSync {
     instance_id: String,
     stream: EventStream,
+    weekly_stream: Option<EventStream>,
     cache: Mutex<HashMap<(String, Uuid), CachedRank>>,
     versions: Mutex<HashMap<(String, Uuid), u64>>,
 }
@@ -59,13 +65,34 @@ impl LeaderboardSync {
         Self {
             instance_id: instance_id.into(),
             stream,
+            weekly_stream: None,
             cache: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
         }
     }
 
+    /// Attach a dedicated event stream for weekly rollover summaries
+    /// (Issue #1572). Optional: `publish_weekly_summary` falls back to the
+    /// main rank-update stream when none is attached.
+    pub fn with_weekly_stream(mut self, stream: EventStream) -> Self {
+        self.weekly_stream = Some(stream);
+        self
+    }
+
     pub fn instance_id(&self) -> &str {
         &self.instance_id
+    }
+
+    /// Publish a weekly leaderboard rollover summary (Issue #1572) — final
+    /// standings plus prize awards — so any subscriber (notifications,
+    /// admin dashboards, analytics) can react to season-end results.
+    pub async fn publish_weekly_summary(
+        &self,
+        summary: &WeeklyRolloverSummary,
+    ) -> Result<String, String> {
+        let payload = serde_json::to_string(summary).map_err(|e| e.to_string())?;
+        let stream = self.weekly_stream.as_ref().unwrap_or(&self.stream);
+        stream.publish(&payload).await
     }
 
     /// Publishes a rank change. The version is one greater than the last

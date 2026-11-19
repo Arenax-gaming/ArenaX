@@ -31,6 +31,18 @@ export interface Tournament {
   updatedAt: string;
   sponsors?: TournamentSponsor[];
   sponsor?: TournamentSponsor;
+  /**
+   * Team-size configuration for team-based tournaments (issue #1565).
+   * Absent (or `max` of 1) means the tournament is solo — the roster
+   * builder step is skipped entirely for those.
+   */
+  teamSize?: TournamentTeamSize;
+}
+
+/** Minimum/maximum players required on a registered team roster. */
+export interface TournamentTeamSize {
+  min: number;
+  max: number;
 }
 
 export type TournamentStatus =

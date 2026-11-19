@@ -124,6 +124,65 @@ impl RewardSettlementService {
         }
     }
 
+    /// Settle a weekly leaderboard prize payout for a top-N finisher
+    /// (Issue #1572).
+    ///
+    /// Idempotent: keyed by `weekly_prize:{week_key}:{user_id}`, mirroring
+    /// `settle_tournament_refund`'s per-recipient idempotency key, so
+    /// re-running the weekly rollover for an already-settled week/user pair
+    /// is a no-op rather than a double payout.
+    pub async fn settle_weekly_prize(
+        &self,
+        week_key: &str,
+        rank: i64,
+        user_id: &str,
+        amount: &str,
+        asset: &str,
+    ) -> Result<RewardSettlement, ApiError> {
+        let prize_match_id = format!("weekly_prize:{}:{}", week_key, user_id);
+
+        if let Some(existing) = self.get_settlement(&prize_match_id).await? {
+            if existing.is_settled() {
+                return Ok(existing);
+            }
+            if existing.status != Some(SettlementStatus::Failed) {
+                return Ok(existing);
+            }
+        }
+
+        tracing::info!(
+            week = %week_key,
+            rank,
+            user_id = %user_id,
+            amount = %amount,
+            "Settling weekly leaderboard prize"
+        );
+
+        let mut settlement = RewardSettlement::new(
+            prize_match_id.clone(),
+            user_id.to_string(),
+            amount.to_string(),
+            asset.to_string(),
+        );
+
+        self.persist_settlement(&settlement)?;
+
+        match self.call_settlement_contract(&settlement).await {
+            Ok(tx_hash) => {
+                settlement.tx_hash = Some(tx_hash);
+                settlement.status = Some(SettlementStatus::Confirmed);
+                settlement.settled_at = Some(Utc::now());
+                self.persist_settlement(&settlement)?;
+                Ok(settlement)
+            }
+            Err(e) => {
+                settlement.status = Some(SettlementStatus::Failed);
+                self.persist_settlement(&settlement)?;
+                Err(e)
+            }
+        }
+    }
+
     /// Compute rewards deterministically based on stake amount.
     /// Winner receives the full stake amount (deterministic calculation).
     fn compute_reward(&self, stake_amount: &str) -> Result<String, ApiError> {
