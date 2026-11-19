@@ -11,12 +11,19 @@
  *
  * When the match ends naturally (`status === "ended"`) or a match is found,
  * the guard switches off, so the move to the lobby/results never asks.
+ *
+ * When a match is found and `voiceChatEnabled` is set (#1564), the lobby
+ * shows the microphone permission step (`VoiceChatPermissionGate`) before
+ * rendering `children`, so the player sees Granted/Denied/Pending and any
+ * recovery instructions instead of an unexplained browser prompt.
  */
 
 import { useCallback, useState } from "react";
 import MatchmakingQueue from "@/components/game/MatchmakingQueue";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useNavigationGuard } from "@/hooks/useNavigationGuard";
+import { VoiceChatPermissionGate } from "@/components/match/VoiceChatPermissionGate";
+import type { VoiceChatPermissionStatus } from "@/hooks/useMatches";
 
 export type MatchQueueStatus = "queueing" | "in-match" | "ended";
 
@@ -28,6 +35,14 @@ interface MatchQueueViewProps {
   onMatchFound: (sessionId: string) => void;
   /** Rendered instead of the queue UI while `status === "in-match"`. */
   children?: React.ReactNode;
+  /**
+   * Whether this match type uses voice chat. When true, entering the match
+   * shows the microphone permission gate before `children`. Defaults to
+   * `false` so match types that never use voice chat are unaffected.
+   */
+  voiceChatEnabled?: boolean;
+  /** Called once the voice chat permission step resolves (granted, denied, or skipped). */
+  onVoiceChatPermissionResolved?: (status: VoiceChatPermissionStatus) => void;
 }
 
 const COPY: Record<Exclude<MatchQueueStatus, "ended">, { title: string; body: string; confirm: string }> = {
@@ -49,6 +64,8 @@ export function MatchQueueView({
   onLeaveQueue,
   onMatchFound,
   children,
+  voiceChatEnabled = false,
+  onVoiceChatPermissionResolved,
 }: MatchQueueViewProps) {
   // A found match is a natural exit: stop guarding before we navigate to it.
   const [matchFound, setMatchFound] = useState(false);
@@ -85,7 +102,16 @@ export function MatchQueueView({
   return (
     <>
       {status === "in-match" && children ? (
-        children
+        <>
+          {voiceChatEnabled && (
+            <VoiceChatPermissionGate
+              required
+              onResolved={onVoiceChatPermissionResolved}
+              className="mb-3"
+            />
+          )}
+          {children}
+        </>
       ) : (
         <MatchmakingQueue
           gameMode={gameMode}
