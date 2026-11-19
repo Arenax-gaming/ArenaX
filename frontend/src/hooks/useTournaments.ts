@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Tournament, TournamentFilters } from "@/types/tournament";
+import { Tournament, TournamentFilters, TournamentTeamSize } from "@/types/tournament";
 
 /**
  * Builds a flat params object from TournamentFilters, stripping undefined
@@ -65,4 +65,71 @@ export function useJoinedTournaments(userId: string | undefined) {
     staleTime: 60_000,
     retry: 1,
   });
+}
+
+// ─── Team roster helpers (issue #1565) ──────────────────────────────────────
+
+/** Default team-size config for tournaments that don't specify one (solo). */
+const SOLO_TEAM_SIZE: TournamentTeamSize = { min: 1, max: 1 };
+
+/**
+ * Resolves the effective team-size config for a tournament, defaulting to a
+ * solo (1/1) roster when the tournament doesn't define one.
+ */
+export function getTournamentTeamSize(
+  tournament: Pick<Tournament, "teamSize">,
+): TournamentTeamSize {
+  const size = tournament.teamSize;
+  if (!size || size.max < 1) return SOLO_TEAM_SIZE;
+  return {
+    min: Math.max(1, Math.min(size.min, size.max)),
+    max: size.max,
+  };
+}
+
+/** True when a tournament requires a multi-player roster (not solo entry). */
+export function isTeamTournament(tournament: Pick<Tournament, "teamSize">): boolean {
+  return getTournamentTeamSize(tournament).max > 1;
+}
+
+export interface RosterValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Validates a drag-and-drop team roster against the tournament's team-size
+ * config. Catches: too few players, too many players, and duplicate players
+ * occupying more than one slot.
+ */
+export function validateRoster(
+  roster: Array<string | null>,
+  teamSize: TournamentTeamSize,
+): RosterValidationResult {
+  const errors: string[] = [];
+  const filled = roster.filter((id): id is string => !!id);
+
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const id of filled) {
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  if (duplicates.size > 0) {
+    errors.push("Duplicate players are not allowed on the roster.");
+  }
+
+  const uniqueCount = seen.size;
+  if (uniqueCount < teamSize.min) {
+    errors.push(
+      `This tournament requires at least ${teamSize.min} player${teamSize.min === 1 ? "" : "s"} (${uniqueCount} selected).`,
+    );
+  }
+  if (uniqueCount > teamSize.max) {
+    errors.push(
+      `This tournament allows at most ${teamSize.max} player${teamSize.max === 1 ? "" : "s"} (${uniqueCount} selected).`,
+    );
+  }
+
+  return { valid: errors.length === 0, errors };
 }

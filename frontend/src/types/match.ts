@@ -186,3 +186,28 @@ export type SpectatorConnectionStatus =
   | "reconnecting"
   | "disconnected"
   | "error";
+
+// ─── Match Invite Deep Links (issue #1562) ─────────────────────────────────
+
+export type MatchInviteStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "expired"
+  | "invalid";
+
+/** Resolved contents of a `/match/invite/:token` deep link. */
+export interface MatchInvite {
+  token: string;
+  matchId: string;
+  status: MatchInviteStatus;
+  gameType: string;
+  entryFee: number;
+  expiresAt: string;
+  opponent: {
+    id: string;
+    username: string;
+    avatar?: string;
+    elo?: number;
+  };
+}

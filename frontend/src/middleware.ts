@@ -198,11 +198,20 @@ export default async function middleware(request: NextRequest) {
   const strippedPath = stripLocale(pathname);
   const routeType = classifyRoute(strippedPath);
 
+  // Match-invite deep links (issue #1562) carry their own query param name
+  // ("returnTo") so the login page can send the user straight back to the
+  // invite card — rather than the home page — once they've signed in.
+  const isMatchInviteDeepLink = /^\/match\/invite\/[^/]+\/?$/.test(strippedPath);
+
   const authRedirect = async (): Promise<NextResponse | null> => {
     if (routeType === "public") return null;
 
     const loginUrl = new URL(`/${locale}/login`, request.url);
-    loginUrl.searchParams.set("redirect", pathname);
+    const deepLinkTarget = pathname + (request.nextUrl.search ?? "");
+    if (isMatchInviteDeepLink) {
+      loginUrl.searchParams.set("returnTo", deepLinkTarget);
+    }
+    loginUrl.searchParams.set("redirect", deepLinkTarget);
 
     const deny = (url: URL): NextResponse => {
       const redirect = NextResponse.redirect(url);

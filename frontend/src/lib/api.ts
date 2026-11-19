@@ -8,6 +8,7 @@ import {
   Match,
   MatchFilters,
   ReportScoreRequest,
+  MatchInvite,
 } from "../types/match";
 import {
   Proposal,
@@ -390,6 +391,8 @@ class ApiClient {
     id: string,
     paymentMethod?: "fiat" | "arenax" | "xlm" | string,
     idempotencyKey?: string,
+    /** Player IDs for a team roster (issue #1565) — omitted for solo entries. */
+    roster?: string[],
   ): Promise<{ message: string; transactionHash?: string }> {
     return this.request<{ message: string; transactionHash?: string }>(
       `/tournaments/${id}/register`,
@@ -401,6 +404,7 @@ class ApiClient {
         body: JSON.stringify({
           ...(paymentMethod && { paymentMethod, payment_method: paymentMethod }),
           ...(idempotencyKey && { idempotencyKey }),
+          ...(roster && roster.length > 0 && { roster, teamRoster: roster }),
         }),
       },
     );
@@ -509,6 +513,32 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(result),
     });
+  }
+
+  // ── Match invites (issue #1562) ──────────────────────────────────────────────
+
+  /**
+   * Resolves a match-invite deep-link token to its invite details.
+   * Throws on an invalid/expired token so the invite page can show a clear
+   * error message instead of a blank/loading state.
+   */
+  async getMatchInvite(token: string): Promise<MatchInvite> {
+    return this.request<MatchInvite>(
+      `/matches/invites/${encodeURIComponent(token)}`,
+    );
+  }
+
+  async respondToMatchInvite(
+    token: string,
+    response: "accept" | "decline",
+  ): Promise<{ matchId: string }> {
+    return this.request<{ matchId: string }>(
+      `/matches/invites/${encodeURIComponent(token)}/respond`,
+      {
+        method: "POST",
+        body: JSON.stringify({ response }),
+      },
+    );
   }
 
   // ── Health ───────────────────────────────────────────────────────────────────

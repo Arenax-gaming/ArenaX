@@ -60,6 +60,25 @@ const PENDING_VERIFICATION_EMAIL_KEY = "arenax_pending_email";
 
 export const AUTH_PROFILE_QUERY_KEY = ["auth", "profile"] as const;
 
+/**
+ * Validates a post-login redirect target (from a `returnTo`/`redirect`
+ * query param, issue #1562) so an attacker can't smuggle an open redirect
+ * through the login URL — only same-origin, relative paths are honored.
+ */
+export function sanitizeReturnPath(raw: string | null | undefined): string {
+  if (!raw) return "/";
+  // Reject absolute URLs and protocol-relative ("//host/...") targets.
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
+  try {
+    // Decoding also catches encoded variants like "/%2F%2Fevil.com".
+    const decoded = decodeURIComponent(raw);
+    if (!decoded.startsWith("/") || decoded.startsWith("//")) return "/";
+  } catch {
+    return "/";
+  }
+  return raw;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -340,10 +359,11 @@ export const AuthProvider = ({
   useEffect(() => {
     api.setOnAuthFailure(() => {
       logout();
-      const returnTo =
+      const returnTo = sanitizeReturnPath(
         typeof window !== "undefined"
           ? window.location.pathname + window.location.search
-          : "/";
+          : "/",
+      );
       router.push(
         `/login?reason=session_expired&returnTo=${encodeURIComponent(returnTo)}`,
       );
