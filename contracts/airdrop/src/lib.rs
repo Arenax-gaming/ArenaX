@@ -31,8 +31,10 @@
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
-    Address, Bytes, BytesN, Env, Vec,
+    Address, Bytes, BytesN, Env, Map, Vec,
 };
+
+mod distribution;
 
 /// Maximum Merkle proof depth accepted by claims (2^32 leaves).
 const MAX_PROOF_DEPTH: u32 = 32;
@@ -76,6 +78,19 @@ pub struct TokenDropClaimed {
     pub claimant: Address,
     pub amount: i128,
     pub claimed_at: u64,
+}
+
+/// Emitted once per recipient of a reputation-weighted distribution
+/// (#1553), carrying the weight that was used and the allocation it
+/// produced.
+#[contractevent(topics = ["Airdrop", "WEIGHT_ASSIGNED"])]
+pub struct AirdropWeightAssigned {
+    #[topic]
+    pub token: Address,
+    #[topic]
+    pub recipient: Address,
+    pub weight: u32,
+    pub allocation: i128,
 }
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
@@ -618,6 +633,73 @@ impl AirdropContract {
             .persistent()
             .get::<DataKey, bool>(&DataKey::TokenClaimed(token, claimant))
             .unwrap_or(false)
+    }
+
+    // ── Reputation-weighted distribution (#1553) ──────────────────────────────
+
+    /// Distribute `total_supply` of `token` across `recipients`,
+    /// proportionally to each address's weight in `weights`.
+    ///
+    /// A recipient missing from `weights` — including every recipient, when
+    /// `weights` is empty — defaults to weight `1`, so calling this with no
+    /// weights at all splits `total_supply` equally across `recipients`,
+    /// exactly as before this feature existed.
+    ///
+    /// Allocation uses the largest-remainder method (see [`distribution`])
+    /// so the amounts transferred always sum to exactly `total_supply`,
+    /// regardless of how evenly it divides across the weights.
+    ///
+    /// Admin-only. The contract must hold at least `total_supply` of
+    /// `token`. Emits [`AirdropWeightAssigned`] for every recipient, in
+    /// `recipients` order, with its resolved weight and computed
+    /// allocation — including recipients that resolve to a zero allocation
+    /// (e.g. every weight is `0`), so an indexer sees a complete picture of
+    /// the distribution rather than silent omissions.
+    pub fn distribute_weighted_airdrop(
+        env: Env,
+        token: Address,
+        recipients: Vec<Address>,
+        total_supply: i128,
+        weights: Map<Address, u32>,
+    ) -> Map<Address, i128> {
+        Self::require_admin(&env);
+
+        if total_supply <= 0 {
+            panic!("total_supply must be positive");
+        }
+        if recipients.is_empty() {
+            panic!("recipients must not be empty");
+        }
+
+        let resolved_weights = distribution::resolve_weights(&env, &recipients, &weights);
+        let allocations =
+            distribution::compute_weighted_allocations(&env, total_supply, &resolved_weights);
+
+        let client = token::Client::new(&env, &token);
+        let contract_addr = env.current_contract_address();
+
+        let mut i = 0u32;
+        while i < recipients.len() {
+            let recipient = recipients.get(i).unwrap();
+            let weight = resolved_weights.get(recipient.clone()).unwrap_or(1);
+            let allocation = allocations.get(recipient.clone()).unwrap_or(0);
+
+            if allocation > 0 {
+                client.transfer(&contract_addr, &recipient, &allocation);
+            }
+
+            AirdropWeightAssigned {
+                token: token.clone(),
+                recipient,
+                weight,
+                allocation,
+            }
+            .publish(&env);
+
+            i += 1;
+        }
+
+        allocations
     }
 
     // ── Admin operations ──────────────────────────────────────────────────────
