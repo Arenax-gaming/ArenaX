@@ -353,6 +353,97 @@ pub use soroban_client::soroban_rpc::TransactionStatus as SdkTxStatus;
 pub use soroban_client::transaction::Transaction as SdkTransaction;
 pub use soroban_client::xdr::ScVal as SdkScVal;
 
+// ---------------------------------------------------------------------------
+// Security monitoring alert channel (Issue #1573)
+// ---------------------------------------------------------------------------
+//
+// Backend security code (e.g. the rate-limit-bypass detector in
+// `middleware::rate_limit`) needs a single place to push structured alerts
+// out to an external security monitoring service. This channel is kept in
+// the SDK service module so all outbound-alerting network calls (Slack in
+// `telemetry.rs`, the monitoring webhook here) stay consistent with the
+// project's existing fire-and-forget, fail-soft style: a slow or
+// unreachable endpoint must never block the request path that triggered
+// the alert.
+
+/// Severity for a security alert sent to the external monitoring service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityAlertSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+/// A structured security alert payload sent to the monitoring service.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SecurityAlertPayload {
+    pub alert_type: String,
+    pub severity: SecurityAlertSeverity,
+    pub message: String,
+    pub metadata: serde_json::Value,
+}
+
+/// Fire-and-forget alert channel used by backend security code (rate-limit
+/// abuse detection, anti-cheat, etc.) to notify an external monitoring
+/// service.
+///
+/// Configured via `SECURITY_ALERT_WEBHOOK_URL`. When unset, alerts are only
+/// logged locally (no network call), so local dev and tests never depend on
+/// an external endpoint.
+#[derive(Debug, Clone, Default)]
+pub struct SecurityAlertChannel {
+    webhook_url: Option<String>,
+}
+
+impl SecurityAlertChannel {
+    /// Build a channel from the `SECURITY_ALERT_WEBHOOK_URL` environment
+    /// variable.
+    pub fn from_env() -> Self {
+        Self {
+            webhook_url: std::env::var("SECURITY_ALERT_WEBHOOK_URL")
+                .ok()
+                .filter(|u| !u.is_empty()),
+        }
+    }
+
+    /// Send a security alert to the configured monitoring webhook.
+    ///
+    /// Always logs the alert locally via `tracing::warn!` first, so a
+    /// detection event is never silently dropped even if the webhook call
+    /// fails or is unconfigured. The network call has a 5s timeout and
+    /// failures are only logged (never propagated), so a slow or
+    /// unreachable monitoring endpoint never blocks the caller.
+    pub async fn send(&self, payload: &SecurityAlertPayload) {
+        tracing::warn!(
+            alert_type = %payload.alert_type,
+            severity = ?payload.severity,
+            message = %payload.message,
+            metadata = %payload.metadata,
+            "Security alert"
+        );
+
+        let Some(webhook_url) = self.webhook_url.clone() else {
+            return;
+        };
+
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to build security alert HTTP client");
+                return;
+            }
+        };
+
+        if let Err(e) = client.post(&webhook_url).json(payload).send().await {
+            tracing::warn!(error = %e, "Failed to deliver security alert to monitoring webhook");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

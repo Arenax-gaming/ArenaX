@@ -120,6 +120,27 @@ pub struct MonitoringSnapshot {
     pub snapshot_at: u64,
 }
 
+// ─── Emergency role / override events (Issue #1554) ───────────────────────────
+
+#[contractevent(topics = ["TimeLock", "EMERG_GRANTED"])]
+pub struct EmergencyRoleGranted {
+    pub account: Address,
+    pub granted_by_vote_of: Address,
+}
+
+#[contractevent(topics = ["TimeLock", "EMERG_REVOKED"])]
+pub struct EmergencyRoleRevoked {
+    pub account: Address,
+    pub revoked_by_vote_of: Address,
+}
+
+#[contractevent(topics = ["TimeLock", "EMERG_OVERRIDE"])]
+pub struct EmergencyOverrideUsed {
+    pub operation_id: BytesN<32>,
+    pub executor: Address,
+    pub executed_at: u64,
+}
+
 // ─── Emit helpers ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -288,6 +309,36 @@ pub fn emit_monitoring_snapshot(
         total_cancelled,
         total_accelerated,
         snapshot_at: env.ledger().timestamp(),
+    }
+    .publish(env);
+}
+
+pub fn emit_emergency_role_granted(env: &Env, account: &Address, granted_by_vote_of: &Address) {
+    EmergencyRoleGranted {
+        account: account.clone(),
+        granted_by_vote_of: granted_by_vote_of.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_emergency_role_revoked(env: &Env, account: &Address, revoked_by_vote_of: &Address) {
+    EmergencyRoleRevoked {
+        account: account.clone(),
+        revoked_by_vote_of: revoked_by_vote_of.clone(),
+    }
+    .publish(env);
+}
+
+pub fn emit_emergency_override_used(
+    env: &Env,
+    operation_id: &BytesN<32>,
+    executor: &Address,
+    executed_at: u64,
+) {
+    EmergencyOverrideUsed {
+        operation_id: operation_id.clone(),
+        executor: executor.clone(),
+        executed_at,
     }
     .publish(env);
 }
