@@ -1,5 +1,5 @@
 use crate::models::{StellarAccount, StellarTransaction};
-use crate::security::PiiDataProtector;
+use crate::security::{EnvelopeEncryption, EnvelopedSecret, PiiDataProtector};
 use crate::service::stellar_sdk_service::StellarSdkService;
 use anyhow::Result;
 use chrono::Utc;
@@ -125,6 +125,10 @@ pub struct StellarService {
     http_client: reqwest::Client,
     /// Shared across clones so every handler sees the same Horizon health.
     horizon_breaker: Arc<HorizonCircuitBreaker>,
+    /// Envelope encryption engine for Stellar secret keys (Issue #1361).
+    /// KEK loaded from `STELLAR_KEK` env var; falls back to an ephemeral key
+    /// in dev mode.
+    envelope_enc: Arc<EnvelopeEncryption>,
 }
 
 impl StellarService {
@@ -146,6 +150,7 @@ impl StellarService {
                 .build()
                 .unwrap_or_default(),
             horizon_breaker: Arc::new(HorizonCircuitBreaker::new(HorizonBreakerConfig::from_env())),
+            envelope_enc: Arc::new(EnvelopeEncryption::from_env()),
         }
     }
 
@@ -854,6 +859,36 @@ impl StellarService {
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .ok_or(StellarError::InvalidPublicKey)
+    }
+
+    // ========================================================================
+    // ENVELOPE ENCRYPTION — Issue #1361
+    // ========================================================================
+    // The two methods below implement two-layer (envelope) encryption for
+    // Stellar secret keys. A random per-record DEK encrypts the secret; the
+    // DEK itself is wrapped under a KEK loaded from STELLAR_KEK. Rotating the
+    // KEK re-wraps DEKs without touching the secret ciphertext, so key
+    // rotation is O(n) in row count rather than O(n) in ciphertext size.
+
+    /// Seal a Stellar secret key into an `EnvelopedSecret` and return it as a
+    /// JSON string suitable for storage in `stellar_accounts.encrypted_secret_key`.
+    pub fn encrypt_secret_key_envelope(&self, secret: &str) -> Result<String, StellarError> {
+        let enc = EnvelopeEncryption::from_env();
+        let enveloped = enc
+            .seal_str(secret)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))?;
+        serde_json::to_string(&enveloped)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
+    }
+
+    /// Open an `EnvelopedSecret` JSON string stored in the database and
+    /// return the plaintext Stellar secret key.
+    pub fn decrypt_secret_key_envelope(&self, envelope_json: &str) -> Result<String, StellarError> {
+        let enveloped: EnvelopedSecret = serde_json::from_str(envelope_json)
+            .map_err(|e| StellarError::StellarSdkError(format!("envelope JSON: {e}")))?;
+        let enc = EnvelopeEncryption::from_env();
+        enc.open_str(&enveloped)
+            .map_err(|e| StellarError::StellarSdkError(e.to_string()))
     }
 
     /// Convert XLM to stroops (1 XLM = 10,000,000 stroops)

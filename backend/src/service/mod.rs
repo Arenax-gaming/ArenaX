@@ -2,7 +2,9 @@
 pub mod achievement_service;
 pub mod weekly_leaderboard;
 pub mod analytics_service;
+pub mod anti_cheat_config;
 pub mod anti_cheat_service;
+pub mod configurable_gameplay_analysis;
 pub mod api_key_service;
 pub mod audit_service;
 pub mod auth_service;
@@ -19,6 +21,7 @@ pub mod idempotency_service;
 pub mod idempotency_tests;
 pub mod elo_history_tests;
 pub mod leaderboard_service;
+pub mod leaderboard_snapshot_job;
 pub mod leaderboard_sync;
 pub mod match_authority_service;
 pub mod match_authority_service_test;
