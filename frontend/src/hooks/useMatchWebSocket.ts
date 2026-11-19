@@ -33,6 +33,13 @@ interface UseMatchWebSocketReturn {
   connectionRestored: boolean;
   reconnect: () => void;
   disconnect: () => void;
+  /**
+   * Rolling average (ms) of the last `LATENCY_WINDOW_SIZE` end-to-end
+   * round-trip samples (#1566). `null` until the first pong is received.
+   */
+  latencyMs: number | null;
+  /** Raw round-trip samples backing `latencyMs`, oldest first, capped at `LATENCY_WINDOW_SIZE`. */
+  latencySamples: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +57,12 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 
 /** How long the "connection restored" flag stays set (ms). */
 const RESTORED_NOTICE_MS = 3_000;
+
+/** How often a timestamped latency ping is sent while connected (#1566). */
+const LATENCY_PING_INTERVAL_MS = 2_000;
+
+/** Number of round-trip samples kept for the rolling average (#1566). */
+const LATENCY_WINDOW_SIZE = 10;
 
 // ---------------------------------------------------------------------------
 // useMatchWebSocket
@@ -74,6 +87,8 @@ export function useMatchWebSocket({
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionRestored, setConnectionRestored] = useState(false);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [latencySamples, setLatencySamples] = useState<number[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,6 +97,24 @@ export function useMatchWebSocket({
   // Set to true when the cleanup function runs so stale async callbacks
   // don't attempt to reconnect after the component has unmounted.
   const closedRef = useRef(false);
+
+  // ── Latency measurement (#1566) ────────────────────────────────────────
+  // Timestamped pings sent on an interval; `pendingLatencyPingsRef` maps a
+  // ping id to its send time so the matching pong can compute a true
+  // end-to-end round trip (not just server ping, which the existing
+  // keepalive "ping" message above already represents).
+  const latencyPingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingLatencyPingsRef = useRef<Map<string, number>>(new Map());
+  const latencySamplesRef = useRef<number[]>([]);
+  const latencyPingSeqRef = useRef(0);
+
+  const clearLatencyPingInterval = () => {
+    if (latencyPingIntervalRef.current !== null) {
+      clearInterval(latencyPingIntervalRef.current);
+      latencyPingIntervalRef.current = null;
+    }
+    pendingLatencyPingsRef.current.clear();
+  };
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -102,6 +135,7 @@ export function useMatchWebSocket({
 
   const disconnect = useCallback(() => {
     clearReconnectTimer();
+    clearLatencyPingInterval();
     retryCountRef.current = 0;
     if (wsRef.current) {
       // Remove handlers before closing so onclose doesn't schedule a reconnect.
@@ -145,6 +179,29 @@ export function useMatchWebSocket({
 
     wsRef.current = ws;
 
+    // Sends a timestamped latency-measurement ping; the matching
+    // "latency_pong" reply (handled below) closes the round trip (#1566).
+    // Distinct from the server's own keepalive "ping" message, which this
+    // hook has always ignored — that only measures server liveness, not
+    // the full end-to-end path a player actually experiences.
+    const sendLatencyPing = () => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const id = `lp-${++latencyPingSeqRef.current}`;
+      const sentAt = Date.now();
+      pendingLatencyPingsRef.current.set(id, sentAt);
+      // Bound memory if pongs stop arriving (e.g. server doesn't support
+      // this message type yet) — drop the oldest in-flight ping.
+      if (pendingLatencyPingsRef.current.size > LATENCY_WINDOW_SIZE * 2) {
+        const oldestKey = pendingLatencyPingsRef.current.keys().next().value;
+        if (oldestKey !== undefined) pendingLatencyPingsRef.current.delete(oldestKey);
+      }
+      try {
+        ws.send(JSON.stringify({ type: "latency_ping", id, ts: sentAt }));
+      } catch {
+        // Socket is closing — the next interval tick (or cleanup) handles it.
+      }
+    };
+
     ws.onopen = () => {
       if (closedRef.current) {
         ws.close();
@@ -163,13 +220,35 @@ export function useMatchWebSocket({
           RESTORED_NOTICE_MS,
         );
       }
+
+      clearLatencyPingInterval();
+      sendLatencyPing();
+      latencyPingIntervalRef.current = setInterval(sendLatencyPing, LATENCY_PING_INTERVAL_MS);
     };
 
     ws.onmessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data as string) as Partial<MatchUpdate> & {
           type?: string;
+          id?: string;
         };
+
+        // Latency pong — resolve the round trip and never fall through to
+        // match-data handling below (#1566 "does not interfere with match
+        // data messages").
+        if (data.type === "latency_pong") {
+          const id = data.id;
+          if (id && pendingLatencyPingsRef.current.has(id)) {
+            const sentAt = pendingLatencyPingsRef.current.get(id)!;
+            pendingLatencyPingsRef.current.delete(id);
+            const rtt = Math.max(0, Date.now() - sentAt);
+            const samples = [...latencySamplesRef.current, rtt].slice(-LATENCY_WINDOW_SIZE);
+            latencySamplesRef.current = samples;
+            setLatencySamples(samples);
+            setLatencyMs(Math.round(samples.reduce((sum, v) => sum + v, 0) / samples.length));
+          }
+          return;
+        }
 
         // Ignore keepalive pings.
         if (data.type === "ping") return;
@@ -193,6 +272,7 @@ export function useMatchWebSocket({
     ws.onclose = (event: CloseEvent) => {
       setIsConnected(false);
       wsRef.current = null;
+      clearLatencyPingInterval();
 
       if (closedRef.current) return;
 
@@ -289,6 +369,8 @@ export function useMatchWebSocket({
     connectionRestored,
     reconnect,
     disconnect,
+    latencyMs,
+    latencySamples,
   };
 }
 

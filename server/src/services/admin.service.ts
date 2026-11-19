@@ -22,7 +22,7 @@ export interface GameConfig {
 
 export interface ModerationItem {
   id: string
-  type: 'chat' | 'username' | 'content'
+  type: 'chat' | 'username' | 'content' | 'profile'
   reportedUserId: string
   content: string
   reportedAt: Date
@@ -43,9 +43,11 @@ export interface SystemHealth {
   activeBans?: number
 }
 
+import { Prisma } from '@prisma/client'
 import { getDatabaseClient } from './database.service'
-import ModerationService from './moderation.service'
-import { NotificationService } from './notification.service'
+import ModerationService, { PendingProfileContent } from './moderation.service'
+import { NotificationService, notificationService } from './notification.service'
+import { cacheService } from './cache.service'
 
 export class AdminService {
   private inMemoryGameConfig: GameConfig = {
@@ -268,15 +270,29 @@ export class AdminService {
 
   async reviewContent(
     contentId: string,
-    action: 'approve' | 'reject' | 'remove'
+    action: 'approve' | 'reject' | 'remove',
+    options: { reviewerId?: string; reason?: string } = {}
   ): Promise<boolean> {
     const prisma = getDatabaseClient()
     const existing = await prisma.moderationItem.findUnique({ where: { id: contentId } })
     if (!existing) throw new Error('Content not found in moderation queue')
 
-    await prisma.moderationItem.update({ where: { id: contentId }, data: { status: 'REVIEWED', reviewerId: null, reviewedAt: new Date(), actionTaken: action === 'remove' ? 'removed' : action } })
+    await prisma.moderationItem.update({
+      where: { id: contentId },
+      data: {
+        status: 'REVIEWED',
+        reviewerId: options.reviewerId ?? null,
+        reviewedAt: new Date(),
+        actionTaken: action === 'remove' ? 'removed' : action,
+        ...(options.reason ? { flagReason: options.reason } : {})
+      }
+    })
 
-    if (action === 'remove') {
+    if (existing.type === 'profile') {
+      // Profile content submitted through updateMyProfile (#1569): apply
+      // or discard the pending edit and notify the user either way.
+      await this.resolveProfileModeration(existing, action, options.reason)
+    } else if (action === 'remove') {
       // placeholder for removal logic
       console.log('[Admin] Content removed via moderation:', { contentId, content: existing.content })
     }
@@ -286,6 +302,68 @@ export class AdminService {
 
     console.log('[Admin] Content reviewed (db):', { contentId, action })
     return true
+  }
+
+  /**
+   * Apply (approve) or discard (reject/remove) a pending profile edit and
+   * notify the submitting user of the outcome, including the rejection
+   * reason when one was given (#1569 acceptance criteria).
+   */
+  private async resolveProfileModeration(
+    item: { id: string; reportedUserId: string; content: string },
+    action: 'approve' | 'reject' | 'remove',
+    reason?: string
+  ): Promise<void> {
+    const prisma = getDatabaseClient()
+
+    let pending: PendingProfileContent = {}
+    try {
+      pending = JSON.parse(item.content) as PendingProfileContent
+    } catch {
+      pending = {}
+    }
+
+    if (action === 'approve') {
+      const updated = await prisma.user.update({
+        where: { id: item.reportedUserId },
+        data: {
+          bio: pending.bio ?? null,
+          socials: (pending.socials ?? {}) as Prisma.InputJsonValue,
+          avatarUrl: pending.avatarUrl ?? null,
+          pendingBio: null,
+          pendingSocials: Prisma.DbNull,
+          pendingAvatarUrl: null
+        },
+        select: { username: true }
+      })
+
+      await cacheService.delete(`profile:${updated.username}`).catch(() => null)
+
+      await notificationService.sendNotification(
+        item.reportedUserId,
+        'profile_content_approved',
+        'Profile update approved',
+        'Your recent profile update has been reviewed and is now live.'
+      ).catch(() => null)
+    } else {
+      // reject / remove: discard the pending submission, live content is
+      // left exactly as it was.
+      await prisma.user.update({
+        where: { id: item.reportedUserId },
+        data: { pendingBio: null, pendingSocials: Prisma.DbNull, pendingAvatarUrl: null }
+      })
+
+      const content = reason
+        ? `Your recent profile update was rejected: ${reason}`
+        : 'Your recent profile update was rejected by a moderator.'
+
+      await notificationService.sendNotification(
+        item.reportedUserId,
+        'profile_content_rejected',
+        'Profile update rejected',
+        content
+      ).catch(() => null)
+    }
   }
 
   async reportContent(

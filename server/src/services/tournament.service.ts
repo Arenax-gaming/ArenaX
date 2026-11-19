@@ -34,6 +34,25 @@ export interface MatchResult {
   resultType: 'WIN' | 'LOSS' | 'DRAW' | 'DISQUALIFIED';
 }
 
+/** Pointer to a slot in a not-yet-played bracket match. */
+interface BracketSlotRef {
+  matchId: string;
+  slot: 'A' | 'B';
+}
+
+/**
+ * Routing recorded on each `TournamentMatch.metadata` at generation time
+ * (#1568). `winnerTo`/`loserTo` say exactly which match + slot a result
+ * feeds into, so advancing the bracket is a direct lookup instead of
+ * re-deriving pairings from round numbers (which breaks down once winners
+ * and losers brackets run in parallel).
+ */
+interface DoubleEliminationMatchMetadata {
+  bracket: 'winners' | 'losers' | 'grand_final';
+  winnerTo?: BracketSlotRef;
+  loserTo?: BracketSlotRef;
+}
+
 export class TournamentService {
   /**
    * Create a new tournament with configuration
@@ -345,8 +364,16 @@ export class TournamentService {
       // Update participant stats
       await this.updateParticipantStats(tournamentId, match.playerAId, match.playerBId, result);
 
-      // Check if round is complete and advance tournament
-      await this.checkRoundCompletion(tournamentId, match.round);
+      if (match.tournament.format === TournamentFormat.DOUBLE_ELIMINATION) {
+        // Double-elimination brackets advance via the winnerTo/loserTo
+        // pointers wired up at generation time (#1568) — winners and
+        // losers brackets run in parallel, so the generic "pair up every
+        // winner of the previous round" engine below doesn't apply here.
+        await this.advanceDoubleEliminationBracket(tournamentId, updatedMatch, result);
+      } else {
+        // Check if round is complete and advance tournament
+        await this.checkRoundCompletion(tournamentId, match.round);
+      }
 
       logger.info('Match result recorded', {
         tournamentId,
@@ -550,34 +577,205 @@ export class TournamentService {
     return matches;
   }
 
+  /**
+   * Build a full double-elimination bracket: a winners bracket, a losers
+   * bracket that receives every winners-bracket loser at the correct
+   * round, and a grand final between both brackets' champions (#1568).
+   *
+   * Requires a power-of-two field (4, 8, 16, 32, ...) — the standard
+   * shape for this format. Each match's `metadata` records exactly which
+   * match + slot its winner/loser feeds into; `advanceDoubleEliminationBracket`
+   * uses those pointers to progress the bracket as results come in.
+   */
   private async generateDoubleEliminationBracket(tournament: any) {
-    // Simplified double elimination - winners and losers brackets
     const participants = tournament.participants;
     const playerCount = participants.length;
-    const matches: any[] = [];
+    const log2PlayerCount = Math.log2(playerCount);
 
-    // Winners bracket (similar to single elimination)
-    const firstRoundMatches = Math.pow(2, Math.ceil(Math.log2(playerCount)) - 1);
-    for (let i = 0; i < firstRoundMatches; i++) {
-      const playerA = participants[i * 2] || null;
-      const playerB = participants[i * 2 + 1] || null;
-
-      const match = await prisma.tournamentMatch.create({
-        data: {
-          tournamentId: tournament.id,
-          round: 1,
-          roundName: TournamentRound.ROUND_OF_16,
-          matchNumber: i + 1,
-          playerAId: playerA?.id || null,
-          playerBId: playerB?.id || null,
-          status: 'PENDING',
-        },
-      });
-
-      matches.push(match);
+    if (playerCount < 4 || !Number.isInteger(log2PlayerCount)) {
+      throw new Error('Double-elimination brackets require a power-of-two number of players (4, 8, 16, 32, ...)');
     }
 
-    return matches;
+    const k = log2PlayerCount; // number of winners-bracket rounds
+    const allMatches: any[] = [];
+
+    // --- Winners bracket: round w has playerCount / 2^w matches ----------
+    const winnersRounds: any[][] = [];
+    for (let w = 1; w <= k; w++) {
+      const matchCount = playerCount / Math.pow(2, w);
+      const roundMatches: any[] = [];
+
+      for (let i = 0; i < matchCount; i++) {
+        const playerA = w === 1 ? participants[i * 2] ?? null : null;
+        const playerB = w === 1 ? participants[i * 2 + 1] ?? null : null;
+
+        const match = await prisma.tournamentMatch.create({
+          data: {
+            tournamentId: tournament.id,
+            round: w,
+            roundName: this.getRoundName(w, k),
+            matchNumber: i + 1,
+            playerAId: playerA?.id ?? null,
+            playerBId: playerB?.id ?? null,
+            status: 'PENDING',
+            metadata: { bracket: 'winners' },
+          },
+        });
+
+        roundMatches.push(match);
+        allMatches.push(match);
+      }
+
+      winnersRounds.push(roundMatches);
+    }
+
+    // --- Losers bracket: 2*(k-1) rounds, alternating between a "pure" ----
+    // round (only losers-bracket survivors play each other) and a
+    // "drop-in" round (losers-bracket survivors meet the newest batch of
+    // winners-bracket losers). Round sizes halve every two rounds.
+    const losersRoundCount = 2 * (k - 1);
+    const losersRounds: any[][] = [];
+
+    for (let l = 1; l <= losersRoundCount; l++) {
+      const pairIndex = Math.floor((l - 1) / 2);
+      const matchCount = Math.pow(2, k - 2 - pairIndex);
+      const roundMatches: any[] = [];
+
+      for (let i = 0; i < matchCount; i++) {
+        const match = await prisma.tournamentMatch.create({
+          data: {
+            tournamentId: tournament.id,
+            round: k + l,
+            roundName: this.getRoundName(l, losersRoundCount),
+            matchNumber: i + 1,
+            status: 'PENDING',
+            metadata: { bracket: 'losers' },
+          },
+        });
+
+        roundMatches.push(match);
+        allMatches.push(match);
+      }
+
+      losersRounds.push(roundMatches);
+    }
+
+    // --- Grand final: winners bracket champion vs. losers bracket champion
+    const grandFinal = await prisma.tournamentMatch.create({
+      data: {
+        tournamentId: tournament.id,
+        round: k + losersRoundCount + 1,
+        roundName: TournamentRound.GRAND_FINAL,
+        matchNumber: 1,
+        status: 'PENDING',
+        metadata: { bracket: 'grand_final' },
+      },
+    });
+    allMatches.push(grandFinal);
+
+    // --- Wire up winners-bracket routing -----------------------------------
+    for (let w = 1; w <= k; w++) {
+      const round = winnersRounds[w - 1];
+
+      for (let i = 0; i < round.length; i++) {
+        const winnerTo: BracketSlotRef =
+          w < k
+            ? { matchId: winnersRounds[w][Math.floor(i / 2)].id, slot: i % 2 === 0 ? 'A' : 'B' }
+            : { matchId: grandFinal.id, slot: 'A' };
+
+        // Round 1 losers meet each other in losers round 1; every later
+        // winners-bracket round's losers drop into losers round 2*(w-1)
+        // (which always has a matching index/size — see derivation in
+        // the issue's bracket-generation tests) in slot B, alongside the
+        // corresponding losers-bracket survivor in slot A.
+        const loserTo: BracketSlotRef =
+          w === 1
+            ? { matchId: losersRounds[0][Math.floor(i / 2)].id, slot: i % 2 === 0 ? 'A' : 'B' }
+            : { matchId: losersRounds[2 * (w - 1) - 1][i].id, slot: 'B' };
+
+        await prisma.tournamentMatch.update({
+          where: { id: round[i].id },
+          data: { metadata: { bracket: 'winners', winnerTo, loserTo } satisfies DoubleEliminationMatchMetadata },
+        });
+      }
+    }
+
+    // --- Wire up losers-bracket internal routing ---------------------------
+    for (let l = 1; l <= losersRoundCount; l++) {
+      const round = losersRounds[l - 1];
+      const isDropInRound = l % 2 === 0;
+
+      for (let i = 0; i < round.length; i++) {
+        let winnerTo: BracketSlotRef;
+
+        if (l === losersRoundCount) {
+          // Losers bracket final — its winner is the losers bracket champion.
+          winnerTo = { matchId: grandFinal.id, slot: 'B' };
+        } else if (isDropInRound) {
+          // Drop-in round winners merge pairwise into the next (pure) round.
+          winnerTo = { matchId: losersRounds[l][Math.floor(i / 2)].id, slot: i % 2 === 0 ? 'A' : 'B' };
+        } else {
+          // Pure round winners move 1:1 into the following drop-in round's slot A.
+          winnerTo = { matchId: losersRounds[l][i].id, slot: 'A' };
+        }
+
+        await prisma.tournamentMatch.update({
+          where: { id: round[i].id },
+          data: { metadata: { bracket: 'losers', winnerTo } satisfies DoubleEliminationMatchMetadata },
+        });
+      }
+    }
+
+    return allMatches;
+  }
+
+  /**
+   * Advance a double-elimination bracket after a match completes (#1568):
+   * place the winner (and, for winners-bracket matches, the loser) into
+   * whichever match/slot `generateDoubleEliminationBracket` wired up for
+   * them. A loss in the losers bracket is a second loss overall, so it
+   * eliminates the player instead of routing them anywhere further.
+   */
+  private async advanceDoubleEliminationBracket(
+    tournamentId: string,
+    match: { id: string; playerAId: string | null; playerBId: string | null; metadata: unknown; round: number },
+    result: MatchResult
+  ): Promise<void> {
+    const metadata = (match.metadata ?? {}) as Partial<DoubleEliminationMatchMetadata>;
+
+    if (metadata.bracket === 'grand_final') {
+      // The grand final decides the whole tournament.
+      await this.completeTournament(tournamentId);
+      return;
+    }
+
+    const winnerId = result.winnerId;
+    const loserId = winnerId === match.playerAId ? match.playerBId : match.playerAId;
+
+    if (metadata.winnerTo) {
+      await this.placeParticipantInMatch(metadata.winnerTo.matchId, metadata.winnerTo.slot, winnerId);
+    }
+
+    if (metadata.bracket === 'winners') {
+      if (metadata.loserTo && loserId) {
+        await this.placeParticipantInMatch(metadata.loserTo.matchId, metadata.loserTo.slot, loserId);
+      }
+    } else if (metadata.bracket === 'losers' && loserId) {
+      await prisma.tournamentParticipant.update({
+        where: { id: loserId },
+        data: { status: 'ELIMINATED', eliminatedAt: new Date(), eliminatedRound: match.round },
+      }).catch((err) => {
+        logger.warn('Failed to mark participant eliminated after losers-bracket loss', { err, loserId, tournamentId });
+      });
+    }
+  }
+
+  private async placeParticipantInMatch(matchId: string, slot: 'A' | 'B', participantId: string | null): Promise<void> {
+    if (!participantId) return;
+    await prisma.tournamentMatch.update({
+      where: { id: matchId },
+      data: slot === 'A' ? { playerAId: participantId } : { playerBId: participantId },
+    });
   }
 
   private async generateRoundRobinBracket(tournament: any) {

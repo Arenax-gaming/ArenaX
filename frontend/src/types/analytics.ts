@@ -43,7 +43,9 @@ export type AnalyticsEventName =
   | "pwa_prompt_dismissed"
   | "pwa_install_accepted"
   | "pwa_install_declined"
-  | "pwa_installed";
+  | "pwa_installed"
+  // Match debug overlay latency sampling (Issue #1566)
+  | "match_latency_sample";
 
 export interface SessionProperties {
   sessionId: string;
@@ -195,4 +197,5 @@ export const ALLOWED_EVENT_NAMES: readonly AnalyticsEventName[] = [
   "achievement_unlocked",
   "ab_test_assigned",
   "funnel_step",
+  "match_latency_sample",
 ] as const;

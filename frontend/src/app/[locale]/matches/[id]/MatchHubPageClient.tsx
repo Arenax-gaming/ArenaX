@@ -13,6 +13,7 @@ import {
 import { useMatch } from "@/hooks/useMatches";
 import { MatchDetailView } from "@/components/match/MatchDetailView";
 import { SpectatorMode } from "@/components/match/SpectatorMode";
+import { MatchDebugOverlay } from "@/components/game/MatchDebugOverlay";
 import { StellarTransactionList } from "@/components/stellar/StellarTransactionList";
 import {
   AlertTriangle,
@@ -86,7 +87,15 @@ function MatchHubPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.status]);
 
-  const { isConnected, lastUpdate, connectionError, connectionRestored, reconnect } = useMatchWebSocket({
+  const {
+    isConnected,
+    lastUpdate,
+    connectionError,
+    connectionRestored,
+    reconnect,
+    latencyMs,
+    latencySamples,
+  } = useMatchWebSocket({
     matchId,
     enabled: match?.status === "in_progress" || match?.status === "disputed",
   });
@@ -321,6 +330,12 @@ function MatchHubPageContent() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_rgba(248,250,252,1),_rgba(241,245,249,1))] px-4 py-8 pb-28 sm:pb-12">
+      <MatchDebugOverlay
+        matchId={matchId}
+        isConnected={isConnected}
+        latencyMs={latencyMs}
+        latencySamples={latencySamples}
+      />
       <div aria-live="polite" aria-atomic="true" className="sr-only">
         {statusAnnouncement}
       </div>

@@ -5,6 +5,18 @@ export interface ModerationResult {
   severity?: 'low' | 'medium' | 'high'
 }
 
+/**
+ * Snapshot of a user-submitted profile edit awaiting moderation (#1569).
+ * Unspecified fields are filled in with the current *live* value by the
+ * caller before this is persisted, so an approval never silently clears
+ * content the user didn't intend to touch.
+ */
+export interface PendingProfileContent {
+  bio?: string
+  socials?: Record<string, string>
+  avatarUrl?: string
+}
+
 export class ModerationService {
   private static PROFANE = [
     'shit', 'fuck', 'bitch', 'ass', 'damn', 'hell',
@@ -128,6 +140,24 @@ export class ModerationService {
     if (severities.includes('high')) return 'high'
     if (severities.includes('medium')) return 'medium'
     return 'low'
+  }
+
+  /**
+   * Flattens a pending profile submission into a single blob of text so
+   * the existing detectors (profanity/slurs/spam/PII) can scan bio,
+   * avatar URL, and every social link in one pass.
+   */
+  static buildProfileModerationText(content: PendingProfileContent): string {
+    const parts: string[] = []
+    if (content.bio) parts.push(content.bio)
+    if (content.avatarUrl) parts.push(content.avatarUrl)
+    if (content.socials) parts.push(...Object.values(content.socials).filter(Boolean))
+    return parts.join('\n')
+  }
+
+  /** Run every detector against a pending profile submission. */
+  static screenProfileContent(content: PendingProfileContent): ModerationResult {
+    return this.detectAll(this.buildProfileModerationText(content))
   }
 }
 
