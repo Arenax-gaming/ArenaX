@@ -3,6 +3,7 @@ import {
     getAdminStatus,
     listDisputes,
     resolveDispute,
+    getDisputeEvidenceSignedUrl,
     listAuditLogs,
     replayPayment,
     listUsers,
@@ -71,6 +72,8 @@ router.post('/moderation/review', restrictToScope('MODERATION:REVIEW'), reviewCo
 router.get('/system/health', getSystemHealth);
 router.get('/disputes', listDisputes);
 router.post('/disputes/:id/resolve', resolveDispute);
+// Signed, time-limited access to private dispute evidence (#1570)
+router.get('/disputes/:id/evidence-url', getDisputeEvidenceSignedUrl);
 
 // ── Audit Trail ──────────────────────────────────────────────────────────────
 router.get('/audit-logs', listAuditLogs);               // backward-compat

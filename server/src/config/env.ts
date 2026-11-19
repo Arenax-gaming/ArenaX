@@ -87,6 +87,13 @@ const envSchema = z.object({
     /** Comma-separated `host:port` list. When set, the cache connects via
      *  ioredis Cluster mode instead of a single REDIS_URL instance. */
     REDIS_CLUSTER_NODES: z.string().optional(),
+    /** Comma-separated `host:port` list of Redis Sentinel nodes (#1577/#1567).
+     *  When set, the cache connects via Sentinel (taking precedence over
+     *  REDIS_CLUSTER_NODES and REDIS_URL) and automatically follows
+     *  master failover. */
+    REDIS_SENTINEL_HOSTS: z.string().optional(),
+    /** Name of the monitored master group reported by the Sentinels. */
+    REDIS_SENTINEL_MASTER_NAME: z.string().default('mymaster'),
 
     // ── RabbitMQ ─────────────────────────────────────────────────────────────
     RABBITMQ_URL: z.string().url().optional(),
