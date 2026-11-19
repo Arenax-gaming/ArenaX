@@ -1215,3 +1215,337 @@ fn test_unrelated_proposal_cannot_set_fee_split() {
     let proposal_id = client.create_proposal(&voter, &desc, &3600u64);
     client.set_fee_split_via_governance(&proposal_id);
 }
+
+// ============================================================================
+// EMERGENCY PAUSE — PAUSER ROLE & RECOVERY (#1368)
+// ============================================================================
+
+#[test]
+fn test_set_and_clear_pauser_role() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_pauser(), None);
+
+    env.mock_all_auths();
+    let pauser = Address::generate(&env);
+    client.set_pauser(&pauser);
+    assert_eq!(client.get_pauser(), Some(pauser.clone()));
+
+    client.clear_pauser();
+    assert_eq!(client.get_pauser(), None);
+}
+
+#[test]
+fn test_pause_unpause_via_pauser_role() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    let pauser = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.mint(&admin, &user1, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    // Admin appoints a dedicated pauser (#1368).
+    client.set_pauser(&pauser);
+    assert_eq!(client.get_pauser(), Some(pauser.clone()));
+
+    // The pauser freezes transfers.
+    let reason = soroban_sdk::Symbol::new(&env, "EXPLOIT");
+    client.pause(&reason);
+    assert!(client.is_paused());
+
+    let info = client.get_pause_info().unwrap();
+    assert!(info.paused);
+    assert_eq!(info.paused_by, pauser);
+
+    // Unpausing requires the same authorized role — the pauser can lift it.
+    client.unpause();
+    assert!(!client.is_paused());
+
+    // A transfer now succeeds.
+    client.transfer(&user1, &user2, &100i128);
+    assert_eq!(client.balance(&user1), 900);
+    assert_eq!(client.balance(&user2), 100);
+}
+
+/// Acceptance test for #1368: pause, attempt a transfer (reverts), unpause,
+/// and assert the transfer then succeeds.
+#[test]
+fn test_pause_reverts_transfer_then_unpause_succeeds() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&admin, &user1, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    let reason = soroban_sdk::Symbol::new(&env, "EMERGENCY");
+    client.pause(&reason);
+    assert!(client.is_paused());
+
+    // A transfer while paused reverts (the pause check runs before any
+    // balance/state change, so the Env is left usable afterwards).
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer(&user1, &user2, &100i128);
+    }));
+    assert!(panicked.is_err(), "transfer must revert while paused");
+
+    // Unpause, then the same transfer succeeds.
+    client.unpause();
+    assert!(!client.is_paused());
+    client.transfer(&user1, &user2, &100i128);
+    assert_eq!(client.balance(&user1), 900);
+    assert_eq!(client.balance(&user2), 100);
+}
+
+#[test]
+#[should_panic(expected = "not authorized to pause")]
+fn test_unauthorized_address_cannot_pause() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    // No mock_all_auths: neither admin nor any pauser authorizes the call.
+    let reason = soroban_sdk::Symbol::new(&env, "ROGUE");
+    client.pause(&reason);
+}
+
+/// Admin recovery stays callable while paused and moves funds to a safe
+/// address (#1368).
+#[test]
+fn test_admin_can_recover_while_paused() {
+    let (env, admin, compromised, safe) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&admin, &compromised, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    let reason = soroban_sdk::Symbol::new(&env, "HACK");
+    client.pause(&reason);
+    assert!(client.is_paused());
+
+    // Ordinary transfers are frozen, but admin can recover funds to a safe
+    // address even while paused.
+    client.recover(&compromised, &safe, &400i128);
+    assert_eq!(client.balance(&compromised), 600);
+    assert_eq!(client.balance(&safe), 400);
+    assert!(client.is_paused()); // still paused — recover never clears it
+}
+
+#[test]
+fn test_transfer_from_reverts_with_paused_error_code() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let user3 = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.mint(&admin, &user1, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    client.approve(&user1, &user2, &500i128);
+    assert_eq!(client.allowance(&user1, &user2), 500);
+
+    let reason = soroban_sdk::Symbol::new(&env, "FREEZE");
+    client.pause(&reason);
+    assert!(client.is_paused());
+
+    // transfer_from surfaces a structured Paused error code (#1368).
+    let err = client
+        .transfer_from(&user2, &user1, &user3, &100i128)
+        .unwrap_err();
+    assert_eq!(err, TokenError::Paused);
+
+    // No state moved while paused.
+    assert_eq!(client.balance(&user1), 1_000);
+    assert_eq!(client.allowance(&user1, &user2), 500);
+}
+
+#[test]
+fn test_approve_transfer_from_flow_decrements_allowance() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let user3 = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.mint(&admin, &user1, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    client.approve(&user1, &user2, &500i128);
+
+    client.transfer_from(&user2, &user1, &user3, &300i128).unwrap();
+    assert_eq!(client.balance(&user1), 700);
+    assert_eq!(client.balance(&user3), 300);
+    assert_eq!(client.allowance(&user1, &user2), 200);
+}
+
+#[test]
+fn test_transfer_from_insufficient_allowance() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let user3 = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.mint(&admin, &user1, &1_000i128);
+    env.ledger().set_sequence_number(1);
+
+    client.approve(&user1, &user2, &100i128);
+
+    let err = client
+        .transfer_from(&user2, &user1, &user3, &300i128)
+        .unwrap_err();
+    assert_eq!(err, TokenError::InsufficientAllowance);
+}
+
+// ============================================================================
+// PER-WALLET BALANCE CAP (#1364)
+// ============================================================================
+
+/// Acceptance test for #1364: mint up to the cap, then assert a further mint
+/// reverts with a clear error code.
+#[test]
+fn test_mint_up_to_balance_cap_then_revert() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_max_balance_per_wallet(&1_000i128);
+    assert_eq!(client.get_max_balance_per_wallet(), 1_000);
+
+    // Minting exactly to the cap is allowed (cap is an upper bound, not
+    // exclusive).
+    client.mint(&admin, &user1, &1_000i128);
+    assert_eq!(client.balance(&user1), 1_000);
+
+    // A further mint reverts with a clear error code.
+    let err = client.mint(&admin, &user1, &1i128).unwrap_err();
+    assert_eq!(err, TokenError::BalanceCapExceeded);
+}
+
+#[test]
+#[should_panic(expected = "balance cap exceeded")]
+fn test_transfer_exceeds_balance_cap_reverts() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_max_balance_per_wallet(&1_000i128);
+    client.mint(&admin, &user1, &800i128);
+    client.mint(&admin, &user2, &800i128);
+    env.ledger().set_sequence_number(1);
+
+    // Pushing user2 (800) above the cap (1000) reverts.
+    client.transfer(&user1, &user2, &300i128);
+}
+
+#[test]
+fn test_transfer_from_exceeds_balance_cap_reverts() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+    let user3 = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.set_max_balance_per_wallet(&1_000i128);
+    client.mint(&admin, &user1, &800i128);
+    client.mint(&admin, &user3, &800i128);
+    env.ledger().set_sequence_number(1);
+    client.approve(&user1, &user2, &500i128);
+
+    let err = client
+        .transfer_from(&user2, &user1, &user3, &300i128)
+        .unwrap_err();
+    assert_eq!(err, TokenError::BalanceCapExceeded);
+
+    // Cap breach is atomic — nothing moved.
+    assert_eq!(client.balance(&user1), 800);
+    assert_eq!(client.balance(&user3), 800);
+    assert_eq!(client.allowance(&user1, &user2), 500);
+}
+
+#[test]
+fn test_balance_cap_zero_disables_check() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_max_balance_per_wallet(&0i128);
+    assert_eq!(client.get_max_balance_per_wallet(), 0);
+
+    // A zero cap disables enforcement — an arbitrarily large mint is allowed.
+    client.mint(&admin, &user1, &1_000_000i128);
+    assert_eq!(client.balance(&user1), 1_000_000);
+}
+
+#[test]
+#[should_panic(expected = "balance cap cannot be increased by admin")]
+fn test_admin_cannot_raise_balance_cap() {
+    let (env, admin, _, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.set_max_balance_per_wallet(&1_000i128);
+    // Raising an existing cap is governance-only.
+    client.set_max_balance_per_wallet(&2_000i128);
+}
+
+#[test]
+fn test_balance_cap_governance_can_raise() {
+    let (env, admin, user1, _) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    env.ledger().set_sequence_number(1);
+    client.set_max_balance_per_wallet(&1_000i128);
+    client.mint(&admin, &user1, &1_000i128);
+
+    // Governance proposal to raise the cap to 5000.
+    let proposal_id = client.propose_max_balance_cap(&user1, &5_000i128, &3_600u64);
+    env.ledger().set_sequence_number(2);
+    client.vote_on_proposal(&user1, &proposal_id, &true);
+
+    env.ledger().set_timestamp(3_601);
+    client.set_max_balance_cap_via_governance(&proposal_id);
+    assert_eq!(client.get_max_balance_per_wallet(), 5_000);
+
+    // Now minting above the old cap is permitted.
+    client.mint(&admin, &user1, &2_000i128);
+    assert_eq!(client.balance(&user1), 3_000);
+}
+
+/// Existing holders above a newly-lowered cap are not force-reduced; they
+/// simply cannot receive any more (#1364).
+#[test]
+fn test_lowering_cap_does_not_force_reduce_existing_holder() {
+    let (env, admin, user1, user2) = create_test_env();
+    let contract_id = initialize_contract(&env, &admin);
+    let client = AxTokenClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+    client.mint(&admin, &user1, &1_000i128);
+    client.mint(&admin, &user2, &200i128);
+
+    // Lower the cap below user1's existing balance — allowed, no reduction.
+    client.set_max_balance_per_wallet(&500i128);
+    assert_eq!(client.get_max_balance_per_wallet(), 500);
+    assert_eq!(client.balance(&user1), 1_000); // not force-reduced
+
+    // user1 (already over the cap) cannot receive more.
+    let err = client.transfer(&user2, &user1, &100i128).unwrap_err();
+    assert_eq!(err, TokenError::BalanceCapExceeded);
+    assert_eq!(client.balance(&user1), 1_000); // unchanged
+}
