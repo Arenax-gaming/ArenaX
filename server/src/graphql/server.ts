@@ -1,5 +1,5 @@
 import type { Express, RequestHandler } from 'express';
-import { parse } from 'graphql';
+import { parse, ValidationContext, GraphQLError, DocumentNode } from 'graphql';
 import { buildSubgraphSchema } from '@apollo/subgraph';
 import { typeDefs } from './schema';
 import { resolvers } from './resolvers';
@@ -11,6 +11,78 @@ import { buildGraphQLContext, type GraphQLContext } from './context';
 // together with other subgraphs into a supergraph — see
 // server/docs/GRAPHQL_FEDERATION.md.
 const federatedSchema = buildSubgraphSchema({ typeDefs: parse(typeDefs), resolvers: resolvers as any });
+
+// ── #1386: Query depth and complexity limits ──────────────────────────────────
+// Both limits are configurable via environment variables.
+// Rules fire as schema validation rules — before any resolver runs.
+
+const MAX_DEPTH   = parseInt(process.env.GRAPHQL_MAX_DEPTH        ?? '7',   10);
+const MAX_COMPLEXITY = parseInt(process.env.GRAPHQL_MAX_COMPLEXITY ?? '200', 10);
+
+/**
+ * Rejects queries deeper than maxDepth levels.
+ */
+function depthLimitRule(maxDepth: number) {
+    return (context: ValidationContext) => {
+        function measure(node: any, depth: number): number {
+            if (!node?.selectionSet) return depth;
+            return Math.max(
+                ...node.selectionSet.selections.map((sel: any) => measure(sel, depth + 1)),
+            );
+        }
+        return {
+            Document(node: DocumentNode) {
+                for (const def of node.definitions) {
+                    const d = measure(def, 0);
+                    if (d > maxDepth) {
+                        context.reportError(
+                            new GraphQLError(
+                                `Query depth ${d} exceeds the maximum allowed depth of ${maxDepth}.`,
+                                { extensions: { code: 'QUERY_LIMIT_EXCEEDED' } },
+                            ),
+                        );
+                    }
+                }
+            },
+        };
+    };
+}
+
+/**
+ * Rejects queries whose field-weight complexity exceeds maxComplexity.
+ * fieldWeights: { [fieldName]: number } — default weight per field is 1.
+ */
+function complexityLimitRule(
+    maxComplexity: number,
+    fieldWeights: Record<string, number> = {},
+) {
+    return (context: ValidationContext) => {
+        function measure(node: any): number {
+            if (!node?.selectionSet) return 0;
+            return node.selectionSet.selections.reduce((sum: number, sel: any) => {
+                const w = fieldWeights[sel?.name?.value ?? ''] ?? 1;
+                return sum + w + measure(sel);
+            }, 0);
+        }
+        return {
+            Document(node: DocumentNode) {
+                for (const def of node.definitions) {
+                    const c = measure(def);
+                    if (c > maxComplexity) {
+                        context.reportError(
+                            new GraphQLError(
+                                `Query complexity ${c} exceeds the maximum allowed complexity of ${maxComplexity}.`,
+                                { extensions: { code: 'QUERY_LIMIT_EXCEEDED' } },
+                            ),
+                        );
+                    }
+                }
+            },
+        };
+    };
+}
+
+export { depthLimitRule, complexityLimitRule };
 
 export interface GraphQLRegistration {
     path: string
@@ -45,6 +117,12 @@ class YogaExecutor implements GraphQLExecutor {
                     graphqlEndpoint: path,
                     cors: false,
                     logging: false,
+                    // #1386 — depth + complexity validation rules applied before
+                    // any resolver runs; not per-resolver checks.
+                    validationRules: [
+                        depthLimitRule(MAX_DEPTH),
+                        complexityLimitRule(MAX_COMPLEXITY),
+                    ],
                 });
                 this.yoga(req, res, next);
             }).catch(() => {

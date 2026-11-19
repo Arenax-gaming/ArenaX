@@ -425,17 +425,24 @@ export const refreshSession = async (input: RefreshInput) => {
     }
 
     if (storedToken.revokedAt) {
+        // #1385 — If this token was already rotated (replacedByTokenId is set),
+        // a previously-valid token is being replayed: reuse attack detected.
+        // Revoke the entire family immediately and emit a security event so the
+        // incident is surfaced in monitoring / SIEM.
         if (storedToken.replacedByTokenId) {
             await revokeTokenFamily(storedToken.familyId);
-            logger.warn('Refresh token reuse detected — token family revoked', {
+            logger.error('SECURITY: Refresh token reuse detected — entire token family invalidated', {
+                event: 'token_reuse_detected',
                 userId: storedToken.userId,
-                familyId: storedToken.familyId
+                familyId: storedToken.familyId,
+                revokedTokenId: storedToken.id,
             });
             throw new HttpError(
                 401,
                 'Refresh token reuse detected, please login again'
             );
         }
+        // Token was explicitly revoked (logout) but not replaced — not a reuse.
         throw new HttpError(401, 'Invalid refresh token');
     }
 
