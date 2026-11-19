@@ -39,6 +39,10 @@ interface AuthContextType {
    * the first login/refresh of this session.
    */
   expiresAt: number | null;
+  /** Whether TOTP-based two-factor authentication is currently enabled. */
+  twoFactorEnabled: boolean;
+  /** Re-fetch the 2FA status, e.g. after an enable/disable flow completes. */
+  refreshTwoFactorStatus: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +193,30 @@ export const AuthProvider = ({
   });
 
   const user = profileQuery.data ?? null;
+
+  // ── Two-factor authentication status ───────────────────────────────────────
+  // Queried independently of the profile so enabling/disabling 2FA doesn't
+  // require re-fetching (and possibly invalidating caches for) the profile.
+
+  const twoFactorStatusQuery = useQuery({
+    queryKey: ["auth", "2fa-status"],
+    queryFn: async () => {
+      try {
+        return await api.get2FAStatus();
+      } catch {
+        return { enabled: false };
+      }
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const twoFactorEnabled = twoFactorStatusQuery.data?.enabled ?? false;
+
+  const refreshTwoFactorStatus = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["auth", "2fa-status"] });
+  }, [queryClient]);
 
   // ── Login ──────────────────────────────────────────────────────────────────
 
@@ -367,6 +395,8 @@ export const AuthProvider = ({
         refreshAccessToken,
         isRefreshing,
         expiresAt,
+        twoFactorEnabled,
+        refreshTwoFactorStatus,
       }}
     >
       {children}

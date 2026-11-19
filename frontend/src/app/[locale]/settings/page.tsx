@@ -13,6 +13,7 @@ import {
   Keyboard,
   Save,
   UserCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { SettingsBackup } from "@/components/settings/SettingsBackup";
 
@@ -28,6 +29,12 @@ const navigationItems = [
     label: "Account",
     description: "Email, password, and security",
     icon: User,
+  },
+  {
+    href: "/settings/security",
+    label: "Security",
+    description: "Two-factor authentication",
+    icon: ShieldCheck,
   },
   {
     href: "/settings/game",

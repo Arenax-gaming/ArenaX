@@ -201,6 +201,70 @@
 [data-accent="pink"]    { --primary: 330 80% 60%; --ring: 330 80% 60%; }
 /* blue is the default — no override needed */
 
+/* ─── Colorblind-safe palette overrides (#1561) ─────────────────────────────── */
+/* Applied via JS (useThemeConfig / AccessibilityProvider) as `data-colorblind`  */
+/* on <html>. Remaps the status tokens so win/loss/status indicators never      */
+/* rely on a red/green distinction alone for colorblind users. Every consumer   */
+/* must read from these tokens (bg-success, text-destructive, etc.) rather than */
+/* hard-coded Tailwind colors (e.g. text-green-500) for this to take effect.    */
+
+/* Deuteranopia & Protanopia (red-green colorblindness): red and green are
+   nearly indistinguishable, so "success" moves to blue and "destructive"
+   moves to orange — both clearly separable for these conditions. */
+[data-colorblind="deuteranopia"],
+[data-colorblind="protanopia"] {
+  --success: 217 91% 45%;
+  --success-foreground: 0 0% 100%;
+  --success-muted: 217 91% 95%;
+  --success-muted-foreground: 217 91% 25%;
+
+  --destructive: 25 95% 48%;
+  --destructive-foreground: 0 0% 100%;
+
+  --warning: 45 100% 51%;
+  --warning-foreground: 0 0% 10%;
+  --warning-muted: 45 100% 95%;
+  --warning-muted-foreground: 45 100% 25%;
+
+  --info: 270 91% 60%;
+  --info-foreground: 0 0% 100%;
+  --info-muted: 270 91% 95%;
+  --info-muted-foreground: 270 91% 30%;
+}
+
+.dark[data-colorblind="deuteranopia"],
+.dark[data-colorblind="protanopia"] {
+  --success-muted: 217 91% 12%;
+  --success-muted-foreground: 217 91% 75%;
+  --warning-muted: 45 100% 12%;
+  --warning-muted-foreground: 45 100% 75%;
+  --info-muted: 270 91% 12%;
+  --info-muted-foreground: 270 91% 78%;
+}
+
+/* Tritanopia (blue-yellow colorblindness): red/green stay distinguishable,
+   but blue and yellow collapse together, so "warning" moves to pink/magenta
+   and "info" moves to teal to stay separable from each other and from the
+   unaffected success/destructive hues. */
+[data-colorblind="tritanopia"] {
+  --warning: 330 80% 55%;
+  --warning-foreground: 0 0% 100%;
+  --warning-muted: 330 80% 95%;
+  --warning-muted-foreground: 330 80% 28%;
+
+  --info: 189 85% 40%;
+  --info-foreground: 0 0% 100%;
+  --info-muted: 189 85% 95%;
+  --info-muted-foreground: 189 85% 22%;
+}
+
+.dark[data-colorblind="tritanopia"] {
+  --warning-muted: 330 80% 12%;
+  --warning-muted-foreground: 330 80% 78%;
+  --info-muted: 189 85% 12%;
+  --info-muted-foreground: 189 85% 75%;
+}
+
 /* ─── High-contrast overrides ───────────────────────────────────────────────── */
 
 html.high-contrast {

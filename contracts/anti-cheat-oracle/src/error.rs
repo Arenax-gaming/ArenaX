@@ -70,4 +70,14 @@ pub enum AntiCheatError {
     ProofBatchVerificationFailed = 36,
     /// No zk-proof verifier contract configured.
     ZkVerifierNotSet = 37,
+
+    // ── Result expiry (#1556) ────────────────────────────────────────────────
+    /// `valid_until` is already in the past relative to the current ledger
+    /// sequence — the submission is rejected outright.
+    InvalidValidUntil = 38,
+    /// The result's `valid_until` ledger sequence has passed; it can no
+    /// longer be consumed/replayed.
+    ResultExpired = 39,
+    /// No confirmation exists for the given (player, match_id).
+    ConfirmationNotFound = 40,
 }

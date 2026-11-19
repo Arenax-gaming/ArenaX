@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/Button";
 import type { AccessibilityOptions as AccessibilityOptionsType } from "@/types/settings";
 import { colorblindModes } from "@/data/settings";
+import { useAccessibility } from "@/components/providers/AccessibilityProvider";
 
 interface AccessibilityOptionsProps {
   settings: AccessibilityOptionsType;
@@ -32,6 +33,20 @@ export function AccessibilityOptions({
   isSaving,
 }: AccessibilityOptionsProps) {
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const { colorblindMode: appliedColorblindMode, setColorblindMode } = useAccessibility();
+
+  // The locally-applied mode (localStorage + forced-colors default) is the
+  // source of truth for what's on screen right now; reconcile it into the
+  // settings draft once on mount so the <select> doesn't show a stale value
+  // from the last backend-saved settings payload.
+  React.useEffect(() => {
+    if (appliedColorblindMode !== settings.colorblindMode) {
+      onUpdate({ colorblindMode: appliedColorblindMode });
+    }
+    // Only run once on mount — further changes flow the other way
+    // (select -> onUpdate + setColorblindMode).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSave = async () => {
     const success = await onSave();
@@ -92,11 +107,15 @@ export function AccessibilityOptions({
             <select
               id="colorblind-mode"
               value={settings.colorblindMode}
-              onChange={(e) =>
-                onUpdate({
-                  colorblindMode: e.target.value as AccessibilityOptionsType["colorblindMode"],
-                })
-              }
+              onChange={(e) => {
+                const mode = e.target.value as AccessibilityOptionsType["colorblindMode"];
+                onUpdate({ colorblindMode: mode });
+                // Apply immediately (data-colorblind attribute + localStorage)
+                // instead of waiting for "Save Changes" — the acceptance
+                // criteria for #1561 requires every win/loss/status color
+                // indicator to update as soon as a palette is selected.
+                setColorblindMode(mode);
+              }}
               className="w-full px-4 py-2.5 bg-muted rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {colorblindModes.map((mode) => (
@@ -105,6 +124,10 @@ export function AccessibilityOptions({
                 </option>
               ))}
             </select>
+            <p className="text-xs text-muted-foreground">
+              Applies instantly and is remembered on this device across page
+              refreshes, independent of the Save button below.
+            </p>
           </div>
 
           {/* Text Scale */}

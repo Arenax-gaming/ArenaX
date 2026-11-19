@@ -105,7 +105,11 @@ export function MatchHistoryList({
               >
                 <span className="font-medium">vs {opponent}</span>
                 <span className="text-sm text-muted-foreground">{match.gameType}</span>
-                <span className={cn("font-semibold", isWinner ? "text-green-500" : "text-red-500")}>
+                {/* Uses themed --success / --destructive tokens (not hardcoded
+                    green-500/red-500) so colorblind-safe palettes override
+                    correctly, and the text label ("Win"/"Loss") ensures the
+                    result is never conveyed by color alone (#1561). */}
+                <span className={cn("font-semibold", isWinner ? "text-success" : "text-destructive")}>
                   {isWinner ? "Win" : "Loss"}
                 </span>
               </Link>

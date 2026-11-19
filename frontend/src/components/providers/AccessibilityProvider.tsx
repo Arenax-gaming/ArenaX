@@ -10,6 +10,11 @@ import React, {
   ReactNode,
 } from "react";
 import { a11yAnalytics, announce, A11yAnalyticsEntry, A11yEventType } from "@/lib/accessibility";
+import {
+  applyColorblindMode,
+  resolveInitialColorblindMode,
+  type ColorblindMode,
+} from "@/lib/theme";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +39,15 @@ export interface AccessibilityContextType {
   trackA11y: (type: A11yEventType, detail?: string) => void;
   /** All tracked events in the current session. */
   a11yEvents: A11yAnalyticsEntry[];
+  /** The active colorblind-safe palette ("none" when disabled). #1561 */
+  colorblindMode: ColorblindMode;
+  /**
+   * Switch the active colorblind-safe palette. Applies `data-colorblind` on
+   * <html> immediately (so every win/loss/status indicator bound to the
+   * --success/--destructive/--warning/--info tokens updates at once) and
+   * persists the choice to localStorage.
+   */
+  setColorblindMode: (mode: ColorblindMode) => void;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -52,6 +66,21 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
 
   const [a11yEvents, setA11yEvents] = useState<A11yAnalyticsEntry[]>([]);
   const keyboardRef = useRef(false);
+
+  // ── Colorblind mode (#1561) ───────────────────────────────────────────────
+  // Lazily resolved on first render: a saved preference always wins,
+  // otherwise falls back to the system `forced-colors` media query.
+  const [colorblindMode, setColorblindModeState] = useState<ColorblindMode>(
+    () => (typeof window === "undefined" ? "none" : resolveInitialColorblindMode()),
+  );
+
+  useEffect(() => {
+    applyColorblindMode(colorblindMode);
+  }, [colorblindMode]);
+
+  const setColorblindMode = useCallback((mode: ColorblindMode) => {
+    setColorblindModeState(mode);
+  }, []);
 
   // ── Detect OS-level media queries ─────────────────────────────────────────
 
@@ -182,6 +211,8 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
         announce: announceMessage,
         trackA11y,
         a11yEvents,
+        colorblindMode,
+        setColorblindMode,
       }}
     >
       {children}

@@ -16,6 +16,12 @@
 
 use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, String, Val, Vec};
 
+pub mod checker;
+pub use checker::{
+    check_compliance, CheckResult, CheckerError, ComplianceReport, ContractStandard,
+    ContractStandardClient,
+};
+
 // ---------------------------------------------------------------------------
 // Standard Error Codes
 // ---------------------------------------------------------------------------

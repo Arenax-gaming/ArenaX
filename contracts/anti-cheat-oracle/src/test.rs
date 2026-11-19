@@ -2,7 +2,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
 
 #[test]
 fn test_initialize_and_add_oracle() {
@@ -38,7 +38,8 @@ fn test_submit_flag_unauthorized() {
     let client = AntiCheatOracleClient::new(&env, &contract_id);
     client.initialize(&admin, &0u32, &0u64, &0u32);
 
-    let result = client.try_submit_flag(&unauthorized, &player, &1u64, &2u32);
+    let valid_until = env.ledger().sequence() + 1_000;
+    let result = client.try_submit_flag(&unauthorized, &player, &1u64, &2u32, &valid_until);
     assert_eq!(result, Err(Ok(AntiCheatError::OracleNotAuthorized)));
 }
 
@@ -56,12 +57,13 @@ fn test_submit_flag_invalid_severity() {
     client.initialize(&admin, &0u32, &0u64, &0u32);
     client.add_authorized_oracle(&oracle);
 
+    let valid_until = env.ledger().sequence() + 1_000;
     assert_eq!(
-        client.try_submit_flag(&oracle, &player, &1u64, &0u32),
+        client.try_submit_flag(&oracle, &player, &1u64, &0u32, &valid_until),
         Err(Ok(AntiCheatError::InvalidSeverity))
     );
     assert_eq!(
-        client.try_submit_flag(&oracle, &player, &1u64, &4u32),
+        client.try_submit_flag(&oracle, &player, &1u64, &4u32, &valid_until),
         Err(Ok(AntiCheatError::InvalidSeverity))
     );
 }
@@ -81,16 +83,79 @@ fn test_submit_flag_and_get_confirmation() {
     client.initialize(&admin, &0u32, &0u64, &0u32);
     client.add_authorized_oracle(&oracle);
 
-    assert!(client.get_confirmation(&player, &match_id).is_none());
+    assert_eq!(
+        client.try_get_confirmation(&player, &match_id),
+        Err(Ok(AntiCheatError::ConfirmationNotFound))
+    );
 
-    client.submit_flag(&oracle, &player, &match_id, &2u32); // severity 2 = medium
+    let valid_until = env.ledger().sequence() + 1_000;
+    client.submit_flag(&oracle, &player, &match_id, &2u32, &valid_until); // severity 2 = medium
 
-    let conf = client.get_confirmation(&player, &match_id).unwrap();
+    let conf = client.get_confirmation(&player, &match_id);
     assert_eq!(conf.player, player);
     assert_eq!(conf.match_id, match_id);
     assert_eq!(conf.severity, 2);
     assert_eq!(conf.penalty_applied, 15); // PENALTY_MEDIUM
     assert_eq!(conf.oracle, oracle);
+    assert_eq!(conf.valid_until, valid_until);
+}
+
+#[test]
+fn test_submit_flag_rejects_past_valid_until() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let player = Address::generate(&env);
+
+    let contract_id = env.register(AntiCheatOracle, ());
+    let client = AntiCheatOracleClient::new(&env, &contract_id);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
+    client.add_authorized_oracle(&oracle);
+
+    // Advance the ledger so sequence 0 is unambiguously "in the past".
+    env.ledger().set_sequence_number(10);
+
+    let result = client.try_submit_flag(&oracle, &player, &1u64, &2u32, &0u32);
+    assert_eq!(result, Err(Ok(AntiCheatError::InvalidValidUntil)));
+}
+
+#[test]
+fn test_expired_confirmation_cannot_be_consumed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let player = Address::generate(&env);
+    let match_id = 7u64;
+
+    let contract_id = env.register(AntiCheatOracle, ());
+    let client = AntiCheatOracleClient::new(&env, &contract_id);
+    client.initialize(&admin, &0u32, &0u64, &0u32);
+    client.add_authorized_oracle(&oracle);
+
+    env.ledger().set_sequence_number(100);
+    let valid_until = 105u32;
+    client.submit_flag(&oracle, &player, &match_id, &2u32, &valid_until);
+
+    // Still within the validity window.
+    let conf = client.get_confirmation(&player, &match_id);
+    assert_eq!(conf.valid_until, valid_until);
+
+    // Advance past valid_until.
+    env.ledger().set_sequence_number(106);
+    assert_eq!(
+        client.try_get_confirmation(&player, &match_id),
+        Err(Ok(AntiCheatError::ResultExpired))
+    );
+
+    // Oracle extends validity by resubmitting with a later valid_until.
+    let extended_valid_until = 200u32;
+    client.submit_flag(&oracle, &player, &match_id, &2u32, &extended_valid_until);
+    let conf = client.get_confirmation(&player, &match_id);
+    assert_eq!(conf.valid_until, extended_valid_until);
 }
 
 // Integration with Reputation Index is tested by calling submit_flag with

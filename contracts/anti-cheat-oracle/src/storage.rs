@@ -278,4 +278,8 @@ pub struct AntiCheatConfirmation {
     pub feed_id: u32,
     /// New in v2: alert ID that triggered this confirmation, 0 = legacy.
     pub alert_id: u64,
+    /// Ledger sequence after which this result is no longer valid. Stale
+    /// results from previous seasons can't be replayed once the current
+    /// ledger sequence passes this value (#1556).
+    pub valid_until: u32,
 }

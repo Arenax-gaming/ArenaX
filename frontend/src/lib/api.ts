@@ -280,6 +280,67 @@ class ApiClient {
     );
   }
 
+  // ── Two-factor authentication (#1560) ─────────────────────────────────────────
+
+  /** GET /api/auth/2fa/status — whether 2FA is currently enabled for the user. */
+  async get2FAStatus(): Promise<{ enabled: boolean }> {
+    return this.request<{ enabled: boolean }>("/auth/2fa/status");
+  }
+
+  /**
+   * POST /api/auth/2fa/setup
+   *
+   * Begins enrollment. Returns the TOTP secret and an `otpauth://` URI the
+   * client renders as a QR code (scanned by an authenticator app). 2FA is
+   * NOT active yet — the user must confirm a generated code first.
+   */
+  async setup2FA(): Promise<{ secret: string; otpauthUrl: string }> {
+    return this.request<{ secret: string; otpauthUrl: string }>(
+      "/auth/2fa/setup",
+      { method: "POST" },
+    );
+  }
+
+  /**
+   * POST /api/auth/2fa/confirm
+   *
+   * Validates the TOTP code generated from the secret returned by
+   * `setup2FA`. On success, 2FA becomes active and one-time backup recovery
+   * codes are issued (shown to the user exactly once).
+   */
+  async confirm2FA(code: string): Promise<{ backupCodes: string[] }> {
+    return this.request<{ backupCodes: string[] }>("/auth/2fa/confirm", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  /**
+   * POST /api/auth/2fa/disable
+   *
+   * Requires the current TOTP code to prove possession of the authenticator
+   * before turning 2FA off.
+   */
+  async disable2FA(code: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/auth/2fa/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  /**
+   * POST /api/auth/2fa/backup-codes
+   *
+   * Regenerates backup recovery codes, invalidating any previously issued
+   * set. Requires an active 2FA session.
+   */
+  async regenerate2FABackupCodes(): Promise<{ backupCodes: string[] }> {
+    return this.request<{ backupCodes: string[] }>(
+      "/auth/2fa/backup-codes",
+      { method: "POST" },
+    );
+  }
+
   // ── User / Profile ───────────────────────────────────────────────────────────
 
   async getProfile() {
