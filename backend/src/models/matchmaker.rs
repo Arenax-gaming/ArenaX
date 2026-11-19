@@ -58,15 +58,23 @@ pub struct UserElo {
     pub updated_at: DateTime<Utc>,
 }
 
+/// One immutable ELO snapshot for a player after a resolved match (#1400).
+///
+/// Field names mirror the `elo_history` table (rating_before/rating_after/
+/// rating_change) so this struct decodes rows returned by the API.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct EloHistory {
     pub id: Uuid,
     pub user_id: Uuid,
     pub game: String,
-    pub old_rating: i32,
-    pub new_rating: i32,
-    pub change_amount: i32,
-    pub match_id: Uuid,
+    pub match_id: Option<Uuid>,
+    pub rating_before: i32,
+    pub rating_after: i32,
+    pub rating_change: i32,
+    pub opponent_id: Option<Uuid>,
+    pub opponent_rating: Option<i32>,
+    /// 0 = win, 1 = loss, 2 = draw (core migration encoding).
+    pub result: i32,
     pub created_at: DateTime<Utc>,
 }
 

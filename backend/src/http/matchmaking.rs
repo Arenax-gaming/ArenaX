@@ -5,7 +5,7 @@ use crate::models::matchmaker::*;
 use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig, QueueEntry};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use actix_web::{web, HttpResponse, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,6 +42,23 @@ pub struct QueueStatusResponse {
     pub queue_size: usize,
     pub estimated_wait_time: Option<i32>,
     pub wait_time_so_far: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EloHistoryRangeQuery {
+    /// Inclusive lower bound (ISO-8601 / RFC 3339).
+    pub from: Option<DateTime<Utc>>,
+    /// Inclusive upper bound (ISO-8601 / RFC 3339).
+    pub to: Option<DateTime<Utc>>,
+    /// Maximum points returned (default 500, clamped to 1..=2000).
+    pub limit: Option<i64>,
+}
+
+/// One point on the ELO progression chart.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EloHistoryPoint {
+    pub date: DateTime<Utc>,
+    pub elo: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -359,7 +376,50 @@ pub async fn get_elo(
     }
 }
 
-/// Get user's ELO history
+/// Get the caller's ELO progression for one game with optional date-range
+/// filtering (#1400). Returns points ordered oldest-first so charts can plot
+/// them directly. Registered at `GET /api/matchmaking/elo/{game}`.
+pub async fn get_elo_history_range(
+    db_pool: web::Data<DbPool>,
+    claims: web::ReqData<Claims>,
+    path: web::Path<String>,
+    query: web::Query<EloHistoryRangeQuery>,
+) -> Result<HttpResponse> {
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
+    let game = path.into_inner();
+    let limit = query.limit.unwrap_or(500).clamp(1, 2_000);
+
+    let rows: Vec<(DateTime<Utc>, i32)> = sqlx::query_as(
+        r#"
+        SELECT created_at, rating_after
+          FROM elo_history
+         WHERE user_id = $1
+           AND game = $2
+           AND ($3::timestamptz IS NULL OR created_at >= $3)
+           AND ($4::timestamptz IS NULL OR created_at <= $4)
+         ORDER BY created_at ASC
+         LIMIT $5
+        "#,
+    )
+    .bind(user_id)
+    .bind(&game)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(limit)
+    .fetch_all(db_pool.as_ref())
+    .await
+    .map_err(|e| ApiError::database_error(e))?;
+
+    let points: Vec<EloHistoryPoint> = rows
+        .into_iter()
+        .map(|(date, elo)| EloHistoryPoint { date, elo })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(points))
+}
+
+/// Get a page of raw ELO history records (most recent first).
 pub async fn get_elo_history(
     db_pool: web::Data<DbPool>,
     claims: web::ReqData<Claims>,

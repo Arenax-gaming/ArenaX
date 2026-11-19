@@ -115,15 +115,27 @@ Authorization: Bearer <jwt_token>
 
 #### Player ELO Rating
 ```http
-GET /api/matchmaking/elo/{game}
+GET /api/matchmaking/elo/{game}/current
 Authorization: Bearer <jwt_token>
 ```
 
-#### ELO History
+#### ELO Progression (date-ranged)
+```http
+GET /api/matchmaking/elo/{game}?from=<ISO-8601>&to=<ISO-8601>&limit=500
+Authorization: Bearer <jwt_token>
+```
+
+Returns `[{ "date": "...", "elo": 1216 }, ...]` oldest-first. `from`/`to`
+are optional and inclusive; `limit` defaults to 500 (max 2000).
+
+#### ELO History (paged records)
 ```http
 GET /api/matchmaking/elo/{game}/{page}/{limit}
 Authorization: Bearer <jwt_token>
 ```
+
+Records are append-only: the database rejects `UPDATE`/`DELETE` on
+`elo_history`.
 
 ## 🧮 ELO System
 
