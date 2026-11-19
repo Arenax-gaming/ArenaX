@@ -19,6 +19,23 @@ export const useFriendsList = () => {
   })
 }
 
+/**
+ * Friends sorted online-first, for use as the drag source panel in the
+ * tournament team-roster builder (issue #1565). Keeps the raw query state
+ * (isLoading / isError) so callers can render loading/empty states.
+ */
+export const useFriendsForRoster = () => {
+  const query = useFriendsList()
+  const friends = query.data?.friends ?? []
+  const sorted = [...friends].sort((a, b) => {
+    const aOnline = a.status === 'online' || a.status === 'in-game' ? 0 : 1
+    const bOnline = b.status === 'online' || b.status === 'in-game' ? 0 : 1
+    if (aOnline !== bOnline) return aOnline - bOnline
+    return a.username.localeCompare(b.username)
+  })
+  return { ...query, friends: sorted }
+}
+
 export const usePendingFriendRequests = () => {
   return useQuery({
     queryKey: ['friendRequests'],
