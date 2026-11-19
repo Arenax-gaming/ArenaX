@@ -16,6 +16,13 @@ model User {
   isVerified    Boolean   @default(false)
   bio           String?
   socials       Json?
+  avatarUrl     String?
+  // Pending profile content awaiting moderation review (#1569). Populated on
+  // submission via `updateMyProfile` and copied into the live columns above
+  // (or discarded) once an admin approves/rejects the moderation item.
+  pendingBio       String?
+  pendingSocials   Json?
+  pendingAvatarUrl String?
   walletAddress String?   @unique
   verificationToken        String?   @unique
   verificationTokenExpires DateTime?

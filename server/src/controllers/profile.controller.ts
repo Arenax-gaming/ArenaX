@@ -17,7 +17,8 @@ const socialsSchema = z
 const updateProfileSchema = z
     .object({
         bio: z.string().max(280).optional(),
-        socials: socialsSchema.optional()
+        socials: socialsSchema.optional(),
+        avatarUrl: z.string().url().optional()
     })
     .refine((value) => Object.keys(value).length > 0, {
         message: 'At least one profile field must be provided'
@@ -59,7 +60,9 @@ export const updateMyProfileController = async (
 
         const payload = parseBody(updateProfileSchema, req.body);
         const updatedProfile = await updateMyProfile(req.user.id, payload);
-        res.status(200).json(updatedProfile);
+        // 202: the submission is accepted but queued for moderation review
+        // rather than applied immediately (#1569).
+        res.status(202).json(updatedProfile);
     } catch (error) {
         next(error);
     }

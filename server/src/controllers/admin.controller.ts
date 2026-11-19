@@ -275,21 +275,26 @@ export const getModerationQueue = async (req: Request, res: Response): Promise<v
 
 export const reviewContent = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { contentId, action } = req.body as { contentId: string; action: 'approve' | 'reject' | 'remove' };
+        const { contentId, action, reason } = req.body as { contentId: string; action: 'approve' | 'reject' | 'remove'; reason?: string };
 
         if (!contentId || !action) {
             res.status(400).json({ error: 'contentId and action are required' });
             return;
         }
 
-        await adminService.reviewContent(contentId, action);
+        if (action === 'reject' && !reason) {
+            res.status(400).json({ error: 'reason is required to reject content' });
+            return;
+        }
+
+        await adminService.reviewContent(contentId, action, { reviewerId: req.user!.id, reason });
 
         await AuditService.logAction({
             adminId: req.user!.id,
             action: 'REVIEW_CONTENT',
             targetType: 'CONTENT',
             targetId: contentId,
-            details: { action },
+            details: { action, reason },
             requestId: req.auditContext?.requestId,
             ipAddress: req.auditContext?.ipAddress,
             userAgent: req.auditContext?.userAgent
