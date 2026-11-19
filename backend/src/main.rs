@@ -299,14 +299,21 @@ async fn main() -> io::Result<()> {
     // Each process consumes the full leaderboard stream into its own cache
     // (Issue #1255). A separate consumer group per process is what makes
     // every instance see every update.
-    let leaderboard_sync = Arc::new(crate::service::leaderboard_sync::LeaderboardSync::new(
-        format!("backend-{}", std::process::id()),
-        crate::realtime::event_stream::EventStream::redis(
+    let leaderboard_sync = Arc::new(
+        crate::service::leaderboard_sync::LeaderboardSync::new(
+            format!("backend-{}", std::process::id()),
+            crate::realtime::event_stream::EventStream::redis(
+                redis_conn.clone(),
+                crate::service::leaderboard_sync::LEADERBOARD_STREAM,
+                5,
+            ),
+        )
+        .with_weekly_stream(crate::realtime::event_stream::EventStream::redis(
             redis_conn.clone(),
-            crate::service::leaderboard_sync::LEADERBOARD_STREAM,
+            crate::service::leaderboard_sync::WEEKLY_ROLLOVER_STREAM,
             5,
-        ),
-    ));
+        )),
+    );
     {
         let sync = leaderboard_sync.clone();
         tokio::spawn(async move {
@@ -319,6 +326,26 @@ async fn main() -> io::Result<()> {
             }
         });
     }
+
+    // Automated weekly leaderboard season rollover with prize distribution
+    // — Issue #1572. Runs every Sunday at 23:59 UTC: snapshots final
+    // standings, settles prizes for the top 5 via RewardSettlementService,
+    // notifies recipients, and publishes a summary event. Idempotent per
+    // ISO week, so this is safe even across a restart.
+    let _weekly_rollover_handle = {
+        let reward_settlement_service = Arc::new(
+            crate::service::reward_settlement_service::RewardSettlementService::new(
+                db_pool.clone(),
+            ),
+        );
+        crate::service::weekly_leaderboard::spawn_weekly_rollover_worker(
+            redis_conn.clone(),
+            reward_settlement_service,
+            notification_service.clone(),
+            leaderboard_sync.clone(),
+            5,
+        )
+    };
 
     // Initialize Auth Services for Realtime
     let jwt_config = crate::auth::jwt_service::JwtConfig::from_config(

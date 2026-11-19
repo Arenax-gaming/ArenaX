@@ -88,6 +88,7 @@ use tracing::warn;
 
 use crate::auth::jwt_service::Claims;
 use crate::config::{EndpointLimitOverride, RateLimitConfig};
+use crate::security::rate_limit_abuse;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bucket definitions
@@ -378,11 +379,31 @@ where
             );
 
             // ── Resolve identity (user ID > IP) ───────────────────────────────
-            let identity = req
-                .extensions()
-                .get::<Claims>()
-                .map(|c| format!("u:{}", c.sub))
+            let user_id = req.extensions().get::<Claims>().map(|c| c.sub.clone());
+            let identity = user_id
+                .as_ref()
+                .map(|sub| format!("u:{}", sub))
                 .unwrap_or_else(|| format!("ip:{}", extract_ip(&req)));
+
+            // ── Rotating-IP account block check (Issue #1573) ─────────────────
+            // A user already blocked for triggering rate limits from 5+
+            // distinct IPs within 10 minutes is rejected outright, regardless
+            // of this request's own rate-limit status.
+            if let Some(uid) = &user_id {
+                let mut block_conn = (*redis).clone();
+                if rate_limit_abuse::is_user_blocked(&mut block_conn, uid).await {
+                    warn!(
+                        user_id = %uid,
+                        path = %path,
+                        "Blocked account rejected (rate-limit bypass detection)"
+                    );
+                    let resp = HttpResponse::Forbidden().json(serde_json::json!({
+                        "error": "Account temporarily blocked due to suspicious activity",
+                        "code": "ACCOUNT_TEMP_BLOCKED",
+                    }));
+                    return Ok(req.into_response(resp).map_into_right_body());
+                }
+            }
 
             // ── Sliding window check ──────────────────────────────────────────
             let mut conn = (*redis).clone();
@@ -400,6 +421,16 @@ where
                     limit = limit,
                     "Rate limit exceeded"
                 );
+
+                // Rotating-IP bypass detection (Issue #1573): only meaningful
+                // for authenticated requests — unauthenticated hits are
+                // already keyed by IP, so there's no single user identity to
+                // correlate across IPs.
+                if let Some(uid) = &user_id {
+                    let ip = extract_ip(&req);
+                    let mut detect_conn = (*redis).clone();
+                    rate_limit_abuse::record_hit_and_maybe_block(&mut detect_conn, uid, &ip).await;
+                }
 
                 let retry_after = reset_secs.saturating_sub(now / 1_000);
                 let mut response = HttpResponse::TooManyRequests().json(serde_json::json!({
