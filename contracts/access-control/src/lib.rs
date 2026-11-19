@@ -1,5 +1,8 @@
 #![no_std]
 
+mod roles;
+pub use roles::{get_role_parent, role_includes, ROLE_PLAYER, ROLE_SUPER_ADMIN};
+
 use arenax_events::access_control as events;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
 
@@ -24,7 +27,7 @@ pub const ROLE_MINTER: u32 = 12;
 
 /// Canonical role ids. `has_role` keys storage by this integer, so a duplicate
 /// value makes two roles indistinguishable.
-const ALL_ROLE_IDS: [u32; 12] = [
+const ALL_ROLE_IDS: [u32; 14] = [
     ROLE_ADMIN,
     ROLE_GOVERNANCE,
     ROLE_OPERATOR,
@@ -37,6 +40,8 @@ const ALL_ROLE_IDS: [u32; 12] = [
     ROLE_STAKING_MANAGER,
     ROLE_CROSS_GAME_ADMIN,
     ROLE_MINTER,
+    ROLE_SUPER_ADMIN,
+    ROLE_PLAYER,
 ];
 
 const fn role_ids_are_unique(roles: &[u32]) -> bool {
@@ -71,7 +76,8 @@ pub enum DataKey {
     TimeRestriction(Address, u32),    // (Account, Role) -> TimeRestriction
     AuditLog(u64),                    // (EntryId) -> AuditEntry
     AuditCounter,
-    MinterCap(Address), // (Minter) -> MinterCap
+    MinterCap(Address),  // (Minter) -> MinterCap
+    RoleParent(u32),     // (Role) -> immediate senior Role in the hierarchy (#1559)
 }
 
 /// Per-period mint cap attached to a `ROLE_MINTER` grant.
@@ -151,6 +157,11 @@ impl AccessControl {
             admin.clone(),
             String::from_str(&env, "Initialized RBAC contract with admin"),
         );
+
+        // Seed the canonical SUPER_ADMIN > ADMIN > MODERATOR > PLAYER
+        // hierarchy (#1559). Only installs edges that are unset, so
+        // re-initialization never clobbers a customized hierarchy.
+        roles::install_default_hierarchy(&env, &admin);
     }
 
     /// Check if an account has a specific role (or admin role)
@@ -399,6 +410,57 @@ impl AccessControl {
             results.push_back(Self::has_role(env.clone(), account, role));
         }
         results
+    }
+
+    // ── Role Hierarchy ───────────────────────────────────────────────────────
+
+    /// Set `role`'s immediate senior role in the hierarchy. Admin only.
+    /// Panics with `circular_hierarchy` if this would create a cycle.
+    /// Emits `role_hierarchy_updated`.
+    pub fn set_role_hierarchy(env: Env, role: u32, parent_role: u32) {
+        Self::require_admin(&env);
+        let admin = Self::get_admin(env.clone());
+        roles::set_role_parent(&env, role, parent_role, &admin);
+    }
+
+    /// Get `role`'s immediate senior role in the hierarchy, if any.
+    pub fn get_role_hierarchy(env: Env, role: u32) -> Option<u32> {
+        roles::get_role_parent(&env, role)
+    }
+
+    /// Whether `senior_role` inherits `role`'s permissions, i.e.
+    /// `senior_role` is `role` itself or dominates it transitively in the
+    /// hierarchy.
+    pub fn role_inherits(env: Env, senior_role: u32, role: u32) -> bool {
+        roles::role_includes(&env, senior_role, role)
+    }
+
+    /// Check if `account` has `permission_name`, either because a role it
+    /// holds was assigned the permission directly, or because it holds a
+    /// role that is senior (in the hierarchy) to a role that was assigned
+    /// the permission directly (#1559). For example, if `PLAYER` has a
+    /// permission and `SUPER_ADMIN` is senior to `PLAYER` in the
+    /// hierarchy, an account holding `SUPER_ADMIN` has that permission
+    /// too, with no explicit assignment needed.
+    pub fn has_permission_for_account(env: Env, account: Address, permission_name: String) -> bool {
+        let mut i = 0;
+        while i < ALL_ROLE_IDS.len() {
+            let held_role = ALL_ROLE_IDS[i];
+            if Self::has_role(env.clone(), account.clone(), held_role) {
+                let mut j = 0;
+                while j < ALL_ROLE_IDS.len() {
+                    let candidate_role = ALL_ROLE_IDS[j];
+                    if roles::role_includes(&env, held_role, candidate_role)
+                        && Self::has_permission(env.clone(), candidate_role, permission_name.clone())
+                    {
+                        return true;
+                    }
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        false
     }
 
     // ── Permission Management & Storage Caching ─────────────────────────────
