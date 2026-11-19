@@ -29,6 +29,15 @@ pub struct DelegationRevoked {
     pub role: u32,
 }
 
+/// Emitted when a role's position in the role hierarchy (its immediate
+/// senior role) is created or changed (#1559).
+#[contractevent(topics = ["AccessControl", "HIERARCHY"])]
+pub struct RoleHierarchyUpdated {
+    pub role: u32,
+    pub parent_role: u32,
+    pub updated_by: Address,
+}
+
 pub fn emit_role_granted(env: &Env, account: &Address, role: u32, granted_by: &Address) {
     RoleGranted {
         account: account.clone(),
@@ -68,6 +77,15 @@ pub fn emit_delegation_revoked(env: &Env, delegator: &Address, delegatee: &Addre
         delegator: delegator.clone(),
         delegatee: delegatee.clone(),
         role,
+    }
+    .publish(env);
+}
+
+pub fn emit_role_hierarchy_updated(env: &Env, role: u32, parent_role: u32, updated_by: &Address) {
+    RoleHierarchyUpdated {
+        role,
+        parent_role,
+        updated_by: updated_by.clone(),
     }
     .publish(env);
 }
