@@ -21,6 +21,7 @@ path = "src/lib.rs"
 soroban-sdk = { version = "23.5.2", features = ["testutils"] }
 staking-rewards = { path = "../staking-rewards" }
 virtual-economy = { path = "../virtual-economy", features = ["testutils"] }
+upgrade-system = { path = "../upgrade-system" }
 proptest = "1"
 quickcheck = "1"
 composable-example = { path = "../composable-example" }

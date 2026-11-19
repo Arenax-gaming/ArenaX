@@ -1,5 +1,6 @@
 import { logger } from './logger.service';
 import { cdnCacheService } from './cdn-cache.service';
+import { cacheService } from './cache.service';
 import { getEnv } from '../config/env';
 
 interface WarmingEndpoint {
@@ -47,6 +48,15 @@ export class CacheWarmingService {
   async warmAll(): Promise<void> {
     if (this.endpoints.length === 0) return;
 
+    // Skip the warming cycle while Redis is configured but unreachable
+    // (Sentinel failover in progress or outage — #1577 / #1567). Warming
+    // would only populate this process's local in-memory fallback cache and
+    // adds unnecessary request load to a backend that's already degraded.
+    if (cacheService.isRedisConfigured && !cacheService.isRedisConnected) {
+      logger.warn('Cache warming skipped — Redis unavailable, cache running in in-memory fallback mode');
+      return;
+    }
+
     const sorted = [...this.endpoints].sort((a, b) => {
       const priorityOrder = { high: 0, medium: 1, low: 2 };
       return priorityOrder[a.priority] - priorityOrder[b.priority];
@@ -85,7 +95,12 @@ export class CacheWarmingService {
   }
 
   getStats() {
-    return { ...this.warmingStats, endpointsRegistered: this.endpoints.length, isRunning: this.isRunning };
+    return {
+      ...this.warmingStats,
+      endpointsRegistered: this.endpoints.length,
+      isRunning: this.isRunning,
+      cacheBackend: cacheService.isRedisConnected ? 'redis' : 'in-memory-fallback',
+    };
   }
 
   getEndpoints(): WarmingEndpoint[] {
