@@ -14,7 +14,9 @@
 //! every storage write made in it, keeping tournament and hook state
 //! consistent. Tournaments without a hook skip the call (default no-op).
 
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Bytes, Env, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token, Address, Bytes, Env, Symbol, Vec,
+};
 
 /// Client for tournament hook contracts. Mirrors the interface defined in
 /// `composable-example::tournament_hooks`; declared here so this contract does
@@ -72,6 +74,11 @@ pub enum DataKey {
     Phase(u64),
     Participants(u64),
     Winner(u64),
+    /// Optional invite-only list for a tournament (#1541). Absent means open
+    /// registration; present (even empty) means only listed addresses may
+    /// register. Kept under its own key so existing `CommunityTournament`
+    /// entries decode unchanged.
+    Whitelist(u64),
 }
 
 #[contract]
@@ -213,7 +220,58 @@ impl SponsoredTournamentContract {
             .get(&DataKey::Winner(tournament_id))
     }
 
+    /// The tournament's whitelist, or `None` when registration is open (#1541).
+    pub fn get_whitelist(env: Env, tournament_id: u64) -> Option<Vec<Address>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Whitelist(tournament_id))
+    }
+
+    /// Add `player` to the tournament whitelist (organizer only, before the
+    /// tournament starts). The first call turns the tournament invite-only.
+    /// Emits `whitelist_added` with `(tournament_id, player)`. Idempotent.
+    pub fn add_to_whitelist(env: Env, tournament_id: u64, player: Address) {
+        Self::require_whitelist_editable(&env, tournament_id);
+        let mut list = Self::get_whitelist(env.clone(), tournament_id).unwrap_or(Vec::new(&env));
+        if !list.contains(&player) {
+            list.push_back(player.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::Whitelist(tournament_id), &list);
+        }
+        env.events().publish(
+            (Symbol::new(&env, "whitelist_added"), tournament_id),
+            player,
+        );
+    }
+
+    /// Remove `player` from the whitelist (organizer only, before start).
+    /// The tournament stays invite-only even if the list becomes empty.
+    /// Emits `whitelist_removed` with `(tournament_id, player)`.
+    pub fn remove_from_whitelist(env: Env, tournament_id: u64, player: Address) {
+        Self::require_whitelist_editable(&env, tournament_id);
+        let list = match Self::get_whitelist(env.clone(), tournament_id) {
+            Some(list) => list,
+            None => panic!("no whitelist"),
+        };
+        let mut kept = Vec::new(&env);
+        for addr in list.iter() {
+            if addr != player {
+                kept.push_back(addr);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::Whitelist(tournament_id), &kept);
+        env.events().publish(
+            (Symbol::new(&env, "whitelist_removed"), tournament_id),
+            player,
+        );
+    }
+
     /// Register a player for an approved tournament, then invoke `on_register`.
+    /// Invite-only tournaments reject players not on the whitelist with
+    /// `not_whitelisted`.
     pub fn register_player(env: Env, tournament_id: u64, player: Address) {
         player.require_auth();
 
@@ -222,6 +280,12 @@ impl SponsoredTournamentContract {
             panic!("tournament not approved");
         }
         Self::require_phase(&env, tournament_id, TournamentPhase::Registration);
+
+        if let Some(list) = Self::get_whitelist(env.clone(), tournament_id) {
+            if !list.contains(&player) {
+                panic!("not_whitelisted");
+            }
+        }
 
         let mut participants = Self::get_participants(env.clone(), tournament_id);
         if participants.contains(&player) {
@@ -278,6 +342,14 @@ impl SponsoredTournamentContract {
     fn require_organizer(env: &Env, tournament_id: u64) {
         let tournament = Self::get_tournament(env.clone(), tournament_id);
         tournament.organizer.require_auth();
+    }
+
+    /// The whitelist is frozen once the tournament leaves `Registration`.
+    fn require_whitelist_editable(env: &Env, tournament_id: u64) {
+        Self::require_organizer(env, tournament_id);
+        if Self::get_phase(env.clone(), tournament_id) != TournamentPhase::Registration {
+            panic!("whitelist frozen");
+        }
     }
 
     fn require_phase(env: &Env, tournament_id: u64, expected: TournamentPhase) {
