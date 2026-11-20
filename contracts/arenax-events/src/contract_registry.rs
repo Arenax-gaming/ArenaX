@@ -189,3 +189,35 @@ pub fn emit_successor_linked(env: &Env, old_address: &Address, successor: &Addre
     }
     .publish(env);
 }
+
+// Issue #1547: deregistration with cooldown.
+
+#[contractevent(topics = ["ArenaXCReg_v1", "DEREG_SCHEDULED"])]
+pub struct DeregistrationScheduled {
+    pub name: Symbol,
+    pub address: Address,
+    pub removal_ledger: u32,
+}
+
+#[contractevent(topics = ["ArenaXCReg_v1", "DEREG_CANCELLED"])]
+pub struct DeregistrationCancelled {
+    pub name: Symbol,
+    pub address: Address,
+}
+
+pub fn emit_deregistration_scheduled(env: &Env, name: &Symbol, address: &Address, removal_ledger: u32) {
+    DeregistrationScheduled {
+        name: name.clone(),
+        address: address.clone(),
+        removal_ledger,
+    }
+    .publish(env);
+}
+
+pub fn emit_deregistration_cancelled(env: &Env, name: &Symbol, address: &Address) {
+    DeregistrationCancelled {
+        name: name.clone(),
+        address: address.clone(),
+    }
+    .publish(env);
+}
