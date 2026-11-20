@@ -1114,3 +1114,80 @@ fn test_chained_deprecation_eventually_fails_when_all_deprecated() {
     client.deprecate_contract(&contract2, &None);
     client.get_current(&name);
 }
+
+// ── Deregistration with cooldown (#1547) ────────────────────────────────────
+
+fn setup_registered<'a>(
+    env: &'a Env,
+    admin: &Address,
+    address: &Address,
+) -> (ContractRegistryClient<'a>, Symbol) {
+    let contract_id = initialize_contract(env, admin);
+    let client = ContractRegistryClient::new(env, &contract_id);
+    let name = Symbol::new(env, "match_contract");
+    client.register_contract(&name, address);
+    (client, name)
+}
+
+#[test]
+fn test_deregister_sets_pending_removal_and_ledger() {
+    let (env, admin, contract1, _) = create_test_env();
+    let (client, name) = setup_registered(&env, &admin, &contract1);
+    env.ledger().set_sequence_number(100);
+
+    let removal_ledger = client.deregister(&name);
+
+    assert_eq!(removal_ledger, 100 + DEREGISTRATION_COOLDOWN_LEDGERS);
+    assert_eq!(client.get_pending_removal(&name), Some(removal_ledger));
+    assert_eq!(client.get_contract_status(&name), Symbol::new(&env, "pending_removal"));
+    // Still registered until the cooldown elapses.
+    assert!(client.is_contract_registered(&name));
+}
+
+#[test]
+#[should_panic(expected = "contract pending removal")]
+fn test_pending_removal_excluded_from_get_contract() {
+    let (env, admin, contract1, _) = create_test_env();
+    let (client, name) = setup_registered(&env, &admin, &contract1);
+    client.deregister(&name);
+    client.get_contract(&name);
+}
+
+#[test]
+#[should_panic(expected = "cooldown not elapsed")]
+fn test_finalize_before_cooldown_fails() {
+    let (env, admin, contract1, _) = create_test_env();
+    let (client, name) = setup_registered(&env, &admin, &contract1);
+    env.ledger().set_sequence_number(100);
+    client.deregister(&name);
+    env.ledger().set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS - 1);
+    client.finalize_deregistration(&name);
+}
+
+#[test]
+fn test_finalize_after_cooldown_removes_contract() {
+    let (env, admin, contract1, _) = create_test_env();
+    let (client, name) = setup_registered(&env, &admin, &contract1);
+    env.ledger().set_sequence_number(100);
+    client.deregister(&name);
+    env.ledger().set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS);
+
+    client.finalize_deregistration(&name);
+
+    assert!(!client.is_contract_registered(&name));
+    assert_eq!(client.get_pending_removal(&name), None);
+    assert_eq!(client.get_contract_count(), 0);
+}
+
+#[test]
+fn test_cancel_deregistration_restores_contract() {
+    let (env, admin, contract1, _) = create_test_env();
+    let (client, name) = setup_registered(&env, &admin, &contract1);
+    client.deregister(&name);
+
+    client.cancel_deregistration(&name);
+
+    assert_eq!(client.get_pending_removal(&name), None);
+    assert_eq!(client.get_contract_status(&name), Symbol::new(&env, "active"));
+    assert_eq!(client.get_contract(&name), contract1);
+}

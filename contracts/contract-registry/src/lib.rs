@@ -18,7 +18,12 @@ pub enum DataKey {
     ContractCategory(Symbol),
     ContractStatus(Symbol),
     CategoryList,
+    /// Ledger at which a pending deregistration may be finalized (#1547).
+    PendingRemoval(Symbol),
 }
+
+/// 7 days at ~5s per ledger.
+pub const DEREGISTRATION_COOLDOWN_LEDGERS: u32 = 7 * 24 * 60 * 60 / 5;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -198,7 +203,76 @@ impl ContractRegistry {
     pub fn remove_contract(env: Env, name: Symbol) {
         Self::require_admin(&env);
         Self::require_not_paused(&env);
+        Self::remove_entry(&env, name);
+    }
 
+    // ── Deregistration with cooldown (#1547) ──────────────────────────────
+
+    /// Schedule `name` for removal after [`DEREGISTRATION_COOLDOWN_LEDGERS`].
+    /// Sets its status to `pending_removal`, which hides it from `get_contract`
+    /// so dependents fail loudly while they migrate. Returns the removal ledger.
+    pub fn deregister(env: Env, name: Symbol) -> u32 {
+        Self::require_admin(&env);
+        Self::require_not_paused(&env);
+        let info = Self::get_contract_info(env.clone(), name.clone());
+        let key = DataKey::PendingRemoval(name.clone());
+        if env.storage().instance().has(&key) {
+            panic!("deregistration already scheduled");
+        }
+
+        let removal_ledger = env.ledger().sequence() + DEREGISTRATION_COOLDOWN_LEDGERS;
+        env.storage().instance().set(&key, &removal_ledger);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractStatus(name.clone()), &Self::pending_removal_status(&env));
+
+        events::emit_deregistration_scheduled(&env, &name, &info.address, removal_ledger);
+        removal_ledger
+    }
+
+    /// Cancel a pending deregistration while the cooldown is still running.
+    pub fn cancel_deregistration(env: Env, name: Symbol) {
+        Self::require_admin(&env);
+        let removal_ledger = Self::get_pending_removal(env.clone(), name.clone())
+            .expect("no deregistration scheduled");
+        if env.ledger().sequence() >= removal_ledger {
+            panic!("cooldown elapsed");
+        }
+
+        env.storage().instance().remove(&DataKey::PendingRemoval(name.clone()));
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractStatus(name.clone()), &Symbol::new(&env, "active"));
+
+        let info = Self::get_contract_info(env.clone(), name.clone());
+        events::emit_deregistration_cancelled(&env, &name, &info.address);
+    }
+
+    /// Fully remove a contract whose cooldown has elapsed.
+    pub fn finalize_deregistration(env: Env, name: Symbol) {
+        Self::require_admin(&env);
+        Self::require_not_paused(&env);
+        let removal_ledger = Self::get_pending_removal(env.clone(), name.clone())
+            .expect("no deregistration scheduled");
+        if env.ledger().sequence() < removal_ledger {
+            panic!("cooldown not elapsed");
+        }
+
+        env.storage().instance().remove(&DataKey::PendingRemoval(name.clone()));
+        env.storage().instance().remove(&DataKey::ContractStatus(name.clone()));
+        Self::remove_entry(&env, name);
+    }
+
+    /// Ledger at which `name` may be finalized, or `None` if not pending.
+    pub fn get_pending_removal(env: Env, name: Symbol) -> Option<u32> {
+        env.storage().instance().get(&DataKey::PendingRemoval(name))
+    }
+
+    fn pending_removal_status(env: &Env) -> Symbol {
+        Symbol::new(env, "pending_removal")
+    }
+
+    fn remove_entry(env: &Env, name: Symbol) {
         let contract_info: ContractInfo = env
             .storage()
             .instance()
@@ -218,7 +292,7 @@ impl ContractRegistry {
             .storage()
             .instance()
             .get(&DataKey::ContractList)
-            .unwrap_or(Vec::new(&env));
+            .unwrap_or(Vec::new(env));
 
         let index = contract_list.iter().position(|item| item == name);
         if let Some(idx) = index {
@@ -228,7 +302,7 @@ impl ContractRegistry {
                 .set(&DataKey::ContractList, &contract_list);
         }
 
-        events::emit_contract_removed(&env, name, &address, &env.current_contract_address());
+        events::emit_contract_removed(env, name, &address, &env.current_contract_address());
     }
 
     /// Get the address of a registered contract
@@ -241,7 +315,11 @@ impl ContractRegistry {
     ///
     /// # Panics
     /// * If contract name is not registered
+    /// * If the contract is pending removal (#1547)
     pub fn get_contract(env: Env, name: Symbol) -> Address {
+        if env.storage().instance().has(&DataKey::PendingRemoval(name.clone())) {
+            panic!("contract pending removal");
+        }
         let contract_info: ContractInfo = env
             .storage()
             .instance()
