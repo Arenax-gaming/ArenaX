@@ -307,3 +307,87 @@ impl std::str::FromStr for MatchStatus {
         }
     }
 }
+
+// ===== Bulk Match Ingestion (Issue #bulk-ingest) =====
+
+/// A single match result submitted as part of a bulk ingestion request.
+///
+/// Each item carries everything needed to record one complete match outcome:
+/// who played, who won, scores, and the game context.  The `game_id` field
+/// drives the game-specific validation rules applied before persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BulkMatchResultItem {
+    /// Caller-assigned ordinal — echoed back in every per-item result so the
+    /// caller can correlate failures without counting array positions.
+    pub index: usize,
+    pub player1_id: Uuid,
+    pub player2_id: Uuid,
+    /// Identifier of the game integration that produced this result.
+    /// Used to select the appropriate validation ruleset (e.g. score-range
+    /// limits, required fields per game).
+    pub game_id: String,
+    pub game_mode: String,
+    pub player1_score: i32,
+    pub player2_score: i32,
+    /// UUID of the winner.  Must be `player1_id` or `player2_id` unless both
+    /// scores are equal, in which case a draw is accepted and this field may
+    /// be `None`.
+    pub winner_id: Option<Uuid>,
+    pub match_type: Option<String>,
+    pub tournament_id: Option<Uuid>,
+    pub round_id: Option<Uuid>,
+    /// Optional proof artifact (screenshot URL, replay link, …).
+    pub proof_url: Option<String>,
+    /// Freeform telemetry blob from the game client (JSON string).
+    pub telemetry_data: Option<String>,
+    /// Unix timestamp (seconds) when the match ended, as reported by the
+    /// game integration.  Stored as `completed_at` on the resulting row.
+    pub completed_at: Option<i64>,
+    /// How long the match lasted in seconds.
+    pub match_duration: Option<i32>,
+}
+
+/// Payload for `POST /api/matches/bulk`.
+///
+/// Accepts 1–500 match results in a single request.  Items that pass
+/// game-specific validation are persisted; items that fail are reported
+/// individually but do not block the valid items.
+#[derive(Debug, Deserialize)]
+pub struct BulkMatchIngestRequest {
+    pub results: Vec<BulkMatchResultItem>,
+}
+
+/// Per-item outcome returned by the bulk endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BulkMatchItemResult {
+    /// Zero-based position within the original `results` array (or the caller-
+    /// supplied `index` field when present).
+    pub index: usize,
+    /// `"ok"` on success, `"error"` on validation or persistence failure.
+    pub status: BulkItemStatus,
+    /// UUID of the newly-created match row.  `None` when `status` is `"error"`.
+    pub match_id: Option<Uuid>,
+    /// Human-readable explanation of the failure.  `None` when `status` is `"ok"`.
+    pub reason: Option<String>,
+}
+
+/// Discriminant for [`BulkMatchItemResult::status`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BulkItemStatus {
+    Ok,
+    Error,
+}
+
+/// Top-level response body for `POST /api/matches/bulk`.
+#[derive(Debug, Serialize)]
+pub struct BulkMatchIngestResponse {
+    /// Total items submitted.
+    pub total: usize,
+    /// Count of items that were persisted successfully.
+    pub succeeded: usize,
+    /// Count of items that failed validation or persistence.
+    pub failed: usize,
+    /// Per-item results, one entry per input item, in submission order.
+    pub results: Vec<BulkMatchItemResult>,
+}
