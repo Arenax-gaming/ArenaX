@@ -144,3 +144,87 @@ fn test_cannot_change_hook_after_start() {
     let noop = s.env.register(NoopTournamentHooks, ());
     s.tournament.set_tournament_hook(&id, &noop);
 }
+
+// ── Whitelist-gated registration (#1541) ────────────────────────────────────
+
+#[test]
+fn test_no_whitelist_allows_any_player() {
+    let s = setup();
+    assert_eq!(s.tournament.get_whitelist(&s.tournament_id), None);
+    s.tournament.register_player(&s.tournament_id, &Address::generate(&s.env));
+    assert_eq!(s.tournament.get_participants(&s.tournament_id).len(), 1);
+}
+
+#[test]
+fn test_whitelisted_player_can_register() {
+    let s = setup();
+    let invited = Address::generate(&s.env);
+    s.tournament.add_to_whitelist(&s.tournament_id, &invited);
+    s.tournament.add_to_whitelist(&s.tournament_id, &invited); // idempotent
+
+    s.tournament.register_player(&s.tournament_id, &invited);
+    assert_eq!(
+        s.tournament.get_whitelist(&s.tournament_id),
+        Some(vec![&s.env, invited.clone()])
+    );
+    assert!(s.tournament.get_participants(&s.tournament_id).contains(&invited));
+}
+
+#[test]
+#[should_panic(expected = "not_whitelisted")]
+fn test_non_whitelisted_player_is_rejected() {
+    let s = setup();
+    s.tournament.add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
+    s.tournament.register_player(&s.tournament_id, &Address::generate(&s.env));
+}
+
+#[test]
+#[should_panic(expected = "not_whitelisted")]
+fn test_removed_player_is_rejected_and_list_stays_invite_only() {
+    let s = setup();
+    let player = Address::generate(&s.env);
+    s.tournament.add_to_whitelist(&s.tournament_id, &player);
+    s.tournament.remove_from_whitelist(&s.tournament_id, &player);
+
+    assert_eq!(
+        s.tournament.get_whitelist(&s.tournament_id),
+        Some(Vec::new(&s.env))
+    );
+    s.tournament.register_player(&s.tournament_id, &player);
+}
+
+#[test]
+fn test_whitelist_changes_emit_events() {
+    let s = setup();
+    let player = Address::generate(&s.env);
+
+    s.tournament.add_to_whitelist(&s.tournament_id, &player);
+    assert!(last_event_topic_is(&s, "whitelist_added"));
+
+    s.tournament.remove_from_whitelist(&s.tournament_id, &player);
+    assert!(last_event_topic_is(&s, "whitelist_removed"));
+}
+
+#[test]
+#[should_panic(expected = "whitelist frozen")]
+fn test_whitelist_frozen_after_start() {
+    let s = setup();
+    let (p1, p2) = (Address::generate(&s.env), Address::generate(&s.env));
+    s.tournament.add_to_whitelist(&s.tournament_id, &p1);
+    s.tournament.add_to_whitelist(&s.tournament_id, &p2);
+    s.tournament.register_player(&s.tournament_id, &p1);
+    s.tournament.register_player(&s.tournament_id, &p2);
+    s.tournament.start_tournament(&s.tournament_id);
+
+    s.tournament.add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
+}
+
+fn last_event_topic_is(s: &Setup, name: &str) -> bool {
+    use soroban_sdk::{testutils::Events as _, IntoVal, Val};
+    let events = s.env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    let first: Val = topics.get(0).unwrap();
+    let expected: Val = Symbol::new(&s.env, name).into_val(&s.env);
+    first.get_payload() == expected.get_payload()
+}
+
