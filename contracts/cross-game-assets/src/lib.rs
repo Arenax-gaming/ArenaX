@@ -10,6 +10,10 @@
 
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Vec};
 
+pub mod lock;
+
+use lock::AssetLock;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -136,6 +140,7 @@ pub enum DataKey {
     BridgeLock(Address, BytesN<32>),
     BridgeCooldown(Address, String),
     SupportedChains,
+    AssetLock(Address, BytesN<32>),
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -384,6 +389,7 @@ impl CrossGameAssets {
         if from == to {
             panic!("cannot transfer to self");
         }
+        Self::ensure_not_locked(&env, &from, &asset_id);
 
         let def: AssetDefinition = env
             .storage()
@@ -526,6 +532,79 @@ impl CrossGameAssets {
         Self::burn(env, owner, asset_id, amount);
     }
 
+    // ── Asset locks ─────────────────────────────────────────────────────────
+
+    /// Lock an owner's asset while it is being used in a game session.
+    pub fn lock_asset(
+        env: Env,
+        caller: Address,
+        owner: Address,
+        asset_id: BytesN<32>,
+        game_id: u32,
+    ) {
+        Self::require_not_paused(&env);
+        caller.require_auth();
+        Self::require_authorised_caller(&env, &caller, game_id);
+        if !Self::validate_asset_compatibility(env.clone(), asset_id.clone(), game_id) {
+            panic!("game not compatible");
+        }
+        if Self::get_balance(env.clone(), owner.clone(), asset_id.clone()) <= 0 {
+            panic!("no asset to lock");
+        }
+
+        if let Some(existing) = lock::get_lock(&env, &owner, &asset_id) {
+            if lock::is_active(&existing, env.ledger().timestamp()) {
+                panic!("asset already locked");
+            }
+            lock::clear_lock(&env, &owner, &asset_id);
+        }
+
+        let now = env.ledger().timestamp();
+        let asset_lock = AssetLock {
+            owner: owner.clone(),
+            asset_id: asset_id.clone(),
+            locker: caller.clone(),
+            game_id,
+            locked_at: now,
+            expires_at: now + lock::LOCK_DURATION_SECS,
+        };
+        lock::set_lock(&env, &asset_lock);
+        env.events()
+            .publish((lock::locked_event(&env), asset_id, owner), (caller, now));
+    }
+
+    /// Release a lock. Only the contract that placed it may release it.
+    pub fn unlock_asset(env: Env, caller: Address, owner: Address, asset_id: BytesN<32>) {
+        caller.require_auth();
+        let asset_lock: AssetLock =
+            lock::get_lock(&env, &owner, &asset_id).expect("asset not locked");
+        if asset_lock.locker != caller {
+            panic!("caller is not the locker");
+        }
+        lock::clear_lock(&env, &owner, &asset_id);
+        env.events().publish(
+            (lock::unlocked_event(&env), asset_id, owner),
+            (caller, env.ledger().timestamp()),
+        );
+    }
+
+    pub fn is_asset_locked(env: Env, owner: Address, asset_id: BytesN<32>) -> bool {
+        lock::get_lock(&env, &owner, &asset_id)
+            .map(|l| lock::is_active(&l, env.ledger().timestamp()))
+            .unwrap_or(false)
+    }
+
+    pub fn get_asset_lock(env: Env, owner: Address, asset_id: BytesN<32>) -> Option<AssetLock> {
+        match lock::get_lock(&env, &owner, &asset_id) {
+            Some(l) if lock::is_active(&l, env.ledger().timestamp()) => Some(l),
+            Some(_) => {
+                lock::clear_lock(&env, &owner, &asset_id);
+                None
+            }
+            None => None,
+        }
+    }
+
     // ── Bridging ───────────────────────────────────────────────────────────
 
     /// Register a supported external chain for bridging
@@ -609,6 +688,7 @@ impl CrossGameAssets {
         if amount <= 0 {
             panic!("amount must be positive");
         }
+        Self::ensure_not_locked(&env, &owner, &asset_id);
 
         // Verify asset is transferable
         let def: AssetDefinition = env
@@ -947,6 +1027,15 @@ impl CrossGameAssets {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
+    fn ensure_not_locked(env: &Env, owner: &Address, asset_id: &BytesN<32>) {
+        if let Some(asset_lock) = lock::get_lock(env, owner, asset_id) {
+            if lock::is_active(&asset_lock, env.ledger().timestamp()) {
+                panic!("asset_locked");
+            }
+            lock::clear_lock(env, owner, asset_id);
+        }
+    }
+
     fn require_admin(env: &Env) {
         let admin: Address = env
             .storage()
@@ -1009,3 +1098,6 @@ impl CrossGameAssets {
         BytesN::from_array(env, &bytes)
     }
 }
+
+#[cfg(test)]
+mod test;
