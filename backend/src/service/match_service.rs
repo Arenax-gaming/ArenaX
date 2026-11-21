@@ -2520,3 +2520,226 @@ impl MatchService {
         (new_player1_elo, new_player2_elo)
     }
 }
+
+// ============================================================
+// Bulk match ingestion (Issue #bulk-ingest)
+// ============================================================
+
+impl MatchService {
+    /// Persist up to 500 fully-reported match results in a single call.
+    ///
+    /// Each item in `items` is validated independently against game-specific
+    /// rules before any database work is attempted.  Items that fail
+    /// validation are recorded as errors and skipped; the remaining items are
+    /// persisted inside individual transactions so a single DB failure cannot
+    /// roll back the entire batch.
+    ///
+    /// Returns a [`BulkMatchIngestResponse`] whose `results` vec has exactly
+    /// one entry per input item, in submission order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApiError::BadRequest`] when the batch is empty or exceeds the
+    /// 500-item hard limit.  Individual item failures are reported inside the
+    /// response body, not as top-level errors.
+    pub async fn bulk_ingest_matches(
+        &self,
+        items: Vec<crate::models::BulkMatchResultItem>,
+    ) -> Result<crate::models::BulkMatchIngestResponse, ApiError> {
+        use crate::models::{
+            BulkItemStatus, BulkMatchIngestResponse, BulkMatchItemResult, MatchStatus, MatchType,
+        };
+        use crate::validators::custom::validate_bulk_match_result;
+        use chrono::{TimeZone, Utc};
+
+        const MAX_BATCH: usize = 500;
+
+        if items.is_empty() {
+            return Err(ApiError::bad_request("batch must contain at least one item"));
+        }
+        if items.len() > MAX_BATCH {
+            return Err(ApiError::bad_request(format!(
+                "batch exceeds the maximum of {MAX_BATCH} items (got {})",
+                items.len()
+            )));
+        }
+
+        let total = items.len();
+        let mut results: Vec<BulkMatchItemResult> = Vec::with_capacity(total);
+
+        for item in &items {
+            // ── Step 1: game-specific validation ─────────────────────────
+            if let Err(reason) = validate_bulk_match_result(item) {
+                results.push(BulkMatchItemResult {
+                    index: item.index,
+                    status: BulkItemStatus::Error,
+                    match_id: None,
+                    reason: Some(reason),
+                });
+                continue;
+            }
+
+            // ── Step 2: resolve match type ────────────────────────────────
+            let match_type = match item
+                .match_type
+                .as_deref()
+                .map(|s| s.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("tournament") => MatchType::Tournament,
+                Some("ranked") => MatchType::Ranked,
+                Some("practice") => MatchType::Practice,
+                _ => MatchType::Casual,
+            };
+
+            // ── Step 3: resolve optional timestamps ───────────────────────
+            let completed_at: Option<chrono::DateTime<Utc>> = item
+                .completed_at
+                .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
+
+            // ── Step 4: snapshot Elo for both players ─────────────────────
+            let player1_elo = match self.get_user_elo(item.player1_id, &item.game_mode).await {
+                Ok(e) => Some(e),
+                Err(_) => None,
+            };
+            let player2_elo = match self.get_user_elo(item.player2_id, &item.game_mode).await {
+                Ok(e) => Some(e),
+                Err(_) => None,
+            };
+
+            // ── Step 5: insert the match row ──────────────────────────────
+            let match_id = Uuid::new_v4();
+            let now = Utc::now();
+
+            let insert_result = sqlx::query_as!(
+                Match,
+                r#"
+                INSERT INTO matches (
+                    id, tournament_id, round_id, match_type, status,
+                    player1_id, player2_id, winner_id,
+                    player1_score, player2_score,
+                    player1_elo_before, player2_elo_before,
+                    game_mode, match_duration, completed_at,
+                    created_at, updated_at
+                ) VALUES (
+                    $1,  $2,  $3,  $4,  $5,
+                    $6,  $7,  $8,
+                    $9,  $10,
+                    $11, $12,
+                    $13, $14, $15,
+                    $16, $17
+                ) RETURNING *
+                "#,
+                match_id,
+                item.tournament_id,
+                item.round_id,
+                match_type as _,
+                MatchStatus::Completed as _,
+                item.player1_id,
+                item.player2_id,
+                item.winner_id,
+                item.player1_score,
+                item.player2_score,
+                player1_elo,
+                player2_elo,
+                item.game_mode,
+                item.match_duration,
+                completed_at,
+                now,
+                now,
+            )
+            .fetch_one(&self.db_pool)
+            .await;
+
+            match insert_result {
+                Err(e) => {
+                    results.push(BulkMatchItemResult {
+                        index: item.index,
+                        status: BulkItemStatus::Error,
+                        match_id: None,
+                        reason: Some(format!("database error: {e}")),
+                    });
+                    continue;
+                }
+                Ok(match_record) => {
+                    // ── Step 6: record the score rows for both players ────
+                    // We attempt to insert score rows but do not fail the
+                    // whole item if the score insert errors — the match row
+                    // has already been committed and that is the authoritative
+                    // record.
+                    let _ = sqlx::query!(
+                        r#"
+                        INSERT INTO match_scores
+                            (id, match_id, player_id, score, opponent_score,
+                             proof_url, telemetry_data, submitted_at, verified)
+                        VALUES
+                            ($1, $2, $3, $4, $5, $6, $7, $8, false),
+                            ($9, $10, $11, $12, $13, $14, $15, $16, false)
+                        "#,
+                        Uuid::new_v4(),
+                        match_record.id,
+                        item.player1_id,
+                        item.player1_score,
+                        item.player2_score,
+                        item.proof_url,
+                        item.telemetry_data,
+                        now,
+                        Uuid::new_v4(),
+                        match_record.id,
+                        item.player2_id,
+                        item.player2_score,
+                        item.player1_score,
+                        item.proof_url,
+                        item.telemetry_data,
+                        now,
+                    )
+                    .execute(&self.db_pool)
+                    .await;
+
+                    // ── Step 7: update Elo ratings ────────────────────────
+                    // Fire-and-forget: Elo update failure must not cause the
+                    // bulk item to be reported as an error.  The match row is
+                    // already durable; Elo can be recomputed offline.
+                    let _ = self
+                        .update_elo_ratings(
+                            match_record.id,
+                            item.player1_id,
+                            item.player2_id,
+                            item.winner_id,
+                            &item.game_mode,
+                        )
+                        .await;
+
+                    // ── Step 8: publish match-completed event ─────────────
+                    let event_payload = serde_json::json!({
+                        "event":    "bulk_match_completed",
+                        "match_id": match_record.id,
+                        "player1":  item.player1_id,
+                        "player2":  item.player2_id,
+                        "winner":   item.winner_id,
+                        "game_id":  item.game_id,
+                        "game_mode": item.game_mode,
+                    });
+                    let _ = self.publish_match_event(event_payload).await;
+
+                    results.push(BulkMatchItemResult {
+                        index: item.index,
+                        status: BulkItemStatus::Ok,
+                        match_id: Some(match_record.id),
+                        reason: None,
+                    });
+                }
+            }
+        }
+
+        let succeeded = results.iter().filter(|r| r.status == BulkItemStatus::Ok).count();
+        let failed = results.iter().filter(|r| r.status == BulkItemStatus::Error).count();
+
+        Ok(BulkMatchIngestResponse {
+            total,
+            succeeded,
+            failed,
+            results,
+        })
+    }
+}

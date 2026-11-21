@@ -419,6 +419,91 @@ pub async fn queue_status(
     Ok(HttpResponse::Ok().json(status))
 }
 
+/// `POST /api/matches/bulk` — ingest up to 500 completed match results.
+///
+/// Each item is validated against game-specific rules independently.
+/// Valid items are persisted even when sibling items in the same batch fail.
+/// The response body always contains a per-item result list regardless of
+/// whether individual items succeeded or failed.
+///
+/// ## Request body
+/// ```json
+/// {
+///   "results": [
+///     {
+///       "index": 0,
+///       "player1_id": "<uuid>",
+///       "player2_id": "<uuid>",
+///       "game_id": "fps_pro",
+///       "game_mode": "ranked",
+///       "player1_score": 10,
+///       "player2_score": 5,
+///       "winner_id": "<player1_uuid>",
+///       "proof_url": "https://cdn.example.com/proof.mp4"
+///     }
+///   ]
+/// }
+/// ```
+///
+/// ## Response (200 OK — even on partial failure)
+/// ```json
+/// {
+///   "total": 1,
+///   "succeeded": 1,
+///   "failed": 0,
+///   "results": [
+///     { "index": 0, "status": "ok", "match_id": "<uuid>", "reason": null }
+///   ]
+/// }
+/// ```
+///
+/// ## Error responses
+/// - `400 Bad Request` — batch is empty or exceeds 500 items.
+/// - `401 Unauthorized` — no valid auth token.
+/// - `403 Forbidden` — caller does not hold the `game_integration` or
+///   `admin` role.
+pub async fn bulk_ingest_matches(
+    service: web::Data<Arc<MatchService>>,
+    req: HttpRequest,
+    body: web::Json<crate::models::BulkMatchIngestRequest>,
+) -> Result<HttpResponse, ApiError> {
+    // Only game-integration service accounts and admins may bulk-ingest.
+    let caller = authenticated_user(&req)?;
+    let is_integration = req
+        .claims()
+        .map(|c| {
+            c.roles
+                .iter()
+                .any(|r| r == "game_integration" || r == "admin")
+        })
+        .unwrap_or(false);
+    if !is_integration {
+        return Err(ApiError::forbidden(
+            "Only game_integration or admin accounts may use the bulk ingest endpoint",
+        ));
+    }
+
+    tracing::info!(
+        caller = %caller,
+        batch_size = body.results.len(),
+        "bulk match ingestion requested",
+    );
+
+    let response = service.bulk_ingest_matches(body.into_inner().results).await?;
+
+    tracing::info!(
+        succeeded = response.succeeded,
+        failed    = response.failed,
+        total     = response.total,
+        "bulk match ingestion complete",
+    );
+
+    // Always 200: a mix of successes and failures is not a server error.
+    // The caller inspects per-item `status` fields.  A 400 is only returned
+    // when the whole batch is structurally invalid (empty / >500 items).
+    Ok(HttpResponse::Ok().json(response))
+}
+
 // =============================================================================
 // ROUTES
 // =============================================================================
@@ -428,10 +513,15 @@ pub async fn queue_status(
 /// Called from [`crate::http::match_authority_handler::configure_routes`] so
 /// both modules share a single `/matches` scope without path collisions.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/create", web::post().to(create_match))
+    cfg
+        // ── Bulk ingestion ────────────────────────────────────────────────
+        .route("/bulk", web::post().to(bulk_ingest_matches))
+        // ── Single-match CRUD ─────────────────────────────────────────────
+        .route("/create", web::post().to(create_match))
         .route("/{id}/details", web::get().to(get_match_details))
         .route("/{id}/report", web::post().to(report_score))
         .route("/{id}/cancel", web::post().to(cancel_match))
+        // ── Disputes ──────────────────────────────────────────────────────
         .route("/{id}/dispute", web::post().to(create_match_dispute_singular))
         .route("/{id}/disputes", web::post().to(create_match_dispute))
         .route("/{id}/disputes", web::get().to(list_match_disputes))
@@ -448,11 +538,13 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             "/{id}/disputes/{dispute_id}/reject",
             web::post().to(reject_match_dispute),
         )
+        // ── Elo & history ─────────────────────────────────────────────────
         .route("/players/{user_id}/elo", web::get().to(get_player_elo))
         .route(
             "/players/{user_id}/history",
             web::get().to(get_match_history),
         )
+        // ── Matchmaking queue ─────────────────────────────────────────────
         .route("/queue/join", web::post().to(join_queue))
         .route("/queue/leave", web::post().to(leave_queue))
         .route("/queue/status", web::get().to(queue_status));

@@ -267,3 +267,339 @@ mod tests {
         assert!(validate_reference("key@with#symbols").is_err());
     }
 }
+
+// ============================================================
+// Bulk match ingestion — game-specific validation (Issue #bulk-ingest)
+// ============================================================
+
+use crate::models::BulkMatchResultItem;
+
+/// Maximum score value accepted for any game.
+///
+/// Game integrations must report scores in the range `0..=MAX_GAME_SCORE`.
+/// Scores outside this range are almost certainly a client bug or a
+/// malicious payload.
+pub const MAX_GAME_SCORE: i32 = 999_999;
+
+/// Game-specific score-range upper bounds.
+///
+/// If a `game_id` is not listed here the generic `MAX_GAME_SCORE` ceiling
+/// applies.  Keys are lower-cased before lookup so "FPS_PRO" and "fps_pro"
+/// match the same rule.
+fn max_score_for_game(game_id: &str) -> i32 {
+    match game_id.to_ascii_lowercase().as_str() {
+        // Round-based games — single-digit round counts.
+        "chess" | "checkers" | "go" => 1,
+        // Best-of-N series games — small integer win counts.
+        "fighting_game" | "streetfighter" | "tekken" => 3,
+        // Sports simulation — realistic score ceiling.
+        "soccer_sim" | "basketball_sim" | "football_sim" => 200,
+        // FPS / battle-royale — kill / point counts.
+        "fps_pro" | "battle_royale" => 500,
+        // Card / strategy games.
+        "card_duel" | "hearthstone_clone" => 30,
+        // Racing games — position/lap-time encoded as integer milliseconds.
+        "racing_sim" => 999_999,
+        // Default: generous ceiling for unknown integrations.
+        _ => MAX_GAME_SCORE,
+    }
+}
+
+/// Minimum required `game_id` length.
+pub const GAME_ID_MIN_LEN: usize = 2;
+/// Maximum allowed `game_id` length.
+pub const GAME_ID_MAX_LEN: usize = 64;
+
+/// Minimum required `game_mode` length.
+pub const GAME_MODE_MIN_LEN: usize = 1;
+/// Maximum allowed `game_mode` length.
+pub const GAME_MODE_MAX_LEN: usize = 64;
+
+/// Validate one item from a bulk match-result ingestion request.
+///
+/// Returns `Ok(())` when the item passes all game-specific rules, or an `Err`
+/// carrying a human-readable explanation string when it does not.  The caller
+/// is responsible for collecting these errors into
+/// [`BulkMatchItemResult`][crate::models::BulkMatchItemResult] entries.
+///
+/// ### Rules applied (in order)
+///
+/// 1. `player1_id` ≠ `player2_id` — a player cannot face themselves.
+/// 2. Scores are non-negative (`0..=MAX_GAME_SCORE`).
+/// 3. Each score must not exceed the game-specific ceiling.
+/// 4. `winner_id`, when present, must be `player1_id` or `player2_id`.
+/// 5. When scores are equal the result must be a draw (`winner_id = None`).
+/// 6. When scores differ `winner_id` must agree with the higher score.
+/// 7. `game_id` length must be in `GAME_ID_MIN_LEN..=GAME_ID_MAX_LEN`.
+/// 8. `game_mode` length must be in `GAME_MODE_MIN_LEN..=GAME_MODE_MAX_LEN`.
+/// 9. Optional `proof_url`, when present, must start with `http://` or
+///    `https://` and must not exceed 2 048 characters.
+/// 10. Optional `completed_at`, when present, must be a positive Unix
+///     timestamp (> 0).
+/// 11. Optional `match_duration`, when present, must be positive (> 0).
+pub fn validate_bulk_match_result(item: &BulkMatchResultItem) -> Result<(), String> {
+    // Rule 1 — distinct players.
+    if item.player1_id == item.player2_id {
+        return Err("player1_id and player2_id must be different".to_string());
+    }
+
+    // Rule 2 — non-negative scores.
+    if item.player1_score < 0 {
+        return Err(format!(
+            "player1_score must be >= 0, got {}",
+            item.player1_score
+        ));
+    }
+    if item.player2_score < 0 {
+        return Err(format!(
+            "player2_score must be >= 0, got {}",
+            item.player2_score
+        ));
+    }
+
+    // Rule 3 — game-specific score ceiling.
+    let max_score = max_score_for_game(&item.game_id);
+    if item.player1_score > max_score {
+        return Err(format!(
+            "player1_score {} exceeds the maximum allowed score {} for game '{}'",
+            item.player1_score, max_score, item.game_id
+        ));
+    }
+    if item.player2_score > max_score {
+        return Err(format!(
+            "player2_score {} exceeds the maximum allowed score {} for game '{}'",
+            item.player2_score, max_score, item.game_id
+        ));
+    }
+
+    // Rule 4 — winner_id, when present, must be one of the participants.
+    if let Some(winner) = item.winner_id {
+        if winner != item.player1_id && winner != item.player2_id {
+            return Err(format!(
+                "winner_id {} is not a participant in this match",
+                winner
+            ));
+        }
+    }
+
+    // Rules 5 & 6 — winner consistency with scores.
+    if item.player1_score == item.player2_score {
+        // Draw: winner_id must be absent.
+        if item.winner_id.is_some() {
+            return Err(
+                "winner_id must be absent when scores are equal (draw)".to_string(),
+            );
+        }
+    } else {
+        // Decisive outcome: winner_id must be present and must match the
+        // player with the higher score.
+        match item.winner_id {
+            None => {
+                return Err(
+                    "winner_id is required when scores differ".to_string(),
+                );
+            }
+            Some(winner) => {
+                let expected_winner = if item.player1_score > item.player2_score {
+                    item.player1_id
+                } else {
+                    item.player2_id
+                };
+                if winner != expected_winner {
+                    return Err(format!(
+                        "winner_id {} does not match the player with the higher score",
+                        winner
+                    ));
+                }
+            }
+        }
+    }
+
+    // Rule 7 — game_id length.
+    let game_id_len = item.game_id.len();
+    if !(GAME_ID_MIN_LEN..=GAME_ID_MAX_LEN).contains(&game_id_len) {
+        return Err(format!(
+            "game_id length must be {GAME_ID_MIN_LEN}–{GAME_ID_MAX_LEN} characters, got {game_id_len}"
+        ));
+    }
+
+    // Rule 8 — game_mode length.
+    let mode_len = item.game_mode.len();
+    if !(GAME_MODE_MIN_LEN..=GAME_MODE_MAX_LEN).contains(&mode_len) {
+        return Err(format!(
+            "game_mode length must be {GAME_MODE_MIN_LEN}–{GAME_MODE_MAX_LEN} characters, got {mode_len}"
+        ));
+    }
+
+    // Rule 9 — proof_url format.
+    if let Some(ref url) = item.proof_url {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err("proof_url must start with http:// or https://".to_string());
+        }
+        if url.len() > 2048 {
+            return Err(format!(
+                "proof_url must not exceed 2048 characters, got {}",
+                url.len()
+            ));
+        }
+    }
+
+    // Rule 10 — completed_at must be a positive Unix timestamp.
+    if let Some(ts) = item.completed_at {
+        if ts <= 0 {
+            return Err(format!(
+                "completed_at must be a positive Unix timestamp, got {ts}"
+            ));
+        }
+    }
+
+    // Rule 11 — match_duration must be positive.
+    if let Some(dur) = item.match_duration {
+        if dur <= 0 {
+            return Err(format!(
+                "match_duration must be positive (seconds), got {dur}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod bulk_validation_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn base_item() -> BulkMatchResultItem {
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        BulkMatchResultItem {
+            index: 0,
+            player1_id: p1,
+            player2_id: p2,
+            game_id: "fps_pro".to_string(),
+            game_mode: "ranked".to_string(),
+            player1_score: 10,
+            player2_score: 5,
+            winner_id: Some(p1),
+            match_type: None,
+            tournament_id: None,
+            round_id: None,
+            proof_url: None,
+            telemetry_data: None,
+            completed_at: None,
+            match_duration: None,
+        }
+    }
+
+    #[test]
+    fn valid_item_passes() {
+        assert!(validate_bulk_match_result(&base_item()).is_ok());
+    }
+
+    #[test]
+    fn same_player_ids_rejected() {
+        let mut item = base_item();
+        item.player2_id = item.player1_id;
+        let err = validate_bulk_match_result(&item).unwrap_err();
+        assert!(err.contains("different"));
+    }
+
+    #[test]
+    fn negative_score_rejected() {
+        let mut item = base_item();
+        item.player1_score = -1;
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn score_exceeds_game_ceiling_rejected() {
+        let mut item = base_item();
+        // chess max score is 1
+        item.game_id = "chess".to_string();
+        item.player1_score = 2;
+        item.player2_score = 0;
+        item.winner_id = Some(item.player1_id);
+        let err = validate_bulk_match_result(&item).unwrap_err();
+        assert!(err.contains("maximum allowed score"));
+    }
+
+    #[test]
+    fn winner_not_participant_rejected() {
+        let mut item = base_item();
+        item.winner_id = Some(Uuid::new_v4()); // random non-participant
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn draw_requires_no_winner_id() {
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        let mut item = base_item();
+        item.player1_id = p1;
+        item.player2_id = p2;
+        item.player1_score = 3;
+        item.player2_score = 3;
+        item.winner_id = Some(p1); // wrong: draw should have no winner
+        assert!(validate_bulk_match_result(&item).is_err());
+        item.winner_id = None;
+        assert!(validate_bulk_match_result(&item).is_ok());
+    }
+
+    #[test]
+    fn decisive_match_requires_winner_id() {
+        let mut item = base_item();
+        item.winner_id = None;
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn wrong_winner_id_rejected() {
+        let mut item = base_item();
+        // player2 has lower score (5) but is listed as winner
+        item.winner_id = Some(item.player2_id);
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn invalid_proof_url_rejected() {
+        let mut item = base_item();
+        item.proof_url = Some("ftp://not-allowed.com".to_string());
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn valid_proof_url_accepted() {
+        let mut item = base_item();
+        item.proof_url = Some("https://cdn.example.com/proof.mp4".to_string());
+        assert!(validate_bulk_match_result(&item).is_ok());
+    }
+
+    #[test]
+    fn zero_completed_at_rejected() {
+        let mut item = base_item();
+        item.completed_at = Some(0);
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn zero_match_duration_rejected() {
+        let mut item = base_item();
+        item.match_duration = Some(0);
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn short_game_id_rejected() {
+        let mut item = base_item();
+        item.game_id = "x".to_string();
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+
+    #[test]
+    fn empty_game_mode_rejected() {
+        let mut item = base_item();
+        item.game_mode = String::new();
+        assert!(validate_bulk_match_result(&item).is_err());
+    }
+}
