@@ -21,6 +21,23 @@ pub enum TokenError {
     MinterNotFound = 3,
     /// Minter cap must not be negative.
     InvalidMinterConfig = 4,
+    /// Transfers are frozen: the contract is in the emergency-paused state
+    /// (#1368). Admin recovery (`recover`) remains callable while paused.
+    Paused = 5,
+    /// `amount` must be strictly positive.
+    InvalidAmount = 6,
+    /// `from` and `to` resolve to the same address.
+    SelfTransfer = 7,
+    /// Sender does not hold enough balance to cover the transfer/mint.
+    InsufficientBalance = 8,
+    /// `transfer_from` was attempted without a sufficient spender allowance
+    /// (#1368).
+    InsufficientAllowance = 9,
+    /// A transfer or mint would push a recipient's balance above the
+    /// configurable per-wallet cap (#1364). A zero cap disables the check.
+    BalanceCapExceeded = 10,
+    /// Same-sequence re-use detected by the flash-loan guard.
+    FlashLoanDetected = 11,
 }
 
 /// Minimal client for the staking-manager contract, used for composite
@@ -203,6 +220,18 @@ pub enum DataKey {
     FeeTreasury,
     /// Fee split value a governance proposal was created for.
     FeeSplitProposal(u64),
+    // Authorized pauser role (#1368): the address permitted to toggle the
+    // emergency pause independently of the admin. `None` means no dedicated
+    // pauser is configured and only the admin may pause/unpause.
+    Pauser,
+    // ERC20-style spender allowance for `transfer_from` (#1368): keyed by
+    // (owner, spender). Absent ⇒ 0.
+    Allowance(Address, Address),
+    // Configurable per-wallet balance cap (#1364). `0` disables the check.
+    MaxBalancePerWallet,
+    /// Per-wallet balance-cap value a governance proposal was created for
+    /// (#1368) — the only path that may *raise* an existing cap.
+    MaxBalanceCapProposal(u64),
 }
 
 /// Maximum value of `fee_split_bps` (100%).
@@ -287,7 +316,7 @@ impl AxToken {
         let config = Self::charge_minter(env, config, amount)?;
         Self::write_minter(env, &minter, &config);
 
-        Self::mint_internal(env, to, amount);
+        Self::mint_internal(env, to, amount)?;
         Ok(())
     }
 
@@ -421,7 +450,7 @@ impl AxToken {
         Ok(config)
     }
 
-    fn mint_internal(env: &Env, to: Address, amount: i128) {
+    fn mint_internal(env: &Env, to: Address, amount: i128) -> Result<(), TokenError> {
         if amount <= 0 {
             panic!("amount must be positive");
         }
@@ -439,6 +468,10 @@ impl AxToken {
             .checked_add(amount)
             .expect("balance overflow");
 
+        // Per-wallet balance cap (#1364). A zero cap disables the check, so
+        // existing uncapped deployments keep working unchanged.
+        Self::enforce_balance_cap(env, new_balance)?;
+
         env.storage()
             .instance()
             .set(&DataKey::Balance(to.clone()), &new_balance);
@@ -450,6 +483,7 @@ impl AxToken {
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &to), amount);
 
         events::emit_mint(env, &to, amount);
+        Ok(())
     }
 
     /// Mint to many recipients in a single transaction.
@@ -501,10 +535,18 @@ impl AxToken {
             total = total.checked_add(amount).expect("batch total overflow");
 
             let existing = per_recipient_delta.get(to.clone()).unwrap_or(0);
-            per_recipient_delta.set(
-                to,
-                existing.checked_add(amount).expect("batch total overflow"),
-            );
+            let delta_after = existing.checked_add(amount).expect("batch total overflow");
+
+            // Per-wallet balance cap (#1364): evaluate the recipient's
+            // prospective balance before any storage write so a cap breach
+            // aborts the whole batch atomically.
+            let current_balance = Self::balance(env, to.clone());
+            let prospective = current_balance
+                .checked_add(delta_after)
+                .expect("balance overflow");
+            Self::enforce_balance_cap(env, prospective)?;
+
+            per_recipient_delta.set(to, delta_after);
         }
 
         let current_supply = Self::total_supply(env);
@@ -602,12 +644,20 @@ impl AxToken {
         }
 
         let new_from_balance = from_balance - amount;
+        let to_balance = Self::balance(env, to.clone());
+        let new_to_balance = to_balance + amount;
+
+        // Per-wallet balance cap (#1364): a recipient that would exceed the
+        // cap cannot receive more. Checked before any storage write so the
+        // transfer is atomic — a breach leaves both balances untouched.
+        let cap = Self::get_max_balance_per_wallet(env.clone());
+        if cap > 0 && new_to_balance > cap {
+            panic!("balance cap exceeded");
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::Balance(from.clone()), &new_from_balance);
-
-        let to_balance = Self::balance(env, to.clone());
-        let new_to_balance = to_balance + amount;
         env.storage()
             .instance()
             .set(&DataKey::Balance(to.clone()), &new_to_balance);
@@ -616,6 +666,106 @@ impl AxToken {
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &to), amount);
 
         events::emit_transfer(env, &from, &to, amount);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Allowance & operator transfers (#1368)
+    // ---------------------------------------------------------------------------
+
+    /// Approve `spender` to transfer up to `amount` of `owner`'s balance via
+    /// `transfer_from`. `owner` must authorize this call. Re-approval replaces
+    /// the existing allowance rather than accumulating.
+    pub fn approve(env: &Env, owner: Address, spender: Address, amount: i128) {
+        owner.require_auth();
+        if amount < 0 {
+            panic!("amount must not be negative");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Allowance(owner.clone(), spender.clone()), &amount);
+        env.events().publish(
+            (
+                Symbol::new(env, "ArenaXToken_v1"),
+                Symbol::new(env, "APPROVAL"),
+            ),
+            (owner, spender, amount),
+        );
+    }
+
+    /// Current allowance `spender` has to spend on behalf of `owner`.
+    pub fn allowance(env: &Env, owner: Address, spender: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Allowance(owner, spender))
+            .unwrap_or(0)
+    }
+
+    /// Operator-initiated transfer: `spender` moves `amount` from `from` to
+    /// `to`, consuming `from`'s allowance for `spender`.
+    ///
+    /// Like `transfer` this respects the pause and the per-wallet balance cap,
+    /// but — per #1368 — failures surface as [`TokenError`] values instead of
+    /// panics, so callers see a structured `Paused` code when the contract is
+    /// frozen.
+    pub fn transfer_from(
+        env: &Env,
+        spender: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), TokenError> {
+        spender.require_auth();
+
+        if Self::is_paused(env.clone()) {
+            return Err(TokenError::Paused);
+        }
+
+        if amount <= 0 {
+            return Err(TokenError::InvalidAmount);
+        }
+
+        if from == to {
+            return Err(TokenError::SelfTransfer);
+        }
+
+        // Flash loan protection: reject same-sequence re-use
+        if FlashLoanGuard::check_and_set_sequence(env, &from) {
+            return Err(TokenError::FlashLoanDetected);
+        }
+
+        let allowed = Self::allowance(env, from.clone(), spender.clone());
+        if allowed < amount {
+            return Err(TokenError::InsufficientAllowance);
+        }
+
+        let from_balance = Self::balance(env, from.clone());
+        if from_balance < amount {
+            return Err(TokenError::InsufficientBalance);
+        }
+
+        let new_from_balance = from_balance - amount;
+        let to_balance = Self::balance(env, to.clone());
+        let new_to_balance = to_balance + amount;
+
+        // Per-wallet balance cap on the recipient (#1364).
+        Self::enforce_balance_cap(env, new_to_balance)?;
+
+        // All checks passed — commit the state changes atomically.
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &new_from_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &new_to_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Allowance(from.clone(), spender.clone()), &(allowed - amount));
+
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, &from), -amount);
+        Self::checkpoint_add(env, &Self::voting_power_holder(env, &to), amount);
+
+        events::emit_transfer(env, &from, &to, amount);
+        Ok(())
     }
 
     pub fn balance(env: &Env, addr: Address) -> i128 {
@@ -642,13 +792,74 @@ impl AxToken {
     }
 
     // ---------------------------------------------------------------------------
-    // Advanced Features: Emergency Pause Mechanism
+    // Advanced Features: Emergency Pause Mechanism (#1368)
     // ---------------------------------------------------------------------------
 
-    pub fn pause(env: Env, reason: Symbol) {
+    /// Set the dedicated pauser role. Admin-only. Only the pauser (and the
+    /// admin) may call `pause`/`unpause` afterwards, so a governance-appointed
+    /// guardian can respond to an exploit without holding full admin keys.
+    pub fn set_pauser(env: Env, pauser: Address) {
         Self::require_admin(&env);
+        env.storage().instance().set(&DataKey::Pauser, &Some(pauser.clone()));
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PAUSER_SET"),
+            ),
+            pauser,
+        );
+    }
 
-        let admin = Self::get_admin(&env);
+    /// Clear the dedicated pauser role so only the admin may pause/unpause.
+    /// Admin-only.
+    pub fn clear_pauser(env: Env) {
+        Self::require_admin(&env);
+        env.storage().instance().remove(&DataKey::Pauser);
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "PAUSER_CLEARED"),
+            ),
+            (),
+        );
+    }
+
+    /// The configured pauser, or `None` when only the admin may pause.
+    pub fn get_pauser(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Pauser)
+    }
+
+    /// Resolve who is authorized to toggle the pause right now and return the
+    /// address that should be recorded as the actor. Both the admin and the
+    /// configured pauser qualify; if neither authorizes the call, it reverts.
+    /// Uses the non-panishing `requires_auth` so "admin OR pauser" can be
+    /// expressed without one of the two short-circuiting the other.
+    fn require_pauser(env: &Env) -> Address {
+        let admin = Self::get_admin(env);
+        let pauser = Self::get_pauser(env.clone());
+
+        let admin_authed = admin.requires_auth();
+        let pauser_authed = pauser
+            .as_ref()
+            .map(|p| p.requires_auth())
+            .unwrap_or(false);
+
+        if !(admin_authed || pauser_authed) {
+            panic!("not authorized to pause");
+        }
+
+        // Prefer the pauser as the recorded actor when it authorized, so the
+        // audit trail reflects the guardian that actually froze transfers.
+        if pauser_authed {
+            pauser.unwrap()
+        } else {
+            admin
+        }
+    }
+
+    pub fn pause(env: Env, reason: Symbol) {
+        let actor = Self::require_pauser(&env);
+
         let timeout = env
             .storage()
             .instance()
@@ -658,7 +869,7 @@ impl AxToken {
         let info = PauseInfo {
             paused: true,
             paused_at: env.ledger().timestamp(),
-            paused_by: admin.clone(),
+            paused_by: actor.clone(),
             timeout,
             reason: reason.clone(),
         };
@@ -669,9 +880,78 @@ impl AxToken {
         arenax_events::emergency_pause::emit_paused(
             &env,
             &env.current_contract_address(),
-            &admin,
+            &actor,
             &reason,
         );
+    }
+
+    /// Unpause the contract. Requires the same authorized pauser role that
+    /// `pause` does (the admin or the configured pauser), so a freeze can be
+    /// lifted without convening a full governance vote when speed matters
+    /// (#1368).
+    pub fn unpause(env: Env) {
+        Self::require_pauser(&env);
+
+        if let Some(mut info) = env
+            .storage()
+            .instance()
+            .get::<_, PauseInfo>(&DataKey::PauseInfo)
+        {
+            info.paused = false;
+            env.storage().instance().set(&DataKey::PauseInfo, &info);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+
+        arenax_events::emergency_pause::emit_unpaused(
+            &env,
+            &env.current_contract_address(),
+            &Self::get_admin(&env),
+        );
+    }
+
+    /// Emergency recovery: move `amount` of an at-risk holder's balance to a
+    /// safe `to` address. Admin-only and deliberately **not** blocked by the
+    /// pause, so funds can be secured while transfers are frozen (#1368).
+    /// Supply is unchanged (this is a balance move, not a mint/burn) and the
+    /// per-wallet cap is intentionally not enforced — recovery must not be
+    /// gated by a concentration limit it predates.
+    pub fn recover(env: Env, from: Address, to: Address, amount: i128) {
+        Self::require_admin(&env);
+
+        if amount <= 0 {
+            panic!("amount must be positive");
+        }
+        if from == to {
+            panic!("cannot recover to the same address");
+        }
+
+        let from_balance = Self::balance(&env, from.clone());
+        if from_balance < amount {
+            panic!("insufficient balance");
+        }
+
+        let new_from_balance = from_balance - amount;
+        let to_balance = Self::balance(&env, to.clone());
+        let new_to_balance = to_balance + amount;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(from.clone()), &new_from_balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::Balance(to.clone()), &new_to_balance);
+
+        Self::checkpoint_add(&env, &Self::voting_power_holder(&env, &from), -amount);
+        Self::checkpoint_add(&env, &Self::voting_power_holder(&env, &to), amount);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "ArenaXToken_v1"),
+                Symbol::new(&env, "RECOVER"),
+            ),
+            (from.clone(), to.clone(), amount),
+        );
+        events::emit_transfer(&env, &from, &to, amount);
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -810,6 +1090,119 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::Proposal(proposal_id), &proposal);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Advanced Features: Per-Wallet Balance Cap (#1364)
+    // ---------------------------------------------------------------------------
+
+    /// Lower (or initially set, or disable) the per-wallet balance cap.
+    /// Admin-only.
+    ///
+    /// A stored cap of `0` disables the check. The first call may introduce a
+    /// finite cap; once one is set this path can only lower it or disable it.
+    /// Raising an existing cap is governance-only via
+    /// [`Self::set_max_balance_cap_via_governance`].
+    ///
+    /// Lowering the cap never force-reduces an existing holder that already
+    /// exceeds the new limit — it simply prevents that wallet from receiving
+    /// any more (#1364).
+    pub fn set_max_balance_per_wallet(env: Env, cap: i128) {
+        Self::require_admin(&env);
+        if cap < 0 {
+            panic!("balance cap must not be negative");
+        }
+        if cap == 0 {
+            // 0 disables the check.
+            env.storage().instance().set(&DataKey::MaxBalancePerWallet, &0i128);
+            return;
+        }
+        let current = Self::get_max_balance_per_wallet(env.clone());
+        if current > 0 && cap >= current {
+            panic!("balance cap cannot be increased by admin");
+        }
+        env.storage().instance().set(&DataKey::MaxBalancePerWallet, &cap);
+    }
+
+    /// The configured per-wallet balance cap, or `0` when the check is off.
+    pub fn get_max_balance_per_wallet(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxBalancePerWallet)
+            .unwrap_or(0)
+    }
+
+    /// Open a governance proposal to set `max_balance_per_wallet` to
+    /// `new_cap`. The value is bound to the proposal at creation, so the vote
+    /// is on a specific number. This is the only path that may *raise* an
+    /// existing cap.
+    pub fn propose_max_balance_cap(
+        env: Env,
+        proposer: Address,
+        new_cap: i128,
+        voting_duration: u64,
+    ) -> u64 {
+        if new_cap < 0 {
+            panic!("balance cap must not be negative");
+        }
+        let description = String::from_str(&env, "Update max_balance_per_wallet");
+        let proposal_id =
+            Self::create_proposal(env.clone(), proposer, description, voting_duration);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxBalanceCapProposal(proposal_id), &new_cap);
+        proposal_id
+    }
+
+    /// Apply a passed per-wallet balance-cap proposal. This is the only way to
+    /// raise an existing cap. `0` (disabling the check) is a valid outcome.
+    pub fn set_max_balance_cap_via_governance(env: Env, proposal_id: u64) {
+        let new_cap: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxBalanceCapProposal(proposal_id))
+            .expect("not a max balance cap proposal");
+
+        let mut proposal: Proposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if env.ledger().timestamp() <= proposal.end_time {
+            panic!("voting period not ended");
+        }
+        if proposal.votes_for <= proposal.votes_against {
+            panic!("proposal did not pass");
+        }
+        if proposal.executed {
+            panic!("proposal already executed");
+        }
+        if new_cap < 0 {
+            panic!("balance cap must not be negative");
+        }
+
+        proposal.executed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxBalancePerWallet, &new_cap);
+
+        env.events()
+            .publish((symbol_short!("BAL_CAP"), proposal_id), new_cap);
+    }
+
+    /// Enforce the per-wallet cap on a prospective balance. A `0` cap is a
+    /// no-op (the check is disabled). Pure: callers must not have written the
+    /// balance yet, so a rejection leaves state untouched.
+    fn enforce_balance_cap(env: &Env, new_balance: i128) -> Result<(), TokenError> {
+        let cap = Self::get_max_balance_per_wallet(env.clone());
+        if cap > 0 && new_balance > cap {
+            return Err(TokenError::BalanceCapExceeded);
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------------------------
