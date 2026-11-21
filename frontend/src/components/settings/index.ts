@@ -12,3 +12,4 @@ export { ProfileSettings } from "./ProfileSettings";
 export { AvatarUpload } from "./AvatarUpload";
 export { AvatarCropModal } from "./AvatarCropModal";
 export { NotificationPreferencesMatrix } from "./NotificationPreferencesMatrix";
+export { TwoFactorSetup } from "./TwoFactorSetup";

@@ -7,8 +7,12 @@ import {
   applyAccentColor,
   applyCompactMode,
   applyAnimationsEnabled,
+  applyColorblindMode,
+  resolveInitialColorblindMode,
   getAccentColor,
+  getColorblindMode,
   trackStyleEvent,
+  type ColorblindMode,
 } from "@/lib/theme";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,6 +30,10 @@ export interface UseThemeConfigReturn {
   setAnimationsEnabled: (enabled: boolean) => void;
   /** The currently active accent colour (from the DOM attribute). */
   activeAccent: AccentColor;
+  /** Apply a colorblind-safe palette (or "none" to clear it). */
+  setColorblindMode: (mode: ColorblindMode) => void;
+  /** The currently active colorblind mode (from the DOM attribute). */
+  activeColorblindMode: ColorblindMode;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -50,6 +58,7 @@ export function useThemeConfig(): UseThemeConfigReturn {
 
   // Re-read the DOM attribute on mount so the hook stays in sync
   const activeAccent = getAccentColor();
+  const activeColorblindMode = getColorblindMode();
 
   const setMode = useCallback(
     (mode: ThemeMode) => {
@@ -73,6 +82,10 @@ export function useThemeConfig(): UseThemeConfigReturn {
     trackStyleEvent("animations_toggled", String(enabled));
   }, []);
 
+  const setColorblindMode = useCallback((mode: ColorblindMode) => {
+    applyColorblindMode(mode);
+  }, []);
+
   const applySettings = useCallback(
     (settings: ThemeSettings) => {
       setMode(settings.mode);
@@ -92,6 +105,13 @@ export function useThemeConfig(): UseThemeConfigReturn {
     } catch {/* ignore */}
   }, []);
 
+  // On mount: restore the colorblind mode. A saved preference always wins;
+  // otherwise default to the system `forced-colors` media query (#1561).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    applyColorblindMode(resolveInitialColorblindMode());
+  }, []);
+
   return {
     applySettings,
     setMode,
@@ -99,5 +119,7 @@ export function useThemeConfig(): UseThemeConfigReturn {
     setCompactMode,
     setAnimationsEnabled,
     activeAccent,
+    setColorblindMode,
+    activeColorblindMode,
   };
 }

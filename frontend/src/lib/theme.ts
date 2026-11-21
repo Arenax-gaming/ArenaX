@@ -10,7 +10,9 @@
  * - Style analytics tracking
  */
 
-import type { AccentColor, ThemeMode } from "@/types/settings";
+import type { AccentColor, ThemeMode, AccessibilityOptions } from "@/types/settings";
+
+export type ColorblindMode = AccessibilityOptions["colorblindMode"];
 
 // ─── Design token map ─────────────────────────────────────────────────────────
 
@@ -124,6 +126,87 @@ export function applyCompactMode(enabled: boolean): void {
   trackStyleEvent("compact_mode", String(enabled));
 }
 
+// ─── Colorblind mode (#1561) ──────────────────────────────────────────────────
+//
+// Applied as a `data-colorblind` attribute on <html>, mirroring how
+// `data-accent` drives the accent-colour overrides above. The CSS rules
+// live in globals.css and remap --success/--destructive/--warning/--info
+// to colorblind-safe hues so every win/loss/status indicator that reads
+// from those tokens updates immediately, with no reload required.
+
+const COLORBLIND_STORAGE_KEY = "arenax_colorblind_mode";
+
+/**
+ * Applies a colorblind-safe palette by setting `data-colorblind` on <html>
+ * and persisting the choice to localStorage so it survives page refreshes.
+ */
+export function applyColorblindMode(mode: ColorblindMode): void {
+  if (typeof document === "undefined") return;
+  if (mode === "none") {
+    document.documentElement.removeAttribute("data-colorblind");
+  } else {
+    document.documentElement.setAttribute("data-colorblind", mode);
+  }
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(COLORBLIND_STORAGE_KEY, mode);
+    }
+  } catch {
+    /* localStorage unavailable (private mode, SSR, etc.) — ignore */
+  }
+  trackStyleEvent("colorblind_mode_changed", mode);
+}
+
+/** Returns the currently applied colorblind mode from the DOM attribute. */
+export function getColorblindMode(): ColorblindMode {
+  if (typeof document === "undefined") return "none";
+  return (
+    (document.documentElement.getAttribute(
+      "data-colorblind",
+    ) as ColorblindMode | null) ?? "none"
+  );
+}
+
+/** Returns the persisted colorblind mode from localStorage, if any. */
+export function getStoredColorblindMode(): ColorblindMode | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(
+      COLORBLIND_STORAGE_KEY,
+    ) as ColorblindMode | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the browser/OS has an active `forced-colors` mode (e.g. Windows
+ * High Contrast). Used so the colorblind toggle can default sensibly for
+ * users who already rely on system-level colour accommodations.
+ */
+export function prefersForcedColors(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  try {
+    return window.matchMedia("(forced-colors: active)").matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves the colorblind mode to apply on initial load:
+ * 1. A previously saved user choice always wins.
+ * 2. Otherwise, if the system reports `forced-colors: active`, default to
+ *    the most common correction (deuteranopia) so colour is never relied
+ *    on alone for a user who has already signalled a vision accommodation.
+ * 3. Otherwise, no correction is applied.
+ */
+export function resolveInitialColorblindMode(): ColorblindMode {
+  const stored = getStoredColorblindMode();
+  if (stored) return stored;
+  return prefersForcedColors() ? "deuteranopia" : "none";
+}
+
 // ─── Animations ──────────────────────────────────────────────────────────────
 
 export function applyAnimationsEnabled(enabled: boolean): void {
@@ -235,7 +318,8 @@ export type StyleEventType =
   | "accent_changed"
   | "compact_mode"
   | "animations_toggled"
-  | "responsive_breakpoint";
+  | "responsive_breakpoint"
+  | "colorblind_mode_changed";
 
 export interface StyleAnalyticsEntry {
   type: StyleEventType;

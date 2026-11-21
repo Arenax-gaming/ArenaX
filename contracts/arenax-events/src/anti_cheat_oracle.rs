@@ -287,3 +287,22 @@ pub fn emit_proof_batch_verified(env: &Env, batch_id: u64, oracle: &Address, siz
     }
     .publish(env);
 }
+
+/// Emitted when a confirmation is queried after its `valid_until` ledger
+/// sequence has passed (#1556) — the stale result is rejected rather than
+/// returned to the caller.
+#[contractevent(topics = ["AntiCheatOracle", "RESULT_EXPIRED"])]
+pub struct ResultExpired {
+    pub player: Address,
+    pub match_id: u64,
+    pub valid_until: u32,
+}
+
+pub fn emit_result_expired(env: &Env, player: &Address, match_id: u64, valid_until: u32) {
+    ResultExpired {
+        player: player.clone(),
+        match_id,
+        valid_until,
+    }
+    .publish(env);
+}

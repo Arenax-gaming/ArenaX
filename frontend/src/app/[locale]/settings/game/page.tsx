@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { ArrowLeft, User, Gamepad2, Bell, Lock, Accessibility, Palette, Keyboard } from "lucide-react";
+import { ArrowLeft, User, Gamepad2, Bell, Lock, Accessibility, Palette, Keyboard, ShieldCheck } from "lucide-react";
 import { useSettings } from "@/hooks/useSettings";
 import { GamePreferences } from "@/components/settings/GamePreferences";
 
@@ -12,6 +12,13 @@ const navigationItems = [
     label: "Account",
     description: "Email, password, and security",
     icon: User,
+    active: false,
+  },
+  {
+    href: "/settings/security",
+    label: "Security",
+    description: "Two-factor authentication",
+    icon: ShieldCheck,
     active: false,
   },
   {

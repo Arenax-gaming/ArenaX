@@ -1,6 +1,7 @@
 #![no_std]
 
 mod error;
+mod expiry;
 mod storage;
 
 use arenax_events::anti_cheat as anticheat_events;
@@ -41,6 +42,12 @@ const DEFAULT_MIN_SUBMIT_INTERVAL: u64 = 10; // 10 seconds
 const DEFAULT_MAX_READINGS: u32 = 100;
 const DEFAULT_GOVERNANCE_QUORUM: u32 = 2;
 const PROPOSAL_TTL: u64 = 604_800; // 7 days
+
+// ─── Result expiry (#1556) ────────────────────────────────────────────────────
+/// Default validity window (in ledgers, ~5s each) applied to confirmations
+/// derived internally from `resolve_alert`, which has no caller-supplied
+/// `valid_until`. Roughly 7 days: 604_800s / 5s per ledger.
+const DEFAULT_RESULT_VALIDITY_LEDGERS: u32 = 120_960;
 
 // ─── Detection thresholds ─────────────────────────────────────────────────────
 const ANOMALY_ML_DEFAULT_THRESHOLD: i64 = 75; // score > 75 → alert
@@ -550,12 +557,18 @@ impl AntiCheatOracle {
     /// Legacy entry-point kept for callers that still use the v1 interface.
     /// Internally it validates, stores a confirmation, and calls the reputation
     /// contract (same behaviour as before).
+    ///
+    /// `valid_until` is the ledger sequence after which this result expires
+    /// (#1556). It is rejected outright if it is already in the past; an
+    /// oracle can extend an existing result's validity by resubmitting the
+    /// same `(player, match_id)` with a later `valid_until`.
     pub fn submit_flag(
         env: Env,
         oracle: Address,
         player: Address,
         match_id: u64,
         severity: u32,
+        valid_until: u32,
     ) -> Result<(), AntiCheatError> {
         oracle.require_auth();
         Self::require_oracle(&env, &oracle)?;
@@ -564,6 +577,7 @@ impl AntiCheatOracle {
         if severity == 0 || severity > 3 {
             return Err(AntiCheatError::InvalidSeverity);
         }
+        expiry::validate_valid_until(&env, valid_until)?;
 
         let penalty: i128 = match severity {
             1 => PENALTY_LOW,
@@ -582,6 +596,7 @@ impl AntiCheatOracle {
             oracle: oracle.clone(),
             feed_id: 0,
             alert_id: 0,
+            valid_until,
         };
         env.storage().persistent().set(
             &DataKey::Confirmation(player.clone(), match_id),
@@ -605,14 +620,29 @@ impl AntiCheatOracle {
         Ok(())
     }
 
+    /// Consume a confirmation result (#1556).
+    ///
+    /// Returns `ConfirmationNotFound` if none was ever submitted for this
+    /// `(player, match_id)`. Returns `ResultExpired` — and emits
+    /// `result_expired` — once the current ledger sequence has passed the
+    /// result's `valid_until`, so a stale result can never be replayed.
     pub fn get_confirmation(
         env: Env,
         player: Address,
         match_id: u64,
-    ) -> Option<AntiCheatConfirmation> {
-        env.storage()
+    ) -> Result<AntiCheatConfirmation, AntiCheatError> {
+        let confirmation: AntiCheatConfirmation = env
+            .storage()
             .persistent()
-            .get(&DataKey::Confirmation(player, match_id))
+            .get(&DataKey::Confirmation(player.clone(), match_id))
+            .ok_or(AntiCheatError::ConfirmationNotFound)?;
+
+        if expiry::is_expired(&env, confirmation.valid_until) {
+            events::emit_result_expired(&env, &player, match_id, confirmation.valid_until);
+            return Err(AntiCheatError::ResultExpired);
+        }
+
+        Ok(confirmation)
     }
 
     /// Alias kept for callers that used the old `add_authorized_oracle` name.
@@ -823,6 +853,13 @@ impl AntiCheatOracle {
                 oracle: alert.oracle.clone(),
                 feed_id: alert.feed_id,
                 alert_id,
+                // Alert-derived confirmations aren't resubmitted by an
+                // oracle with an explicit valid_until, so they get the
+                // default validity window from the current ledger (#1556).
+                valid_until: env
+                    .ledger()
+                    .sequence()
+                    .saturating_add(DEFAULT_RESULT_VALIDITY_LEDGERS),
             };
             env.storage().persistent().set(
                 &DataKey::Confirmation(alert.player.clone(), alert.match_id),

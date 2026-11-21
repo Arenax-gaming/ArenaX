@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Eye, EyeOff, Shield, Mail, User, Lock, Check } from "lucide-react";
+import { Eye, EyeOff, Shield, Mail, User, Lock, Check, ChevronRight } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -12,7 +13,7 @@ import {
   CardDescription,
 } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Switch } from "@/components/ui/Switch";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Form,
   FormControl,
@@ -42,6 +43,7 @@ export function AccountSettings({
   isSaving,
   getFieldError,
 }: AccountSettingsProps) {
+  const { twoFactorEnabled } = useAuth();
   const [showPasswords, setShowPasswords] = useState({
     current: false,
     new: false,
@@ -328,49 +330,39 @@ export function AccountSettings({
               )}
             </div>
 
-            {/* Two-Factor Authentication */}
-            <FormField
-              control={form.control}
-              name="twoFactorEnabled"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`p-2 rounded-lg ${
-                          field.value ? "bg-success/10" : "bg-muted"
-                        }`}
-                      >
-                        <Shield
-                          className={`h-5 w-5 ${
-                            field.value ? "text-success" : "text-muted-foreground"
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">
-                          Two-Factor Authentication
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {field.value
-                            ? "Enabled"
-                            : "Add extra security to your account"}
-                        </p>
-                      </div>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={(checked) => {
-                          field.onChange(checked);
-                          onUpdate({ twoFactorEnabled: checked });
-                        }}
-                      />
-                    </FormControl>
-                  </div>
-                </FormItem>
-              )}
-            />
+            {/* Two-Factor Authentication — links out to the dedicated TOTP
+                setup flow on the Security settings page (#1560) rather than
+                a bare toggle, since enabling 2FA requires QR scanning and
+                code confirmation, not a single boolean. */}
+            <Link
+              href="/settings/security"
+              className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border hover:bg-muted/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-2 rounded-lg ${
+                    twoFactorEnabled ? "bg-success/10" : "bg-muted"
+                  }`}
+                >
+                  <Shield
+                    className={`h-5 w-5 ${
+                      twoFactorEnabled ? "text-success" : "text-muted-foreground"
+                    }`}
+                  />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">
+                    Two-Factor Authentication
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {twoFactorEnabled
+                      ? "Enabled"
+                      : "Add extra security to your account"}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
 
             {/* Root form error */}
             {form.formState.errors.root && (
