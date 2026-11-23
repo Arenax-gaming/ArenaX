@@ -1,4 +1,4 @@
-# Contributing to ArenaX
+# Contributing to ArenaX gaming
 
 ## Branches
 
