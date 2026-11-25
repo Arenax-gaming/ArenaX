@@ -77,7 +77,7 @@ pub async fn get_game_metrics(
     let svc = AnalyticsService::new(db.get_ref().clone());
     match svc.get_game_metrics(path.into_inner()).await? {
         Some(m) => Ok(HttpResponse::Ok().json(m)),
-        None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "no metrics found"}))),
+        None => Err(ApiError::not_found("Game metrics not found")),
     }
 }
 
@@ -99,7 +99,7 @@ pub async fn get_player_insights(
     // requesting_user_id == target for self-service; admin check omitted for brevity
     match svc.get_player_insights(user_id, user_id, false, query.game_id).await? {
         Some(i) => Ok(HttpResponse::Ok().json(i)),
-        None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "no data"}))),
+        None => Err(ApiError::not_found("Player insights not found")),
     }
 }
 

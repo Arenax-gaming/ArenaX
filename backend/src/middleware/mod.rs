@@ -38,7 +38,9 @@ pub use rate_limit::RateLimitMiddleware;
 pub use security::SecurityMiddleware;
 pub use security_headers::security_headers;
 pub use tenant_context::{with_tenant_scope, TenantContext};
-pub use tracing_middleware::{correlation_id, CorrelationId, RequestTracing};
+pub use tracing_middleware::{
+    correlation_id, current_request_id, scope_request_id, CorrelationId, RequestTracing,
+};
 
 use actix_cors::Cors;
 use actix_web::dev::ServiceRequest;

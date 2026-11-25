@@ -260,17 +260,28 @@ async fn main() -> io::Result<()> {
     // Response cache for read-heavy endpoints — Issue #910
     let response_cache = crate::middleware::cache::ResponseCache::new(redis_conn.clone());
 
-    // Weekly→monthly leaderboard rollup — Issue #1226
+    // Weekly→monthly leaderboard rollup — Issue #1226, and the season-end
+    // staking snapshot that runs with it — Issue #1524.
     {
         let monthly = crate::service::monthly_leaderboard::MonthlyLeaderboardService::new(
             redis_conn.clone(),
         );
+        let snapshot_pool = db_pool.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
             loop {
                 interval.tick().await;
                 if let Err(error) = monthly.rollup_completed_weeks().await {
                     tracing::warn!(%error, "monthly leaderboard rollup failed");
+                }
+                match monthly.take_season_end_snapshots(&snapshot_pool).await {
+                    Ok(0) => {}
+                    Ok(rows) => {
+                        tracing::info!(rows, "staking snapshot taken for closed seasons")
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "season-end staking snapshot job failed")
+                    }
                 }
             }
         });
@@ -386,7 +397,40 @@ async fn main() -> io::Result<()> {
 
     // Anti-cheat microservice (#1281): screenshot + telemetry analysis,
     // suspicious-activity flagging, and PostgreSQL/Stellar result logging.
-    let gameplay_analysis = Arc::new(GameplayAnalysis::new(Some(event_bus.clone())));
+    //
+    // Detection rules are admin-editable rows (#1525). The cache is seeded from
+    // the database and refreshed every 60 seconds by the task below.
+    let anti_cheat_config_store = Arc::new(
+        crate::service::anti_cheat_config::AntiCheatConfigStore::new(
+            crate::service::anti_cheat_config::RULE_REFRESH_INTERVAL,
+            Arc::new(crate::service::anti_cheat_config::DefaultConfigProvider),
+        ),
+    );
+    // Load the admin-editable rules at startup; a database that has not been
+    // migrated yet falls back to the compiled-in defaults.
+    match crate::service::anti_cheat_config::AntiCheatConfig::load_from_db(&db_pool).await {
+        Ok(loaded) => anti_cheat_config_store.set_config(loaded),
+        Err(error) => tracing::warn!(
+            %error,
+            "anti-cheat rules unavailable at startup; using compiled-in defaults"
+        ),
+    }
+    {
+        let store = anti_cheat_config_store.clone();
+        let pool = db_pool.clone();
+        tokio::spawn(async move {
+            store
+                .refresh_loop(
+                    pool,
+                    crate::service::anti_cheat_config::RULE_REFRESH_INTERVAL,
+                )
+                .await;
+        });
+    }
+    let gameplay_analysis = Arc::new(
+        GameplayAnalysis::new(Some(event_bus.clone()))
+            .with_config(anti_cheat_config_store.clone()),
+    );
     let stellar_reporter: Arc<dyn crate::service::StellarReporter> =
         Arc::new(LoggingStellarReporter::new());
     let anti_cheat_service = Arc::new(AntiCheatService::new(
@@ -458,6 +502,19 @@ async fn main() -> io::Result<()> {
             .app_data(web::Data::new(anti_cheat_service.clone()))
             .app_data(web::Data::new(telemetry_upload_service.clone()))
             .app_data(web::Data::new(reputation_penalty_service.clone()))
+            .app_data(web::Data::new(anti_cheat_config_store.clone()))
+            // Malformed bodies/parameters are answered through `ApiError` so
+            // the response is the same JSON error envelope as every handler
+            // (Issue #1523).
+            .app_data(
+                web::JsonConfig::default().error_handler(crate::api_error::json_error_handler),
+            )
+            .app_data(
+                web::QueryConfig::default().error_handler(crate::api_error::query_error_handler),
+            )
+            .app_data(
+                web::PathConfig::default().error_handler(crate::api_error::path_error_handler),
+            )
             .wrap(TenantContextMiddleware)
             .wrap(IdempotencyMiddleware::new(redis_conn.clone(), idempotency_policy.clone()))
             .wrap(RateLimitMiddleware::new(redis_conn.clone(), rate_limit_config.clone()))
@@ -575,6 +632,8 @@ async fn main() -> io::Result<()> {
                             .route("/unstake/{user_id}", web::delete().to(crate::http::staking_handler::unstake))
                             .route("/position/{user_id}", web::get().to(crate::http::staking_handler::get_position))
                             .route("/stats", web::get().to(crate::http::staking_handler::get_staking_stats))
+                            // Season-end staking snapshot, admin review (#1524)
+                            .route("/snapshots/{season_id}", web::get().to(crate::http::staking_handler::get_season_snapshots))
                     )
                     // Analytics endpoints
                     .service(
@@ -669,11 +728,16 @@ async fn main() -> io::Result<()> {
             .configure(crate::http::cache_handler::configure)
             // Audit log endpoints — Issue #863 / #1066
             .configure(crate::http::audit_handler::configure)
+            // Runtime anti-cheat rule editing — Issue #1525
+            .configure(crate::http::anti_cheat_handler::configure_admin)
             // Tournament sponsorship packages and admin endpoints — Issue #1419
             .configure(crate::service::sponsored_tokens::configure)
             .configure(crate::service::sponsored_tokens::configure_admin)
             .configure(crate::realtime::user_ws::configure_ws_route)
             .configure(crate::service::chat::configure)
+            // Unmatched routes answer the uniform JSON 404 envelope instead of
+            // actix's plain-text default (Issue #1523).
+            .default_service(web::to(crate::api_error::not_found_handler))
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run();

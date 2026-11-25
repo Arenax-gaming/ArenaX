@@ -570,6 +570,20 @@ impl LeaderboardService {
             .map_err(|e| ApiError::DatabaseError(e))?;
         }
 
+        // Freeze staking positions at the moment the season closes
+        // (Issue #1524). Positions keep changing afterwards, so season-end
+        // leaderboard maths must read this copy, not `staking_positions`.
+        let staking_snapshot = crate::service::staking_service::StakingService::new(
+            self.db_pool.clone(),
+        )
+        .take_staking_snapshot(season_id)
+        .await?;
+        tracing::info!(
+            %season_id,
+            rows = staking_snapshot.rows_snapshotted,
+            "staking snapshot taken at season close"
+        );
+
         // Soft-reset every rated player of this game 10% toward the 1200
         // baseline (floor 800). Decayed in Rust via `decay_elo` (unit-tested
         // below) rather than in raw SQL, so the formula itself is verifiable

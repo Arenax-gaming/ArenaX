@@ -11,31 +11,52 @@ use crate::service::gameplay_analysis::{AnalysisError, GameplayAnalysis, IngestR
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Score one frame using the provided [`AntiCheatConfig`] instead of the
-/// hardcoded constants in `gameplay_analysis::infer()`.
+/// One rule that fired for a frame, with the threshold it crossed.
 ///
-/// Returns `(score, reasons)` where `score` is capped at 100 and `reasons`
-/// lists the human-readable labels of every rule that fired.
-pub fn score_frame_with_config(frame: &TelemetryFrame, config: &AntiCheatConfig) -> (u8, Vec<String>) {
+/// Carried alongside the score so the caller can log *which* rule flagged a
+/// session and at what threshold (Issue #1525), not just the total score.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleHit {
+    pub name: String,
+    pub weight: u8,
+    pub threshold: u32,
+    pub reason: String,
+}
+
+fn hit(rule: &crate::service::anti_cheat_config::RuleConfig, reason: &str) -> RuleHit {
+    RuleHit {
+        name: rule.name.clone(),
+        weight: rule.weight,
+        threshold: rule.threshold,
+        reason: reason.to_string(),
+    }
+}
+
+/// Score one frame using the provided [`AntiCheatConfig`], returning every rule
+/// that fired with its threshold.
+pub fn score_frame_with_config_detailed(
+    frame: &TelemetryFrame,
+    config: &AntiCheatConfig,
+) -> (u8, Vec<RuleHit>) {
     let mut score: u32 = 0;
-    let mut reasons: Vec<String> = Vec::new();
+    let mut hits: Vec<RuleHit> = Vec::new();
 
     // --- Reaction rules (mutually exclusive: inhuman takes priority) ----------
     if let Some(rule) = config.rules.get("reaction_inhuman") {
         if rule.enabled && frame.reaction_ms < rule.threshold {
             score += rule.weight as u32;
-            reasons.push("reaction below human floor".to_string());
+            hits.push(hit(rule, "reaction below human floor"));
         } else if let Some(fast_rule) = config.rules.get("reaction_fast") {
             if fast_rule.enabled && frame.reaction_ms < fast_rule.threshold {
                 score += fast_rule.weight as u32;
-                reasons.push("reaction faster than expected".to_string());
+                hits.push(hit(fast_rule, "reaction faster than expected"));
             }
         }
     } else if let Some(fast_rule) = config.rules.get("reaction_fast") {
         // inhuman rule absent — still check fast rule independently
         if fast_rule.enabled && frame.reaction_ms < fast_rule.threshold {
             score += fast_rule.weight as u32;
-            reasons.push("reaction faster than expected".to_string());
+            hits.push(hit(fast_rule, "reaction faster than expected"));
         }
     }
 
@@ -43,17 +64,17 @@ pub fn score_frame_with_config(frame: &TelemetryFrame, config: &AntiCheatConfig)
     if let Some(rule) = config.rules.get("accuracy_extreme") {
         if rule.enabled && frame.accuracy_bps > rule.threshold {
             score += rule.weight as u32;
-            reasons.push("accuracy above 95%".to_string());
+            hits.push(hit(rule, "accuracy above 95%"));
         } else if let Some(high_rule) = config.rules.get("accuracy_high") {
             if high_rule.enabled && frame.accuracy_bps > high_rule.threshold {
                 score += high_rule.weight as u32;
-                reasons.push("accuracy above 85%".to_string());
+                hits.push(hit(high_rule, "accuracy above 85%"));
             }
         }
     } else if let Some(high_rule) = config.rules.get("accuracy_high") {
         if high_rule.enabled && frame.accuracy_bps > high_rule.threshold {
             score += high_rule.weight as u32;
-            reasons.push("accuracy above 85%".to_string());
+            hits.push(hit(high_rule, "accuracy above 85%"));
         }
     }
 
@@ -61,17 +82,17 @@ pub fn score_frame_with_config(frame: &TelemetryFrame, config: &AntiCheatConfig)
     if let Some(rule) = config.rules.get("snap_extreme") {
         if rule.enabled && frame.snap_deg_per_sec > rule.threshold {
             score += rule.weight as u32;
-            reasons.push("snap faster than 1440 deg/s".to_string());
+            hits.push(hit(rule, "snap faster than 1440 deg/s"));
         } else if let Some(fast_rule) = config.rules.get("snap_fast") {
             if fast_rule.enabled && frame.snap_deg_per_sec > fast_rule.threshold {
                 score += fast_rule.weight as u32;
-                reasons.push("snap faster than 720 deg/s".to_string());
+                hits.push(hit(fast_rule, "snap faster than 720 deg/s"));
             }
         }
     } else if let Some(fast_rule) = config.rules.get("snap_fast") {
         if fast_rule.enabled && frame.snap_deg_per_sec > fast_rule.threshold {
             score += fast_rule.weight as u32;
-            reasons.push("snap faster than 720 deg/s".to_string());
+            hits.push(hit(fast_rule, "snap faster than 720 deg/s"));
         }
     }
 
@@ -79,7 +100,7 @@ pub fn score_frame_with_config(frame: &TelemetryFrame, config: &AntiCheatConfig)
     if let Some(rule) = config.rules.get("speed_hack") {
         if rule.enabled && frame.speed_milli > frame.speed_limit_milli {
             score += rule.weight as u32;
-            reasons.push("speed above the game limit".to_string());
+            hits.push(hit(rule, "speed above the game limit"));
         }
     }
 
@@ -87,11 +108,24 @@ pub fn score_frame_with_config(frame: &TelemetryFrame, config: &AntiCheatConfig)
     if let Some(rule) = config.rules.get("input_scripted") {
         if rule.enabled && frame.entropy_bps < rule.threshold {
             score += rule.weight as u32;
-            reasons.push("input entropy looks scripted".to_string());
+            hits.push(hit(rule, "input entropy looks scripted"));
         }
     }
 
-    ((score.min(100)) as u8, reasons)
+    ((score.min(100)) as u8, hits)
+}
+
+/// Score one frame using the provided [`AntiCheatConfig`] instead of the
+/// hardcoded constants in `gameplay_analysis::infer()`.
+///
+/// Returns `(score, reasons)` where `score` is capped at 100 and `reasons`
+/// lists the human-readable labels of every rule that fired.
+pub fn score_frame_with_config(
+    frame: &TelemetryFrame,
+    config: &AntiCheatConfig,
+) -> (u8, Vec<String>) {
+    let (score, hits) = score_frame_with_config_detailed(frame, config);
+    (score, hits.into_iter().map(|hit| hit.reason).collect())
 }
 
 /// Wrapper around [`GameplayAnalysis`] that uses [`AntiCheatConfigStore`] for
@@ -124,8 +158,25 @@ impl ConfigurableGameplayAnalysis {
         frame: TelemetryFrame,
     ) -> Result<IngestResult, AnalysisError> {
         let config = self.config_store.get();
-        let (score, reasons) = score_frame_with_config(&frame, &config);
+        let (score, hits) = score_frame_with_config_detailed(&frame, &config);
         let alert = score >= config.flag_threshold;
+
+        if alert {
+            for hit in &hits {
+                tracing::warn!(
+                    match_id = %frame.match_id,
+                    player_id = %frame.player_id,
+                    rule = %hit.name,
+                    threshold = hit.threshold,
+                    weight = hit.weight,
+                    score,
+                    flag_threshold = config.flag_threshold,
+                    "gameplay session flagged by anti-cheat rule"
+                );
+            }
+        }
+
+        let reasons: Vec<String> = hits.into_iter().map(|hit| hit.reason).collect();
 
         // Run the inner engine for sequence / sample / alert bookkeeping.
         // We discard its IngestResult fields and substitute our own.
@@ -425,5 +476,47 @@ mod tests {
             matches!(err, Err(AnalysisError::Replay)),
             "duplicate sequence must be rejected"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Issue #1525: the flag log needs the matched rule and its threshold
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn detailed_scoring_reports_the_matched_rule_and_threshold() {
+        let config = AntiCheatConfig::default();
+        let frame = make_frame(1, 85);
+
+        let (score, hits) = score_frame_with_config_detailed(&frame, &config);
+
+        assert_eq!(score, 30, "reaction_fast carries weight 30");
+        let hit = hits
+            .iter()
+            .find(|hit| hit.name == "reaction_fast")
+            .expect("reaction_fast must be reported");
+        assert_eq!(hit.threshold, 90);
+        assert_eq!(hit.weight, 30);
+    }
+
+    #[test]
+    fn disabling_a_rule_removes_its_weight() {
+        let mut config = AntiCheatConfig::default();
+        config.rules.get_mut("reaction_fast").unwrap().enabled = false;
+
+        let frame = make_frame(1, 85);
+        let (score, hits) = score_frame_with_config_detailed(&frame, &config);
+
+        assert_eq!(score, 0);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn a_custom_threshold_changes_when_the_rule_fires() {
+        let mut config = AntiCheatConfig::default();
+        config.rules.get_mut("reaction_fast").unwrap().threshold = 80;
+
+        // 85ms is no longer "fast" once the admin lowers the threshold to 80ms.
+        let (score, _) = score_frame_with_config_detailed(&make_frame(1, 85), &config);
+        assert_eq!(score, 0);
     }
 }

@@ -40,6 +40,28 @@ pub struct StakingStats {
     pub staker_count: i64,
 }
 
+/// Result of one season's staking snapshot run (Issue #1524).
+#[derive(Debug, Clone, Serialize)]
+pub struct StakingSnapshotOutcome {
+    pub season_id: Uuid,
+    /// Rows written. Zero means the snapshot already existed.
+    pub rows_snapshotted: u64,
+    pub snapshot_at: chrono::DateTime<Utc>,
+}
+
+/// One immutable staking position recorded for a season.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct StakingSnapshotRow {
+    pub id: Uuid,
+    pub season_id: Uuid,
+    pub user_id: Uuid,
+    pub stellar_address: String,
+    pub staked_amount: i64,
+    pub tier: String,
+    pub governance_weight: i64,
+    pub snapshot_at: chrono::DateTime<Utc>,
+}
+
 // ─── DB row ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, sqlx::FromRow)]
@@ -205,6 +227,87 @@ impl StakingService {
             annual_rate_bps: 1200,
             staker_count: row.staker_count.unwrap_or(0),
         })
+    }
+
+    // ── Season-end snapshots (Issue #1524) ───────────────────────────────────
+
+    /// Copy every active staker's position for `season_id` into
+    /// `staking_snapshots`.
+    ///
+    /// Idempotent: `(season_id, user_id)` is unique and the insert uses
+    /// `ON CONFLICT DO NOTHING`, so a re-run reports zero new rows instead of
+    /// duplicating positions. The table's trigger rejects later updates and
+    /// deletes.
+    pub async fn take_staking_snapshot(
+        &self,
+        season_id: Uuid,
+    ) -> Result<StakingSnapshotOutcome, ApiError> {
+        self.ensure_season_exists(season_id).await?;
+
+        let snapshot_at = Utc::now();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO staking_snapshots
+                (season_id, user_id, stellar_address, staked_amount, tier,
+                 governance_weight, snapshot_at)
+            SELECT $1, user_id, stellar_address, staked_amount, tier,
+                   governance_weight, $2
+            FROM staking_positions
+            WHERE staked_amount > 0
+            ON CONFLICT (season_id, user_id) DO NOTHING
+            "#,
+        )
+        .bind(season_id)
+        .bind(snapshot_at)
+        .execute(&self.db)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(StakingSnapshotOutcome {
+            season_id,
+            rows_snapshotted: result.rows_affected(),
+            snapshot_at,
+        })
+    }
+
+    /// Read every snapshot row for `season_id`, largest position first.
+    ///
+    /// Returns `RESOURCE_NOT_FOUND` when the season itself does not exist;
+    /// an existing season with no snapshots returns an empty list.
+    pub async fn get_snapshots(
+        &self,
+        season_id: Uuid,
+    ) -> Result<Vec<StakingSnapshotRow>, ApiError> {
+        self.ensure_season_exists(season_id).await?;
+
+        sqlx::query_as::<_, StakingSnapshotRow>(
+            r#"
+            SELECT id, season_id, user_id, stellar_address, staked_amount, tier,
+                   governance_weight, snapshot_at
+            FROM staking_snapshots
+            WHERE season_id = $1
+            ORDER BY staked_amount DESC, user_id ASC
+            "#,
+        )
+        .bind(season_id)
+        .fetch_all(&self.db)
+        .await
+        .map_err(ApiError::database_error)
+    }
+
+    async fn ensure_season_exists(&self, season_id: Uuid) -> Result<(), ApiError> {
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM seasons WHERE id = $1)")
+                .bind(season_id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(ApiError::database_error)?;
+
+        if exists {
+            Ok(())
+        } else {
+            Err(ApiError::not_found("Season not found"))
+        }
     }
 }
 
