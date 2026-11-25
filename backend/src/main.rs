@@ -94,9 +94,8 @@ async fn main() -> io::Result<()> {
         }
     });
 
-    // Spawn the Reaper — forfeits players who miss the reporting deadline
-    let reaper = Arc::new(ReaperService::new(db_pool.clone()));
-    reaper.run();
+    // ReaperService is wired and spawned below once push and leaderboard
+    // services are ready so inactivity ELO decay can notify & sync ranks.
 
     // Create Redis client (placeholder)
     // let redis_client = redis::Client::open(config.redis.url.clone()).unwrap();
@@ -347,6 +346,51 @@ async fn main() -> io::Result<()> {
         )
     };
 
+    // Shared PushNotificationService (FCM v1 with in-app fallback) wired into
+    // both HTTP `/api/push/*` routes and ReaperService inactivity ELO decay.
+    let push_service = {
+        let project_id = std::env::var("FCM_PROJECT_ID")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let service_account_json = std::env::var("FCM_SERVICE_ACCOUNT_JSON")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let fcm_config = match (project_id, service_account_json) {
+            (Some(project_id), Some(service_account_json)) => Some(crate::service::FcmConfig {
+                project_id,
+                service_account_json,
+            }),
+            (Some(_), None) | (None, Some(_)) => {
+                tracing::warn!(
+                    "Only one of FCM_PROJECT_ID / FCM_SERVICE_ACCOUNT_JSON is set; push notifications will fall back to in-app notifications"
+                );
+                None
+            }
+            (None, None) => None,
+        };
+        Arc::new(crate::service::PushNotificationService::new(fcm_config))
+    };
+
+    // Spawn the Reaper — forfeits players who miss the reporting deadline and
+    // applies inactivity ELO decay (Issue #1533) with push notifications and
+    // leaderboard cache/rank synchronization.
+    {
+        let reaper_leaderboard = Arc::new(
+            crate::service::LeaderboardService::new(db_pool.clone())
+                .with_cache(response_cache.clone())
+                .with_broadcaster(leaderboard_broadcaster.clone())
+                .with_sync(leaderboard_sync.clone()),
+        );
+        let reaper = Arc::new(
+            ReaperService::new(db_pool.clone())
+                .with_push_service(push_service.clone())
+                .with_leaderboard_service(reaper_leaderboard),
+        );
+        reaper.run();
+    }
+
     // Initialize Auth Services for Realtime
     let jwt_config = crate::auth::jwt_service::JwtConfig::from_config(
         config.auth.jwt_secret.clone(),
@@ -451,6 +495,7 @@ async fn main() -> io::Result<()> {
             // Match authority service + protocol signer for on-chain match lifecycle
             .app_data(web::Data::new(batch_service.clone()))
             .app_data(web::Data::new(notification_service.clone()))
+            .app_data(web::Data::new(push_service.clone()))
             .app_data(web::Data::new(match_authority_service.clone()))
             .app_data(web::Data::new(match_events.clone()))
             .app_data(web::Data::new(protocol_signer_secret.clone()))

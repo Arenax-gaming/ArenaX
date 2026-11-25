@@ -115,7 +115,9 @@ pub struct UserElo {
     pub win_streak: i32,
     pub loss_streak: i32,
     pub last_updated: DateTime<Utc>,
+    #[sqlx(default)]
     pub created_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
     pub updated_at: Option<DateTime<Utc>>,
 }
 

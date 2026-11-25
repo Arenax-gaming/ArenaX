@@ -19,6 +19,7 @@ pub mod gameplay_analysis;
 pub mod governance_service;
 pub mod idempotency_service;
 pub mod idempotency_tests;
+pub mod elo_decay;
 pub mod elo_history_tests;
 pub mod leaderboard_service;
 pub mod leaderboard_snapshot_job;
@@ -61,6 +62,11 @@ pub use anti_cheat_service::{
 };
 pub use audit_service::{AuditAction, AuditEntryInput, AuditFilter, AuditService};
 pub use dispute_service::DisputeService;
+pub use elo_decay::{
+    AppliedEloDecay, DecayEvaluation, DecaySweepBatch, DecaySweepSummary, EloDecayConfig,
+    PendingDecayNotification, PlayerDecayState, DECAY_INTERVAL_DAYS,
+    DECAY_POINTS_PER_INTERVAL, ELO_DECAY_FLOOR, INACTIVITY_GRACE_PERIOD_DAYS,
+};
 pub use feature_flags::FeatureFlagService;
 pub use governance_service::{
     CreateProposalDto, GovernanceService, GovernanceServiceError, ProposalRecord,
