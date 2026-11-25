@@ -270,7 +270,7 @@ function RosterSlot({
   onClear: () => void;
   onKeyboardAssign: () => void;
 }) {
-  const ref = useRef<HTMLLIElement>(null);
+  const ref = useRef<HTMLLIElement | null>(null);
 
   const [{ isOver, canDrop }, dropRef] = useDrop<DragItem, void, { isOver: boolean; canDrop: boolean }>(
     () => ({

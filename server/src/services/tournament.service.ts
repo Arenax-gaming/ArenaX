@@ -695,7 +695,7 @@ export class TournamentService {
 
         await prisma.tournamentMatch.update({
           where: { id: round[i].id },
-          data: { metadata: { bracket: 'winners', winnerTo, loserTo } satisfies DoubleEliminationMatchMetadata },
+          data: { metadata: { bracket: 'winners', winnerTo, loserTo } as any },
         });
       }
     }
@@ -721,7 +721,7 @@ export class TournamentService {
 
         await prisma.tournamentMatch.update({
           where: { id: round[i].id },
-          data: { metadata: { bracket: 'losers', winnerTo } satisfies DoubleEliminationMatchMetadata },
+          data: { metadata: { bracket: 'losers', winnerTo } as any },
         });
       }
     }

@@ -23,6 +23,7 @@ const EVENT_LABELS: Record<StyleEventType, string> = {
   compact_mode: "Compact",
   animations_toggled: "Animations",
   responsive_breakpoint: "Breakpoint",
+  colorblind_mode_changed: "Colorblind",
 };
 
 const EVENT_COLOURS: Record<StyleEventType, string> = {
@@ -31,6 +32,7 @@ const EVENT_COLOURS: Record<StyleEventType, string> = {
   compact_mode: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
   animations_toggled: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   responsive_breakpoint: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
+  colorblind_mode_changed: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
 };
 
 // ─── Token preview ────────────────────────────────────────────────────────────

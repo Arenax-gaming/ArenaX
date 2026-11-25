@@ -159,6 +159,10 @@ export function MatchInvitePageClient() {
     );
   }
 
+  if (state.phase !== "ready") {
+    return null;
+  }
+
   const { invite } = state;
 
   return (

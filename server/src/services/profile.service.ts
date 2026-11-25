@@ -175,7 +175,7 @@ const registerProfileModerationHandler = (() => {
                     if (!item) return;
 
                     if (item.flagged) {
-                        const { NotificationService } = await import('./notification.service');
+                        const { NotificationService } = await import('./notification.service.js');
                         await NotificationService.notifyWebhook({
                             type: 'PROFILE_MODERATION_FLAGGED',
                             payload: {
@@ -263,7 +263,7 @@ export const updateMyProfile = async (
     // didn't intend to touch.
     const pendingContent: PendingProfileContent = {
         bio: input.bio !== undefined ? input.bio : current.bio ?? undefined,
-        socials: input.socials !== undefined ? input.socials : toSocialLinks(current.socials),
+        socials: (input.socials !== undefined ? input.socials : toSocialLinks(current.socials)) as Record<string, string>,
         avatarUrl: input.avatarUrl !== undefined ? input.avatarUrl : current.avatarUrl ?? undefined
     };
 

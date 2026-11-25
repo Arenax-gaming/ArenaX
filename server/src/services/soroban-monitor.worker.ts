@@ -132,7 +132,7 @@ export class SorobanMonitorWorker {
     private async _finalise(
         txHash: string,
         userId: string | null,
-        status: TxStatus.SUCCESS | TxStatus.FAILED,
+        status: 'SUCCESS' | 'FAILED',
         error?: string,
     ): Promise<void> {
         await this._updateStatus(txHash, status, error);
@@ -150,7 +150,7 @@ export class SorobanMonitorWorker {
         logger.warn('Soroban transaction monitoring timed out — marking EXPIRED', {
             txHash, userId, event: 'tx_expired',
         });
-        await this._updateStatus(txHash, TxStatus.EXPIRED as unknown as TxStatus, 'Transaction finality timeout');
+        await this._updateStatus(txHash, 'FAILED' as unknown as TxStatus, 'Transaction finality timeout');
 
         // #1388 — Notify the user their transaction expired.
         pushUserEvent(userId, {
