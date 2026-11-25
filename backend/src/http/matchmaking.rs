@@ -1,6 +1,7 @@
 use crate::api_error::ApiError;
 use crate::auth::Claims;
 use crate::db::DbPool;
+use crate::middleware::matchmaking_throttle::{check_join, refill, RedisJoinThrottle};
 use crate::models::matchmaker::*;
 use crate::service::matchmaker::{MatchmakerService, EloEngine, MatchmakingConfig, QueueEntry};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
@@ -99,6 +100,11 @@ pub async fn join_queue(
     let game = request.game.clone();
     let game_mode = request.game_mode.clone();
 
+    // One join per user per 30 seconds (#1522). Checked before any queue work
+    // so a flooding client costs one Redis round-trip.
+    let throttle = RedisJoinThrottle::new(matchmaker.redis_conn());
+    check_join(&throttle, user_id).await?;
+
     // Check if user is already in queue
     match matchmaker.is_user_in_queue(user_id, &game, &game_mode).await {
         Ok(Some(_)) => {
@@ -178,6 +184,10 @@ pub async fn leave_queue(
     {
         return Err(e.into());
     }
+
+    // A player-initiated cancel refills their join token immediately.
+    let mut conn = matchmaker.redis_conn();
+    refill(&mut conn, user_id).await;
 
     update_database_queue_status(&db_pool, user_id, &game, &game_mode).await?;
 

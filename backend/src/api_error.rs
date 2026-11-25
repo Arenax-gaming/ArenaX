@@ -140,6 +140,10 @@ struct ErrorResponse {
     error: String,
     code: u16,
     details: Option<String>,
+    /// Seconds until a throttled caller may retry. Present only on 429s, so
+    /// every other error keeps its existing body shape.
+    #[serde(rename = "retryAfterSeconds", skip_serializing_if = "Option::is_none")]
+    retry_after_seconds: Option<u64>,
     /// Per-field failures. Omitted entirely for non-validation errors so the
     /// response shape stays unchanged for every existing consumer.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -195,6 +199,11 @@ impl ResponseError for ApiError {
             code: status.as_u16(),
             // Never echo internal details (DB errors, stack traces, etc.) back to the client.
             details: None,
+            // Only throttling errors tell the caller how long to wait.
+            retry_after_seconds: match self {
+                ApiError::TooManyRequests { retry_after, .. } => Some(*retry_after),
+                _ => None,
+            },
             // Field errors are the exception: they describe the caller's own
             // input, so returning them leaks nothing and is the only way the
             // caller can fix the request.
