@@ -8,6 +8,7 @@ use crate::middleware::cache::{keys as cache_keys, policies as cache_policies, R
 use crate::realtime::leaderboard_broadcaster::{LeaderboardBroadcaster, RankObservation};
 use chrono::{DateTime, Utc, Duration};
 use sqlx::PgPool;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -586,7 +587,23 @@ impl LeaderboardService {
         for (user_id, current_rating) in &ratings {
             let new_rating = decay_elo(*current_rating);
             sqlx::query(
-                "UPDATE user_elo SET current_rating = $1 WHERE game = $2 AND user_id = $3",
+                r#"
+                UPDATE user_elo
+                SET current_rating = $1,
+                    decay_intervals_applied = CASE
+                        WHEN last_ranked_match_at IS NOT NULL THEN GREATEST(
+                            decay_intervals_applied,
+                            FLOOR(
+                                GREATEST(
+                                    EXTRACT(EPOCH FROM (NOW() - last_ranked_match_at)) / 86400.0 - 30.0,
+                                    0.0
+                                ) / 7.0
+                            )::int
+                        )
+                        ELSE decay_intervals_applied
+                    END
+                WHERE game = $2 AND user_id = $3
+                "#,
             )
             .bind(new_rating)
             .bind(&season.game)
@@ -648,6 +665,107 @@ impl LeaderboardService {
         .await
         .map_err(|e| ApiError::DatabaseError(e))
     }
+
+    /// Sync `all_time` leaderboard ratings and recompute category-wide ranks
+    /// in place (avoiding duplicate `period_start` rows and stale overtaken
+    /// ranks), invalidate Redis caches, and broadcast rank deltas for players
+    /// whose ratings were reduced by inactivity ELO decay (Issue #1533).
+    pub async fn sync_decayed_players(
+        &self,
+        affected_players: &[(String, Uuid)],
+    ) -> Result<usize, ApiError> {
+        let grouped = group_affected_players_by_category(affected_players);
+        let mut synced = 0usize;
+
+        for (category, player_ids) in grouped {
+            // Recompute ratings and ranks in place for all existing `all_time`
+            // rows in this category so overtaken players move up atomically
+            // without inserting duplicate `all_time` rows.
+            let update_res = sqlx::query(
+                r#"
+                WITH ranked AS (
+                    SELECT
+                        user_id,
+                        current_rating,
+                        (RANK() OVER (ORDER BY current_rating DESC))::int AS new_ranking
+                    FROM user_elo
+                    WHERE game = $1
+                      AND user_id IS NOT NULL
+                )
+                UPDATE leaderboards l
+                SET elo_rating = r.current_rating,
+                    ranking    = r.new_ranking,
+                    updated_at = NOW()
+                FROM ranked r
+                WHERE l.game    = $1
+                  AND l.period  = 'all_time'
+                  AND l.user_id = r.user_id
+                  AND (l.elo_rating IS DISTINCT FROM r.current_rating
+                       OR l.ranking IS DISTINCT FROM r.new_ranking)
+                "#,
+            )
+            .bind(&category)
+            .execute(&self.db_pool)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+
+            // Invalidate all cached pages of this board and each decayed player.
+            if let Some(cache) = &self.cache {
+                let mut tags = Vec::with_capacity(player_ids.len() + 1);
+                tags.push(cache_keys::leaderboard_tag(&category));
+                for player_id in &player_ids {
+                    tags.push(cache_keys::player_tag(player_id));
+                }
+                cache.invalidate_tags(&tags).await;
+            }
+
+            // Broadcast & publish updated rank observations for decayed players.
+            let updated_rows = sqlx::query_as::<_, (Uuid, i32, i32)>(
+                r#"
+                SELECT DISTINCT ON (user_id) user_id, ranking, elo_rating
+                FROM leaderboards
+                WHERE game = $1
+                  AND period = 'all_time'
+                  AND user_id = ANY($2)
+                ORDER BY user_id, updated_at DESC
+                "#,
+            )
+            .bind(&category)
+            .bind(&player_ids)
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+
+            for (user_id, ranking, elo_rating) in updated_rows {
+                self.broadcast_rank(
+                    &category,
+                    RankObservation {
+                        user_id,
+                        ranking,
+                        elo_rating,
+                    },
+                )
+                .await;
+
+                if let Some(sync) = &self.sync {
+                    if let Err(error) = sync
+                        .publish_rank(&category, user_id, ranking, elo_rating)
+                        .await
+                    {
+                        tracing::warn!(%error, "failed to publish decayed leaderboard update");
+                    }
+                }
+            }
+
+            if let Some(broadcaster) = &self.broadcaster {
+                broadcaster.flush(&category).await;
+            }
+
+            synced += update_res.rows_affected() as usize;
+        }
+
+        Ok(synced)
+    }
 }
 
 const ELO_BASELINE: f64 = 1200.0;
@@ -671,6 +789,24 @@ fn next_season_name(current: &str) -> String {
         Ok(n) => format!("{prefix}{}", n + 1),
         Err(_) => format!("{current} 2"),
     }
+}
+
+
+/// Group and deduplicate `(category, user_id)` pairs by category while
+/// preserving first-seen player order within each category.
+pub(crate) fn group_affected_players_by_category(
+    affected_players: &[(String, Uuid)],
+) -> BTreeMap<String, Vec<Uuid>> {
+    let mut grouped: BTreeMap<String, Vec<Uuid>> = BTreeMap::new();
+    let mut seen: HashSet<(&str, Uuid)> = HashSet::new();
+
+    for (category, user_id) in affected_players {
+        if seen.insert((category.as_str(), *user_id)) {
+            grouped.entry(category.clone()).or_default().push(*user_id);
+        }
+    }
+
+    grouped
 }
 
 #[cfg(test)]
@@ -719,5 +855,28 @@ mod season_close_tests {
     fn decay_never_drops_below_the_floor() {
         assert_eq!(decay_elo(0), ELO_MINIMUM);
         assert_eq!(decay_elo(-500), ELO_MINIMUM);
+    }
+
+    #[test]
+    fn groups_and_deduplicates_decayed_players_by_category() {
+        use super::group_affected_players_by_category;
+        use uuid::Uuid;
+
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        let p3 = Uuid::new_v4();
+
+        let input = vec![
+            ("chess".to_string(), p1),
+            ("poker".to_string(), p2),
+            ("chess".to_string(), p1), // duplicate
+            ("chess".to_string(), p3),
+        ];
+
+        let grouped = group_affected_players_by_category(&input);
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped.get("chess"), Some(&vec![p1, p3]));
+        assert_eq!(grouped.get("poker"), Some(&vec![p2]));
+        assert!(group_affected_players_by_category(&[]).is_empty());
     }
 }

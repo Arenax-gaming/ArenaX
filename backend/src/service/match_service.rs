@@ -515,12 +515,11 @@ impl MatchService {
         user_id: Uuid,
         game: &str,
     ) -> Result<EloResponse, ApiError> {
-        let elo_record = sqlx::query_as!(
-            UserElo,
+        let elo_record = sqlx::query_as::<_, UserElo>(
             "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
         )
+        .bind(user_id)
+        .bind(game)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?
@@ -556,12 +555,11 @@ impl MatchService {
     // Private helper methods
 
     async fn get_user_elo(&self, user_id: Uuid, game: &str) -> Result<i32, ApiError> {
-        let elo_record = sqlx::query_as!(
-            UserElo,
+        let elo_record = sqlx::query_as::<_, UserElo>(
             "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
         )
+        .bind(user_id)
+        .bind(game)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -955,7 +953,17 @@ impl MatchService {
         match_record: &Match,
         winner_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
+        let is_ranked = match_record.match_type == MatchType::Ranked;
         if match_record.player2_id.is_none() {
+            if is_ranked {
+                crate::service::player_stats_service::PlayerStatsService::reset_inactivity_timer_with_pool(
+                    &self.db_pool,
+                    match_record.player1_id,
+                    &match_record.game_mode,
+                    match_record.completed_at.unwrap_or_else(Utc::now),
+                )
+                .await?;
+            }
             return Ok(()); // Bye match, no Elo update needed
         }
 
@@ -988,23 +996,27 @@ impl MatchService {
             MatchResult::Draw
         };
 
-        // Update player 1 Elo
+        // Update player 1 Elo (and atomically reset inactivity tracking on ranked matches)
         self.update_user_elo(
             match_record.player1_id,
             &match_record.game_mode,
             new_player1_elo,
             player1_result,
+            is_ranked,
         )
         .await?;
 
-        // Update player 2 Elo
-        self.update_user_elo(
-            match_record.player2_id.unwrap(),
-            &match_record.game_mode,
-            new_player2_elo,
-            player2_result,
-        )
-        .await?;
+        // Update player 2 Elo (and atomically reset inactivity tracking on ranked matches)
+        if let Some(p2_id) = match_record.player2_id {
+            self.update_user_elo(
+                p2_id,
+                &match_record.game_mode,
+                new_player2_elo,
+                player2_result,
+                is_ranked,
+            )
+            .await?;
+        }
 
         // Update match record with new Elo ratings
         sqlx::query!(
@@ -1067,14 +1079,14 @@ impl MatchService {
         game: &str,
         new_elo: i32,
         result: MatchResult,
+        is_ranked: bool,
     ) -> Result<(), ApiError> {
         // Get current Elo record
-        let current_elo = sqlx::query_as!(
-            UserElo,
+        let current_elo = sqlx::query_as::<_, UserElo>(
             "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-            user_id,
-            game
         )
+        .bind(user_id)
+        .bind(game)
         .fetch_optional(&self.db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?;
@@ -1096,25 +1108,49 @@ impl MatchService {
                 MatchResult::Draw => (0, 0), // Draws reset both streaks
             };
 
-            sqlx::query!(
+            let now = Utc::now();
+            sqlx::query(
                 r#"
                 UPDATE user_elo
-                SET current_rating = $1, peak_rating = $2, games_played = games_played + 1,
-                    wins = $3, losses = $4, draws = $5, win_streak = $6, loss_streak = $7,
-                    last_updated = $8
+                SET current_rating          = $1,
+                    peak_rating             = $2,
+                    games_played            = games_played + 1,
+                    wins                    = $3,
+                    losses                  = $4,
+                    draws                   = $5,
+                    win_streak              = $6,
+                    loss_streak             = $7,
+                    last_updated            = $8,
+                    last_ranked_match_at    = CASE
+                        WHEN $11 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $8) THEN $8
+                        ELSE last_ranked_match_at
+                    END,
+                    last_decay_at           = CASE
+                        WHEN $11 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $8) THEN NULL
+                        ELSE last_decay_at
+                    END,
+                    decay_intervals_applied = CASE
+                        WHEN $11 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $8) THEN 0
+                        ELSE decay_intervals_applied
+                    END,
+                    decay_notified          = CASE
+                        WHEN $11 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $8) THEN FALSE
+                        ELSE decay_notified
+                    END
                 WHERE user_id = $9 AND game = $10
                 "#,
-                new_elo,
-                peak_rating,
-                wins,
-                losses,
-                draws,
-                win_streak,
-                loss_streak,
-                Utc::now(),
-                user_id,
-                game
             )
+            .bind(new_elo)
+            .bind(peak_rating)
+            .bind(wins)
+            .bind(losses)
+            .bind(draws)
+            .bind(win_streak)
+            .bind(loss_streak)
+            .bind(now)
+            .bind(user_id)
+            .bind(game)
+            .bind(is_ranked)
             .execute(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -1132,28 +1168,32 @@ impl MatchService {
                 MatchResult::Draw => (0, 0),
             };
 
-            sqlx::query!(
+            let now = Utc::now();
+            let last_ranked = if is_ranked { Some(now) } else { None };
+            sqlx::query(
                 r#"
                 INSERT INTO user_elo (
                     id, user_id, game, current_rating, peak_rating, games_played,
-                    wins, losses, draws, win_streak, loss_streak, last_updated
+                    wins, losses, draws, win_streak, loss_streak, last_updated,
+                    last_ranked_match_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
                 )
                 "#,
-                Uuid::new_v4(),
-                user_id,
-                game,
-                new_elo,
-                new_elo,
-                1,
-                wins,
-                losses,
-                draws,
-                win_streak,
-                loss_streak,
-                Utc::now()
             )
+            .bind(Uuid::new_v4())
+            .bind(user_id)
+            .bind(game)
+            .bind(new_elo)
+            .bind(new_elo)
+            .bind(1i32)
+            .bind(wins)
+            .bind(losses)
+            .bind(draws)
+            .bind(win_streak)
+            .bind(loss_streak)
+            .bind(now)
+            .bind(last_ranked)
             .execute(&self.db_pool)
             .await
             .map_err(|e| ApiError::database_error(e))?;
@@ -2162,6 +2202,9 @@ impl MatchService {
         let match_record = self.get_match_by_id(dispute.match_id).await?;
         self.update_match_status(match_record.id, match_record.status, MatchStatus::Completed)
             .await?;
+        if winner_id.is_none() && match_record.match_type == MatchType::Ranked {
+            self.reset_ranked_inactivity_for_match(&match_record).await;
+        }
         self.notify_dispute_participants(
             &match_record,
             Uuid::nil(),
@@ -2211,6 +2254,9 @@ impl MatchService {
         let match_record = self.get_match_by_id(dispute.match_id).await?;
         self.update_match_status(match_record.id, match_record.status, MatchStatus::Completed)
             .await?;
+        if match_record.match_type == MatchType::Ranked {
+            self.reset_ranked_inactivity_for_match(&match_record).await;
+        }
         self.notify_dispute_participants(
             &match_record,
             Uuid::nil(),
@@ -2221,6 +2267,29 @@ impl MatchService {
 
         tracing::info!("Dispute {} rejected by admin {}", dispute_id, admin_id);
         Ok(dispute)
+    }
+
+    async fn reset_ranked_inactivity_for_match(&self, match_record: &Match) {
+        let now = Utc::now();
+        for player_id in std::iter::once(match_record.player1_id)
+            .chain(match_record.player2_id.into_iter())
+        {
+            if let Err(e) = crate::service::player_stats_service::PlayerStatsService::reset_inactivity_timer_with_pool(
+                &self.db_pool,
+                player_id,
+                &match_record.game_mode,
+                now,
+            )
+            .await
+            {
+                tracing::warn!(
+                    match_id = %match_record.id,
+                    player_id = %player_id,
+                    error = %e,
+                    "Failed to reset ranked inactivity timer on dispute completion"
+                );
+            }
+        }
     }
 
     /// Start a match (transition from scheduled to in_progress)

@@ -14,6 +14,10 @@
 //! snapshot query so it stays fast at scale.
 
 use crate::api_error::ApiError;
+use crate::service::elo_decay::{
+    evaluate_player_decay, AppliedEloDecay, DecaySweepBatch, EloDecayConfig,
+    PendingDecayNotification, PlayerDecayState,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -511,5 +515,259 @@ impl PlayerStatsService {
 
         Ok(BatchPlayerStatsResponse { players })
     }
-}
 
+    // ── 6. Inactivity ELO decay persistence & ranked-match reset (Issue #1533) ─
+
+    /// Scan `user_elo` rows with at least one unapplied 7-day decay interval
+    /// past the 30-day grace period, evaluate pure decay math, and persist new
+    /// ratings using an optimistic CAS predicate so concurrent ranked matches
+    /// or multi-replica sweeps can never clobber post-match ratings.
+    pub async fn apply_inactivity_elo_decay(
+        &self,
+        now: DateTime<Utc>,
+        config: &EloDecayConfig,
+    ) -> Result<DecaySweepBatch, ApiError> {
+        if !config.is_valid() {
+            return Ok(DecaySweepBatch::default());
+        }
+
+        let Some(min_inactive_days) = config
+            .grace_period_days
+            .checked_add(config.interval_days)
+            .and_then(chrono::Duration::try_days)
+        else {
+            return Ok(DecaySweepBatch::default());
+        };
+        let cutoff = now - min_inactive_days;
+
+        #[derive(sqlx::FromRow)]
+        struct CandidateRow {
+            id: Uuid,
+            user_id: Uuid,
+            game: String,
+            current_rating: i32,
+            last_ranked_match_at: DateTime<Utc>,
+            last_decay_at: Option<DateTime<Utc>>,
+            decay_intervals_applied: i32,
+            decay_notified: bool,
+        }
+
+        // Uses exact 86,400-second day math in `bigint` (matching `elo_decay.rs`
+        // with zero `int4` overflow or session-timezone DST drift) and bounds each
+        // sweep with `LIMIT` so initial backfills never starve the Reaper loop.
+        let candidates = sqlx::query_as::<_, CandidateRow>(
+            r#"
+            SELECT
+                id,
+                user_id,
+                game,
+                current_rating,
+                last_ranked_match_at,
+                last_decay_at,
+                decay_intervals_applied,
+                decay_notified
+            FROM user_elo
+            WHERE user_id IS NOT NULL
+              AND last_ranked_match_at IS NOT NULL
+              AND last_ranked_match_at <= $1
+              AND current_rating > $2
+              AND EXTRACT(EPOCH FROM ($5 - last_ranked_match_at))
+                  >= ($3::numeric + $4::numeric * (GREATEST(decay_intervals_applied, 0)::numeric + 1)) * 86400
+            ORDER BY last_ranked_match_at ASC
+            LIMIT $6
+            "#,
+        )
+        .bind(cutoff)
+        .bind(config.floor_elo)
+        .bind(config.grace_period_days)
+        .bind(config.interval_days)
+        .bind(now)
+        .bind(crate::service::elo_decay::DEFAULT_DECAY_SWEEP_BATCH_SIZE)
+        .fetch_all(&self.db)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let candidates_scanned = candidates.len();
+        let mut applied = Vec::new();
+
+        for row in candidates {
+            let state = PlayerDecayState {
+                user_elo_id: row.id,
+                user_id: row.user_id,
+                game: row.game.clone(),
+                current_rating: row.current_rating,
+                last_ranked_match_at: row.last_ranked_match_at,
+                last_decay_at: row.last_decay_at,
+                decay_intervals_applied: row.decay_intervals_applied,
+                decay_notified: row.decay_notified,
+            };
+
+            let eval = evaluate_player_decay(&state, now, config);
+            if eval.actual_deduction <= 0 {
+                continue;
+            }
+
+            // Optimistic CAS guard: if a concurrent ranked match or another
+            // replica modified this row since SELECT, rows_affected() == 0 and
+            // we skip without overwriting or emitting a false notification.
+            let res = sqlx::query(
+                r#"
+                UPDATE user_elo
+                SET current_rating          = $1,
+                    last_decay_at           = $2,
+                    decay_intervals_applied = $3
+                WHERE id = $4
+                  AND current_rating = $5
+                  AND decay_intervals_applied = $6
+                  AND last_ranked_match_at = $7
+                "#,
+            )
+            .bind(eval.new_rating)
+            .bind(now)
+            .bind(eval.new_intervals_applied)
+            .bind(row.id)
+            .bind(row.current_rating)
+            .bind(row.decay_intervals_applied)
+            .bind(row.last_ranked_match_at)
+            .execute(&self.db)
+            .await;
+
+            match res {
+                Ok(done) if done.rows_affected() == 1 => {
+                    applied.push(AppliedEloDecay {
+                        user_elo_id: row.id,
+                        user_id: row.user_id,
+                        game: row.game,
+                        previous_rating: eval.previous_rating,
+                        new_rating: eval.new_rating,
+                        points_deducted: eval.actual_deduction,
+                        intervals_applied: eval.new_intervals_applied,
+                        last_decay_at: now,
+                        should_notify_first_decay: eval.should_notify_first_decay,
+                    });
+                }
+                Ok(_) => {
+                    tracing::debug!(
+                        user_elo_id = %row.id,
+                        user_id = %row.user_id,
+                        "Skipped ELO decay CAS update due to concurrent row modification"
+                    );
+                }
+                Err(e) => {
+                    // Isolate per-row DB errors so already-committed rows still
+                    // receive notifications and leaderboard synchronization.
+                    tracing::warn!(
+                        user_elo_id = %row.id,
+                        user_id = %row.user_id,
+                        error = %e,
+                        "Failed to persist ELO decay for row; continuing sweep"
+                    );
+                }
+            }
+        }
+
+        Ok(DecaySweepBatch {
+            candidates_scanned,
+            applied,
+        })
+    }
+
+    /// Find decayed rows whose first-decay push notification was not yet marked
+    /// delivered (for example after a transient delivery failure or crash),
+    /// including rows that hit the 100-ELO floor on their first deduction.
+    pub async fn find_pending_first_decay_notifications(
+        &self,
+    ) -> Result<Vec<PendingDecayNotification>, ApiError> {
+        #[derive(sqlx::FromRow)]
+        struct PendingRow {
+            id: Uuid,
+            user_id: Uuid,
+            game: String,
+            current_rating: i32,
+            last_decay_at: DateTime<Utc>,
+        }
+
+        let rows = sqlx::query_as::<_, PendingRow>(
+            r#"
+            SELECT id, user_id, game, current_rating, last_decay_at
+            FROM user_elo
+            WHERE user_id IS NOT NULL
+              AND last_decay_at IS NOT NULL
+              AND decay_intervals_applied > 0
+              AND decay_notified = FALSE
+            ORDER BY last_decay_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(crate::service::elo_decay::DEFAULT_DECAY_SWEEP_BATCH_SIZE)
+        .fetch_all(&self.db)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| PendingDecayNotification {
+                user_elo_id: r.id,
+                user_id: r.user_id,
+                game: r.game,
+                current_rating: r.current_rating,
+                last_decay_at: r.last_decay_at,
+            })
+            .collect())
+    }
+
+    /// Record that the first-decay push notification has been delivered for
+    /// this inactivity spell. Guarded by `last_decay_at` so a concurrent ranked
+    /// match reset cannot be overwritten by a late notification callback.
+    pub async fn mark_decay_notified(
+        &self,
+        user_elo_id: Uuid,
+        expected_last_decay_at: DateTime<Utc>,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+            UPDATE user_elo
+            SET decay_notified = TRUE
+            WHERE id = $1
+              AND decay_intervals_applied > 0
+              AND last_decay_at = $2
+            "#,
+        )
+        .bind(user_elo_id)
+        .bind(expected_last_decay_at)
+        .execute(&self.db)
+        .await
+        .map_err(ApiError::database_error)?;
+        Ok(())
+    }
+
+    /// Pool-level helper so match completion paths (`MatchService`, `EloEngine`,
+    /// `ReaperService` ranked forfeits/byes) can monotonically reset inactivity
+    /// tracking without duplicating SQL.
+    pub async fn reset_inactivity_timer_with_pool(
+        db: &PgPool,
+        user_id: Uuid,
+        game: &str,
+        match_completed_at: DateTime<Utc>,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+            UPDATE user_elo
+            SET last_ranked_match_at    = $1,
+                last_decay_at           = NULL,
+                decay_intervals_applied = 0,
+                decay_notified          = FALSE
+            WHERE user_id = $2
+              AND game = $3
+              AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $1)
+            "#,
+        )
+        .bind(match_completed_at)
+        .bind(user_id)
+        .bind(game)
+        .execute(db)
+        .await
+        .map_err(ApiError::database_error)?;
+        Ok(())
+    }
+}

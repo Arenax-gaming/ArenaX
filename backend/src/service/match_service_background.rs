@@ -243,12 +243,11 @@ impl crate::service::match_service::MatchService {
 
     /// Static helper to get user Elo (for use in static context)
     async fn get_user_elo_static(db_pool: &DbPool, user_id: Uuid, game_mode: &str) -> Result<i32, ApiError> {
-        let elo = sqlx::query_as!(
-            UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game_mode = $2",
-            user_id,
-            game_mode
+        let elo = sqlx::query_as::<_, UserElo>(
+            "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
         )
+        .bind(user_id)
+        .bind(game_mode)
         .fetch_optional(db_pool)
         .await
         .map_err(|e| ApiError::database_error(e))?

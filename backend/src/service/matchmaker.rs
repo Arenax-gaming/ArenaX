@@ -830,28 +830,75 @@ impl EloEngine {
             match_record.player2_id.unwrap_or_default(),
         );
 
-        sqlx::query!(
-            "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-            new_elo1,
-            Utc::now(),
-            match_record.player1_id,
-            match_record.game_mode
+        let now = Utc::now();
+        let is_ranked = match_record.match_type == MatchType::Ranked;
+
+        sqlx::query(
+            r#"
+            UPDATE user_elo
+            SET current_rating          = $1,
+                last_updated            = $2,
+                last_ranked_match_at    = CASE
+                    WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN $2
+                    ELSE last_ranked_match_at
+                END,
+                last_decay_at           = CASE
+                    WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN NULL
+                    ELSE last_decay_at
+                END,
+                decay_intervals_applied = CASE
+                    WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN 0
+                    ELSE decay_intervals_applied
+                END,
+                decay_notified          = CASE
+                    WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN FALSE
+                    ELSE decay_notified
+                END
+            WHERE user_id = $3 AND game = $4
+            "#,
         )
+        .bind(new_elo1)
+        .bind(now)
+        .bind(match_record.player1_id)
+        .bind(&match_record.game_mode)
+        .bind(is_ranked)
         .execute(db_pool)
         .await
-        .map_err(|e| ApiError::database_error(e))?;
+        .map_err(ApiError::database_error)?;
 
         if let Some(p2_id) = match_record.player2_id {
-            sqlx::query!(
-                "UPDATE user_elo SET current_rating = $1, updated_at = $2 WHERE user_id = $3 AND game = $4",
-                new_elo2,
-                Utc::now(),
-                p2_id,
-                match_record.game_mode
+            sqlx::query(
+                r#"
+                UPDATE user_elo
+                SET current_rating          = $1,
+                    last_updated            = $2,
+                    last_ranked_match_at    = CASE
+                        WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN $2
+                        ELSE last_ranked_match_at
+                    END,
+                    last_decay_at           = CASE
+                        WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN NULL
+                        ELSE last_decay_at
+                    END,
+                    decay_intervals_applied = CASE
+                        WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN 0
+                        ELSE decay_intervals_applied
+                    END,
+                    decay_notified          = CASE
+                        WHEN $5 AND (last_ranked_match_at IS NULL OR last_ranked_match_at <= $2) THEN FALSE
+                        ELSE decay_notified
+                    END
+                WHERE user_id = $3 AND game = $4
+                "#,
             )
+            .bind(new_elo2)
+            .bind(now)
+            .bind(p2_id)
+            .bind(&match_record.game_mode)
+            .bind(is_ranked)
             .execute(db_pool)
             .await
-            .map_err(|e| ApiError::database_error(e))?;
+            .map_err(ApiError::database_error)?;
         }
 
         let mut player2_id = None;

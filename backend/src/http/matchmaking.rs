@@ -356,12 +356,11 @@ pub async fn get_elo(
         .map_err(|_| ApiError::unauthorized("Invalid user ID in token"))?;
     let game = path.into_inner();
 
-    let elo_record = sqlx::query_as!(
-        UserElo,
+    let elo_record = sqlx::query_as::<_, UserElo>(
         "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
     )
+    .bind(user_id)
+    .bind(&game)
     .fetch_optional(db_pool.as_ref())
     .await
     .map_err(|e| ApiError::database_error(e))?;
@@ -455,12 +454,11 @@ pub async fn get_elo_history(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn get_user_elo(db_pool: &DbPool, user_id: Uuid, game: &str) -> Result<UserElo, ApiError> {
-    sqlx::query_as!(
-        UserElo,
+    sqlx::query_as::<_, UserElo>(
         "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
-        user_id,
-        game
     )
+    .bind(user_id)
+    .bind(game)
     .fetch_one(db_pool)
     .await
     .map_err(|e| ApiError::database_error(e))
