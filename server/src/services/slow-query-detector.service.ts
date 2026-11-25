@@ -57,7 +57,7 @@ export function recordQueryExecution(
     query: truncateQuery(query),
   };
 
-  if (durationMs >= ERROR_THRESHOLD_MS) {
+  if (durationMs > ERROR_THRESHOLD_MS) {
     logger.error('Very slow query detected', logPayload);
   } else {
     logger.warn('Slow query detected', logPayload);
