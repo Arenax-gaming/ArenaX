@@ -88,6 +88,37 @@ Response `200`:
 
 > Both tokens are rotated on refresh. Store the new pair and discard the old ones.
 
+### Suspension status is baked into the token
+
+Access tokens carry a `suspended` boolean claim describing the player's
+suspension status **at the moment the token was issued**. Requests presenting a
+token with `suspended: true` are rejected before they reach a handler:
+
+```http
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "Player is suspended",
+  "code": "PLAYER_SUSPENDED",
+  "message": "This account is suspended. Suspension status is baked into the token; call POST /api/auth/refresh once the suspension is lifted."
+}
+```
+
+Because the flag is a claim, suspension is not re-read from the database on
+every request. The consequence is that the status is only refreshed when a new
+token is issued:
+
+- **Suspended after login** — the player keeps access until their access token
+  expires (default 15 minutes), then the refresh below issues a token with
+  `suspended: true`.
+- **Reinstated** — the player must call `POST /api/auth/refresh`. Refresh tokens
+  are exempt from the suspension check precisely so this call still works; the
+  new access token carries the current status and access is restored.
+
+Call `POST /api/auth/refresh` after any suspension or reinstatement rather than
+waiting for the access token to expire.
+
 ## 5. Logout
 
 Blacklists the current access token server-side:

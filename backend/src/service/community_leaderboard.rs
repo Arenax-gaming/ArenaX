@@ -595,7 +595,7 @@ async fn caller(
         .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
     jwt.validate_token(&token)
         .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))
+        .map_err(crate::auth::middleware::api_error_for)
 }
 
 #[derive(Debug, Deserialize)]

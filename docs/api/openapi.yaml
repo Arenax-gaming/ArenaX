@@ -58,6 +58,10 @@ tags:
     description: Idempotency key management and configuration
   - name: Health
     description: Service health checks
+  - name: Social
+    description: Friends, messages, parties and the community feed
+  - name: Anti-Cheat
+    description: Gameplay telemetry uploads and anti-cheat evidence
   - name: WebSocket
     description: Real-time event streams over WebSocket
 
@@ -168,6 +172,114 @@ components:
         token_type:
           type: string
           example: "Bearer"
+
+    CommunityPost:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          format: uuid
+        author_username:
+          type: string
+        author_avatar:
+          type: string
+          nullable: true
+        title:
+          type: string
+        content:
+          type: string
+        category:
+          type: string
+        likes:
+          type: integer
+        comments:
+          type: integer
+        is_liked:
+          type: boolean
+          description: Whether the caller liked the post; always false for anonymous requests
+        created_at:
+          type: string
+          format: date-time
+
+    TelemetryUploadRequest:
+      type: object
+      required: [match_id, player_id, client, events]
+      properties:
+        match_id:
+          type: string
+          format: uuid
+        player_id:
+          type: string
+          format: uuid
+        client:
+          type: object
+          required: [client_build, platform, avg_fps, frame_time_p99_ms, ping_ms, resolution, sample_rate_hz]
+          properties:
+            client_build:
+              type: string
+            platform:
+              type: string
+              enum: [windows, macos, linux, android, ios, web]
+            avg_fps:
+              type: integer
+            frame_time_p99_ms:
+              type: integer
+            ping_ms:
+              type: integer
+            resolution:
+              type: string
+              example: 1920x1080
+            sample_rate_hz:
+              type: integer
+        events:
+          type: array
+          description: |
+            Input samples in strictly increasing `seq` order. An empty array, a
+            repeated or decreasing `seq`, or a metric outside its documented
+            range is rejected with 422.
+          items:
+            type: object
+            required: [seq, t_ms, action, input, reaction_ms, accuracy_bps, snap_deg_per_sec, speed_milli, speed_limit_milli, entropy_bps]
+            properties:
+              seq:
+                type: integer
+                format: int64
+              t_ms:
+                type: integer
+                format: int64
+              action:
+                type: string
+                example: move
+              input:
+                type: object
+                properties:
+                  pointer_dx_milli:
+                    type: integer
+                  pointer_dy_milli:
+                    type: integer
+                  keys_down:
+                    type: array
+                    items:
+                      type: string
+                  button_mask:
+                    type: integer
+              reaction_ms:
+                type: integer
+              accuracy_bps:
+                type: integer
+                maximum: 10000
+              snap_deg_per_sec:
+                type: integer
+              speed_milli:
+                type: integer
+              speed_limit_milli:
+                type: integer
+              entropy_bps:
+                type: integer
+                maximum: 10000
 
     UserProfile:
       type: object
@@ -552,6 +664,254 @@ paths:
                     type: string
                     example: "ok"
 
+  # ── Telemetry ───────────────────────────────────────────────────────────────
+  /api/telemetry:
+    post:
+      tags: [Anti-Cheat]
+      summary: Upload a gameplay recording
+      description: |
+        Stores a validated input recording for anti-cheat review and links it to
+        the match. The caller must be the player named in the body, or an admin.
+
+        The body may be sent as plain JSON or gzip-compressed. Send
+        `Content-Encoding: gzip` with a compressed body; the server inflates it
+        before validating, so compression never bypasses the document limit
+        (#1529). Anything other than `identity` or `gzip` is rejected with 415.
+
+        Limits: `TELEMETRY_MAX_UPLOAD_BYTES` (default 16 MiB) on the bytes
+        received and 8 MiB on the decompressed document. Exceeding either is a
+        413.
+      parameters:
+        - name: Content-Encoding
+          in: header
+          required: false
+          description: |
+            `identity` (default) for a plain JSON body, or `gzip` for a
+            compressed one.
+          schema:
+            type: string
+            enum: [identity, gzip, x-gzip]
+            default: identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryUploadRequest'
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+              description: The same JSON document, gzip-compressed
+      responses:
+        "200":
+          description: Recording stored and linked to the match
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference:
+                    type: object
+                    properties:
+                      match_id:
+                        type: string
+                        format: uuid
+                      player_id:
+                        type: string
+                        format: uuid
+                      object_key:
+                        type: string
+                      content_hash:
+                        type: string
+                        description: SHA-256 of the uncompressed document
+                      byte_size:
+                        type: integer
+                        description: Document size in bytes, not the gzip object size
+                      event_count:
+                        type: integer
+                      schema_version:
+                        type: integer
+                      max_suspicion_score:
+                        type: integer
+                      uploaded_at:
+                        type: string
+                        format: date-time
+                      retained_until:
+                        type: string
+                        format: date-time
+                      purged_at:
+                        type: string
+                        format: date-time
+                        nullable: true
+                  summary:
+                    type: object
+                    properties:
+                      duration_ms:
+                        type: integer
+                      event_count:
+                        type: integer
+                      flagged_events:
+                        type: integer
+                      max_suspicion_score:
+                        type: integer
+        "400":
+          description: Body is not valid JSON, or claims gzip but is not gzip
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Missing, expired, revoked or suspended token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: |
+            The token belongs to another player, or it carries
+            `suspended: true` (code `PLAYER_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: Body too large, before or after decompression
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "415":
+          description: Unsupported `Content-Encoding`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: Recording failed validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: |
+            Object storage is unavailable, or its circuit breaker is open —
+            retry after `Retry-After`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Social ──────────────────────────────────────────────────────────────────
+  /api/social/feed:
+    get:
+      tags: [Social]
+      summary: Community feed (cursor paginated)
+      description: |
+        Newest-first feed of active community posts.
+
+        Pagination is keyset-based: pass the `nextCursor` from one response as
+        `cursor` on the next request. Cursors are opaque, stable across
+        inserts and deletes, and never skip or repeat a post — unlike `offset`
+        paging, which shifts the window when posts are added (#1528).
+
+        Anonymous callers are welcome; `isLiked` is then always `false`.
+      security: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from the previous page's `nextCursor`
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size; values outside 1-50 are clamped (default 20)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: One page of the feed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      posts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CommunityPost'
+                      nextCursor:
+                        type: string
+                        nullable: true
+                        description: Cursor for the next page; null on the last page
+                      hasMore:
+                        type: boolean
+        "400":
+          description: Malformed cursor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/social/feed/offset:
+    get:
+      tags: [Social]
+      summary: Community feed (offset paginated, deprecated)
+      description: |
+        Deprecated in favour of `GET /api/social/feed`. Responses carry
+        `Deprecation: true` and a `Warning` header, and never include a cursor.
+      deprecated: true
+      security: []
+      parameters:
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: One page of the feed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      posts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CommunityPost'
+                      nextCursor:
+                        type: string
+                        nullable: true
+                      hasMore:
+                        type: boolean
+
   # ── Auth ────────────────────────────────────────────────────────────────────
   /api/auth/register:
     post:
@@ -623,7 +983,10 @@ paths:
                   type: string
       responses:
         "200":
-          description: New token pair
+          description: |
+            New token pair. The access token carries the player's current
+            `suspended` status, so calling this endpoint after a suspension is
+            lifted is how access is restored.
           content:
             application/json:
               schema:

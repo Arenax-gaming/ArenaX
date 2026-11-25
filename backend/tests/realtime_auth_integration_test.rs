@@ -43,7 +43,7 @@ async fn test_ws_connection_with_valid_token() {
     let auth_guard = Arc::new(RealtimeAuth::new(db_pool));
 
     let user_id = Uuid::new_v4();
-    let token = jwt_service.generate_access_token(user_id, vec!["user".to_string()], None).await.unwrap();
+    let token = jwt_service.generate_access_token(user_id, vec!["user".to_string()], None, false).await.unwrap();
 
     let app = test::init_service(
         App::new()

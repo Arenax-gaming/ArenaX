@@ -21,6 +21,8 @@ All errors follow a consistent JSON envelope:
 | 403 | Forbidden | Valid token but insufficient permissions (e.g. non-admin hitting admin route) |
 | 404 | Not Found | Resource doesn't exist or doesn't belong to the requesting user |
 | 409 | Conflict | Duplicate resource, idempotency key conflict, invalid state transition |
+| 413 | Payload Too Large | Upload exceeds the compressed or decompressed size limit (telemetry) |
+| 415 | Unsupported Media Type | Request body uses a `Content-Encoding` the endpoint cannot read |
 | 422 | Unprocessable | Semantic validation failure (e.g. ELO range invalid) |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | Unexpected server error, database failure, blockchain error |
@@ -130,6 +132,29 @@ The response includes a `Retry-After` header (seconds). Back off and retry after
 ```
 
 These are transient. Retry with exponential back-off. If the match is in an inconsistent state, call `POST /api/matches/{id}/reconcile` to sync off-chain state with the blockchain.
+
+---
+
+### Telemetry Upload Size and Encoding Errors (413 / 415)
+
+`POST /api/telemetry` accepts either plain JSON or a gzip-compressed body
+(`Content-Encoding: gzip`).
+
+```json
+// 413 — the body is too large, before or after decompression
+{ "error": "Payload too large: Decompressed telemetry document exceeds the 8388608-byte limit", "code": 413 }
+
+// 415 — the declared encoding is not supported
+{ "error": "Unsupported media type: Unsupported Content-Encoding 'br'; telemetry uploads accept identity or gzip", "code": 415 }
+
+// 400 — the body claims to be gzip but is not
+{ "error": "Bad request: Telemetry body is not valid gzip: invalid gzip header", "code": 400 }
+```
+
+The limits are the compressed upload size (`TELEMETRY_MAX_UPLOAD_BYTES`,
+default 16 MiB) and the decompressed document size (8 MiB). A gzip body is
+inflated before validation, so compressing an oversized recording does not get
+it past the limit.
 
 ---
 

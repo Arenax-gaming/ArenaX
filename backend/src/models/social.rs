@@ -82,6 +82,21 @@ pub struct CommunityPost {
     pub created_at: DateTime<Utc>,
 }
 
+/// One page of the community feed (#1528).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedPage {
+    pub posts: Vec<CommunityPost>,
+    /// Opaque keyset cursor for the next page; `None` on the last page.
+    ///
+    /// Clients must treat it as opaque and hand it back unchanged as `?cursor=`.
+    pub next_cursor: Option<String>,
+    /// Whether more posts exist after this page. Always `true` when
+    /// `next_cursor` is set; the deprecated offset endpoint reports it without
+    /// issuing a cursor.
+    pub has_more: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnlineStatus {
     pub user_id: Uuid,

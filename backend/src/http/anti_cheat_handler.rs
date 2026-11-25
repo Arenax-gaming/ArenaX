@@ -42,7 +42,7 @@ async fn caller(req: &HttpRequest, jwt: &JwtService) -> Result<Claims, ApiError>
 
     jwt.validate_token(&token)
         .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))
+        .map_err(crate::auth::middleware::api_error_for)
 }
 
 fn is_admin(claims: &Claims) -> bool {

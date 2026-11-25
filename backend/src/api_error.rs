@@ -44,6 +44,12 @@ pub enum ApiError {
     #[error("Forbidden")]
     Forbidden,
 
+    /// The caller authenticated successfully but their token says they are
+    /// suspended (#1531). Answered 403 with a `PLAYER_SUSPENDED` code so a
+    /// client can tell "log in again" (401) from "your account is suspended".
+    #[error("Player is suspended")]
+    PlayerSuspended,
+
     #[error("Not found")]
     NotFound,
 
@@ -90,6 +96,18 @@ pub enum ApiError {
     /// `retry_after` seconds instead of hammering a known-down dependency.
     #[error("Service unavailable: {message}")]
     DependencyUnavailable { message: String, retry_after: u64 },
+
+    /// The request body is larger than the endpoint accepts (#1529). For
+    /// telemetry uploads this is measured after decompression, so a small gzip
+    /// body cannot expand past the document limit unnoticed.
+    #[error("Payload too large: {0}")]
+    PayloadTooLarge(String),
+
+    /// The request body declares an encoding the endpoint cannot read (#1529).
+    /// Answers 415 so a client can retry with a supported encoding instead of
+    /// guessing whether the failure was its fault.
+    #[error("Unsupported media type: {0}")]
+    UnsupportedMediaType(String),
 }
 
 // Helper methods for convenience
@@ -148,6 +166,20 @@ struct ErrorResponse {
 
 impl ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
+        // Suspension gets its own body shape: the generic envelope carries the
+        // HTTP status in `code`, but a client needs the machine-readable
+        // `PLAYER_SUSPENDED` value to know that refreshing is the way back in
+        // (#1531).
+        if let ApiError::PlayerSuspended = self {
+            return HttpResponse::build(actix_web::http::StatusCode::FORBIDDEN).json(
+                serde_json::json!({
+                    "error": "Player is suspended",
+                    "code": "PLAYER_SUSPENDED",
+                    "message": "This account is suspended. Suspension status is baked into the token; call POST /api/auth/refresh once the suspension is lifted.",
+                }),
+            );
+        }
+
         let (status, message) = match self {
             ApiError::InternalServerError(_) => (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -156,6 +188,7 @@ impl ResponseError for ApiError {
             ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
             ApiError::Forbidden => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
+            ApiError::PlayerSuspended => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
             ApiError::NotFound => (actix_web::http::StatusCode::NOT_FOUND, self.to_string()),
             ApiError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, self.to_string()),
             ApiError::DatabaseError(_) => (
@@ -186,6 +219,14 @@ impl ResponseError for ApiError {
             ),
             ApiError::ServiceUnavailable(_) | ApiError::DependencyUnavailable { .. } => (
                 actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
+                self.to_string(),
+            ),
+            ApiError::PayloadTooLarge(_) => (
+                actix_web::http::StatusCode::PAYLOAD_TOO_LARGE,
+                self.to_string(),
+            ),
+            ApiError::UnsupportedMediaType(_) => (
+                actix_web::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 self.to_string(),
             ),
         };
@@ -325,6 +366,15 @@ mod validation_tests {
         let err = ApiError::ValidationFailed(vec![FieldError::new("email", "email", "invalid")]);
 
         assert_eq!(err.error_response().status().as_u16(), 422);
+    }
+
+    /// A suspended player is authenticated but not allowed through, and the
+    /// client needs a code it can branch on (#1531).
+    #[test]
+    fn suspension_answers_403_with_a_machine_readable_code() {
+        let response = ApiError::PlayerSuspended.error_response();
+
+        assert_eq!(response.status().as_u16(), 403);
     }
 
     #[test]

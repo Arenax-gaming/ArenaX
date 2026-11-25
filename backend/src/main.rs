@@ -537,6 +537,16 @@ async fn main() -> io::Result<()> {
                             .route("/devices", web::delete().to(crate::http::push_notification_handler::unregister_device))
                             .route("/send/{user_id}", web::post().to(crate::http::push_notification_handler::send_push_to_user)),
                     )
+                    // Social feed — cursor pagination (#1528). The offset
+                    // variant is deprecated but served for existing clients.
+                    .service(
+                        web::scope("/social")
+                            .route("/feed", web::get().to(crate::http::social_handler::get_feed))
+                            .route(
+                                "/feed/offset",
+                                web::get().to(crate::http::social_handler::get_feed_offset),
+                            ),
+                    )
                     // Wallet endpoints
                     .service(
                         web::scope("/wallet")

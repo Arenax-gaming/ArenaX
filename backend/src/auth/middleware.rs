@@ -1,7 +1,8 @@
+use crate::api_error::ApiError;
 use crate::auth::jwt_service::{Claims, JwtError, JwtService};
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    error::{ErrorForbidden, ErrorUnauthorized},
+    error::ErrorUnauthorized,
     Error, HttpMessage,
 };
 use futures::future::LocalBoxFuture;
@@ -93,24 +94,27 @@ where
                     req.extensions_mut().insert(claims);
                     service.call(req).await
                 }
-                Err(JwtError::TokenExpired) => {
-                    warn!("Token expired");
-                    Err(ErrorUnauthorized("Token expired"))
-                }
-                Err(JwtError::TokenBlacklisted) => {
-                    warn!("Token blacklisted");
-                    Err(ErrorForbidden("Token has been revoked"))
-                }
-                Err(JwtError::SessionNotFound) => {
-                    warn!("Session not found");
-                    Err(ErrorUnauthorized("Session expired or invalid"))
-                }
-                Err(e) => {
-                    warn!(error = %e, "Token validation failed");
-                    Err(ErrorUnauthorized(format!("Invalid token: {}", e)))
+                Err(error) => {
+                    warn!(error = %error, "Token validation failed");
+                    Err(api_error_for(error).into())
                 }
             }
         })
+    }
+}
+
+/// Translate a token-validation failure into the error the client should see.
+///
+/// Shared by this middleware and by handlers that validate tokens themselves,
+/// so a suspended player is answered 403 `PLAYER_SUSPENDED` everywhere rather
+/// than 403 here and a generic 401 there (#1531).
+pub fn api_error_for(error: JwtError) -> ApiError {
+    match error {
+        JwtError::PlayerSuspended => ApiError::PlayerSuspended,
+        JwtError::TokenExpired => ApiError::unauthorized("Token expired"),
+        JwtError::TokenBlacklisted => ApiError::forbidden("Token has been revoked"),
+        JwtError::SessionNotFound => ApiError::unauthorized("Session expired or invalid"),
+        other => ApiError::unauthorized(format!("Invalid token: {}", other)),
     }
 }
 

@@ -1,12 +1,141 @@
 use crate::api_error::ApiError;
 use crate::models::{
     Friend, FriendRequest, Message, Conversation, Party, PartyMember, CommunityPost,
-    OnlineStatus, SocialNotification, FriendsListResponse,
+    OnlineStatus, SocialNotification, FriendsListResponse, FeedPage,
     BlockEntry, BlockListResponse, BlockRequest,
 };
-use chrono::Utc;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+/// Default page size for the community feed.
+pub const DEFAULT_FEED_LIMIT: i64 = 20;
+/// Hard cap on feed page size, whatever the client asks for.
+pub const MAX_FEED_LIMIT: i64 = 50;
+
+/// Keyset position in the community feed: the `(created_at, id)` of the last
+/// post already returned (#1528).
+///
+/// Ordering is `(created_at DESC, id DESC)` and the table's index matches it, so
+/// the comparison is a single index seek instead of the scan-and-discard an
+/// `OFFSET` performs. Because the position is a value rather than a count,
+/// posts inserted or deleted between requests cannot shift the window, which is
+/// what makes offset paging skip and repeat rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeedCursor {
+    pub created_at: DateTime<Utc>,
+    pub id: Uuid,
+}
+
+impl FeedCursor {
+    pub fn new(created_at: DateTime<Utc>, id: Uuid) -> Self {
+        Self { created_at, id }
+    }
+
+    /// Encode as an opaque, URL-safe token.
+    ///
+    /// Microseconds match Postgres `timestamptz` resolution, so a decoded
+    /// cursor lands exactly on the row it was built from.
+    pub fn encode(&self) -> String {
+        URL_SAFE_NO_PAD.encode(format!(
+            "{}:{}",
+            self.created_at.timestamp_micros(),
+            self.id
+        ))
+    }
+
+    /// Decode a token produced by [`FeedCursor::encode`].
+    ///
+    /// Anything malformed is a client error (400), never a silent fallback to
+    /// the first page — a bad cursor that silently restarts the feed would make
+    /// clients loop over the same posts forever.
+    pub fn decode(raw: &str) -> Result<Self, ApiError> {
+        let invalid = || ApiError::BadRequest("Invalid feed cursor".to_string());
+
+        let bytes = URL_SAFE_NO_PAD.decode(raw.trim()).map_err(|_| invalid())?;
+        let text = String::from_utf8(bytes).map_err(|_| invalid())?;
+        let (timestamp, id) = text.split_once(':').ok_or_else(invalid)?;
+
+        let micros: i64 = timestamp.parse().map_err(|_| invalid())?;
+        let created_at = DateTime::from_timestamp_micros(micros).ok_or_else(invalid)?;
+        let id = Uuid::parse_str(id).map_err(|_| invalid())?;
+
+        Ok(Self { created_at, id })
+    }
+}
+
+/// Clamp a client-supplied page size into `1..=MAX_FEED_LIMIT`.
+pub fn clamp_feed_limit(limit: Option<i64>) -> i64 {
+    limit.unwrap_or(DEFAULT_FEED_LIMIT).clamp(1, MAX_FEED_LIMIT)
+}
+
+/// Community feed projection: the post plus the author fields and the viewer's
+/// like flag, which is not stored on the row itself.
+const FEED_SELECT: &str = r#"
+    SELECT p.id,
+           p.author_id,
+           u.username AS author_username,
+           u.avatar_url AS author_avatar,
+           p.title,
+           p.content,
+           p.category,
+           COALESCE(p.likes, 0) AS likes,
+           COALESCE(p.comments, 0) AS comments,
+           p.created_at,
+           EXISTS (
+               SELECT 1 FROM post_likes pl
+               WHERE pl.post_id = p.id AND pl.user_id = $1
+           ) AS is_liked
+    FROM community_posts p
+    JOIN users u ON u.id = p.author_id
+    WHERE p.is_active = TRUE
+"#;
+
+fn feed_post_from_row(row: &sqlx::postgres::PgRow) -> Result<CommunityPost, ApiError> {
+    use sqlx::Row;
+
+    Ok(CommunityPost {
+        id: row.try_get("id").map_err(ApiError::DatabaseError)?,
+        author_id: row.try_get("author_id").map_err(ApiError::DatabaseError)?,
+        author_username: row
+            .try_get("author_username")
+            .map_err(ApiError::DatabaseError)?,
+        author_avatar: row
+            .try_get("author_avatar")
+            .map_err(ApiError::DatabaseError)?,
+        title: row.try_get("title").map_err(ApiError::DatabaseError)?,
+        content: row.try_get("content").map_err(ApiError::DatabaseError)?,
+        category: row.try_get("category").map_err(ApiError::DatabaseError)?,
+        likes: row.try_get("likes").map_err(ApiError::DatabaseError)?,
+        comments: row.try_get("comments").map_err(ApiError::DatabaseError)?,
+        is_liked: row.try_get("is_liked").map_err(ApiError::DatabaseError)?,
+        created_at: row.try_get("created_at").map_err(ApiError::DatabaseError)?,
+    })
+}
+
+/// Turn `limit + 1` fetched rows into a page, using the extra row only as the
+/// "there is more" signal.
+fn build_feed_page(mut posts: Vec<CommunityPost>, limit: i64, cursor_endpoint: bool) -> FeedPage {
+    let has_more = posts.len() as i64 > limit;
+    if has_more {
+        posts.truncate(limit as usize);
+    }
+
+    let next_cursor = if cursor_endpoint && has_more {
+        posts
+            .last()
+            .map(|post| FeedCursor::new(post.created_at, post.id).encode())
+    } else {
+        None
+    };
+
+    FeedPage {
+        posts,
+        next_cursor,
+        has_more,
+    }
+}
 
 pub struct SocialService {
     db_pool: PgPool,
@@ -484,5 +613,196 @@ impl SocialService {
             .collect();
 
         Ok(BlockListResponse { blocks, total_count })
+    }
+
+    // ── Community feed (#1528) ───────────────────────────────────────────────
+
+    /// One page of the community feed, newest first, positioned by a keyset
+    /// cursor.
+    ///
+    /// `viewer` only personalises `is_liked`; anonymous callers pass `None` and
+    /// always get `is_liked: false`.
+    pub async fn get_feed(
+        &self,
+        viewer: Option<Uuid>,
+        cursor: Option<&FeedCursor>,
+        limit: i64,
+    ) -> Result<FeedPage, ApiError> {
+        let limit = clamp_feed_limit(Some(limit));
+        let sql = format!(
+            "{FEED_SELECT}
+             AND ($2::timestamptz IS NULL OR (p.created_at, p.id) < ($2::timestamptz, $3::uuid))
+             ORDER BY p.created_at DESC, p.id DESC
+             LIMIT $4"
+        );
+
+        let rows = sqlx::query(&sql)
+            .bind(viewer)
+            .bind(cursor.map(|c| c.created_at))
+            .bind(cursor.map(|c| c.id))
+            .bind(limit + 1)
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+
+        let posts = rows
+            .iter()
+            .map(feed_post_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(build_feed_page(posts, limit, true))
+    }
+
+    /// One page of the community feed using `OFFSET`.
+    ///
+    /// Deprecated in favour of [`SocialService::get_feed`] (#1528); kept so
+    /// clients on the old contract keep working while they migrate.
+    pub async fn get_feed_offset(
+        &self,
+        viewer: Option<Uuid>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<FeedPage, ApiError> {
+        let limit = clamp_feed_limit(Some(limit));
+        let offset = offset.max(0);
+        let sql = format!(
+            "{FEED_SELECT}
+             ORDER BY p.created_at DESC, p.id DESC
+             LIMIT $2 OFFSET $3"
+        );
+
+        let rows = sqlx::query(&sql)
+            .bind(viewer)
+            .bind(limit + 1)
+            .bind(offset)
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+
+        let posts = rows
+            .iter()
+            .map(feed_post_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(build_feed_page(posts, limit, false))
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::*;
+
+    /// Postgres stores `timestamptz` at microsecond resolution, so feed rows
+    /// never carry nanoseconds; tests build their timestamps the same way.
+    fn micros_now() -> DateTime<Utc> {
+        DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).expect("valid timestamp")
+    }
+
+    fn post(created_at: DateTime<Utc>, id: Uuid) -> CommunityPost {
+        CommunityPost {
+            id,
+            author_id: Uuid::new_v4(),
+            author_username: "player".to_string(),
+            author_avatar: None,
+            title: "title".to_string(),
+            content: "content".to_string(),
+            category: "general".to_string(),
+            likes: 0,
+            comments: 0,
+            is_liked: false,
+            created_at,
+        }
+    }
+
+    #[test]
+    fn cursor_round_trips_through_its_opaque_encoding() {
+        let cursor = FeedCursor::new(micros_now(), Uuid::new_v4());
+
+        let decoded = FeedCursor::decode(&cursor.encode()).unwrap();
+
+        assert_eq!(decoded.created_at, cursor.created_at);
+        assert_eq!(decoded.id, cursor.id);
+    }
+
+    #[test]
+    fn cursor_preserves_microsecond_precision() {
+        // Postgres timestamps are microsecond-precise; a cursor truncated to
+        // milliseconds would re-read or skip the row it was built from.
+        let created_at = DateTime::from_timestamp_micros(1_700_000_000_123_456).unwrap();
+        let cursor = FeedCursor::new(created_at, Uuid::new_v4());
+
+        assert_eq!(FeedCursor::decode(&cursor.encode()).unwrap().created_at, created_at);
+    }
+
+    #[test]
+    fn malformed_cursors_are_rejected() {
+        let id = Uuid::new_v4();
+        let cases = [
+            "".to_string(),
+            "not-base64!!".to_string(),
+            URL_SAFE_NO_PAD.encode("no-separator"),
+            URL_SAFE_NO_PAD.encode(format!("not-a-number:{id}")),
+            URL_SAFE_NO_PAD.encode("1700000000000000:not-a-uuid"),
+            URL_SAFE_NO_PAD.encode("999999999999999999999:".to_string() + &id.to_string()),
+        ];
+
+        for raw in cases {
+            assert!(
+                FeedCursor::decode(&raw).is_err(),
+                "cursor {raw:?} should have been rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn page_limits_are_clamped() {
+        assert_eq!(clamp_feed_limit(None), DEFAULT_FEED_LIMIT);
+        assert_eq!(clamp_feed_limit(Some(0)), 1);
+        assert_eq!(clamp_feed_limit(Some(-5)), 1);
+        assert_eq!(clamp_feed_limit(Some(10)), 10);
+        assert_eq!(clamp_feed_limit(Some(MAX_FEED_LIMIT + 1)), MAX_FEED_LIMIT);
+    }
+
+    #[test]
+    fn a_full_page_with_an_extra_row_yields_a_cursor() {
+        let now = micros_now();
+        let posts = vec![
+            post(now, Uuid::new_v4()),
+            post(now - chrono::Duration::seconds(1), Uuid::new_v4()),
+            post(now - chrono::Duration::seconds(2), Uuid::new_v4()),
+        ];
+
+        let page = build_feed_page(posts, 2, true);
+
+        assert_eq!(page.posts.len(), 2);
+        assert!(page.has_more);
+        // The cursor must point at the last row *returned*, not the probe row.
+        let cursor = FeedCursor::decode(page.next_cursor.as_deref().unwrap()).unwrap();
+        assert_eq!(cursor.created_at, page.posts[1].created_at);
+        assert_eq!(cursor.id, page.posts[1].id);
+    }
+
+    #[test]
+    fn a_short_page_has_no_cursor() {
+        let page = build_feed_page(vec![post(Utc::now(), Uuid::new_v4())], 2, true);
+
+        assert_eq!(page.posts.len(), 1);
+        assert!(!page.has_more);
+        assert!(page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn the_offset_endpoint_reports_more_without_a_cursor() {
+        let now = micros_now();
+        let posts = vec![
+            post(now, Uuid::new_v4()),
+            post(now - chrono::Duration::seconds(1), Uuid::new_v4()),
+        ];
+
+        let page = build_feed_page(posts, 1, false);
+
+        assert_eq!(page.posts.len(), 1);
+        assert!(page.has_more);
+        assert!(page.next_cursor.is_none());
     }
 }
