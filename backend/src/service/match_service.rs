@@ -18,6 +18,10 @@ pub struct MatchService {
     pub event_bus: Option<crate::realtime::event_bus::EventBus>,
     /// Match state stream (Issue #1254). Absent when Redis is not configured.
     pub match_events: Option<crate::realtime::event_stream::EventStream>,
+    /// Optional leaderboard service used to recalculate rankings after match corrections.
+    pub leaderboard_service: Option<Arc<crate::service::leaderboard_service::LeaderboardService>>,
+    /// Deduplicates rapid corrections to the same match within a 10-second window.
+    recalc_dedup: Arc<crate::service::leaderboard_sync::RecalculationDeduplicator>,
 }
 
 impl MatchService {
@@ -28,7 +32,58 @@ impl MatchService {
             reputation_service: None,
             event_bus: None,
             match_events: None,
+            leaderboard_service: None,
+            recalc_dedup: Arc::new(
+                crate::service::leaderboard_sync::RecalculationDeduplicator::default(),
+            ),
         }
+    }
+
+    pub fn with_leaderboard_service(
+        mut self,
+        leaderboard_service: Arc<crate::service::leaderboard_service::LeaderboardService>,
+    ) -> Self {
+        self.leaderboard_service = Some(leaderboard_service);
+        self
+    }
+
+    /// Enqueues an asynchronous background task to recalculate leaderboard scores
+    /// for all players affected by a match result correction.
+    ///
+    /// Returns `true` if a task was enqueued, or `false` if a correction for the
+    /// same `match_id` was already enqueued within the 10-second deduplication window.
+    pub fn enqueue_leaderboard_recalculation(&self, match_id: Uuid) -> bool {
+        if !self.recalc_dedup.try_acquire(match_id) {
+            tracing::debug!(
+                %match_id,
+                "skipping duplicate leaderboard recalculation within deduplication window"
+            );
+            return false;
+        }
+
+        if let Some(leaderboard) = self.leaderboard_service.clone() {
+            tokio::spawn(async move {
+                match leaderboard.recalculate_from_match(match_id).await {
+                    Ok(summary) => {
+                        tracing::info!(
+                            %match_id,
+                            category = %summary.category,
+                            affected_players = summary.affected_players,
+                            "leaderboard recalculated after match correction"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            %match_id,
+                            %error,
+                            "background leaderboard recalculation failed"
+                        );
+                    }
+                }
+            });
+        }
+
+        true
     }
 
     pub fn with_redis(mut self, redis_client: Arc<RedisClient>) -> Self {
@@ -2157,6 +2212,9 @@ impl MatchService {
             let match_record = self.get_match_by_id(dispute.match_id).await?;
             self.update_elo_ratings(&match_record, Some(new_winner))
                 .await?;
+
+            // Enqueue background leaderboard recalculation for all affected players.
+            self.enqueue_leaderboard_recalculation(dispute.match_id);
         }
 
         let match_record = self.get_match_by_id(dispute.match_id).await?;
@@ -2172,6 +2230,61 @@ impl MatchService {
 
         tracing::info!("Dispute {} resolved by admin {}", dispute_id, admin_id);
         Ok(dispute)
+    }
+
+    /// Admin correction of a completed match result.
+    ///
+    /// Updates the match's winner/scores and enqueues an asynchronous
+    /// leaderboard recalculation for all affected players (deduplicated within
+    /// a 10-second window).
+    pub async fn correct_match_result(
+        &self,
+        match_id: Uuid,
+        admin_id: Uuid,
+        new_winner_id: Option<Uuid>,
+        player1_score: Option<i32>,
+        player2_score: Option<i32>,
+    ) -> Result<Match, ApiError> {
+        let match_record = self.get_match_by_id(match_id).await?;
+
+        if let Some(winner) = new_winner_id {
+            if match_record.player1_id != winner && match_record.player2_id != Some(winner) {
+                return Err(ApiError::bad_request(
+                    "Winner is not a player in this match",
+                ));
+            }
+        }
+
+        let updated = sqlx::query_as::<_, Match>(
+            r#"
+            UPDATE matches
+            SET winner_id = $1,
+                player1_score = COALESCE($2, player1_score),
+                player2_score = COALESCE($3, player2_score),
+                updated_at = $4
+            WHERE id = $5
+            RETURNING *
+            "#,
+        )
+        .bind(new_winner_id)
+        .bind(player1_score)
+        .bind(player2_score)
+        .bind(Utc::now())
+        .bind(match_id)
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| ApiError::database_error(e))?;
+
+        // Enqueue background leaderboard recalculation (deduplicated within 10s).
+        self.enqueue_leaderboard_recalculation(match_id);
+
+        tracing::info!(
+            %match_id,
+            %admin_id,
+            ?new_winner_id,
+            "Match result corrected by admin"
+        );
+        Ok(updated)
     }
 
     /// Reject a match dispute
