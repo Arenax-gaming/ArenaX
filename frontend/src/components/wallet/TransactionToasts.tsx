@@ -47,7 +47,7 @@ export function TransactionToasts() {
                   rel="noreferrer"
                   className="text-xs underline"
                 >
-                  Open Explorer
+                  {toast.status === "failed" ? "View on Stellar Expert" : "Open Explorer"}
                 </a>
               )}
             </div>

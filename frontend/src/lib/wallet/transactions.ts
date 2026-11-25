@@ -250,7 +250,7 @@ const waitForHorizonConfirmation = async (hash: string) => {
     const response = await fetch(txUrl, { cache: "no-store" });
 
     if (response.status === 404) {
-      await sleep(1500);
+      await sleep(2000);
       continue;
     }
 
@@ -269,7 +269,7 @@ const waitForHorizonConfirmation = async (hash: string) => {
       throw buildTxError(parseHorizonFailure(payload));
     }
 
-    await sleep(1000);
+    await sleep(2000);
   }
 
   throw buildTxError("Timed out waiting for Stellar confirmation.");
