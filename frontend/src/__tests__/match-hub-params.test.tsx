@@ -22,6 +22,10 @@ jest.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'user-123', username: 'TestUser' } }),
 }));
 
+jest.mock('@/hooks/useAnalytics', () => ({
+  useAnalytics: () => ({ track: jest.fn() }),
+}));
+
 jest.mock('@/hooks/useMatchWebSocket', () => ({
   useMatchWebSocket: () => ({
     isConnected: false,
