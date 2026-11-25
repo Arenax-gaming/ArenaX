@@ -542,6 +542,7 @@ async fn main() -> io::Result<()> {
                         web::scope("/wallet")
                             .route("", web::get().to(crate::http::wallet::get_wallet))
                             .route("/transactions", web::get().to(crate::http::wallet::get_transaction_history))
+                            .route("/statement", web::get().to(crate::http::wallet::get_wallet_statement))
                             .route("/deposit", web::post().to(crate::http::wallet::initiate_deposit))
                             .route("/deposit/verify", web::post().to(crate::http::wallet::verify_deposit))
                             .route("/withdraw", web::post().to(crate::http::wallet::initiate_withdrawal))
