@@ -35,7 +35,8 @@ export const createFlag = async (req: Request, res: Response): Promise<void> => 
             return;
         }
 
-        const adminId = req.user?.id || 'system';
+        const user = req.user as any;
+        const adminId = user?.id || 'system';
         const flag = await featureFlagService.createFlag({ key, description, isEnabled, rules }, adminId);
         res.status(201).json(flag);
     } catch (error) {
@@ -49,7 +50,8 @@ export const updateFlag = async (req: Request, res: Response): Promise<void> => 
         const { key } = req.params;
         const { description, isEnabled, rules } = req.body;
 
-        const adminId = req.user?.id || 'system';
+        const user = req.user as any;
+        const adminId = user?.id || 'system';
         const flag = await featureFlagService.updateFlag(key, { description, isEnabled, rules }, adminId);
         res.status(200).json(flag);
     } catch (error) {
@@ -61,7 +63,8 @@ export const updateFlag = async (req: Request, res: Response): Promise<void> => 
 export const deleteFlag = async (req: Request, res: Response): Promise<void> => {
     try {
         const { key } = req.params;
-        const adminId = req.user?.id || 'system';
+        const user = req.user as any;
+        const adminId = user?.id || 'system';
         await featureFlagService.deleteFlag(key, adminId);
         res.status(200).json({ message: `Feature flag '${key}' deleted successfully` });
     } catch (error) {
@@ -83,17 +86,36 @@ export const getAuditLogs = async (req: Request, res: Response): Promise<void> =
 
 export const evaluateFlag = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { key } = req.params;
-        const { userId, role, email, ip } = req.body;
+        const flagKey = req.params.flagKey || req.params.key;
+        if (!flagKey) {
+            res.status(400).json({ error: 'Flag key is required' });
+            return;
+        }
 
-        const isEnabled = await featureFlagService.evaluate(key, {
-            userId: userId || req.user?.id,
-            role: role || req.user?.role,
-            email: email || req.user?.email,
-            ip: ip || req.ip
+        const user = req.user as any;
+        const userId = (req.query?.userId as string) || req.body?.userId || user?.id || (req.headers['x-user-id'] as string);
+        const role = (req.query?.role as string) || req.body?.role || user?.role;
+        const email = (req.query?.email as string) || req.body?.email || user?.email;
+        const ip = (req.query?.ip as string) || req.body?.ip || req.ip;
+        const region = (req.query?.region as string) || req.body?.region || (req.headers['x-user-region'] as string) || (req.headers['cf-ipcountry'] as string);
+
+        const rawBeta = req.query?.beta ?? req.query?.betaOnly ?? req.query?.isBeta ?? req.body?.beta ?? req.body?.betaOnly ?? req.body?.isBeta ?? req.headers['x-user-beta'];
+        const isBeta = rawBeta !== undefined ? (rawBeta === true || rawBeta === 'true' || rawBeta === '1') : Boolean(user?.isBeta || user?.beta);
+
+        const result = await featureFlagService.evaluateDetail(flagKey, {
+            userId,
+            role,
+            email,
+            ip,
+            region,
+            isBeta,
+            beta: isBeta
         });
 
-        res.status(200).json({ key, isEnabled });
+        res.status(200).json({
+            enabled: result.enabled,
+            reason: result.reason
+        });
     } catch (error) {
         logger.error('Failed to evaluate feature flag', { error });
         res.status(500).json({ error: (error as Error).message });

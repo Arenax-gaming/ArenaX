@@ -13,6 +13,7 @@ import { metricsMiddleware } from './middleware/metrics.middleware';
 import { apiVersionMiddleware } from './middleware/api-version.middleware';
 import { apiVersionRegistry } from './config/api-versions';
 import routes from './routes/index';
+import featureFlagRoutes from './routes/feature-flag.routes';
 import { getEnv } from './config/env';
 import { getGraphQLExecutor } from './graphql/server';
 import rateLimit from 'express-rate-limit';
@@ -205,6 +206,7 @@ export const createApp = (): Express => {
     });
 
     app.use('/api', routes);
+    app.use('/feature-flags', featureFlagRoutes);
 
     const graphql = getGraphQLExecutor();
     graphql.mount(app);

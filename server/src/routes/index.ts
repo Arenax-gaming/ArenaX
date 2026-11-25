@@ -23,6 +23,7 @@ import paymentWebhookRoutes from './payment-webhook.routes';
 import currencyRoutes from './currency.routes';
 import anchorRoutes from './anchor.routes';
 import notificationRoutes from './notification.routes';
+import featureFlagRoutes from './feature-flag.routes';
 import { getMyPreferences, updatePreferences } from '../controllers/notification.controller';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import * as authController from '../controllers/auth.controller';
@@ -82,6 +83,7 @@ mountVersioned('/wallets', walletRoutes);
 mountVersioned('/wallet', walletRoutes);
 mountVersioned('/analytics', analyticsRoutes);
 mountVersioned('/notifications', notificationRoutes);
+mountVersioned('/feature-flags', featureFlagRoutes);
 
 const mePreferencesRouter = Router();
 mePreferencesRouter.get('/', authenticateJWT, getMyPreferences);
