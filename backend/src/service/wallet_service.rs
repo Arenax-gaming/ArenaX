@@ -4,10 +4,11 @@ use crate::models::{
 use crate::service::payment_provider::{DepositInitiation, PaymentProvider, PaymentProviderKind};
 use crate::transaction::{execute_transaction, IsolationLevel, TransactionConfig};
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Duration, Months, NaiveDate, Utc};
 // EventBus is used via crate::realtime::event_bus::EventBus
 use rust_decimal::Decimal;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -20,6 +21,8 @@ pub enum WalletError {
     InsufficientBalance { required: i64, available: i64 },
     #[error("Invalid amount: {0}")]
     InvalidAmount(String),
+    #[error("Invalid date range: {0}")]
+    InvalidDateRange(String),
     #[error("Transaction not found")]
     TransactionNotFound,
     #[error("Payment verification failed")]
@@ -918,6 +921,138 @@ impl WalletService {
     }
 
     // ========================================================================
+    // WALLET STATEMENT CSV EXPORT
+    // ========================================================================
+
+    /// Validate `from` and `to` date strings (YYYY-MM-DD) and enforce a maximum
+    /// 12-month range per request.
+    pub fn validate_statement_date_range(
+        from: &str,
+        to: &str,
+    ) -> Result<(NaiveDate, NaiveDate), WalletError> {
+        let from_date = NaiveDate::parse_from_str(from.trim(), "%Y-%m-%d").map_err(|_| {
+            WalletError::InvalidDateRange(
+                "Invalid 'from' date format. Expected YYYY-MM-DD.".to_string(),
+            )
+        })?;
+        let to_date = NaiveDate::parse_from_str(to.trim(), "%Y-%m-%d").map_err(|_| {
+            WalletError::InvalidDateRange(
+                "Invalid 'to' date format. Expected YYYY-MM-DD.".to_string(),
+            )
+        })?;
+
+        if to_date < from_date {
+            return Err(WalletError::InvalidDateRange(
+                "'to' date must be on or after 'from' date.".to_string(),
+            ));
+        }
+
+        let max_to = from_date
+            .checked_add_months(Months::new(12))
+            .ok_or_else(|| {
+                WalletError::InvalidDateRange("Invalid date range.".to_string())
+            })?;
+
+        if to_date > max_to {
+            return Err(WalletError::InvalidDateRange(
+                "Date range cannot exceed 12 months per request.".to_string(),
+            ));
+        }
+
+        Ok((from_date, to_date))
+    }
+
+    /// Fetch user profile, wallet address, opening balances, and transactions
+    /// in `[from, to]` (inclusive) and render a downloadable CSV statement.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, from = %from, to = %to))]
+    pub async fn get_wallet_statement_csv(
+        &self,
+        user_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<String, WalletError> {
+        // Fetch user's display name (falling back to username).
+        let user_row: Option<(Option<String>, String)> = sqlx::query_as(
+            "SELECT display_name, username FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&*self.db_pool)
+        .await?;
+
+        let display_name = match user_row {
+            Some((Some(dn), _)) if !dn.trim().is_empty() => dn,
+            Some((_, username)) => username,
+            None => "Unknown User".to_string(),
+        };
+
+        // Fetch user's wallet for address info.
+        let wallet = self.get_wallet(user_id).await?;
+        let wallet_address = wallet
+            .stellar_public_key
+            .or(wallet.stellar_account_id)
+            .unwrap_or_else(|| wallet.id.to_string());
+
+        let from_start = from
+            .and_hms_opt(0, 0, 0)
+            .expect("valid midnight time")
+            .and_utc();
+        let to_exclusive = (to + Duration::days(1))
+            .and_hms_opt(0, 0, 0)
+            .expect("valid midnight time")
+            .and_utc();
+
+        // Fetch prior transactions before `from_start` to establish opening balances per currency.
+        let prior_txns: Vec<Transaction> = sqlx::query_as(
+            r#"
+            SELECT id, user_id, transaction_type, amount, currency,
+                   status, reference, description, metadata,
+                   stellar_transaction_id, created_at, updated_at, completed_at
+            FROM transactions
+            WHERE user_id = $1 AND created_at < $2
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(user_id)
+        .bind(from_start)
+        .fetch_all(&*self.db_pool)
+        .await?;
+
+        let mut opening_balances: HashMap<String, Decimal> = HashMap::new();
+        for tx in &prior_txns {
+            let entry = opening_balances
+                .entry(tx.currency.clone())
+                .or_insert(Decimal::ZERO);
+            *entry += signed_transaction_delta(tx.transaction_type, tx.amount);
+        }
+
+        // Fetch transactions within the requested date range in chronological order.
+        let transactions: Vec<Transaction> = sqlx::query_as(
+            r#"
+            SELECT id, user_id, transaction_type, amount, currency,
+                   status, reference, description, metadata,
+                   stellar_transaction_id, created_at, updated_at, completed_at
+            FROM transactions
+            WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(user_id)
+        .bind(from_start)
+        .bind(to_exclusive)
+        .fetch_all(&*self.db_pool)
+        .await?;
+
+        Ok(generate_statement_csv(
+            &display_name,
+            &wallet_address,
+            from,
+            to,
+            &transactions,
+            &opening_balances,
+        ))
+    }
+
+    // ========================================================================
     // REAL-TIME UPDATES
     // ========================================================================
 
@@ -1085,5 +1220,181 @@ mod payment_provider_tests {
             .await
             .unwrap());
         assert!(calls.lock().unwrap().is_empty());
+    }
+}
+
+/// Returns the signed balance change for a transaction type.
+pub fn signed_transaction_delta(tx_type: TransactionType, amount: Decimal) -> Decimal {
+    match tx_type {
+        TransactionType::Deposit | TransactionType::Refund | TransactionType::Prize => amount,
+        TransactionType::Withdrawal
+        | TransactionType::Payment
+        | TransactionType::EntryFee
+        | TransactionType::Fee => -amount,
+    }
+}
+
+/// Escape a single CSV field per RFC 4180.
+pub fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
+}
+
+/// Render a wallet transaction statement as a CSV string.
+///
+/// Includes the user's display name and wallet address in the header rows,
+/// followed by the required columns:
+/// `date,type,amount,currency,balance_after,tx_hash`
+pub fn generate_statement_csv(
+    display_name: &str,
+    wallet_address: &str,
+    from: NaiveDate,
+    to: NaiveDate,
+    transactions: &[Transaction],
+    opening_balances: &HashMap<String, Decimal>,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Display Name,{}\n", csv_escape(display_name)));
+    out.push_str(&format!("Wallet Address,{}\n", csv_escape(wallet_address)));
+    out.push_str(&format!("Statement Period,{} to {}\n", from, to));
+    out.push('\n');
+    out.push_str("date,type,amount,currency,balance_after,tx_hash\n");
+
+    let mut running_balances = opening_balances.clone();
+
+    for tx in transactions {
+        let balance = running_balances
+            .entry(tx.currency.clone())
+            .or_insert(Decimal::ZERO);
+        *balance += signed_transaction_delta(tx.transaction_type, tx.amount);
+
+        let date_str = tx.created_at.to_rfc3339();
+        let tx_type_str = tx.transaction_type.to_string();
+        let amount_str = tx.amount.to_string();
+        let balance_after_str = balance.to_string();
+        let tx_hash = tx.stellar_transaction_id.as_deref().unwrap_or("");
+
+        out.push_str(&format!(
+            "{},{},{},{},{},{}\n",
+            csv_escape(&date_str),
+            csv_escape(&tx_type_str),
+            csv_escape(&amount_str),
+            csv_escape(&tx.currency),
+            csv_escape(&balance_after_str),
+            csv_escape(tx_hash),
+        ));
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod statement_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn sample_tx(
+        tx_type: TransactionType,
+        amount: i64,
+        currency: &str,
+        tx_hash: Option<&str>,
+        day: u32,
+    ) -> Transaction {
+        let ts = Utc.with_ymd_and_hms(2026, 3, day, 12, 0, 0).unwrap();
+        Transaction {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            transaction_type: tx_type,
+            amount: Decimal::from(amount),
+            currency: currency.to_string(),
+            status: TransactionStatus::Completed,
+            reference: format!("REF-{day}"),
+            description: "test".to_string(),
+            metadata: None,
+            stellar_transaction_id: tx_hash.map(|s| s.to_string()),
+            created_at: ts,
+            updated_at: ts,
+            completed_at: Some(ts),
+        }
+    }
+
+    #[test]
+    fn valid_date_range_within_12_months() {
+        let (from, to) =
+            WalletService::validate_statement_date_range("2026-01-01", "2026-11-30").unwrap();
+        assert_eq!(from, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        assert_eq!(to, NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
+    }
+
+    #[test]
+    fn valid_date_range_exact_12_months() {
+        let res = WalletService::validate_statement_date_range("2026-01-01", "2027-01-01");
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn rejects_range_exceeding_12_months() {
+        let err = WalletService::validate_statement_date_range("2026-01-01", "2027-01-02")
+            .unwrap_err();
+        assert!(err.to_string().contains("12 months"));
+    }
+
+    #[test]
+    fn rejects_reversed_range() {
+        let err = WalletService::validate_statement_date_range("2026-06-01", "2026-05-01")
+            .unwrap_err();
+        assert!(err.to_string().contains("on or after"));
+    }
+
+    #[test]
+    fn rejects_invalid_date_format() {
+        let err = WalletService::validate_statement_date_range("01-01-2026", "2026-11-30")
+            .unwrap_err();
+        assert!(err.to_string().contains("YYYY-MM-DD"));
+    }
+
+    #[test]
+    fn generates_csv_with_header_and_running_balance() {
+        let from = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+        let mut opening = HashMap::new();
+        opening.insert("NGN".to_string(), Decimal::from(1000));
+
+        let txns = vec![
+            sample_tx(TransactionType::Deposit, 500, "NGN", Some("0xabc"), 1),
+            sample_tx(TransactionType::EntryFee, 200, "NGN", None, 2),
+            sample_tx(TransactionType::Prize, 100, "XLM", Some("stellar-hash-1"), 3),
+        ];
+
+        let csv = generate_statement_csv(
+            "Jane, Doe",
+            "GABC1234567890",
+            from,
+            to,
+            &txns,
+            &opening,
+        );
+
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "Display Name,\"Jane, Doe\"");
+        assert_eq!(lines[1], "Wallet Address,GABC1234567890");
+        assert_eq!(lines[2], "Statement Period,2026-01-01 to 2026-11-30");
+        assert_eq!(lines[3], "");
+        assert_eq!(lines[4], "date,type,amount,currency,balance_after,tx_hash");
+        assert_eq!(
+            lines[5],
+            "2026-03-01T12:00:00+00:00,deposit,500,NGN,1500,0xabc"
+        );
+        assert_eq!(
+            lines[6],
+            "2026-03-02T12:00:00+00:00,entry_fee,200,NGN,1300,"
+        );
+        assert_eq!(
+            lines[7],
+            "2026-03-03T12:00:00+00:00,prize,100,XLM,100,stellar-hash-1"
+        );
     }
 }

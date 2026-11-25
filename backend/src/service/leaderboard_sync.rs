@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub const LEADERBOARD_STREAM: &str = "leaderboard:updates";
@@ -19,6 +20,63 @@ pub const LEADERBOARD_STREAM: &str = "leaderboard:updates";
 /// separate from `LEADERBOARD_STREAM` so consumers don't need to filter two
 /// different payload shapes out of one feed.
 pub const WEEKLY_ROLLOVER_STREAM: &str = "leaderboard:weekly_rollover";
+/// Stream/event name emitted after a match correction triggers leaderboard recalculation.
+pub const LEADERBOARD_RECALCULATED_STREAM: &str = "leaderboard:recalculated";
+/// Default deduplication window preventing duplicate recalculations for the same match.
+pub const RECALCULATION_DEDUP_WINDOW_SECS: u64 = 10;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LeaderboardRecalculatedEvent {
+    pub schema_version: u32,
+    pub event: String,
+    pub match_id: Uuid,
+    pub category: String,
+    pub affected_players: usize,
+    pub occurred_at_ms: i64,
+}
+
+/// Prevents duplicate leaderboard recalculation tasks when the same match is
+/// corrected multiple times within a short window (default: 10 seconds).
+#[derive(Debug)]
+pub struct RecalculationDeduplicator {
+    window: Duration,
+    recent: Mutex<HashMap<Uuid, Instant>>,
+}
+
+impl Default for RecalculationDeduplicator {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(RECALCULATION_DEDUP_WINDOW_SECS))
+    }
+}
+
+impl RecalculationDeduplicator {
+    pub fn new(window: Duration) -> Self {
+        Self {
+            window,
+            recent: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Returns `true` if a recalculation for `match_id` should proceed, or
+    /// `false` if one was already enqueued within the deduplication window.
+    pub fn try_acquire(&self, match_id: Uuid) -> bool {
+        self.try_acquire_at(match_id, Instant::now())
+    }
+
+    /// Deterministic variant of [`Self::try_acquire`] for testing.
+    pub fn try_acquire_at(&self, match_id: Uuid, now: Instant) -> bool {
+        let mut recent = self.recent.lock().expect("recalc dedup lock");
+        // Prune expired entries to keep memory bounded.
+        recent.retain(|_, ts| now.saturating_duration_since(*ts) < self.window);
+        if let Some(prev) = recent.get(&match_id) {
+            if now.saturating_duration_since(*prev) < self.window {
+                return false;
+            }
+        }
+        recent.insert(match_id, now);
+        true
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LeaderboardUpdate {
@@ -56,6 +114,7 @@ pub struct LeaderboardSync {
     instance_id: String,
     stream: EventStream,
     weekly_stream: Option<EventStream>,
+    recalculated_stream: Option<EventStream>,
     cache: Mutex<HashMap<(String, Uuid), CachedRank>>,
     versions: Mutex<HashMap<(String, Uuid), u64>>,
 }
@@ -66,6 +125,7 @@ impl LeaderboardSync {
             instance_id: instance_id.into(),
             stream,
             weekly_stream: None,
+            recalculated_stream: None,
             cache: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
         }
@@ -79,8 +139,36 @@ impl LeaderboardSync {
         self
     }
 
+    /// Attach a dedicated event stream for `leaderboard:recalculated` events.
+    /// Optional: `publish_recalculated` falls back to the main rank-update stream.
+    pub fn with_recalculated_stream(mut self, stream: EventStream) -> Self {
+        self.recalculated_stream = Some(stream);
+        self
+    }
+
     pub fn instance_id(&self) -> &str {
         &self.instance_id
+    }
+
+    /// Emit a `leaderboard:recalculated` event with the number of affected players.
+    pub async fn publish_recalculated(
+        &self,
+        match_id: Uuid,
+        category: &str,
+        affected_players: usize,
+    ) -> Result<LeaderboardRecalculatedEvent, String> {
+        let event = LeaderboardRecalculatedEvent {
+            schema_version: 1,
+            event: LEADERBOARD_RECALCULATED_STREAM.to_string(),
+            match_id,
+            category: category.to_string(),
+            affected_players,
+            occurred_at_ms: Utc::now().timestamp_millis(),
+        };
+        let payload = serde_json::to_string(&event).map_err(|e| e.to_string())?;
+        let stream = self.recalculated_stream.as_ref().unwrap_or(&self.stream);
+        stream.publish(&payload).await?;
+        Ok(event)
     }
 
     /// Publish a weekly leaderboard rollover summary (Issue #1572) — final
@@ -284,5 +372,48 @@ mod tests {
         let right = update(user, 1, 7, 50, "a-origin");
         assert!(should_apply(&left, &right));
         assert!(!should_apply(&right, &left));
+    }
+
+    #[tokio::test]
+    async fn publish_recalculated_emits_event_with_affected_player_count() {
+        let main_stream = EventStream::memory(3);
+        let recalc_stream = EventStream::memory(3);
+        let sync = LeaderboardSync::new("instance-a", main_stream)
+            .with_recalculated_stream(recalc_stream.clone());
+        let match_id = Uuid::new_v4();
+
+        let emitted = sync
+            .publish_recalculated(match_id, "fifa", 12)
+            .await
+            .unwrap();
+        assert_eq!(emitted.event, LEADERBOARD_RECALCULATED_STREAM);
+        assert_eq!(emitted.match_id, match_id);
+        assert_eq!(emitted.category, "fifa");
+        assert_eq!(emitted.affected_players, 12);
+
+        let deliveries = recalc_stream
+            .read_group("test-group", "c1", 10)
+            .await
+            .unwrap();
+        assert_eq!(deliveries.len(), 1);
+        let parsed: LeaderboardRecalculatedEvent =
+            serde_json::from_str(&deliveries[0].payload).unwrap();
+        assert_eq!(parsed, emitted);
+    }
+
+    #[test]
+    fn deduplicator_blocks_second_correction_within_ten_seconds() {
+        let dedup = RecalculationDeduplicator::default();
+        let match_id = Uuid::new_v4();
+        let other_match = Uuid::new_v4();
+        let t0 = Instant::now();
+
+        assert!(dedup.try_acquire_at(match_id, t0));
+        // Second correction within 10s must be suppressed.
+        assert!(!dedup.try_acquire_at(match_id, t0 + Duration::from_secs(9)));
+        // Different match is unaffected.
+        assert!(dedup.try_acquire_at(other_match, t0 + Duration::from_secs(1)));
+        // After 10s, the same match can be recalculated again.
+        assert!(dedup.try_acquire_at(match_id, t0 + Duration::from_secs(10)));
     }
 }
