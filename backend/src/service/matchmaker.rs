@@ -159,6 +159,10 @@ impl MatchmakerService {
             self.record_candidate_metrics(conn, &candidate).await?;
             self.remove_from_queue(conn, &candidate.player1.user_id, game, game_mode).await?;
             self.remove_from_queue(conn, &candidate.player2.user_id, game, game_mode).await?;
+            // A found match refills both players' join tokens so they can
+            // queue again immediately.
+            crate::middleware::matchmaking_throttle::refill(conn, candidate.player1.user_id).await;
+            crate::middleware::matchmaking_throttle::refill(conn, candidate.player2.user_id).await;
         }
 
         Ok(())

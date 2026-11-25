@@ -8,6 +8,7 @@ pub mod csrf;
 pub mod horizon_circuit_breaker;
 pub mod idempotency_middleware;
 pub mod ip_list;
+pub mod matchmaking_throttle;
 pub mod metrics_middleware;
 pub mod rate_limit;
 pub mod security;
