@@ -8,10 +8,14 @@
 //! rankings stay real-time. Before each rollup the current ranks are
 //! snapshotted so responses can report a rank change indicator.
 
+use crate::api_error::ApiError;
+use crate::service::staking_service::StakingService;
 use chrono::{DateTime, Datelike, Duration, Utc};
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use serde::Serialize;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 const LIVE_TTL_SECS: i64 = 5;
 
@@ -112,6 +116,43 @@ impl MonthlyLeaderboardService {
             }
         }
         Ok(rolled)
+    }
+
+    /// Take a staking snapshot for every closed season that does not have one
+    /// yet (Issue #1524).
+    ///
+    /// Runs alongside the weekly rollup so a season that ended without an
+    /// explicit admin close still gets a point-in-time staking record. One
+    /// failing season is logged and does not stop the others.
+    pub async fn take_season_end_snapshots(&self, db: &PgPool) -> Result<usize, ApiError> {
+        let season_ids: Vec<Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT s.id
+            FROM seasons s
+            WHERE s.status = 'closed'
+              AND NOT EXISTS (
+                  SELECT 1 FROM staking_snapshots ss WHERE ss.season_id = s.id
+              )
+            "#,
+        )
+        .fetch_all(db)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        let mut rows = 0;
+        for season_id in season_ids {
+            match StakingService::new(db.clone())
+                .take_staking_snapshot(season_id)
+                .await
+            {
+                Ok(outcome) => rows += outcome.rows_snapshotted as usize,
+                Err(error) => {
+                    tracing::error!(%season_id, %error, "staking snapshot failed");
+                }
+            }
+        }
+
+        Ok(rows)
     }
 
     /// Current monthly standings, including the in-progress week.

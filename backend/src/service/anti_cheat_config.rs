@@ -1,15 +1,20 @@
-//! Runtime-configurable anti-cheat scoring thresholds — Issue #1358.
+//! Runtime-configurable anti-cheat scoring thresholds — Issue #1358 / #1525.
 //!
 //! Each detection rule carries a weight (contribution to the composite score)
 //! and a threshold (the per-rule trip value). The composite suspicion score is
 //! the sum of weights for every rule whose metric crosses its threshold.
-//! Thresholds are loaded from Redis or fall back to compiled-in defaults; a
-//! background refresh applies new values within one cache TTL.
+//! Thresholds are stored in the database and refreshed into an in-memory cache
+//! every [`RULE_REFRESH_INTERVAL`]; compiled-in defaults are only a fallback for
+//! a database that has not been migrated yet.
 
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
+/// How often every instance reloads the rules from the database (Issue #1525).
+pub const RULE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// One configurable detection rule.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -118,7 +123,47 @@ impl Default for AntiCheatConfig {
     }
 }
 
-/// Source of truth for the config. Redis in production; in-memory stub in tests.
+impl AntiCheatConfig {
+    /// Load the live rules from the database (Issue #1525).
+    ///
+    /// The tables are the source of truth: `anti_cheat_settings` holds the
+    /// composite flag threshold and `anti_cheat_rules` one row per detection
+    /// rule. Values are clamped to their valid ranges so a bad manual edit
+    /// cannot produce an out-of-range weight.
+    pub async fn load_from_db(pool: &PgPool) -> Result<Self, sqlx::Error> {
+        let flag_threshold: i16 = sqlx::query_scalar(
+            "SELECT flag_threshold FROM anti_cheat_settings WHERE id = TRUE",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        let rows: Vec<(String, i16, i32, bool)> = sqlx::query_as(
+            "SELECT name, weight, threshold, enabled FROM anti_cheat_rules",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        let mut rules = HashMap::with_capacity(rows.len());
+        for (name, weight, threshold, enabled) in rows {
+            rules.insert(
+                name.clone(),
+                RuleConfig {
+                    name,
+                    weight: weight.clamp(0, 100) as u8,
+                    threshold: threshold.max(0) as u32,
+                    enabled,
+                },
+            );
+        }
+
+        Ok(Self {
+            flag_threshold: flag_threshold.clamp(0, 100) as u8,
+            rules,
+        })
+    }
+}
+
+/// Source of truth for the config. Database in production; in-memory stub in tests.
 pub trait ConfigProvider: Send + Sync {
     /// Returns the current config, or `None` to keep the existing cached value.
     fn load(&self) -> Option<AntiCheatConfig>;
@@ -192,9 +237,43 @@ impl AntiCheatConfigStore {
     /// Force a refresh regardless of TTL.
     pub fn refresh(&self) {
         if let Some(new_config) = self.provider.load() {
-            let mut guard = self.cached.write().expect("anti_cheat_config write lock");
-            guard.0 = new_config;
-            guard.1 = Instant::now();
+            self.set_config(new_config);
+        }
+    }
+
+    /// Replace the cached config immediately.
+    ///
+    /// Used by the database refresher and by the admin PATCH endpoint, so a
+    /// threshold change applies without waiting for the next refresh tick.
+    pub fn set_config(&self, config: AntiCheatConfig) {
+        let mut guard = self.cached.write().expect("anti_cheat_config write lock");
+        guard.0 = config;
+        guard.1 = Instant::now();
+    }
+
+    /// Reload once from the database, replacing the cache on success.
+    ///
+    /// A failed load leaves the previous rules in place: scoring must not fall
+    /// back to "allow everything" because the database blipped.
+    pub async fn refresh_from_db(&self, pool: &PgPool) -> Result<(), sqlx::Error> {
+        let config = AntiCheatConfig::load_from_db(pool).await?;
+        self.set_config(config);
+        Ok(())
+    }
+
+    /// Reload the rules from the database every `interval` (Issue #1525).
+    /// Spawn once per process.
+    pub async fn refresh_loop(self: Arc<Self>, pool: PgPool, interval: Duration) {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = self.refresh_from_db(&pool).await {
+                tracing::warn!(
+                    %error,
+                    "anti-cheat rule refresh failed; keeping cached rules"
+                );
+            }
         }
     }
 
@@ -303,5 +382,22 @@ mod tests {
         store.refresh();
         store.set_rule_weight("speed_hack", 99);
         assert_eq!(store.get().rules["speed_hack"].weight, 99);
+    }
+
+    #[test]
+    fn set_config_replaces_the_cache_without_waiting_for_a_tick() {
+        let store = AntiCheatConfigStore::new(
+            Duration::from_secs(60),
+            Arc::new(DefaultConfigProvider),
+        );
+        let mut config = AntiCheatConfig::default();
+        config.flag_threshold = 10;
+        config.rules.get_mut("speed_hack").unwrap().threshold = 42;
+
+        store.set_config(config);
+
+        let cached = store.get();
+        assert_eq!(cached.flag_threshold, 10);
+        assert_eq!(cached.rules["speed_hack"].threshold, 42);
     }
 }

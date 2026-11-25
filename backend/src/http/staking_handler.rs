@@ -157,13 +157,36 @@ pub async fn get_position(
     let svc = StakingService::new(db.get_ref().clone());
     match svc.get_position(user_id).await? {
         Some(pos) => Ok(HttpResponse::Ok().json(pos)),
-        None => Ok(HttpResponse::NotFound().json(serde_json::json!({"error": "no stake found"}))),
+        None => Err(ApiError::not_found("Staking position not found")),
     }
 }
 
 pub async fn get_staking_stats(db: web::Data<PgPool>) -> Result<HttpResponse, ApiError> {
     let svc = StakingService::new(db.get_ref().clone());
     Ok(HttpResponse::Ok().json(svc.get_stats().await?))
+}
+
+/// Admin-only read of a season's staking snapshot (Issue #1524).
+///
+/// A season that does not exist answers 404 `RESOURCE_NOT_FOUND`; an existing
+/// season with no snapshot answers 200 with an empty list.
+pub async fn get_season_snapshots(
+    req: HttpRequest,
+    db: web::Data<PgPool>,
+    path: web::Path<String>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = req.claims().ok_or(ApiError::Unauthorized)?;
+    if !claims.roles.iter().any(|role| role == "admin") {
+        return Err(ApiError::forbidden("Admin access required"));
+    }
+
+    let season_id = path
+        .into_inner()
+        .parse::<Uuid>()
+        .map_err(|_| ApiError::bad_request("Invalid season id in path"))?;
+
+    let svc = StakingService::new(db.get_ref().clone());
+    Ok(HttpResponse::Ok().json(svc.get_snapshots(season_id).await?))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -174,7 +197,7 @@ mod tests {
     use actix_web::{
         http::StatusCode,
         test,
-        web, App,
+        web, App, HttpMessage,
     };
 
     /// Verifies that a request without a valid JWT (no auth middleware applied)
@@ -247,5 +270,89 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         // attacker_id != owner_id → 403 Forbidden.
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    fn admin_claims() -> crate::auth::Claims {
+        crate::auth::Claims {
+            sub: Uuid::new_v4().to_string(),
+            exp: 9999999999,
+            iat: 0,
+            jti: "test-jti".to_string(),
+            token_type: crate::auth::jwt_service::TokenType::Access,
+            device_id: None,
+            session_id: "test-session".to_string(),
+            roles: vec!["admin".to_string()],
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_season_snapshots_without_auth_returns_401() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(
+                    sqlx::PgPool::connect_lazy("postgres://localhost/arenax").unwrap(),
+                ))
+                .route(
+                    "/staking/snapshots/{season_id}",
+                    web::get().to(get_season_snapshots),
+                ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/staking/snapshots/{}", Uuid::new_v4()))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_web::test]
+    async fn test_season_snapshots_non_admin_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(
+                    sqlx::PgPool::connect_lazy("postgres://localhost/arenax").unwrap(),
+                ))
+                .route(
+                    "/staking/snapshots/{season_id}",
+                    web::get().to(get_season_snapshots),
+                ),
+        )
+        .await;
+
+        let mut req = test::TestRequest::get()
+            .uri(&format!("/staking/snapshots/{}", Uuid::new_v4()))
+            .to_request();
+        req.extensions_mut().insert(crate::auth::Claims {
+            roles: vec!["player".to_string()],
+            ..admin_claims()
+        });
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[actix_web::test]
+    async fn test_season_snapshots_invalid_id_returns_400() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(
+                    sqlx::PgPool::connect_lazy("postgres://localhost/arenax").unwrap(),
+                ))
+                .route(
+                    "/staking/snapshots/{season_id}",
+                    web::get().to(get_season_snapshots),
+                ),
+        )
+        .await;
+
+        let mut req = test::TestRequest::get()
+            .uri("/staking/snapshots/not-a-uuid")
+            .to_request();
+        req.extensions_mut().insert(admin_claims());
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

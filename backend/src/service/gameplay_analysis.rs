@@ -9,6 +9,8 @@ use crate::auth::jwt_service::JwtService;
 use crate::http::auth_handler::ACCESS_TOKEN_COOKIE;
 use crate::realtime::event_bus::EventBus;
 use crate::realtime::events::RealtimeEvent;
+use crate::service::anti_cheat_config::{AntiCheatConfig, AntiCheatConfigStore};
+use crate::service::configurable_gameplay_analysis::{score_frame_with_config_detailed, RuleHit};
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -16,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
+use tracing::warn;
 use uuid::Uuid;
 
 pub const ALERT_THRESHOLD: u8 = 70;
@@ -61,7 +64,10 @@ pub struct TelemetryFrame {
 pub struct Inference {
     pub score: u8,
     pub latency: Duration,
-    pub reasons: Vec<&'static str>,
+    pub reasons: Vec<String>,
+    /// Every rule that fired, with the threshold it crossed. Used for the
+    /// structured flag log and for clients that want the rule breakdown.
+    pub hits: Vec<RuleHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +106,9 @@ pub struct GameplayAnalysis {
     state: AsyncMutex<WatchState>,
     bus: Option<EventBus>,
     published: Mutex<Vec<Alert>>,
+    /// Live, database-backed rule set (Issue #1525). When absent the compiled-in
+    /// defaults are used, which keeps unit tests and tools independent of a DB.
+    config: Option<Arc<AntiCheatConfigStore>>,
 }
 
 impl GameplayAnalysis {
@@ -112,7 +121,15 @@ impl GameplayAnalysis {
             }),
             bus,
             published: Mutex::new(Vec::new()),
+            config: None,
         }
+    }
+
+    /// Score frames with the admin-editable rules from `store` instead of the
+    /// compiled-in thresholds.
+    pub fn with_config(mut self, store: Arc<AntiCheatConfigStore>) -> Self {
+        self.config = Some(store);
+        self
     }
 
     pub fn published(&self) -> Vec<Alert> {
@@ -127,16 +144,31 @@ impl GameplayAnalysis {
                 return Err(AnalysisError::Replay);
             }
         }
-        let inference = infer(&frame)?;
+        let (inference, flag_threshold) = match &self.config {
+            Some(store) => {
+                let config = store.get();
+                let threshold = config.flag_threshold;
+                (infer_with_config(&frame, &config)?, threshold)
+            }
+            None => (infer(&frame)?, ALERT_THRESHOLD),
+        };
         state.last_seq.insert(key, frame.seq);
         *state.samples.entry(frame.match_id).or_insert(0) += 1;
-        let reasons: Vec<String> = inference
-            .reasons
-            .iter()
-            .map(|reason| (*reason).to_string())
-            .collect();
-        let alert = inference.score >= ALERT_THRESHOLD;
+        let reasons = inference.reasons.clone();
+        let alert = inference.score >= flag_threshold;
         if alert {
+            for hit in &inference.hits {
+                warn!(
+                    match_id = %frame.match_id,
+                    player_id = %frame.player_id,
+                    rule = %hit.name,
+                    threshold = hit.threshold,
+                    weight = hit.weight,
+                    score = inference.score,
+                    flag_threshold,
+                    "gameplay session flagged by anti-cheat rule"
+                );
+            }
             let record = Alert {
                 id: Uuid::new_v4(),
                 match_id: frame.match_id,
@@ -210,49 +242,34 @@ pub fn validate(frame: &TelemetryFrame) -> Result<(), AnalysisError> {
     Ok(())
 }
 
-/// Score one frame. The work is bounded by [`LATENCY_BUDGET`].
+/// Score one frame with the compiled-in default rules.
+///
+/// Production scoring goes through [`infer_with_config`] with the rules loaded
+/// from the database; this wrapper keeps the default rule set available for
+/// callers that have no store (tests, tools, offline analysis).
 pub fn infer(frame: &TelemetryFrame) -> Result<Inference, AnalysisError> {
+    infer_with_config(frame, &AntiCheatConfig::default())
+}
+
+/// Score one frame against `config`. The work is bounded by
+/// [`LATENCY_BUDGET`]; a slow inference is reported rather than silently
+/// returning a stale score.
+pub fn infer_with_config(
+    frame: &TelemetryFrame,
+    config: &AntiCheatConfig,
+) -> Result<Inference, AnalysisError> {
     let started = Instant::now();
     validate(frame)?;
-    let mut score: u32 = 0;
-    let mut reasons = Vec::new();
-    if frame.reaction_ms < 50 {
-        score += 50;
-        reasons.push("reaction below human floor");
-    } else if frame.reaction_ms < 90 {
-        score += 30;
-        reasons.push("reaction faster than expected");
-    }
-    if frame.accuracy_bps > 9_500 {
-        score += 25;
-        reasons.push("accuracy above 95%");
-    } else if frame.accuracy_bps > 8_500 {
-        score += 15;
-        reasons.push("accuracy above 85%");
-    }
-    if frame.snap_deg_per_sec > 1_440 {
-        score += 35;
-        reasons.push("snap faster than 1440 deg/s");
-    } else if frame.snap_deg_per_sec > 720 {
-        score += 20;
-        reasons.push("snap faster than 720 deg/s");
-    }
-    if frame.speed_milli > frame.speed_limit_milli {
-        score += 40;
-        reasons.push("speed above the game limit");
-    }
-    if frame.entropy_bps < 500 {
-        score += 15;
-        reasons.push("input entropy looks scripted");
-    }
+    let (score, hits) = score_frame_with_config_detailed(frame, config);
     let latency = started.elapsed();
     if latency > LATENCY_BUDGET {
         return Err(AnalysisError::Slow(latency));
     }
     Ok(Inference {
-        score: score.min(100) as u8,
+        score,
         latency,
-        reasons,
+        reasons: hits.iter().map(|hit| hit.reason.clone()).collect(),
+        hits,
     })
 }
 
@@ -392,5 +409,60 @@ mod tests {
         let other = analysis.monitor(Uuid::from_u128(99)).await;
         assert_eq!(other.samples, 0);
         assert!(other.alerts.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Issue #1525: production scoring uses the admin-editable rule set
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn ingest_uses_the_configured_flag_threshold() {
+        use crate::service::anti_cheat_config::{
+            AntiCheatConfig, AntiCheatConfigStore, StaticConfigProvider,
+        };
+
+        let mut config = AntiCheatConfig::default();
+        config.flag_threshold = 255; // unreachable, so nothing can alert
+        let store = Arc::new(AntiCheatConfigStore::new(
+            Duration::from_secs(60),
+            Arc::new(StaticConfigProvider::new(config)),
+        ));
+        store.refresh();
+
+        let analysis = GameplayAnalysis::new(None).with_config(store);
+        let mut suspicious = frame(1, 10, 5_000);
+        suspicious.accuracy_bps = 9_900;
+        suspicious.entropy_bps = 100;
+
+        let result = analysis.ingest(suspicious).await.unwrap();
+        assert!(result.score > 0, "rules still score the frame");
+        assert!(
+            !result.alert,
+            "threshold 255 must suppress the alert even at score {}",
+            result.score
+        );
+        assert!(analysis.published().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ingest_reports_the_rules_that_flagged_a_session() {
+        use crate::service::anti_cheat_config::{AntiCheatConfig, AntiCheatConfigStore, StaticConfigProvider};
+
+        let store = Arc::new(AntiCheatConfigStore::new(
+            Duration::from_secs(60),
+            Arc::new(StaticConfigProvider::new(AntiCheatConfig::default())),
+        ));
+        store.refresh();
+
+        let analysis = GameplayAnalysis::new(None).with_config(store);
+        let mut suspicious = frame(1, 10, 500);
+        suspicious.accuracy_bps = 9_900;
+        suspicious.snap_deg_per_sec = 2_000;
+
+        let result = analysis.ingest(suspicious).await.unwrap();
+        assert!(result.alert);
+        assert!(result.reasons.iter().any(|r| r.contains("reaction")));
+        assert!(result.reasons.iter().any(|r| r.contains("accuracy")));
+        assert!(result.reasons.iter().any(|r| r.contains("snap")));
     }
 }

@@ -58,6 +58,26 @@ pub fn correlation_id(req: &ServiceRequest) -> Option<String> {
     req.extensions().get::<CorrelationId>().map(|c| c.0.clone())
 }
 
+tokio::task_local! {
+    /// Correlation id of the request currently being served.
+    ///
+    /// Error responses are built by `ResponseError::error_response`, which has
+    /// no access to the request, so the id is made ambient for the lifetime of
+    /// the request future instead of being threaded through every `ApiError`.
+    static REQUEST_ID: String;
+}
+
+/// Correlation id of the request currently being served, if any.
+pub fn current_request_id() -> Option<String> {
+    REQUEST_ID.try_with(|id| id.clone()).ok()
+}
+
+/// Runs `fut` with `id` as the ambient request id. Used by the middleware and
+/// by tests that need to observe the error body.
+pub async fn scope_request_id<F: Future>(id: String, fut: F) -> F::Output {
+    REQUEST_ID.scope(id, fut).await
+}
+
 pub struct RequestTracing;
 
 impl RequestTracing {
@@ -175,8 +195,10 @@ where
             .insert(CorrelationId(correlation_id.clone()));
 
         let fut = self.service.call(req);
+        let request_id = correlation_id.clone();
 
-        Box::pin(
+        Box::pin(REQUEST_ID.scope(
+            request_id,
             async move {
                 let outcome = fut.await;
                 let latency_ms = start.elapsed().as_millis() as u64;
@@ -198,7 +220,7 @@ where
                 }
             }
             .instrument(span),
-        )
+        ))
     }
 }
 

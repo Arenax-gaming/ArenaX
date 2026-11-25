@@ -17,6 +17,7 @@
 use crate::api_error::ApiError;
 use crate::auth::jwt_service::{Claims, JwtService};
 use crate::http::auth_handler::ACCESS_TOKEN_COOKIE;
+use crate::service::anti_cheat_config::{AntiCheatConfig, AntiCheatConfigStore};
 use crate::service::anti_cheat_service::{
     AntiCheatService, Finding, FindingSource, ScreenshotAnalysisRequest, TelemetryFrame,
 };
@@ -222,6 +223,112 @@ async fn get_review_queue(
     Ok(HttpResponse::Ok().json(queue))
 }
 
+/// Body for `PATCH /admin/anti-cheat/rules`.
+///
+/// Both fields are optional so a caller can change just the flag threshold or
+/// just one rule. Unknown rule names are rejected rather than silently ignored.
+#[derive(Debug, Deserialize)]
+pub struct UpdateRulesRequest {
+    #[serde(default)]
+    pub flag_threshold: Option<u8>,
+    #[serde(default)]
+    pub rules: Vec<RuleUpdate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuleUpdate {
+    pub name: String,
+    #[serde(default)]
+    pub weight: Option<u8>,
+    #[serde(default)]
+    pub threshold: Option<u32>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// PATCH /admin/anti-cheat/rules — update thresholds without a deploy
+/// (Issue #1525).
+///
+/// The write is transactional and the in-memory cache is replaced from the
+/// committed rows before responding, so the new rules apply immediately on this
+/// instance; other instances pick them up within the 60-second refresh.
+async fn patch_rules(
+    req: HttpRequest,
+    jwt: web::Data<Arc<JwtService>>,
+    db: web::Data<sqlx::PgPool>,
+    store: web::Data<Arc<AntiCheatConfigStore>>,
+    body: web::Json<UpdateRulesRequest>,
+) -> Result<HttpResponse, ApiError> {
+    let claims = caller(&req, jwt.get_ref()).await?;
+    if !is_admin(&claims) {
+        return Err(ApiError::forbidden("Admin access required"));
+    }
+    let body = body.into_inner();
+
+    if body.flag_threshold.map_or(false, |threshold| threshold > 100) {
+        return Err(ApiError::bad_request("flag_threshold must be 0-100"));
+    }
+    for rule in &body.rules {
+        if rule.weight.map_or(false, |weight| weight > 100) {
+            return Err(ApiError::bad_request(format!(
+                "weight for rule '{}' must be 0-100",
+                rule.name
+            )));
+        }
+        if rule.threshold.map_or(false, |threshold| threshold > i32::MAX as u32) {
+            return Err(ApiError::bad_request(format!(
+                "threshold for rule '{}' is out of range",
+                rule.name
+            )));
+        }
+    }
+
+    let mut tx = db.begin().await.map_err(ApiError::database_error)?;
+
+    if let Some(threshold) = body.flag_threshold {
+        sqlx::query("UPDATE anti_cheat_settings SET flag_threshold = $1 WHERE id = TRUE")
+            .bind(threshold as i16)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::database_error)?;
+    }
+
+    for rule in &body.rules {
+        let updated = sqlx::query(
+            r#"
+            UPDATE anti_cheat_rules
+            SET weight = COALESCE($2, weight),
+                threshold = COALESCE($3, threshold),
+                enabled = COALESCE($4, enabled)
+            WHERE name = $1
+            "#,
+        )
+        .bind(&rule.name)
+        .bind(rule.weight.map(|weight| weight as i16))
+        .bind(rule.threshold.map(|threshold| threshold as i32))
+        .bind(rule.enabled)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::database_error)?;
+
+        if updated.rows_affected() == 0 {
+            return Err(ApiError::not_found(format!(
+                "Anti-cheat rule '{}' not found",
+                rule.name
+            )));
+        }
+    }
+
+    tx.commit().await.map_err(ApiError::database_error)?;
+
+    let config = AntiCheatConfig::load_from_db(db.get_ref())
+        .await
+        .map_err(ApiError::database_error)?;
+    store.set_config(config.clone());
+
+    Ok(HttpResponse::Ok().json(config))
+}
+
 /// Mounted inside the `/api` scope in `main.rs`.
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -232,6 +339,15 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route("/players/{player_id}/flags", web::get().to(get_player_flags))
             .route("/review-queue", web::get().to(get_review_queue)),
     )
+    .route("/admin/anti-cheat/rules", web::patch().to(patch_rules))
     .route("/matches/{id}/analyze", web::post().to(post_match_analyze))
     .route("/matches/{id}/analysis", web::get().to(get_match_analysis));
 }
+
+/// Registers the absolute path documented in Issue #1525
+/// (`PATCH /admin/anti-cheat/rules`) at the app level. The `/api`-prefixed
+/// alias is registered by [`configure_routes`].
+pub fn configure_admin(cfg: &mut web::ServiceConfig) {
+    cfg.route("/admin/anti-cheat/rules", web::patch().to(patch_rules));
+}
+

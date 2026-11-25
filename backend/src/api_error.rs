@@ -1,4 +1,5 @@
-use actix_web::{HttpResponse, ResponseError};
+use actix_web::http::StatusCode;
+use actix_web::{HttpRequest, HttpResponse, ResponseError};
 use serde::Serialize;
 use thiserror::Error;
 use tracing::error;
@@ -94,6 +95,68 @@ pub enum ApiError {
 
 // Helper methods for convenience
 impl ApiError {
+    /// Machine-readable code returned to clients (Issue #1523).
+    ///
+    /// Every variant has its own code so a client can branch on it without
+    /// parsing the human-readable `message`, and without depending on the
+    /// numeric HTTP status (which is shared by several variants).
+    pub fn code(&self) -> &'static str {
+        match self {
+            ApiError::InternalServerError(_) => "INTERNAL_ERROR",
+            ApiError::BadRequest(_) => "BAD_REQUEST",
+            ApiError::Unauthorized => "UNAUTHORIZED",
+            ApiError::Forbidden => "FORBIDDEN",
+            ApiError::NotFound => "RESOURCE_NOT_FOUND",
+            ApiError::Conflict(_) => "CONFLICT",
+            ApiError::DatabaseError(_) => "DATABASE_ERROR",
+            ApiError::RedisError(_) => "CACHE_ERROR",
+            ApiError::StellarError(_) => "STELLAR_ERROR",
+            ApiError::ValidationError(_) => "VALIDATION_ERROR",
+            ApiError::ValidationFailed(_) => "VALIDATION_FAILED",
+            ApiError::TooManyRequests { .. } => "RATE_LIMIT_EXCEEDED",
+            ApiError::ServiceUnavailable(_) => "SERVICE_UNAVAILABLE",
+            ApiError::DependencyUnavailable { .. } => "DEPENDENCY_UNAVAILABLE",
+        }
+    }
+
+    /// HTTP status derived from the variant, never chosen ad hoc at the call
+    /// site (Issue #1523).
+    pub fn status(&self) -> StatusCode {
+        match self {
+            ApiError::InternalServerError(_)
+            | ApiError::DatabaseError(_)
+            | ApiError::RedisError(_)
+            | ApiError::StellarError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ApiError::Forbidden => StatusCode::FORBIDDEN,
+            ApiError::NotFound => StatusCode::NOT_FOUND,
+            ApiError::Conflict(_) => StatusCode::CONFLICT,
+            // 422, not 400: the request was well-formed enough to parse — it is
+            // the values that were rejected.
+            ApiError::ValidationError(_) | ApiError::ValidationFailed(_) => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            ApiError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            ApiError::ServiceUnavailable(_) | ApiError::DependencyUnavailable { .. } => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        }
+    }
+
+    /// Message safe to return to the caller. Internal failures are logged with
+    /// their real cause but answered generically so infrastructure details do
+    /// not leak.
+    pub fn public_message(&self) -> String {
+        match self {
+            ApiError::InternalServerError(_) => "Internal server error".to_string(),
+            ApiError::DatabaseError(_) => "Database error".to_string(),
+            ApiError::RedisError(_) => "Cache error".to_string(),
+            ApiError::StellarError(_) => "Blockchain error".to_string(),
+            other => other.to_string(),
+        }
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         ApiError::BadRequest(message.into())
     }
@@ -135,69 +198,37 @@ impl ApiError {
     }
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-    code: u16,
-    details: Option<String>,
-    /// Per-field failures. Omitted entirely for non-validation errors so the
-    /// response shape stays unchanged for every existing consumer.
+/// Uniform error body returned by every `ApiError` (Issue #1523).
+#[derive(Debug, Serialize)]
+pub struct ErrorResponse {
+    /// Machine-readable code, e.g. `RESOURCE_NOT_FOUND`.
+    pub code: &'static str,
+    /// Human-readable description, safe to show to the caller.
+    pub message: String,
+    /// Correlation id of the request, taken from the tracing middleware so a
+    /// client report can be matched to the server-side log line.
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+    /// Per-field failures. Omitted entirely for non-validation errors.
     #[serde(skip_serializing_if = "Option::is_none")]
-    fields: Option<Vec<FieldError>>,
+    pub fields: Option<Vec<FieldError>>,
 }
 
 impl ResponseError for ApiError {
-    fn error_response(&self) -> HttpResponse {
-        let (status, message) = match self {
-            ApiError::InternalServerError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error".to_string(),
-            ),
-            ApiError::BadRequest(_) => (actix_web::http::StatusCode::BAD_REQUEST, self.to_string()),
-            ApiError::Unauthorized => (actix_web::http::StatusCode::UNAUTHORIZED, self.to_string()),
-            ApiError::Forbidden => (actix_web::http::StatusCode::FORBIDDEN, self.to_string()),
-            ApiError::NotFound => (actix_web::http::StatusCode::NOT_FOUND, self.to_string()),
-            ApiError::Conflict(_) => (actix_web::http::StatusCode::CONFLICT, self.to_string()),
-            ApiError::DatabaseError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ),
-            ApiError::RedisError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Cache error".to_string(),
-            ),
-            ApiError::StellarError(_) => (
-                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Blockchain error".to_string(),
-            ),
-            // 422, not 400: the request was well-formed enough to parse — it is
-            // the values that were rejected.
-            ApiError::ValidationError(_) => (
-                actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
-                self.to_string(),
-            ),
-            ApiError::ValidationFailed(_) => (
-                actix_web::http::StatusCode::UNPROCESSABLE_ENTITY,
-                self.to_string(),
-            ),
-            ApiError::TooManyRequests { .. } => (
-                actix_web::http::StatusCode::TOO_MANY_REQUESTS,
-                self.to_string(),
-            ),
-            ApiError::ServiceUnavailable(_) | ApiError::DependencyUnavailable { .. } => (
-                actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
-                self.to_string(),
-            ),
-        };
+    fn status_code(&self) -> StatusCode {
+        self.status()
+    }
 
+    fn error_response(&self) -> HttpResponse {
+        let status = self.status();
         let error_response = ErrorResponse {
-            error: message,
-            code: status.as_u16(),
-            // Never echo internal details (DB errors, stack traces, etc.) back to the client.
-            details: None,
-            // Field errors are the exception: they describe the caller's own
-            // input, so returning them leaks nothing and is the only way the
-            // caller can fix the request.
+            code: self.code(),
+            message: self.public_message(),
+            request_id: crate::middleware::tracing_middleware::current_request_id()
+                .unwrap_or_default(),
+            // Field errors are the exception to "never echo internals": they
+            // describe the caller's own input, so returning them leaks nothing
+            // and is the only way the caller can fix the request.
             fields: match self {
                 ApiError::ValidationFailed(fields) => Some(fields.clone()),
                 _ => None,
@@ -217,7 +248,10 @@ impl ResponseError for ApiError {
             builder.insert_header(("RateLimit-Remaining", remaining.to_string()));
             builder.insert_header(("RateLimit-Reset", reset.to_string()));
             builder.insert_header(("Retry-After", retry_after.to_string()));
-            builder.insert_header(("Access-Control-Expose-Headers", "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After"));
+            builder.insert_header((
+                "Access-Control-Expose-Headers",
+                "RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset, Retry-After",
+            ));
         }
         if let ApiError::DependencyUnavailable { retry_after, .. } = self {
             builder.insert_header(("Retry-After", retry_after.to_string()));
@@ -225,6 +259,47 @@ impl ResponseError for ApiError {
         }
         builder.json(error_response)
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extractor / routing fallbacks (Issue #1523)
+//
+// Actix answers a malformed JSON/query/path payload and an unmatched route
+// with a plain-text body by default. These handlers route those failures
+// through `ApiError` so every error body has the same JSON shape.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn extractor_error(error: ApiError) -> actix_web::Error {
+    actix_web::error::InternalError::from_response(error.public_message(), error.error_response())
+        .into()
+}
+
+pub fn json_error_handler(
+    error: actix_web::error::JsonPayloadError,
+    _req: &HttpRequest,
+) -> actix_web::Error {
+    extractor_error(ApiError::bad_request(format!("Invalid JSON body: {error}")))
+}
+
+pub fn query_error_handler(
+    error: actix_web::error::QueryPayloadError,
+    _req: &HttpRequest,
+) -> actix_web::Error {
+    extractor_error(ApiError::bad_request(format!(
+        "Invalid query parameters: {error}"
+    )))
+}
+
+pub fn path_error_handler(
+    error: actix_web::error::PathError,
+    _req: &HttpRequest,
+) -> actix_web::Error {
+    extractor_error(ApiError::bad_request(format!("Invalid path parameter: {error}")))
+}
+
+/// Fallback for requests that match no route.
+pub async fn not_found_handler() -> ApiError {
+    ApiError::NotFound
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -434,3 +509,133 @@ mod validation_tests {
     }
 }
 
+
+#[cfg(test)]
+mod error_contract_tests {
+    use super::*;
+    use actix_web::body::to_bytes;
+    use std::collections::HashSet;
+
+    fn all_variants() -> Vec<ApiError> {
+        vec![
+            ApiError::InternalServerError("boom".into()),
+            ApiError::BadRequest("bad".into()),
+            ApiError::Unauthorized,
+            ApiError::Forbidden,
+            ApiError::NotFound,
+            ApiError::Conflict("duplicate".into()),
+            ApiError::DatabaseError(sqlx::Error::RowNotFound),
+            ApiError::RedisError("down".into()),
+            ApiError::StellarError("rpc".into()),
+            ApiError::ValidationError("invalid".into()),
+            ApiError::ValidationFailed(vec![FieldError::new("email", "email", "invalid")]),
+            ApiError::TooManyRequests {
+                message: "slow down".into(),
+                limit: 10,
+                remaining: 0,
+                reset: 1,
+                retry_after: 1,
+            },
+            ApiError::ServiceUnavailable("maintenance".into()),
+            ApiError::DependencyUnavailable {
+                message: "breaker open".into(),
+                retry_after: 5,
+            },
+        ]
+    }
+
+    #[test]
+    fn every_variant_has_a_unique_machine_readable_code() {
+        let variants = all_variants();
+        let codes: HashSet<&'static str> = variants.iter().map(ApiError::code).collect();
+
+        assert_eq!(codes.len(), variants.len(), "codes must be unique");
+        for code in codes {
+            assert!(
+                code.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
+                "{code} must be SCREAMING_SNAKE_CASE"
+            );
+        }
+    }
+
+    #[test]
+    fn status_is_derived_from_the_variant() {
+        assert_eq!(ApiError::NotFound.status(), StatusCode::NOT_FOUND);
+        assert_eq!(ApiError::Forbidden.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            ApiError::ValidationError("x".into()).status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            ApiError::DependencyUnavailable {
+                message: "x".into(),
+                retry_after: 1
+            }
+            .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            ApiError::InternalServerError("x".into()).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn a_missing_resource_is_a_404_with_resource_not_found() {
+        let response = ApiError::NotFound.error_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(ApiError::NotFound.code(), "RESOURCE_NOT_FOUND");
+    }
+
+    #[actix_web::test]
+    async fn error_body_uses_the_uniform_code_message_request_id_shape() {
+        let response = ApiError::NotFound.error_response();
+        let bytes = to_bytes(response.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(body["code"], "RESOURCE_NOT_FOUND");
+        assert_eq!(body["message"], "Not found");
+        assert_eq!(body["requestId"], "");
+        assert!(body.get("error").is_none(), "legacy field must be gone");
+        assert!(body.get("details").is_none(), "legacy field must be gone");
+    }
+
+    #[actix_web::test]
+    async fn request_id_is_taken_from_the_correlation_scope() {
+        let body = crate::middleware::tracing_middleware::scope_request_id(
+            "corr-123".to_string(),
+            async {
+                let response = ApiError::Forbidden.error_response();
+                let bytes = to_bytes(response.into_body()).await.unwrap();
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+            },
+        )
+        .await;
+
+        assert_eq!(body["requestId"], "corr-123");
+    }
+
+    #[actix_web::test]
+    async fn internal_details_are_not_leaked() {
+        let response =
+            ApiError::InternalServerError("connection string leaked".into()).error_response();
+        let bytes = to_bytes(response.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(body["code"], "INTERNAL_ERROR");
+        assert_eq!(body["message"], "Internal server error");
+        assert!(!body.to_string().contains("connection string leaked"));
+    }
+
+    #[actix_web::test]
+    async fn validation_failures_keep_the_field_breakdown() {
+        let error = ApiError::ValidationFailed(vec![FieldError::new("age", "range", "out of range")]);
+        let response = error.error_response();
+        let bytes = to_bytes(response.into_body()).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(body["code"], "VALIDATION_FAILED");
+        assert_eq!(body["fields"][0]["field"], "age");
+    }
+}
