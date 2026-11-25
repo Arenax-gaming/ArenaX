@@ -245,6 +245,9 @@ export const TxStatusProvider = ({ children }: { children: React.ReactNode }) =>
           explorerUrl,
         }));
 
+        // Advance to confirming when submitted to network and start polling
+        setPhase("confirming");
+
         await waitForTransactionConfirmation(txHash, txKind);
 
         setPhase("confirmed");

@@ -12,7 +12,7 @@ export type TxDirection = "deposit" | "withdraw" | "earning";
 
 export type TxStatus = "pending" | "success" | "failed";
 
-export type TxPhase = "signing" | "submitted" | "confirmed";
+export type TxPhase = "signing" | "submitted" | "confirming" | "confirmed";
 
 export interface WalletSession {
   publicKey: string;
