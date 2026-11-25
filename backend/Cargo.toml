@@ -31,3 +31,7 @@ bcrypt = "0.14"
 # Real-time tournament delivery is independently testable without PostgreSQL.
 arenax-tournament-realtime = { path = "realtime" }
 actix = "0.13"
+
+# Soroban JSON-RPC event ingestion.
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
