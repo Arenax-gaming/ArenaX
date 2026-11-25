@@ -13,16 +13,22 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Actix `PayloadConfig` limit for evidence uploads (#1076).
-pub const MAX_EVIDENCE_BYTES: usize = 5 * 1024 * 1024;
+/// Actix `PayloadConfig` limit for evidence uploads (10 MB).
+pub const MAX_EVIDENCE_BYTES: usize = 10 * 1024 * 1024;
 
-pub const ALLOWED_CONTENT_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp"];
+pub const ALLOWED_CONTENT_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "video/mp4",
+    "application/json",
+];
 
 fn base_content_type(content_type: &str) -> &str {
     content_type.split(';').next().unwrap_or("").trim()
 }
 
-/// Reject anything but the three supported image types (#1076).
+/// Reject anything other than the supported evidence MIME types with 422
+/// and the list of allowed types.
 pub fn validate_content_type(content_type: &str) -> Result<(), ApiError> {
     if ALLOWED_CONTENT_TYPES.contains(&base_content_type(content_type)) {
         Ok(())
@@ -35,17 +41,34 @@ pub fn validate_content_type(content_type: &str) -> Result<(), ApiError> {
     }
 }
 
-/// Reject a payload larger than [`MAX_EVIDENCE_BYTES`]. Actix's
-/// `PayloadConfig` limit (wired in `main.rs`) rejects the connection outright
-/// for a body that large; this is a defense-in-depth check for callers that
-/// buffer the body themselves.
+/// Reject a payload larger than [`MAX_EVIDENCE_BYTES`] (10 MB) with 422.
 pub fn validate_evidence_size(len: usize) -> Result<(), ApiError> {
     if len > MAX_EVIDENCE_BYTES {
         Err(ApiError::ValidationError(format!(
-            "Evidence file is {len} bytes, which exceeds the {MAX_EVIDENCE_BYTES}-byte limit"
+            "Evidence file is {len} bytes, which exceeds the {MAX_EVIDENCE_BYTES}-byte (10 MB) limit; allowed types: {}",
+            ALLOWED_CONTENT_TYPES.join(", ")
         )))
     } else {
         Ok(())
+    }
+}
+
+/// Detect the MIME type of raw evidence bytes from their magic header or structure.
+pub fn detect_mime_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        "image/png"
+    } else if bytes.len() >= 3 && bytes[0..3] == [0xFF, 0xD8, 0xFF] {
+        "image/jpeg"
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        "video/mp4"
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"%PDF") {
+        "application/pdf"
+    } else if !bytes.is_empty() && serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+        "application/json"
+    } else {
+        "application/octet-stream"
     }
 }
 
@@ -56,18 +79,66 @@ pub fn validate_magic_bytes(content_type: &str, bytes: &[u8]) -> Result<(), ApiE
     let matches = match base_content_type(content_type) {
         "image/png" => bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
         "image/jpeg" => bytes.len() >= 3 && bytes[0..3] == [0xFF, 0xD8, 0xFF],
-        "image/webp" => {
-            bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+        "video/mp4" => bytes.len() >= 12 && &bytes[4..8] == b"ftyp",
+        "application/json" => {
+            !bytes.is_empty() && serde_json::from_slice::<serde_json::Value>(bytes).is_ok()
         }
         _ => false,
     };
     if matches {
         Ok(())
     } else {
-        Err(ApiError::ValidationError(
-            "File contents do not match the declared content type".to_string(),
-        ))
+        Err(ApiError::ValidationError(format!(
+            "File contents do not match the declared content type '{}'; allowed types: {}",
+            base_content_type(content_type),
+            ALLOWED_CONTENT_TYPES.join(", ")
+        )))
     }
+}
+
+/// Validate an evidence upload (size, declared MIME type, and magic bytes)
+/// before any storage I/O is performed, logging rejected uploads with the
+/// user ID, file size, and detected MIME type.
+pub fn validate_evidence_upload(
+    user_id: Uuid,
+    content_type: &str,
+    bytes: &[u8],
+) -> Result<(), ApiError> {
+    let result = validate_evidence_size(bytes.len())
+        .and_then(|()| validate_content_type(content_type))
+        .and_then(|()| validate_magic_bytes(content_type, bytes));
+
+    if let Err(ref err) = result {
+        let detected_mime = detect_mime_type(bytes);
+        tracing::warn!(
+            user_id = %user_id,
+            file_size = bytes.len(),
+            declared_mime = %base_content_type(content_type),
+            detected_mime = %detected_mime,
+            reason = %err,
+            "Rejected dispute evidence upload"
+        );
+    }
+
+    result
+}
+
+/// Validate evidence bytes and store them in `store` only if validation passes.
+/// Returns `(object_key, sha256_hex)`.
+pub async fn store_validated_evidence(
+    store: &dyn EvidenceStore,
+    user_id: Uuid,
+    match_id: Uuid,
+    content_type: &str,
+    bytes: &[u8],
+) -> Result<(String, String), ApiError> {
+    validate_evidence_upload(user_id, content_type, bytes)?;
+
+    let hash_hex = hash_evidence(bytes);
+    let normalized_type = base_content_type(content_type);
+    let key = evidence_object_key(user_id, match_id, normalized_type, &hash_hex);
+    store.put(&key, normalized_type, bytes).await?;
+    Ok((key, hash_hex))
 }
 
 /// SHA-256 hex digest of the raw evidence bytes (#1081). Stored in
@@ -240,7 +311,8 @@ fn extension_for(content_type: &str) -> &'static str {
     match base_content_type(content_type) {
         "image/png" => "png",
         "image/jpeg" => "jpg",
-        "image/webp" => "webp",
+        "video/mp4" => "mp4",
+        "application/json" => "json",
         _ => "bin",
     }
 }
@@ -568,14 +640,26 @@ mod tests {
     fn accepts_allowed_content_types_only() {
         assert!(validate_content_type("image/png").is_ok());
         assert!(validate_content_type("image/jpeg").is_ok());
-        assert!(validate_content_type("image/webp").is_ok());
-        assert!(validate_content_type("application/pdf").is_err());
+        assert!(validate_content_type("video/mp4").is_ok());
+        assert!(validate_content_type("application/json").is_ok());
+
+        let err = validate_content_type("application/pdf").unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("image/png"));
+        assert!(msg.contains("image/jpeg"));
+        assert!(msg.contains("video/mp4"));
+        assert!(msg.contains("application/json"));
+
+        assert!(validate_content_type("image/webp").is_err());
     }
 
     #[test]
     fn rejects_oversized_payload() {
+        assert_eq!(MAX_EVIDENCE_BYTES, 10 * 1024 * 1024);
         assert!(validate_evidence_size(MAX_EVIDENCE_BYTES).is_ok());
-        assert!(validate_evidence_size(MAX_EVIDENCE_BYTES + 1).is_err());
+        let err = validate_evidence_size(MAX_EVIDENCE_BYTES + 1).unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
     }
 
     #[test]
@@ -584,9 +668,53 @@ mod tests {
         png_bytes.extend_from_slice(b"rest of file");
         assert!(validate_magic_bytes("image/png", &png_bytes).is_ok());
 
+        let jpeg_bytes = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        assert!(validate_magic_bytes("image/jpeg", &jpeg_bytes).is_ok());
+
+        let mp4_bytes = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00".to_vec();
+        assert!(validate_magic_bytes("video/mp4", &mp4_bytes).is_ok());
+
+        let json_bytes = br#"{"match_id":"123","score":42}"#.to_vec();
+        assert!(validate_magic_bytes("application/json", &json_bytes).is_ok());
+
         // A PDF (`%PDF`) renamed to declare image/png must be rejected.
         let fake = b"%PDF-1.4 not actually a png".to_vec();
         assert!(validate_magic_bytes("image/png", &fake).is_err());
+        assert!(validate_magic_bytes("application/json", b"not json").is_err());
+    }
+
+    #[tokio::test]
+    async fn store_validated_evidence_validates_before_storage_io() {
+        let store = FlakyStore::new(0, || ApiError::ServiceUnavailable("unused".into()));
+        let user_id = Uuid::from_u128(10);
+        let match_id = Uuid::from_u128(20);
+
+        // Oversized payload must be rejected before touching the store.
+        let mut oversized = PNG_MAGIC.to_vec();
+        oversized.resize(MAX_EVIDENCE_BYTES + 1, 0);
+        let err = store_validated_evidence(&store, user_id, match_id, "image/png", &oversized)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
+        assert_eq!(store.attempts(), 0, "storage I/O must not run on oversized file");
+
+        // Unsupported MIME type must be rejected before touching the store.
+        let pdf = b"%PDF-1.4 test".to_vec();
+        let err = store_validated_evidence(&store, user_id, match_id, "application/pdf", &pdf)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
+        assert!(err.to_string().contains("video/mp4"));
+        assert_eq!(store.attempts(), 0, "storage I/O must not run on unsupported MIME type");
+
+        // Valid payload succeeds and performs storage I/O.
+        let json = br#"{"event":"dispute"}"#;
+        let (key, _hash) =
+            store_validated_evidence(&store, user_id, match_id, "application/json", json)
+                .await
+                .expect("valid JSON evidence should be stored");
+        assert!(key.ends_with(".json"));
+        assert_eq!(store.attempts(), 1);
     }
 
     #[test]

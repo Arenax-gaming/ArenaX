@@ -20,8 +20,62 @@ use crate::models::{
     AddEvidenceRequest, CreateTicketRequest, Dispute, DisputeDetail, DisputeEvidence,
     DisputeHistoryEntry, EscalationLevel, ListDisputesQuery, TicketStatus,
 };
+use crate::service::evidence_storage::{
+    validate_content_type, validate_evidence_size, ALLOWED_CONTENT_TYPES,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+/// Validate dispute evidence metadata (size <= 10 MB and allowed MIME type)
+/// before any storage or database I/O is performed. Rejected uploads are logged
+/// with the user ID, file size, and MIME type and rejected with 422.
+pub fn validate_evidence_metadata(
+    user_id: Uuid,
+    content_type: Option<&str>,
+    size_bytes: Option<i64>,
+) -> Result<(), ApiError> {
+    let mime = content_type.unwrap_or("").trim();
+
+    if let Some(size) = size_bytes {
+        if size < 0 {
+            let err = ApiError::ValidationError(format!(
+                "Evidence file size cannot be negative; allowed types: {}",
+                ALLOWED_CONTENT_TYPES.join(", ")
+            ));
+            tracing::warn!(
+                user_id = %user_id,
+                file_size = size,
+                detected_mime = %mime,
+                reason = %err,
+                "Rejected dispute evidence upload"
+            );
+            return Err(err);
+        }
+        if let Err(err) = validate_evidence_size(size as usize) {
+            tracing::warn!(
+                user_id = %user_id,
+                file_size = size,
+                detected_mime = %mime,
+                reason = %err,
+                "Rejected dispute evidence upload"
+            );
+            return Err(err);
+        }
+    }
+
+    if let Err(err) = validate_content_type(mime) {
+        tracing::warn!(
+            user_id = %user_id,
+            file_size = size_bytes.unwrap_or(0),
+            detected_mime = %mime,
+            reason = %err,
+            "Rejected dispute evidence upload"
+        );
+        return Err(err);
+    }
+
+    Ok(())
+}
 
 pub struct DisputeService {
     db_pool: PgPool,
@@ -198,14 +252,21 @@ impl DisputeService {
         uploaded_by: Uuid,
         request: AddEvidenceRequest,
     ) -> Result<DisputeEvidence, ApiError> {
+        if request.file_url.trim().is_empty() || request.file_name.trim().is_empty() {
+            return Err(ApiError::bad_request("file_url and file_name are required"));
+        }
+
+        validate_evidence_metadata(
+            uploaded_by,
+            request.content_type.as_deref(),
+            request.size_bytes,
+        )?;
+
         let dispute = self.get_dispute(dispute_id).await?;
         if dispute.status().is_terminal() {
             return Err(ApiError::conflict(
                 "cannot add evidence to a closed dispute",
             ));
-        }
-        if request.file_url.trim().is_empty() || request.file_name.trim().is_empty() {
-            return Err(ApiError::bad_request("file_url and file_name are required"));
         }
 
         let mut tx = self
@@ -569,6 +630,7 @@ impl DisputeService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::evidence_storage::MAX_EVIDENCE_BYTES;
 
     #[test]
     fn escalation_level_progresses_and_caps_at_admin() {
@@ -613,5 +675,41 @@ mod tests {
         assert!(TicketStatus::Resolved.is_terminal());
         assert!(TicketStatus::Rejected.is_terminal());
         assert!(TicketStatus::Closed.is_terminal());
+    }
+
+    #[test]
+    fn evidence_metadata_accepts_valid_types_and_sizes() {
+        let user_id = Uuid::from_u128(1);
+        for mime in ["image/png", "image/jpeg", "video/mp4", "application/json"] {
+            assert!(
+                validate_evidence_metadata(user_id, Some(mime), Some(MAX_EVIDENCE_BYTES as i64))
+                    .is_ok(),
+                "expected {mime} at 10 MB to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn evidence_metadata_rejects_oversized_file_with_422() {
+        let user_id = Uuid::from_u128(2);
+        let err = validate_evidence_metadata(
+            user_id,
+            Some("image/png"),
+            Some((MAX_EVIDENCE_BYTES + 1) as i64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
+    }
+
+    #[test]
+    fn evidence_metadata_rejects_unsupported_mime_with_allowed_list() {
+        let user_id = Uuid::from_u128(3);
+        let err =
+            validate_evidence_metadata(user_id, Some("application/pdf"), Some(1024)).unwrap_err();
+        assert!(matches!(err, ApiError::ValidationError(_)));
+        let msg = err.to_string();
+        for allowed in ALLOWED_CONTENT_TYPES {
+            assert!(msg.contains(allowed), "expected error to list {allowed}");
+        }
     }
 }
