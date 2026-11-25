@@ -1005,3 +1005,16 @@ model ApiKey {
   @@index([userId])
 }
 
+
+model SlowQueryLog {
+  id            String   @id @default(uuid())
+  model         String?
+  operation     String
+  durationMs    Int
+  level         String
+  correlationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([durationMs(sort: Desc)])
+}

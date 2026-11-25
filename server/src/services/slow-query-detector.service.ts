@@ -1,63 +1,84 @@
 import { logger } from './logger.service';
 import { metricsService } from './metrics.service';
+import { correlationStore } from './correlation.service';
 
 export interface SlowQueryRecord {
   query: string;
   params: unknown[];
   durationMs: number;
   model: string;
+  operation: string;
+  correlationId?: string;
   timestamp: Date;
 }
 
-const SLOW_QUERY_THRESHOLD_MS = parseInt(process.env.SLOW_QUERY_THRESHOLD_MS || '500', 10);
+const WARN_THRESHOLD_MS = parseInt(process.env.SLOW_QUERY_THRESHOLD_MS || '100', 10);
+const ERROR_THRESHOLD_MS = parseInt(process.env.SLOW_QUERY_ERROR_THRESHOLD_MS || '500', 10);
 const MAX_RECORDS = parseInt(process.env.SLOW_QUERY_MAX_RECORDS || '1000', 10);
+const WINDOW_MS = 60 * 60 * 1000;
 
 const slowQueries: SlowQueryRecord[] = [];
 
 /**
- * Records a query execution.  Queries that exceed the configurable threshold
- * (default 500 ms) are logged at WARN and a Prometheus counter is incremented
- * so operators can alert on slow-query volume.
- *
- * Wired into database.service.ts via the Prisma `$use` middleware so every
- * query flowing through the client is instrumented automatically.
+ * Records a query execution. Queries over WARN_THRESHOLD_MS are logged at warn;
+ * queries over ERROR_THRESHOLD_MS are logged at error. Each slow query is also
+ * retained (bounded) for the /metrics/slow-queries endpoint.
  */
 export function recordQueryExecution(
   model: string,
+  operation: string,
   query: string,
   params: unknown[],
   durationMs: number
 ): void {
-  if (durationMs >= SLOW_QUERY_THRESHOLD_MS) {
-    const record: SlowQueryRecord = {
-      model,
-      query,
-      params,
-      durationMs,
-      timestamp: new Date(),
-    };
+  if (durationMs < WARN_THRESHOLD_MS) return;
 
-    slowQueries.unshift(record);
-    if (slowQueries.length > MAX_RECORDS) {
-      slowQueries.pop();
-    }
+  const correlationId = correlationStore.getStore()?.correlationId;
+  const record: SlowQueryRecord = {
+    model,
+    operation,
+    query,
+    params,
+    durationMs,
+    correlationId,
+    timestamp: new Date(),
+  };
 
-    logger.warn('Slow query detected', {
-      model,
-      durationMs,
-      threshold: SLOW_QUERY_THRESHOLD_MS,
-      query: truncateQuery(query),
-    });
-
-    // Export to Prometheus so Grafana / alert-manager can fire on slow-query
-    // volume per model + operation.
-    try {
-      metricsService.recordSlowQuery(model, query);
-    } catch {
-      // Metrics service may not be initialised in some test contexts — never
-      // let a metrics error block the query path.
-    }
+  slowQueries.unshift(record);
+  if (slowQueries.length > MAX_RECORDS) {
+    slowQueries.pop();
   }
+
+  const logPayload = {
+    model,
+    operation,
+    durationMs,
+    correlation_id: correlationId,
+    query: truncateQuery(query),
+  };
+
+  if (durationMs >= ERROR_THRESHOLD_MS) {
+    logger.error('Very slow query detected', logPayload);
+  } else {
+    logger.warn('Slow query detected', logPayload);
+  }
+
+  try {
+    metricsService.recordSlowQuery(model, operation);
+  } catch {
+    // Never let a metrics error block the query path.
+  }
+}
+
+/**
+ * Returns the top N slowest queries recorded within the last hour.
+ */
+export function getTopSlowQueriesLastHour(limit = 10): SlowQueryRecord[] {
+  const cutoff = Date.now() - WINDOW_MS;
+  return slowQueries
+    .filter((r) => r.timestamp.getTime() >= cutoff)
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, limit);
 }
 
 export function getSlowQueries(limit = 50, offset = 0): SlowQueryRecord[] {
@@ -72,7 +93,7 @@ export function getSlowQueryStats(): {
   byModel: Record<string, number>;
 } {
   if (slowQueries.length === 0) {
-    return { total: 0, averageMs: 0, maxMs: 0, thresholdMs: SLOW_QUERY_THRESHOLD_MS, byModel: {} };
+    return { total: 0, averageMs: 0, maxMs: 0, thresholdMs: WARN_THRESHOLD_MS, byModel: {} };
   }
 
   const byModel: Record<string, number> = {};
@@ -89,7 +110,7 @@ export function getSlowQueryStats(): {
     total: slowQueries.length,
     averageMs: Math.round(totalMs / slowQueries.length),
     maxMs,
-    thresholdMs: SLOW_QUERY_THRESHOLD_MS,
+    thresholdMs: WARN_THRESHOLD_MS,
     byModel,
   };
 }
@@ -99,7 +120,7 @@ export function clearSlowQueries(): void {
 }
 
 export function getSlowQueryThreshold(): number {
-  return SLOW_QUERY_THRESHOLD_MS;
+  return WARN_THRESHOLD_MS;
 }
 
 function truncateQuery(q: string, maxLen = 200): string {
