@@ -1,9 +1,12 @@
-use actix_web::{web, HttpResponse, Result};
+use actix_web::{http::header, web, HttpRequest, HttpResponse, Result};
 use serde::Deserialize;
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api_error::ApiError;
+use crate::auth::jwt_service::JwtService;
+use crate::service::social_service::{FeedCursor, DEFAULT_FEED_LIMIT};
 use crate::service::SocialService;
 
 #[derive(Deserialize)]
@@ -27,6 +30,100 @@ pub struct CreatePartyRequest {
 #[derive(Deserialize)]
 pub struct AcceptFriendRequestBody {
     pub request_id: Uuid,
+}
+
+#[derive(Deserialize)]
+pub struct FeedQuery {
+    /// Opaque cursor from a previous response's `nextCursor`.
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct FeedOffsetQuery {
+    pub offset: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+/// Resolve the caller from an `Authorization: Bearer` header, if there is one.
+///
+/// The feed is readable anonymously, so a missing, expired or suspended token
+/// degrades to "no personalisation" instead of a 401 — only `is_liked` depends
+/// on knowing who is asking.
+async fn optional_viewer(req: &HttpRequest, jwt_service: &JwtService) -> Option<Uuid> {
+    let token = req
+        .headers()
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")?;
+
+    let claims = jwt_service.validate_token(token).await.ok()?;
+    Uuid::parse_str(&claims.sub).ok()
+}
+
+/// GET /api/social/feed — community feed, cursor paginated (#1528)
+pub async fn get_feed(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    jwt_service: web::Data<Arc<JwtService>>,
+    query: web::Query<FeedQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let viewer = optional_viewer(&req, jwt_service.get_ref()).await;
+    let cursor = query
+        .cursor
+        .as_deref()
+        .filter(|raw| !raw.is_empty())
+        .map(FeedCursor::decode)
+        .transpose()?;
+
+    let service = SocialService::new(pool.get_ref().clone());
+    let page = service
+        .get_feed(
+            viewer,
+            cursor.as_ref(),
+            query.limit.unwrap_or(DEFAULT_FEED_LIMIT),
+        )
+        .await?;
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "success": true,
+        "data": page
+    })))
+}
+
+/// GET /api/social/feed/offset — community feed, offset paginated (deprecated)
+///
+/// Kept for clients written against the original offset contract. Responses
+/// advertise the replacement endpoint (#1528).
+pub async fn get_feed_offset(
+    req: HttpRequest,
+    pool: web::Data<PgPool>,
+    jwt_service: web::Data<Arc<JwtService>>,
+    query: web::Query<FeedOffsetQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let viewer = optional_viewer(&req, jwt_service.get_ref()).await;
+
+    let service = SocialService::new(pool.get_ref().clone());
+    let page = service
+        .get_feed_offset(
+            viewer,
+            query.offset.unwrap_or(0),
+            query.limit.unwrap_or(DEFAULT_FEED_LIMIT),
+        )
+        .await?;
+
+    Ok(HttpResponse::Ok()
+        .insert_header(("Deprecation", "true"))
+        .insert_header((
+            "Warning",
+            "299 - \"Offset pagination is deprecated; use GET /api/social/feed\"",
+        ))
+        .insert_header(("Link", "</api/social/feed>; rel=\"successor-version\""))
+        .json(serde_json::json!({
+            "success": true,
+            "data": page
+        })))
 }
 
 /// GET /api/v1/friends

@@ -33,7 +33,7 @@ mod integration_tests {
         let roles = vec!["user".to_string(), "premium".to_string()];
 
         let token = service
-            .generate_access_token(user_id, roles.clone(), None)
+            .generate_access_token(user_id, roles.clone(), None, false)
             .await;
 
         assert!(token.is_ok());
@@ -48,7 +48,7 @@ mod integration_tests {
         let roles = vec!["user".to_string()];
 
         let token = service
-            .generate_refresh_token(user_id, roles, None)
+            .generate_refresh_token(user_id, roles, None, false)
             .await;
 
         assert!(token.is_ok());
@@ -61,7 +61,7 @@ mod integration_tests {
         let roles = vec!["user".to_string()];
 
         let result = service
-            .generate_token_pair(user_id, roles, None)
+            .generate_token_pair(user_id, roles, None, false)
             .await;
 
         assert!(result.is_ok());
@@ -80,7 +80,7 @@ mod integration_tests {
         let roles = vec!["user".to_string()];
 
         let token = service
-            .generate_access_token(user_id, roles.clone(), Some("device-123".to_string()))
+            .generate_access_token(user_id, roles.clone(), Some("device-123".to_string()), false)
             .await
             .unwrap();
 
@@ -113,12 +113,12 @@ mod integration_tests {
 
         // Generate initial token pair
         let initial_pair = service
-            .generate_token_pair(user_id, roles, None)
+            .generate_token_pair(user_id, roles, None, false)
             .await
             .unwrap();
 
         // Refresh using refresh token
-        let result = service.refresh_token(&initial_pair.refresh_token).await;
+        let result = service.refresh_token(&initial_pair.refresh_token, false).await;
 
         assert!(result.is_ok());
 
@@ -134,12 +134,12 @@ mod integration_tests {
         let roles = vec!["user".to_string()];
 
         let token_pair = service
-            .generate_token_pair(user_id, roles, None)
+            .generate_token_pair(user_id, roles, None, false)
             .await
             .unwrap();
 
         // Try to refresh with access token (should fail)
-        let result = service.refresh_token(&token_pair.access_token).await;
+        let result = service.refresh_token(&token_pair.access_token, false).await;
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), JwtError::InvalidToken));
@@ -152,7 +152,7 @@ mod integration_tests {
         let roles = vec!["user".to_string()];
 
         let token = service
-            .generate_access_token(user_id, roles, None)
+            .generate_access_token(user_id, roles, None, false)
             .await
             .unwrap();
 
@@ -177,7 +177,7 @@ mod integration_tests {
 
         // Generate token (creates session)
         service
-            .generate_access_token(user_id, roles, Some("device-1".to_string()))
+            .generate_access_token(user_id, roles, Some("device-1".to_string()), false)
             .await
             .unwrap();
 
@@ -203,6 +203,7 @@ mod integration_tests {
                     user_id,
                     roles.clone(),
                     Some(format!("device-{}", i)),
+                    false,
                 )
                 .await
                 .unwrap();
@@ -230,7 +231,7 @@ mod integration_tests {
 
         // Generate and validate some tokens
         let token = service
-            .generate_access_token(user_id, roles, None)
+            .generate_access_token(user_id, roles, None, false)
             .await
             .unwrap();
 
@@ -261,7 +262,7 @@ mod integration_tests {
         let user_id = Uuid::new_v4();
         let roles = vec!["user".to_string()];
         let token = service
-            .generate_access_token(user_id, roles, None)
+            .generate_access_token(user_id, roles, None, false)
             .await
             .unwrap();
 
@@ -279,7 +280,7 @@ mod integration_tests {
         let devices = vec!["mobile", "desktop", "tablet"];
         for device in &devices {
             service
-                .generate_access_token(user_id, roles.clone(), Some(device.to_string()))
+                .generate_access_token(user_id, roles.clone(), Some(device.to_string()), false)
                 .await
                 .unwrap();
         }
@@ -304,7 +305,7 @@ mod integration_tests {
         for _ in 0..5 {
             let user_id = Uuid::new_v4();
             service
-                .generate_access_token(user_id, vec!["user".to_string()], None)
+                .generate_access_token(user_id, vec!["user".to_string()], None, false)
                 .await
                 .unwrap();
         }
@@ -321,7 +322,7 @@ mod integration_tests {
         let roles = vec!["user".to_string(), "admin".to_string(), "premium".to_string()];
 
         let token = service
-            .generate_access_token(user_id, roles.clone(), None)
+            .generate_access_token(user_id, roles.clone(), None, false)
             .await
             .unwrap();
 
@@ -331,5 +332,55 @@ mod integration_tests {
         assert!(claims.roles.contains(&"user".to_string()));
         assert!(claims.roles.contains(&"admin".to_string()));
         assert!(claims.roles.contains(&"premium".to_string()));
+    }
+
+    // ── Suspension claim enforcement (#1531) ─────────────────────────────────
+
+    #[tokio::test]
+    async fn a_suspended_access_token_is_rejected() {
+        let service = create_test_service().await;
+        let user_id = Uuid::new_v4();
+
+        let token = service
+            .generate_access_token(user_id, vec!["user".to_string()], None, true)
+            .await
+            .unwrap();
+
+        let result = service.validate_token(&token).await;
+
+        assert!(
+            matches!(result, Err(JwtError::PlayerSuspended)),
+            "a token minted while suspended must be rejected, got {result:?}"
+        );
+    }
+
+    /// Refreshing is the way back in: the refresh token is exempt from the
+    /// suspension check and the replacement pair carries the status the caller
+    /// resolved from the database.
+    #[tokio::test]
+    async fn refreshing_a_suspended_token_uses_the_current_status() {
+        let service = create_test_service().await;
+        let user_id = Uuid::new_v4();
+        let roles = vec!["user".to_string()];
+
+        // Still suspended: the new access token must remain unusable.
+        let pair = service
+            .generate_token_pair(user_id, roles.clone(), None, true)
+            .await
+            .unwrap();
+        let still_suspended = service.refresh_token(&pair.refresh_token, true).await.unwrap();
+        assert!(matches!(
+            service.validate_token(&still_suspended.access_token).await,
+            Err(JwtError::PlayerSuspended)
+        ));
+
+        // Reinstated: the same refresh flow now mints a usable token.
+        let reinstated = service
+            .refresh_token(&still_suspended.refresh_token, false)
+            .await
+            .unwrap();
+        let claims = service.validate_token(&reinstated.access_token).await.unwrap();
+        assert_eq!(claims.sub, user_id.to_string());
+        assert!(!claims.suspended);
     }
 }

@@ -389,7 +389,7 @@ pub async fn get_ws_token(
         .map_err(|_| ApiError::internal_error("Invalid user ID in token"))?;
 
     let ws_token = jwt_service
-        .generate_ws_token(user_id, claims.roles)
+        .generate_ws_token(user_id, claims.roles, claims.suspended)
         .await
         .map_err(|e| ApiError::internal_error(format!("WS token generation failed: {}", e)))?;
 

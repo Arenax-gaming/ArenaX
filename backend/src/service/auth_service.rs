@@ -2,6 +2,7 @@ use crate::api_error::ApiError;
 use crate::auth::jwt_service::{JwtService, RefreshTokenRecord, TokenPair};
 use crate::db::DbPool;
 use crate::models::user::{AuthResponse, CreateUserRequest, LoginRequest, User, UserProfile};
+use crate::service::suspension_service::SuspensionService;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
 use redis::{AsyncCommands, Client as RedisClient};
@@ -146,9 +147,11 @@ impl AuthService {
         }
 
         let roles = vec!["user".to_string()];
+        // A freshly created account cannot have suspension history, so the
+        // claim is stamped false without a lookup (#1531).
         let token_pair = self
             .jwt_service
-            .generate_token_pair(user_id, roles, None)
+            .generate_token_pair(user_id, roles, None, false)
             .await
             .map_err(|e| ApiError::internal_error(format!("Token generation failed: {}", e)))?;
 
@@ -227,9 +230,13 @@ impl AuthService {
         .map_err(ApiError::database_error)?;
 
         let roles = vec!["user".to_string()];
+        // Login is the one place suspension is read from the database. The
+        // answer rides in the token so middleware does not query per request
+        // (#1531).
+        let suspended = self.is_suspended(user.id).await?;
         let token_pair = self
             .jwt_service
-            .generate_token_pair(user.id, roles, None)
+            .generate_token_pair(user.id, roles, None, suspended)
             .await
             .map_err(|e| ApiError::internal_error(format!("Token generation failed: {}", e)))?;
 
@@ -269,12 +276,24 @@ impl AuthService {
 
     /// Rotate refresh token: invalidate the old one, issue a fresh pair.
     ///
+    /// The replacement pair is stamped with the player's *current* suspension
+    /// status read from the database, so a reinstated player regains access by
+    /// refreshing and a newly suspended player loses it (#1531).
+    ///
     /// Replaying the old refresh token after a successful rotation returns
     /// 401 because the Redis record has been deleted.
     #[tracing::instrument(skip(self, refresh_token))]
     pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, ApiError> {
+        let user_id = self
+            .jwt_service
+            .refresh_token_subject(refresh_token)
+            .await
+            .map_err(|e| ApiError::unauthorized(format!("Token refresh failed: {}", e)))?;
+
+        let suspended = self.is_suspended(user_id).await?;
+
         self.jwt_service
-            .refresh_token(refresh_token)
+            .refresh_token(refresh_token, suspended)
             .await
             .map_err(|e| ApiError::unauthorized(format!("Token refresh failed: {}", e)))
     }
@@ -322,6 +341,19 @@ impl AuthService {
     }
 
     // ── User helpers ─────────────────────────────────────────────────────────
+
+    /// Whether the player has any suspension active right now.
+    ///
+    /// Broader than "cannot sign in": any active suspension is stamped into the
+    /// token, because enforcement is a claim check rather than a query per
+    /// request. Scope-specific decisions (competition, social, financial) still
+    /// go through [`crate::service::suspension_service::SuspensionService::check`].
+    pub async fn is_suspended(&self, user_id: Uuid) -> Result<bool, ApiError> {
+        let active = SuspensionService::new(self.pool.clone())
+            .active_for_user(user_id)
+            .await?;
+        Ok(!active.is_empty())
+    }
 
     /// Fetch a user record by ID (used by `GET /api/auth/me`).
     pub async fn get_user(&self, user_id: Uuid) -> Result<User, ApiError> {

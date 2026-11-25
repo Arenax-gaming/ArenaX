@@ -264,6 +264,23 @@ pub fn evidence_object_key(user_id: Uuid, match_id: Uuid, content_type: &str, ha
 pub trait EvidenceStore: Send + Sync {
     async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError>;
 
+    /// Store an object whose bytes carry a content coding such as `gzip`.
+    ///
+    /// The coding travels with the object so a later read can decode it. The
+    /// default implementation stores the bytes as-is and ignores the coding,
+    /// which keeps stores that never compress — and in-memory test doubles —
+    /// working without change (#1529).
+    async fn put_encoded(
+        &self,
+        key: &str,
+        content_type: &str,
+        encoding: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<(), ApiError> {
+        let _ = encoding;
+        self.put(key, content_type, bytes).await
+    }
+
     /// Retrieve the raw bytes stored at `key` (#1281). Used by the anti-cheat
     /// screenshot pipeline to re-hash and analyse evidence that was uploaded
     /// earlier, without trusting anything the caller supplies beyond the key.
@@ -334,9 +351,24 @@ pub async fn put_with_retry(
     bytes: &[u8],
     policy: RetryPolicy,
 ) -> Result<(), ApiError> {
+    put_encoded_with_retry(store, key, content_type, None, bytes, policy).await
+}
+
+/// Same as [`put_with_retry`], for a body that carries a content coding.
+///
+/// The coding (e.g. `gzip`) is passed to the store so it can be recorded as
+/// object metadata; retries repeat the identical request (#1529).
+pub async fn put_encoded_with_retry(
+    store: &dyn EvidenceStore,
+    key: &str,
+    content_type: &str,
+    encoding: Option<&str>,
+    bytes: &[u8],
+    policy: RetryPolicy,
+) -> Result<(), ApiError> {
     let mut attempt = 1;
     loop {
-        match store.put(key, content_type, bytes).await {
+        match store.put_encoded(key, content_type, encoding, bytes).await {
             Ok(()) => return Ok(()),
             Err(error) if attempt >= policy.max_attempts || !is_transient(&error) => {
                 if attempt > 1 {
@@ -433,22 +465,33 @@ impl S3EvidenceStore {
 
         (url, host, amz_date, authorization)
     }
-}
 
-#[async_trait::async_trait]
-impl EvidenceStore for S3EvidenceStore {
-    async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError> {
+    /// Single PUT implementation; `encoding` becomes the object's
+    /// `Content-Encoding` metadata (#1529).
+    async fn put_with_encoding(
+        &self,
+        key: &str,
+        content_type: &str,
+        encoding: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<(), ApiError> {
         let payload_hash = hex::encode(Sha256::digest(bytes));
         let (url, host, amz_date, authorization) = self.sign("PUT", key, &payload_hash);
 
-        let response = self
+        let mut request = self
             .http
             .put(&url)
             .header("host", host)
             .header("x-amz-content-sha256", payload_hash)
             .header("x-amz-date", amz_date)
             .header("Authorization", authorization)
-            .header("Content-Type", content_type)
+            .header("Content-Type", content_type);
+
+        if let Some(encoding) = encoding {
+            request = request.header("Content-Encoding", encoding);
+        }
+
+        let response = request
             .body(bytes.to_vec())
             .send()
             .await
@@ -461,6 +504,24 @@ impl EvidenceStore for S3EvidenceStore {
             )));
         }
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl EvidenceStore for S3EvidenceStore {
+    async fn put(&self, key: &str, content_type: &str, bytes: &[u8]) -> Result<(), ApiError> {
+        self.put_with_encoding(key, content_type, None, bytes).await
+    }
+
+    async fn put_encoded(
+        &self,
+        key: &str,
+        content_type: &str,
+        encoding: Option<&str>,
+        bytes: &[u8],
+    ) -> Result<(), ApiError> {
+        self.put_with_encoding(key, content_type, encoding, bytes)
+            .await
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, ApiError> {

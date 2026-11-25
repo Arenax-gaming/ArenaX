@@ -35,6 +35,48 @@ pub const MAX_TELEMETRY_BYTES: usize = 8 * 1024 * 1024;
 /// evidence.
 pub const TELEMETRY_KEY_PREFIX: &str = "telemetry";
 
+/// Largest *compressed* upload body accepted (#1529). Deliberately above
+/// [`MAX_TELEMETRY_BYTES`] so a body that merely fails to compress well is
+/// still accepted, while a client cannot make the server buffer an unbounded
+/// request. Override with `TELEMETRY_MAX_UPLOAD_BYTES`.
+pub const DEFAULT_MAX_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+
+/// Size limits applied to an incoming telemetry upload (#1529).
+#[derive(Debug, Clone, Copy)]
+pub struct TelemetryUploadLimits {
+    /// Cap on the bytes received off the wire, before decompression.
+    pub max_upload_bytes: usize,
+    /// Cap on the bytes after decompression — the same limit the stored
+    /// document has to satisfy, so what is validated is what is written.
+    pub max_document_bytes: usize,
+}
+
+impl Default for TelemetryUploadLimits {
+    fn default() -> Self {
+        Self {
+            max_upload_bytes: DEFAULT_MAX_UPLOAD_BYTES,
+            max_document_bytes: MAX_TELEMETRY_BYTES,
+        }
+    }
+}
+
+impl TelemetryUploadLimits {
+    /// Read `TELEMETRY_MAX_UPLOAD_BYTES`, falling back to the default when it
+    /// is unset, unparseable or zero.
+    pub fn from_env() -> Self {
+        let max_upload_bytes = std::env::var("TELEMETRY_MAX_UPLOAD_BYTES")
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .filter(|bytes| *bytes > 0)
+            .unwrap_or(DEFAULT_MAX_UPLOAD_BYTES);
+
+        Self {
+            max_upload_bytes,
+            ..Self::default()
+        }
+    }
+}
+
 /// A single input sample: where the pointer moved and which inputs were held.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TelemetryInput {
@@ -292,8 +334,12 @@ pub struct TelemetryReference {
     pub player_id: Uuid,
     /// S3 object key, prefixed [`TELEMETRY_KEY_PREFIX`].
     pub object_key: String,
-    /// SHA-256 hex digest of the stored bytes, so tampering is detectable.
+    /// SHA-256 hex digest of the recording document, so tampering is
+    /// detectable. Hashed before compression, so the object key does not
+    /// depend on the compressor (#1529).
     pub content_hash: String,
+    /// Size of the recording document in bytes, not of the gzip object that
+    /// holds it.
     pub byte_size: i64,
     pub event_count: i32,
     pub schema_version: i32,

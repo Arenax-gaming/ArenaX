@@ -18,14 +18,33 @@ use crate::models::telemetry::{
     retention_deadline, telemetry_object_key, TelemetryEnvelope, TelemetryReference,
     TelemetrySummary, TelemetryUploadRequest,
 };
-use crate::service::evidence_storage::{hash_evidence, put_with_retry, EvidenceStore, RetryPolicy};
+use crate::service::evidence_storage::{
+    hash_evidence, put_encoded_with_retry, EvidenceStore, RetryPolicy,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use std::io::Write;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 /// Content type every recording is stored under.
 pub const TELEMETRY_CONTENT_TYPE: &str = "application/json";
+
+/// Content coding recordings are stored under (#1529).
+///
+/// Input recordings are long runs of near-identical samples, so gzip typically
+/// removes an order of magnitude of storage and transfer.
+pub const TELEMETRY_CONTENT_ENCODING: &str = "gzip";
+
+/// Consecutive failed uploads that open the circuit breaker (#1529).
+pub const DEFAULT_BREAKER_THRESHOLD: u32 = 3;
+
+/// How long the breaker stays open before a single probe is allowed through.
+pub const DEFAULT_BREAKER_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// Default retention window for stored recordings, in days.
 ///
@@ -90,12 +109,139 @@ pub struct TelemetryUploadOutcome {
     pub summary: TelemetrySummary,
 }
 
+/// Whether uploads are being attempted right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CircuitState {
+    /// Uploads are attempted normally.
+    Closed,
+    /// Too many consecutive failures: uploads fail fast without touching storage.
+    Open,
+}
+
+#[derive(Debug)]
+struct BreakerState {
+    consecutive_failures: u32,
+    open_until: Option<Instant>,
+}
+
+/// Stops hammering a storage backend that is known to be down (#1529).
+///
+/// The upload path is driven by a processing loop that has to keep running. If
+/// every batch waits out the retry policy against a dead backend, that loop
+/// stalls behind the failures. After [`threshold`](Self::new) consecutive
+/// failures the breaker opens and uploads are refused immediately with
+/// [`ApiError::DependencyUnavailable`], which the loop can treat as "skip this
+/// batch" without waiting.
+///
+/// Once the cooldown elapses one probe is let through: success closes the
+/// breaker, failure re-opens it. Several callers can therefore probe at once
+/// after a cooldown; that is bounded by the number of in-flight uploads and
+/// keeps the state machine free of a half-open flag to leak.
+pub struct CircuitBreaker {
+    threshold: u32,
+    cooldown: Duration,
+    state: Mutex<BreakerState>,
+    trips: AtomicU64,
+}
+
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self::new(DEFAULT_BREAKER_THRESHOLD, DEFAULT_BREAKER_COOLDOWN)
+    }
+}
+
+impl CircuitBreaker {
+    /// `threshold` is clamped to at least one failure, so a breaker can never
+    /// open before anything has actually failed.
+    pub fn new(threshold: u32, cooldown: Duration) -> Self {
+        Self {
+            threshold: threshold.max(1),
+            cooldown,
+            state: Mutex::new(BreakerState {
+                consecutive_failures: 0,
+                open_until: None,
+            }),
+            trips: AtomicU64::new(0),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, BreakerState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Whether an upload may be attempted.
+    pub fn allows(&self) -> bool {
+        let mut state = self.lock();
+        match state.open_until {
+            Some(until) if Instant::now() < until => false,
+            Some(_) => {
+                // Cooldown elapsed: let a probe through. A failure re-opens the
+                // breaker because the failure count is still at the threshold.
+                state.open_until = None;
+                true
+            }
+            None => true,
+        }
+    }
+
+    /// Current state, for metrics and logs.
+    pub fn state(&self) -> CircuitState {
+        match self.lock().open_until {
+            Some(until) if Instant::now() < until => CircuitState::Open,
+            _ => CircuitState::Closed,
+        }
+    }
+
+    /// How long a caller should wait before retrying, for `Retry-After`.
+    pub fn retry_after_secs(&self) -> u64 {
+        self.cooldown.as_secs().max(1)
+    }
+
+    /// How many times the breaker has opened since it was created.
+    pub fn trips(&self) -> u64 {
+        self.trips.load(Ordering::Relaxed)
+    }
+
+    pub fn record_success(&self) {
+        let mut state = self.lock();
+        state.consecutive_failures = 0;
+        state.open_until = None;
+    }
+
+    pub fn record_failure(&self) {
+        let mut state = self.lock();
+        let was_closed = state.open_until.is_none();
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+
+        if state.consecutive_failures >= self.threshold {
+            state.open_until = Some(Instant::now() + self.cooldown);
+            if was_closed {
+                self.trips.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// Deflate a serialized recording.
+fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, ApiError> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(bytes).map_err(|error| {
+        ApiError::internal_error(format!("Failed to compress telemetry: {error}"))
+    })?;
+    encoder
+        .finish()
+        .map_err(|error| ApiError::internal_error(format!("Failed to compress telemetry: {error}")))
+}
+
 /// The upload service itself.
 pub struct TelemetryUploadService {
     store: Arc<dyn EvidenceStore>,
     index: Arc<dyn TelemetryIndex>,
     retention_days: i64,
     retry: RetryPolicy,
+    breaker: Arc<CircuitBreaker>,
 }
 
 impl TelemetryUploadService {
@@ -109,6 +255,7 @@ impl TelemetryUploadService {
             index,
             retention_days,
             retry: RetryPolicy::default(),
+            breaker: Arc::new(CircuitBreaker::default()),
         }
     }
 
@@ -116,6 +263,17 @@ impl TelemetryUploadService {
     pub fn with_retry_policy(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
         self
+    }
+
+    /// Share a breaker with another component (tests use a short cooldown).
+    pub fn with_breaker(mut self, breaker: Arc<CircuitBreaker>) -> Self {
+        self.breaker = breaker;
+        self
+    }
+
+    /// The breaker guarding this service's storage writes.
+    pub fn breaker(&self) -> &Arc<CircuitBreaker> {
+        &self.breaker
     }
 
     /// Validate, upload and link one recording.
@@ -138,18 +296,56 @@ impl TelemetryUploadService {
         envelope: TelemetryEnvelope,
     ) -> Result<TelemetryUploadOutcome, ApiError> {
         envelope.validate()?;
+
+        // Fail fast while storage is known to be down, so the caller's
+        // processing loop is never parked behind retries (#1529).
+        if !self.breaker.allows() {
+            tracing::warn!(
+                match_id = %envelope.match_id,
+                player_id = %envelope.player_id,
+                retry_after = self.breaker.retry_after_secs(),
+                "Telemetry storage circuit breaker is open; upload skipped"
+            );
+            return Err(ApiError::DependencyUnavailable {
+                message: "Telemetry storage is unavailable; upload skipped".to_string(),
+                retry_after: self.breaker.retry_after_secs(),
+            });
+        }
+
         let bytes = envelope.to_bytes()?;
+        // Hash the document, not its compressed form: the object key must not
+        // depend on the compressor's output for identical recordings (#1529).
         let content_hash = hash_evidence(&bytes);
         let object_key = telemetry_object_key(envelope.match_id, envelope.player_id, &content_hash);
 
-        put_with_retry(
+        let compressed = gzip_bytes(&bytes)?;
+        let ratio = bytes.len() as f64 / compressed.len().max(1) as f64;
+        tracing::info!(
+            match_id = %envelope.match_id,
+            player_id = %envelope.player_id,
+            uncompressed_bytes = bytes.len(),
+            compressed_bytes = compressed.len(),
+            compression_ratio = %format!("{ratio:.2}"),
+            "Telemetry batch compressed"
+        );
+
+        let uploaded = put_encoded_with_retry(
             self.store.as_ref(),
             &object_key,
             TELEMETRY_CONTENT_TYPE,
-            &bytes,
+            Some(TELEMETRY_CONTENT_ENCODING),
+            &compressed,
             self.retry,
         )
-        .await?;
+        .await;
+
+        match uploaded {
+            Ok(()) => self.breaker.record_success(),
+            Err(error) => {
+                self.breaker.record_failure();
+                return Err(error);
+            }
+        }
 
         let summary = envelope.summarize();
         let uploaded_at = Utc::now();
@@ -158,6 +354,8 @@ impl TelemetryUploadService {
             player_id: envelope.player_id,
             object_key,
             content_hash,
+            // The recording's own size, not the stored object's: retention and
+            // suspicion reporting reason about the document (#1529).
             byte_size: bytes.len() as i64,
             event_count: summary.event_count as i32,
             schema_version: envelope.schema_version as i32,
@@ -466,13 +664,22 @@ mod tests {
     use crate::models::telemetry::{
         ClientMetrics, TelemetryEvent, TelemetryInput, TELEMETRY_SCHEMA_VERSION,
     };
+    use std::io::Read;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// One object as the store received it.
+    struct StoredObject {
+        key: String,
+        encoding: Option<String>,
+        bytes: Vec<u8>,
+    }
 
     /// Object store that records what was written and how many times.
     struct RecordingStore {
-        objects: Mutex<Vec<(String, Vec<u8>)>>,
+        objects: Mutex<Vec<StoredObject>>,
         deletes: Mutex<Vec<String>>,
         puts: AtomicU32,
+        failing: std::sync::atomic::AtomicBool,
     }
 
     impl RecordingStore {
@@ -481,7 +688,21 @@ mod tests {
                 objects: Mutex::new(Vec::new()),
                 deletes: Mutex::new(Vec::new()),
                 puts: AtomicU32::new(0),
+                failing: std::sync::atomic::AtomicBool::new(false),
             }
+        }
+
+        /// Make every subsequent write fail the way a dead backend would.
+        fn start_failing(&self) {
+            self.failing.store(true, Ordering::SeqCst);
+        }
+
+        fn stop_failing(&self) {
+            self.failing.store(false, Ordering::SeqCst);
+        }
+
+        fn put_count(&self) -> u32 {
+            self.puts.load(Ordering::SeqCst)
         }
 
         fn keys(&self) -> Vec<String> {
@@ -489,7 +710,16 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|(key, _)| key.clone())
+                .map(|object| object.key.clone())
+                .collect()
+        }
+
+        fn encodings(&self) -> Vec<Option<String>> {
+            self.objects
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|object| object.encoding.clone())
                 .collect()
         }
     }
@@ -497,11 +727,27 @@ mod tests {
     #[async_trait]
     impl EvidenceStore for RecordingStore {
         async fn put(&self, key: &str, _content_type: &str, bytes: &[u8]) -> Result<(), ApiError> {
+            self.put_encoded(key, _content_type, None, bytes).await
+        }
+
+        async fn put_encoded(
+            &self,
+            key: &str,
+            _content_type: &str,
+            encoding: Option<&str>,
+            bytes: &[u8],
+        ) -> Result<(), ApiError> {
             self.puts.fetch_add(1, Ordering::SeqCst);
-            self.objects
-                .lock()
-                .unwrap()
-                .push((key.to_string(), bytes.to_vec()));
+            if self.failing.load(Ordering::SeqCst) {
+                return Err(ApiError::ServiceUnavailable(
+                    "object store is down".to_string(),
+                ));
+            }
+            self.objects.lock().unwrap().push(StoredObject {
+                key: key.to_string(),
+                encoding: encoding.map(str::to_string),
+                bytes: bytes.to_vec(),
+            });
             Ok(())
         }
 
@@ -510,16 +756,28 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .find(|(stored, _)| stored == key)
-                .map(|(_, bytes)| bytes.clone())
+                .find(|object| object.key == key)
+                .map(|object| object.bytes.clone())
                 .ok_or_else(|| ApiError::not_found("no such object"))
         }
 
         async fn delete(&self, key: &str) -> Result<(), ApiError> {
             self.deletes.lock().unwrap().push(key.to_string());
-            self.objects.lock().unwrap().retain(|(stored, _)| stored != key);
+            self.objects
+                .lock()
+                .unwrap()
+                .retain(|object| object.key != key);
             Ok(())
         }
+    }
+
+    /// Inflate an object as a reader would, using the coding the store recorded.
+    fn gunzip(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(data)
+            .read_to_end(&mut out)
+            .expect("stored object must be valid gzip");
+        out
     }
 
     fn client() -> ClientMetrics {
@@ -571,7 +829,8 @@ mod tests {
         store: Arc<RecordingStore>,
         index: Arc<InMemoryTelemetryIndex>,
     ) -> TelemetryUploadService {
-        TelemetryUploadService::new(store, index, DEFAULT_RETENTION_DAYS).with_retry_policy(no_sleep())
+        TelemetryUploadService::new(store, index, DEFAULT_RETENTION_DAYS)
+            .with_retry_policy(no_sleep())
     }
 
     #[tokio::test]
@@ -586,16 +845,24 @@ mod tests {
 
         // 1. The bytes are in object storage under a name derived from content.
         assert_eq!(store.keys(), vec![outcome.reference.object_key.clone()]);
+        // 2. They were stored gzipped and labelled as such (#1529).
+        assert_eq!(store.encodings(), vec![Some("gzip".to_string())]);
         let stored = store.get(&outcome.reference.object_key).await.unwrap();
-        assert_eq!(hash_evidence(&stored), outcome.reference.content_hash);
-        let decoded: TelemetryEnvelope = serde_json::from_slice(&stored).unwrap();
+        let document = gunzip(&stored);
+        assert!(
+            stored.len() < document.len(),
+            "gzip must shrink the recording"
+        );
+        assert_eq!(hash_evidence(&document), outcome.reference.content_hash);
+        let decoded: TelemetryEnvelope = serde_json::from_slice(&document).unwrap();
         assert_eq!(decoded.events.len(), 2);
         assert_eq!(decoded.schema_version, TELEMETRY_SCHEMA_VERSION);
 
-        // 2. The match record points at the stored object.
+        // 3. The match record points at the stored object and describes the
+        //    recording itself, not its compressed form.
         let linked = svc.metadata(match_id, player_id).await.unwrap();
         assert_eq!(linked.object_key, outcome.reference.object_key);
-        assert_eq!(linked.byte_size, stored.len() as i64);
+        assert_eq!(linked.byte_size, document.len() as i64);
         assert_eq!(linked.event_count, 2);
         assert_eq!(linked.purged_at, None);
         assert_eq!(index.all().len(), 1);
@@ -679,5 +946,113 @@ mod tests {
         assert_eq!(clamp_retention_days(1), MIN_RETENTION_DAYS);
         assert_eq!(clamp_retention_days(3_650), MAX_RETENTION_DAYS);
         assert_eq!(clamp_retention_days(DEFAULT_RETENTION_DAYS), DEFAULT_RETENTION_DAYS);
+    }
+
+    // ── Compression and circuit breaker (#1529) ──────────────────────────────
+
+    #[test]
+    fn the_breaker_opens_on_the_third_consecutive_failure() {
+        let breaker = CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD, Duration::from_secs(60));
+
+        breaker.record_failure();
+        breaker.record_failure();
+        assert_eq!(
+            breaker.state(),
+            CircuitState::Closed,
+            "two failures are below the threshold"
+        );
+
+        breaker.record_failure();
+        assert_eq!(breaker.state(), CircuitState::Open);
+        assert!(!breaker.allows());
+        assert_eq!(breaker.trips(), 1);
+    }
+
+    #[test]
+    fn a_success_resets_the_failure_run() {
+        let breaker = CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD, Duration::from_secs(60));
+
+        breaker.record_failure();
+        breaker.record_failure();
+        breaker.record_success();
+        breaker.record_failure();
+        breaker.record_failure();
+
+        assert_eq!(
+            breaker.state(),
+            CircuitState::Closed,
+            "failures must be *consecutive* to open the breaker"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_uploads_open_the_breaker_and_skip_storage_while_open() {
+        let store = Arc::new(RecordingStore::new());
+        let index = Arc::new(InMemoryTelemetryIndex::new());
+        let breaker = Arc::new(CircuitBreaker::new(
+            DEFAULT_BREAKER_THRESHOLD,
+            Duration::from_secs(60),
+        ));
+        // One attempt per upload, so each upload is exactly one failed write.
+        let svc = TelemetryUploadService::new(store.clone(), index.clone(), DEFAULT_RETENTION_DAYS)
+            .with_retry_policy(RetryPolicy::new(1, Duration::from_millis(0)))
+            .with_breaker(breaker.clone());
+
+        store.start_failing();
+        for _ in 0..DEFAULT_BREAKER_THRESHOLD {
+            assert!(svc
+                .upload(request(Uuid::from_u128(1), Uuid::from_u128(2)))
+                .await
+                .is_err());
+        }
+
+        assert_eq!(breaker.state(), CircuitState::Open);
+        assert_eq!(store.put_count(), DEFAULT_BREAKER_THRESHOLD);
+
+        // The next upload is refused immediately: no write, no retry backoff,
+        // so a processing loop calling this cannot be blocked by the outage.
+        let error = svc
+            .upload(request(Uuid::from_u128(1), Uuid::from_u128(2)))
+            .await
+            .expect_err("an open breaker must refuse the upload");
+
+        assert!(matches!(error, ApiError::DependencyUnavailable { .. }));
+        assert_eq!(
+            store.put_count(),
+            DEFAULT_BREAKER_THRESHOLD,
+            "an open breaker must not attempt a write"
+        );
+        assert!(index.all().is_empty(), "nothing may be linked");
+    }
+
+    #[tokio::test]
+    async fn a_probe_after_the_cooldown_closes_the_breaker() {
+        let store = Arc::new(RecordingStore::new());
+        let index = Arc::new(InMemoryTelemetryIndex::new());
+        let breaker = Arc::new(CircuitBreaker::new(1, Duration::from_millis(50)));
+        let svc = TelemetryUploadService::new(store.clone(), index.clone(), DEFAULT_RETENTION_DAYS)
+            .with_retry_policy(RetryPolicy::new(1, Duration::from_millis(0)))
+            .with_breaker(breaker.clone());
+
+        store.start_failing();
+        assert!(svc
+            .upload(request(Uuid::from_u128(1), Uuid::from_u128(2)))
+            .await
+            .is_err());
+        assert_eq!(breaker.state(), CircuitState::Open);
+
+        // Storage comes back: once the cooldown elapses the probe goes through
+        // and its success closes the breaker again.
+        store.stop_failing();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        let outcome = svc
+            .upload(request(Uuid::from_u128(1), Uuid::from_u128(2)))
+            .await
+            .unwrap();
+
+        assert_eq!(breaker.state(), CircuitState::Closed);
+        assert_eq!(outcome.summary.event_count, 2);
+        assert_eq!(store.encodings(), vec![Some("gzip".to_string())]);
     }
 }

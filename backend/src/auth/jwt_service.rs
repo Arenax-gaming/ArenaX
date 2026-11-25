@@ -26,6 +26,12 @@ pub enum JwtError {
     #[error("Token blacklisted")]
     TokenBlacklisted,
 
+    /// The token was issued while the player was suspended. Distinct from
+    /// [`JwtError::TokenValidation`] so the HTTP layer can answer 403 with a
+    /// `PLAYER_SUSPENDED` code instead of a generic 401 (#1531).
+    #[error("Player is suspended")]
+    PlayerSuspended,
+
     #[error("Session not found")]
     SessionNotFound,
 
@@ -62,6 +68,18 @@ pub struct Claims {
     pub device_id: Option<String>,
     pub session_id: String,
     pub roles: Vec<String>,
+    /// Whether the player was suspended when this token was minted (#1531).
+    ///
+    /// Carrying the flag here lets authentication reject a suspended player
+    /// without a suspension lookup per request. It is a snapshot, not a live
+    /// answer: a suspension issued *after* login only takes effect once the
+    /// client calls `POST /api/auth/refresh`, and the same call is how a
+    /// reinstated player gets access back.
+    ///
+    /// `#[serde(default)]` keeps tokens minted before this claim existed valid
+    /// (they simply read as not suspended).
+    #[serde(default)]
+    pub suspended: bool,
 }
 
 /// Token type enumeration
@@ -263,11 +281,15 @@ impl JwtService {
     }
 
     /// Generate access token
+    ///
+    /// `suspended` is embedded as a claim so authentication can reject the
+    /// player without a database round-trip (#1531).
     pub async fn generate_access_token(
         &self,
         user_id: Uuid,
         roles: Vec<String>,
         device_id: Option<String>,
+        suspended: bool,
     ) -> Result<String, JwtError> {
         let session_id = Uuid::new_v4().to_string();
 
@@ -280,6 +302,7 @@ impl JwtService {
             device_id: device_id.clone(),
             session_id: session_id.clone(),
             roles: roles.clone(),
+            suspended,
         };
 
         let key_rotation = self.key_rotation.read().await;
@@ -302,6 +325,7 @@ impl JwtService {
         user_id: Uuid,
         roles: Vec<String>,
         device_id: Option<String>,
+        suspended: bool,
     ) -> Result<String, JwtError> {
         let session_id = Uuid::new_v4().to_string();
 
@@ -314,6 +338,7 @@ impl JwtService {
             device_id: device_id.clone(),
             session_id: session_id.clone(),
             roles,
+            suspended,
         };
 
         let key_rotation = self.key_rotation.read().await;
@@ -350,12 +375,13 @@ impl JwtService {
         user_id: Uuid,
         roles: Vec<String>,
         device_id: Option<String>,
+        suspended: bool,
     ) -> Result<TokenPair, JwtError> {
         let access_token = self
-            .generate_access_token(user_id, roles.clone(), device_id.clone())
+            .generate_access_token(user_id, roles.clone(), device_id.clone(), suspended)
             .await?;
         let refresh_token = self
-            .generate_refresh_token(user_id, roles, device_id)
+            .generate_refresh_token(user_id, roles, device_id, suspended)
             .await?;
 
         Ok(TokenPair {
@@ -392,6 +418,18 @@ impl JwtService {
         // Verify session exists
         if !self.session_exists(&claims.session_id).await? {
             return Err(JwtError::SessionNotFound);
+        }
+
+        // Reject access tokens minted while the player was suspended (#1531).
+        // This lives in validation rather than in each handler so every caller
+        // that checks a token — middleware, WebSocket handshake, per-handler
+        // guards — enforces it identically and without a suspension lookup.
+        //
+        // Refresh tokens are deliberately exempt: they are the only credential
+        // a suspended player still holds, and `POST /api/auth/refresh` is how
+        // they pick up a reinstatement.
+        if claims.token_type == TokenType::Access && claims.suspended {
+            return Err(JwtError::PlayerSuspended);
         }
 
         // Update session activity
@@ -436,7 +474,15 @@ impl JwtService {
     /// 2. Delete the old refresh-token record from Redis — replaying the same
     ///    token after this point will return 401 `TokenBlacklisted` (record gone)
     /// 3. Issue a brand-new access + refresh token pair
-    pub async fn refresh_token(&self, refresh_token: &str) -> Result<TokenPair, JwtError> {
+    ///
+    /// `suspended` is the player's *current* suspension status, resolved by the
+    /// caller from the database. Refreshing is therefore how a player who was
+    /// reinstated picks up access again (#1531).
+    pub async fn refresh_token(
+        &self,
+        refresh_token: &str,
+        suspended: bool,
+    ) -> Result<TokenPair, JwtError> {
         // Step 1: Decode and validate the JWT (signature, expiry, blacklist, session)
         let claims = self.validate_token(refresh_token).await?;
 
@@ -459,14 +505,29 @@ impl JwtService {
 
         // Step 4: Issue a fresh token pair (new session, new refresh record)
         let token_pair = self
-            .generate_token_pair(user_id, claims.roles, record.device_id)
+            .generate_token_pair(user_id, claims.roles, record.device_id, suspended)
             .await?;
 
         self.increment_analytics("refreshed").await?;
 
-        info!(user_id = %user_id, "Token refreshed — old refresh token invalidated");
+        info!(user_id = %user_id, suspended, "Token refreshed — old refresh token invalidated");
 
         Ok(token_pair)
+    }
+
+    /// Subject (user id) of a refresh token, without rotating anything.
+    ///
+    /// `AuthService` needs the player behind the token *before* the replacement
+    /// pair is minted, so it can resolve their current suspension status from
+    /// the database and stamp it into the new claims (#1531).
+    pub async fn refresh_token_subject(&self, refresh_token: &str) -> Result<Uuid, JwtError> {
+        let claims = self.validate_token(refresh_token).await?;
+
+        if claims.token_type != TokenType::Refresh {
+            return Err(JwtError::InvalidToken);
+        }
+
+        Uuid::parse_str(&claims.sub).map_err(|e| JwtError::TokenValidation(e.to_string()))
     }
 
     /// Blacklist a token
@@ -855,6 +916,7 @@ impl JwtService {
         &self,
         user_id: Uuid,
         roles: Vec<String>,
+        suspended: bool,
     ) -> Result<String, JwtError> {
         let session_id = Uuid::new_v4().to_string();
 
@@ -867,6 +929,7 @@ impl JwtService {
             device_id: None,
             session_id: session_id.clone(),
             roles,
+            suspended,
         };
 
         let key_rotation = self.key_rotation.read().await;
@@ -1088,6 +1151,7 @@ mod tests {
             device_id: None,
             session_id: Uuid::new_v4().to_string(),
             roles: vec!["user".to_string()],
+            suspended: false,
         };
 
         let encoding_key = jsonwebtoken::EncodingKey::from_secret(secret.as_bytes());
@@ -1130,6 +1194,7 @@ mod tests {
             device_id: None,
             session_id: Uuid::new_v4().to_string(),
             roles: vec!["user".to_string()],
+            suspended: false,
         };
 
         let encoding_key = jsonwebtoken::EncodingKey::from_secret(secret.as_bytes());
@@ -1163,6 +1228,7 @@ mod tests {
             device_id: Some("device-123".to_string()),
             session_id: Uuid::new_v4().to_string(),
             roles: vec!["user".to_string()],
+            suspended: false,
         };
 
         let json = serde_json::to_string(&claims).unwrap();
@@ -1170,5 +1236,53 @@ mod tests {
 
         assert_eq!(deserialized.sub, claims.sub);
         assert_eq!(deserialized.token_type, claims.token_type);
+    }
+
+    // ── Suspension claim (#1531) ──────────────────────────────────────────────
+
+    #[test]
+    fn suspended_claim_round_trips() {
+        let mut claims = Claims {
+            sub: Uuid::new_v4().to_string(),
+            exp: Utc::now().timestamp(),
+            iat: Utc::now().timestamp(),
+            jti: Uuid::new_v4().to_string(),
+            token_type: TokenType::Access,
+            device_id: None,
+            session_id: Uuid::new_v4().to_string(),
+            roles: vec!["user".to_string()],
+            suspended: true,
+        };
+
+        let json = serde_json::to_string(&claims).unwrap();
+        assert!(
+            json.contains("\"suspended\":true"),
+            "the claim must be serialized as a boolean, got {json}"
+        );
+        assert!(serde_json::from_str::<Claims>(&json).unwrap().suspended);
+
+        claims.suspended = false;
+        let json = serde_json::to_string(&claims).unwrap();
+        assert!(!serde_json::from_str::<Claims>(&json).unwrap().suspended);
+    }
+
+    /// Tokens minted before the claim existed must stay valid, so a missing
+    /// `suspended` field reads as "not suspended" rather than failing to
+    /// deserialize.
+    #[test]
+    fn tokens_without_the_suspended_claim_read_as_active() {
+        let legacy = serde_json::json!({
+            "sub": Uuid::new_v4().to_string(),
+            "exp": Utc::now().timestamp() + 600,
+            "iat": Utc::now().timestamp(),
+            "jti": Uuid::new_v4().to_string(),
+            "token_type": "access",
+            "device_id": null,
+            "session_id": Uuid::new_v4().to_string(),
+            "roles": ["user"],
+        });
+
+        let claims: Claims = serde_json::from_value(legacy).expect("legacy token must decode");
+        assert!(!claims.suspended);
     }
 }
