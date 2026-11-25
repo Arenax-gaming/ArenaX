@@ -549,3 +549,43 @@ For backend development questions:
 ---
 
 **Note**: This backend is designed to work with the ArenaX frontend and Stellar smart contracts. Ensure all components are properly configured for full functionality.
+
+## Soroban event ingestion
+
+Set `SOROBAN_RPC_URL` to a Stellar **JSON-RPC** endpoint to enable the background
+poller; `STELLAR_NETWORK_URL` remains the Horizon/network identity. The poller
+uses the configured prize, reputation and ArenaX-token contract IDs. Apply the
+new reversible migration before enabling it (normal backend startup runs migrations).
+
+A new stream starts at the current ledger unless `SOROBAN_EVENT_START_LEDGER`
+sets an explicit inclusive starting ledger. Existing checkpoints always win over
+that setting. Network identity and sorted contract filters scope checkpoints;
+changing either deliberately creates a new stream. Changing only the RPC provider
+keeps the checkpoint, including when switching to an archival provider.
+
+On each poll, the worker snapshots the current head and ingests every missing
+ledger in ascending order before taking another live snapshot. It follows RPC
+pagination, deduplicates event IDs and stores events in `soroban_contract_events`.
+The inbox and `soroban_event_checkpoints.last_ledger` commit in the same transaction.
+Read inbox rows with `ORDER BY ledger, event_id`; these are raw contract events,
+not additional token transfers or prize payouts. No pre-existing domain event
+handler exists on `dev`, so ingestion does not invent financial side effects.
+
+A backlog **greater than 100 ledgers** emits a structured WARN event with target
+and `event` field `soroban:gap_detected`, plus `last_processed_ledger`,
+`current_ledger` and `gap`. Route this tracing event to operational alerting.
+An unavailable retained ledger, regressed RPC head, failed page or failed database
+transaction preserves the checkpoint and retries. Missing history requires an RPC
+provider that retains the needed ledgers; it is never silently skipped.
+
+RPC requests have a 30-second timeout. Polls run sequentially every five seconds;
+catch-up is completed before live polling resumes. Shutdown cancels the worker;
+an unfinished database transaction rolls back and is retried after restart.
+
+Tests: `cargo test soroban` and
+`cargo test durable_checkpoint_atomic_inbox_and_reversible_migration` (the latter
+requires `DATABASE_URL` for a PostgreSQL role with database-creation privileges).
+The database test creates an isolated test database, checks rollback/restart and
+concurrent ingestion, and applies both migration directions.
+
+RPC semantics: https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents

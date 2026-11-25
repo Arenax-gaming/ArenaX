@@ -31,6 +31,34 @@ async fn main() -> io::Result<()> {
         .await
         .expect("Failed to create database pool");
 
+    // A separate RPC URL is required: STELLAR_NETWORK_URL points at Horizon.
+    // Poll immediately on startup, finish the saved gap, then follow live ledgers.
+    let soroban_poller = if let Ok(rpc_url) = std::env::var("SOROBAN_RPC_URL") {
+        use crate::service::soroban_event_poller::EventPoller;
+        use crate::service::soroban_service::SorobanService;
+        use crate::service::stellar_service::PostgresEventStore;
+        let contracts = vec![
+            config.stellar.soroban_contract_prize.clone(),
+            config.stellar.soroban_contract_reputation.clone(),
+            config.stellar.soroban_contract_arenax_token.clone(),
+        ];
+        let start_ledger = std::env::var("SOROBAN_EVENT_START_LEDGER")
+            .ok()
+            .map(|value| value.parse::<u32>())
+            .transpose()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let source = SorobanService::new(&rpc_url)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let store =
+            PostgresEventStore::new(db_pool.clone(), &config.stellar.network_url, &contracts);
+        let poller = EventPoller::new(std::sync::Arc::new(source), store, contracts, start_ledger)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        Some(tokio::spawn(async move { poller.run().await }))
+    } else {
+        tracing::info!("Soroban event polling disabled: set SOROBAN_RPC_URL to enable");
+        None
+    };
+
     // One Redis pattern subscriber and bounded local fan-out per process.
     let defaults = arenax_tournament_realtime::Limits::default();
     let max_clients = std::env::var("TOURNAMENT_REALTIME_MAX_CLIENTS")
@@ -117,5 +145,10 @@ async fn main() -> io::Result<()> {
         server_handle.stop(true).await;
     });
 
-    server.await
+    let result = server.await;
+    if let Some(worker) = soroban_poller {
+        worker.abort();
+        let _ = worker.await;
+    }
+    result
 }
