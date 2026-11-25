@@ -83,3 +83,24 @@ export const logger = winston.createLogger({
     },
     transports
 });
+
+export const SLOW_QUERY_WARN_MS = 100;
+export const SLOW_QUERY_ERROR_MS = 500;
+
+/**
+ * Logs a Prisma query whose duration exceeded the slow-query threshold.
+ * Queries over 500ms are logged at `error`; queries over 100ms at `warn`.
+ * The correlation_id is injected automatically by `correlationFormat`.
+ */
+export function logSlowQuery(params: {
+    model: string;
+    operation: string;
+    durationMs: number;
+}): void {
+    const level = params.durationMs > SLOW_QUERY_ERROR_MS ? 'error' : 'warn';
+    logger.log(level, 'Slow query detected', {
+        model: params.model,
+        operation: params.operation,
+        duration_ms: params.durationMs
+    });
+}

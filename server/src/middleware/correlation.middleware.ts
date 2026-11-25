@@ -40,6 +40,9 @@ export const correlationMiddleware = (req: Request, res: Response, next: NextFun
     req.requestId = correlationId;
     req.correlationId = correlationId;
     req.log = logger.child({ correlation_id: correlationId });
+    // The correlation ID is also made available to the Prisma slow-query
+    // logging middleware and the metrics endpoint via the AsyncLocalStorage
+    // store (see correlationStore.run below).
 
     const startTime = Date.now();
 
