@@ -113,10 +113,7 @@ impl CachedCall {
 
         let value = match result {
             Ok(Ok(val)) => val,
-            Err(err) => panic!(
-                "cross-contract call failed with execution error: {:?}",
-                err
-            ),
+            Err(err) => panic!("cross-contract call failed with execution error: {:?}", err),
             Ok(Err(_)) => panic!("cross-contract call failed to decode result type"),
         };
 

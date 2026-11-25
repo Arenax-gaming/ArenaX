@@ -359,7 +359,8 @@ fn weighted_distribution_sums_exactly_to_the_total_supply() {
     let allocations =
         client.distribute_weighted_airdrop(&token_addr, &recipients, &100i128, &weights);
 
-    let sum = allocations.get(a).unwrap() + allocations.get(b).unwrap() + allocations.get(c).unwrap();
+    let sum =
+        allocations.get(a).unwrap() + allocations.get(b).unwrap() + allocations.get(c).unwrap();
     assert_eq!(sum, 100);
 }
 

@@ -1139,7 +1139,10 @@ fn test_deregister_sets_pending_removal_and_ledger() {
 
     assert_eq!(removal_ledger, 100 + DEREGISTRATION_COOLDOWN_LEDGERS);
     assert_eq!(client.get_pending_removal(&name), Some(removal_ledger));
-    assert_eq!(client.get_contract_status(&name), Symbol::new(&env, "pending_removal"));
+    assert_eq!(
+        client.get_contract_status(&name),
+        Symbol::new(&env, "pending_removal")
+    );
     // Still registered until the cooldown elapses.
     assert!(client.is_contract_registered(&name));
 }
@@ -1160,7 +1163,8 @@ fn test_finalize_before_cooldown_fails() {
     let (client, name) = setup_registered(&env, &admin, &contract1);
     env.ledger().set_sequence_number(100);
     client.deregister(&name);
-    env.ledger().set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS - 1);
+    env.ledger()
+        .set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS - 1);
     client.finalize_deregistration(&name);
 }
 
@@ -1170,7 +1174,8 @@ fn test_finalize_after_cooldown_removes_contract() {
     let (client, name) = setup_registered(&env, &admin, &contract1);
     env.ledger().set_sequence_number(100);
     client.deregister(&name);
-    env.ledger().set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS);
+    env.ledger()
+        .set_sequence_number(100 + DEREGISTRATION_COOLDOWN_LEDGERS);
 
     client.finalize_deregistration(&name);
 
@@ -1188,6 +1193,9 @@ fn test_cancel_deregistration_restores_contract() {
     client.cancel_deregistration(&name);
 
     assert_eq!(client.get_pending_removal(&name), None);
-    assert_eq!(client.get_contract_status(&name), Symbol::new(&env, "active"));
+    assert_eq!(
+        client.get_contract_status(&name),
+        Symbol::new(&env, "active")
+    );
     assert_eq!(client.get_contract(&name), contract1);
 }

@@ -16,7 +16,9 @@
 //! `contract_standards::checker::check_compliance(&env, target)` from one of
 //! its own contract functions.
 
-use soroban_sdk::{contractclient, contracterror, contractevent, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{
+    contractclient, contracterror, contractevent, contracttype, Address, Env, String, Vec,
+};
 
 use crate::ContractVersion;
 

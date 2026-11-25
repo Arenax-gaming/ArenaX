@@ -151,7 +151,8 @@ fn test_cannot_change_hook_after_start() {
 fn test_no_whitelist_allows_any_player() {
     let s = setup();
     assert_eq!(s.tournament.get_whitelist(&s.tournament_id), None);
-    s.tournament.register_player(&s.tournament_id, &Address::generate(&s.env));
+    s.tournament
+        .register_player(&s.tournament_id, &Address::generate(&s.env));
     assert_eq!(s.tournament.get_participants(&s.tournament_id).len(), 1);
 }
 
@@ -167,15 +168,20 @@ fn test_whitelisted_player_can_register() {
         s.tournament.get_whitelist(&s.tournament_id),
         Some(vec![&s.env, invited.clone()])
     );
-    assert!(s.tournament.get_participants(&s.tournament_id).contains(&invited));
+    assert!(s
+        .tournament
+        .get_participants(&s.tournament_id)
+        .contains(&invited));
 }
 
 #[test]
 #[should_panic(expected = "not_whitelisted")]
 fn test_non_whitelisted_player_is_rejected() {
     let s = setup();
-    s.tournament.add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
-    s.tournament.register_player(&s.tournament_id, &Address::generate(&s.env));
+    s.tournament
+        .add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
+    s.tournament
+        .register_player(&s.tournament_id, &Address::generate(&s.env));
 }
 
 #[test]
@@ -184,7 +190,8 @@ fn test_removed_player_is_rejected_and_list_stays_invite_only() {
     let s = setup();
     let player = Address::generate(&s.env);
     s.tournament.add_to_whitelist(&s.tournament_id, &player);
-    s.tournament.remove_from_whitelist(&s.tournament_id, &player);
+    s.tournament
+        .remove_from_whitelist(&s.tournament_id, &player);
 
     assert_eq!(
         s.tournament.get_whitelist(&s.tournament_id),
@@ -201,7 +208,8 @@ fn test_whitelist_changes_emit_events() {
     s.tournament.add_to_whitelist(&s.tournament_id, &player);
     assert!(last_event_topic_is(&s, "whitelist_added"));
 
-    s.tournament.remove_from_whitelist(&s.tournament_id, &player);
+    s.tournament
+        .remove_from_whitelist(&s.tournament_id, &player);
     assert!(last_event_topic_is(&s, "whitelist_removed"));
 }
 
@@ -216,7 +224,8 @@ fn test_whitelist_frozen_after_start() {
     s.tournament.register_player(&s.tournament_id, &p2);
     s.tournament.start_tournament(&s.tournament_id);
 
-    s.tournament.add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
+    s.tournament
+        .add_to_whitelist(&s.tournament_id, &Address::generate(&s.env));
 }
 
 fn last_event_topic_is(s: &Setup, name: &str) -> bool {
@@ -227,4 +236,3 @@ fn last_event_topic_is(s: &Setup, name: &str) -> bool {
     let expected: Val = Symbol::new(&s.env, name).into_val(&s.env);
     first.get_payload() == expected.get_payload()
 }
-

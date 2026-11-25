@@ -757,9 +757,10 @@ impl AxToken {
         env.storage()
             .instance()
             .set(&DataKey::Balance(to.clone()), &new_to_balance);
-        env.storage()
-            .instance()
-            .set(&DataKey::Allowance(from.clone(), spender.clone()), &(allowed - amount));
+        env.storage().instance().set(
+            &DataKey::Allowance(from.clone(), spender.clone()),
+            &(allowed - amount),
+        );
 
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &from), -amount);
         Self::checkpoint_add(env, &Self::voting_power_holder(env, &to), amount);
@@ -800,7 +801,9 @@ impl AxToken {
     /// guardian can respond to an exploit without holding full admin keys.
     pub fn set_pauser(env: Env, pauser: Address) {
         Self::require_admin(&env);
-        env.storage().instance().set(&DataKey::Pauser, &Some(pauser.clone()));
+        env.storage()
+            .instance()
+            .set(&DataKey::Pauser, &Some(pauser.clone()));
         env.events().publish(
             (
                 Symbol::new(&env, "ArenaXToken_v1"),
@@ -839,10 +842,7 @@ impl AxToken {
         let pauser = Self::get_pauser(env.clone());
 
         let admin_authed = admin.requires_auth();
-        let pauser_authed = pauser
-            .as_ref()
-            .map(|p| p.requires_auth())
-            .unwrap_or(false);
+        let pauser_authed = pauser.as_ref().map(|p| p.requires_auth()).unwrap_or(false);
 
         if !(admin_authed || pauser_authed) {
             panic!("not authorized to pause");
@@ -1114,14 +1114,18 @@ impl AxToken {
         }
         if cap == 0 {
             // 0 disables the check.
-            env.storage().instance().set(&DataKey::MaxBalancePerWallet, &0i128);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxBalancePerWallet, &0i128);
             return;
         }
         let current = Self::get_max_balance_per_wallet(env.clone());
         if current > 0 && cap >= current {
             panic!("balance cap cannot be increased by admin");
         }
-        env.storage().instance().set(&DataKey::MaxBalancePerWallet, &cap);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxBalancePerWallet, &cap);
     }
 
     /// The configured per-wallet balance cap, or `0` when the check is off.

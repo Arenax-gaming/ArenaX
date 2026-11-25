@@ -14,9 +14,7 @@
 //! every storage write made in it, keeping tournament and hook state
 //! consistent. Tournaments without a hook skip the call (default no-op).
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, Bytes, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Bytes, Env, Symbol, Vec};
 
 /// Client for tournament hook contracts. Mirrors the interface defined in
 /// `composable-example::tournament_hooks`; declared here so this contract does

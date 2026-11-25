@@ -76,8 +76,8 @@ pub enum DataKey {
     TimeRestriction(Address, u32),    // (Account, Role) -> TimeRestriction
     AuditLog(u64),                    // (EntryId) -> AuditEntry
     AuditCounter,
-    MinterCap(Address),  // (Minter) -> MinterCap
-    RoleParent(u32),     // (Role) -> immediate senior Role in the hierarchy (#1559)
+    MinterCap(Address), // (Minter) -> MinterCap
+    RoleParent(u32),    // (Role) -> immediate senior Role in the hierarchy (#1559)
 }
 
 /// Per-period mint cap attached to a `ROLE_MINTER` grant.
@@ -451,7 +451,11 @@ impl AccessControl {
                 while j < ALL_ROLE_IDS.len() {
                     let candidate_role = ALL_ROLE_IDS[j];
                     if roles::role_includes(&env, held_role, candidate_role)
-                        && Self::has_permission(env.clone(), candidate_role, permission_name.clone())
+                        && Self::has_permission(
+                            env.clone(),
+                            candidate_role,
+                            permission_name.clone(),
+                        )
                     {
                         return true;
                     }

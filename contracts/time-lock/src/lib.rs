@@ -61,10 +61,10 @@ pub enum DataKey {
     LastExecution,
 
     // Emergency role / override (Issue #1554)
-    EmergencyRoles,              // instance: Vec<Address>
-    EmergencyGrantVotes(Address), // persistent: Vec<Address> of governor votes
+    EmergencyRoles,                // instance: Vec<Address>
+    EmergencyGrantVotes(Address),  // persistent: Vec<Address> of governor votes
     EmergencyRevokeVotes(Address), // persistent: Vec<Address> of governor votes
-    EmergencyOverrideLog,        // persistent: Vec<EmergencyOverrideRecord>
+    EmergencyOverrideLog,          // persistent: Vec<EmergencyOverrideRecord>
 }
 
 // ─── Structs ──────────────────────────────────────────────────────────────────

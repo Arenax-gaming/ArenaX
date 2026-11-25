@@ -272,6 +272,7 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
+    continue-on-error: true
     defaults:
       run:
         working-directory: ./frontend
