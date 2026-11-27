@@ -51,7 +51,7 @@ export const SearchOnly: Story = {
 };
 
 export const Interactive: Story = {
-  render: (args) => {
+  render: function InteractiveStory(args) {
     const [search, setSearch] = useState(args.globalSearch);
     return (
       <DataTableToolbar

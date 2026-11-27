@@ -196,6 +196,154 @@ pub async fn time_query<T, E>(
     result
 }
 
+// ── Profile cache metrics (Issue #1079) ─────────────────────────────────────
+//
+// `PROFILE_CACHE_HITS`/`PROFILE_CACHE_READS` are the process-local counters
+// the hit-ratio gauge is derived from; `PROFILE_CACHE_REQUESTS_TOTAL` is the
+// per-outcome scrape target.
+pub static PROFILE_CACHE_REQUESTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "profile_cache_requests_total",
+            "Profile cache lookups by outcome (hit|miss)",
+        ),
+        &["result"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static PROFILE_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+pub static PROFILE_CACHE_READS: AtomicU64 = AtomicU64::new(0);
+
+pub static CACHE_HIT_RATE: Lazy<IntGauge> = Lazy::new(|| {
+    let gauge = IntGauge::new(
+        "profile_cache_hit_rate_percent",
+        "Profile cache hit rate, in percent",
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .expect("metric can be registered");
+    gauge
+});
+
+// ── Soroban transaction metrics (#1283) ─────────────────────────────────────
+pub static SOROBAN_TX_SUBMITTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "soroban_tx_submitted_total",
+            "Soroban contract invocations submitted",
+        ),
+        &["contract", "method"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static SOROBAN_TX_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "soroban_tx_success_total",
+            "Soroban contract invocations confirmed successful",
+        ),
+        &["contract", "method"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static SOROBAN_TX_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    let histogram = HistogramVec::new(
+        prometheus::HistogramOpts::new(
+            "soroban_tx_latency_seconds",
+            "Soroban transaction confirmation latency in seconds",
+        )
+        .buckets(vec![0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]),
+        &["contract", "method"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(histogram.clone()))
+        .expect("metric can be registered");
+    histogram
+});
+
+pub static SOROBAN_TX_FAILED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "soroban_tx_failed_total",
+            "Soroban contract invocations that ended without a confirmed success",
+        ),
+        &["contract", "method", "reason"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static SOROBAN_TX_RETRIES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "soroban_tx_retries_total",
+            "Extra status polls needed before a Soroban transaction settled",
+        ),
+        &["contract", "method"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(counter.clone()))
+        .expect("metric can be registered");
+    counter
+});
+
+pub static SOROBAN_DLQ_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
+    let gauge = IntGauge::new(
+        "soroban_dlq_depth",
+        "Dead-lettered Soroban transactions awaiting replay",
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .expect("metric can be registered");
+    gauge
+});
+
+// ── Dependency health (#1079) ──────────────────────────────────────────────
+pub static DEPENDENCY_HEALTH: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "dependency_health",
+            "Readiness of an external dependency (1 = healthy, 0 = unhealthy)",
+        ),
+        &["dependency"],
+    )
+    .expect("metric can be created");
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .expect("metric can be registered");
+    gauge
+});
+
+/// Record the readiness of an external dependency (`db`, `redis`, `soroban`)
+/// for the `/health/ready` scrape (Issue #1079).
+pub fn record_dependency_health(dependency: &str, healthy: bool) {
+    DEPENDENCY_HEALTH
+        .with_label_values(&[dependency])
+        .set(if healthy { 1 } else { 0 });
+}
+
 /// Force all lazily-registered metrics to initialize (and therefore
 /// register with the collector registry) at startup, before the first
 /// scrape — otherwise a metric with no observations yet simply wouldn't

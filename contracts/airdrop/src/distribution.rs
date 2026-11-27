@@ -159,7 +159,8 @@ mod tests {
         // make up the missing unit.
         let allocations = compute_weighted_allocations(&env, 100, &weights);
 
-        let sum = allocations.get(a).unwrap() + allocations.get(b).unwrap() + allocations.get(c).unwrap();
+        let sum =
+            allocations.get(a).unwrap() + allocations.get(b).unwrap() + allocations.get(c).unwrap();
         assert_eq!(sum, 100);
     }
 

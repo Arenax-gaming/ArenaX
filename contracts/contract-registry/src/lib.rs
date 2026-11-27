@@ -222,9 +222,10 @@ impl ContractRegistry {
 
         let removal_ledger = env.ledger().sequence() + DEREGISTRATION_COOLDOWN_LEDGERS;
         env.storage().instance().set(&key, &removal_ledger);
-        env.storage()
-            .instance()
-            .set(&DataKey::ContractStatus(name.clone()), &Self::pending_removal_status(&env));
+        env.storage().instance().set(
+            &DataKey::ContractStatus(name.clone()),
+            &Self::pending_removal_status(&env),
+        );
 
         events::emit_deregistration_scheduled(&env, &name, &info.address, removal_ledger);
         removal_ledger
@@ -239,10 +240,13 @@ impl ContractRegistry {
             panic!("cooldown elapsed");
         }
 
-        env.storage().instance().remove(&DataKey::PendingRemoval(name.clone()));
         env.storage()
             .instance()
-            .set(&DataKey::ContractStatus(name.clone()), &Symbol::new(&env, "active"));
+            .remove(&DataKey::PendingRemoval(name.clone()));
+        env.storage().instance().set(
+            &DataKey::ContractStatus(name.clone()),
+            &Symbol::new(&env, "active"),
+        );
 
         let info = Self::get_contract_info(env.clone(), name.clone());
         events::emit_deregistration_cancelled(&env, &name, &info.address);
@@ -258,8 +262,12 @@ impl ContractRegistry {
             panic!("cooldown not elapsed");
         }
 
-        env.storage().instance().remove(&DataKey::PendingRemoval(name.clone()));
-        env.storage().instance().remove(&DataKey::ContractStatus(name.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingRemoval(name.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::ContractStatus(name.clone()));
         Self::remove_entry(&env, name);
     }
 
@@ -317,7 +325,11 @@ impl ContractRegistry {
     /// * If contract name is not registered
     /// * If the contract is pending removal (#1547)
     pub fn get_contract(env: Env, name: Symbol) -> Address {
-        if env.storage().instance().has(&DataKey::PendingRemoval(name.clone())) {
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::PendingRemoval(name.clone()))
+        {
             panic!("contract pending removal");
         }
         let contract_info: ContractInfo = env

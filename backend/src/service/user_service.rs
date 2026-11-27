@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use redis::{AsyncCommands, Client as RedisClient};
-use sqlx::PgPool;
+use serde::Serialize;
+use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
 

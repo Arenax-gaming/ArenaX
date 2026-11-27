@@ -245,7 +245,7 @@ impl crate::service::match_service::MatchService {
     async fn get_user_elo_static(db_pool: &DbPool, user_id: Uuid, game_mode: &str) -> Result<i32, ApiError> {
         let elo = sqlx::query_as!(
             UserElo,
-            "SELECT * FROM user_elo WHERE user_id = $1 AND game_mode = $2",
+            "SELECT * FROM user_elo WHERE user_id = $1 AND game = $2",
             user_id,
             game_mode
         )

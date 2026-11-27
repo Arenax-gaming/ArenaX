@@ -500,7 +500,6 @@ mod integration_tests {
     use actix_web::{test, web, App};
     use crate::http::matchmaking::*;
     use crate::auth::{JwtService, Claims};
-    use crate::middleware::auth_middleware::JwtMiddleware;
 
     async fn setup_test_app() -> impl actix_web::dev::Service<
         actix_web::dev::ServiceRequest,

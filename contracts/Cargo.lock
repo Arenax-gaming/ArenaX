@@ -99,6 +99,7 @@ dependencies = [
  "quickcheck",
  "soroban-sdk",
  "staking-rewards",
+ "upgrade-system",
  "virtual-economy",
 ]
 

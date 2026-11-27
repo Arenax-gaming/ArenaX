@@ -19,8 +19,12 @@
 //! tracking) lives entirely on the "prepare" side, so it is fully covered
 //! here without external dependencies, and runs via plain `cargo test`.
 
-use soroban_sdk::{symbol_short, testutils::Address as _, testutils::Ledger as _, Address, BytesN, Env};
-use upgrade_system::{UpgradeError, UpgradeManager, UpgradeManagerClient, Version, DEFAULT_UPGRADE_DELAY};
+use soroban_sdk::{
+    symbol_short, testutils::Address as _, testutils::Ledger as _, Address, BytesN, Env,
+};
+use upgrade_system::{
+    UpgradeError, UpgradeManager, UpgradeManagerClient, Version, DEFAULT_UPGRADE_DELAY,
+};
 
 const V1: Version = Version {
     major: 1,

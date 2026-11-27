@@ -56,7 +56,7 @@ export const TopAligned: Story = { args: { position: "top" } };
 export const NoCloseButton: Story = { args: { showCloseButton: false } };
 
 export const Interactive: Story = {
-  render: (args) => {
+  render: function InteractiveStory(args) {
     const [open, setOpen] = useState(true);
     return (
       <div>

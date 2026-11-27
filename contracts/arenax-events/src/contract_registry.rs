@@ -205,7 +205,12 @@ pub struct DeregistrationCancelled {
     pub address: Address,
 }
 
-pub fn emit_deregistration_scheduled(env: &Env, name: &Symbol, address: &Address, removal_ledger: u32) {
+pub fn emit_deregistration_scheduled(
+    env: &Env,
+    name: &Symbol,
+    address: &Address,
+    removal_ledger: u32,
+) {
     DeregistrationScheduled {
         name: name.clone(),
         address: address.clone(),

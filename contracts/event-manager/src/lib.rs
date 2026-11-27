@@ -83,13 +83,13 @@ pub enum DataKey {
     Admin,
     EventCounter,
     Event(u64),
-    PlayerEvents(Address),   // Vector of event IDs indexed by player
-    TopicAnalytics(Symbol),  // per-topic event count
+    PlayerEvents(Address),  // Vector of event IDs indexed by player
+    TopicAnalytics(Symbol), // per-topic event count
     AnomalyCounter,
     RateLimit(Symbol),
     LastEventTimestamp(Symbol),
     Paused,
-    Subscription(Symbol),   // topic -> Vec<Subscription>
+    Subscription(Symbol), // topic -> Vec<Subscription>
     /// Per-subscriber filter list for a given subscription topic.
     ///
     /// Key: `(subscriber_address, subscription_topic)`.
@@ -390,12 +390,7 @@ impl EventManagerContract {
     ///
     /// Panics if the subscriber is not currently subscribed to `topic`.
     /// The subscriber authorises the operation.
-    pub fn update_filters(
-        env: Env,
-        subscriber: Address,
-        topic: Symbol,
-        filters: Vec<Symbol>,
-    ) {
+    pub fn update_filters(env: Env, subscriber: Address, topic: Symbol, filters: Vec<Symbol>) {
         Self::require_not_paused(&env);
         subscriber.require_auth();
 
@@ -455,11 +450,7 @@ impl EventManagerContract {
     ///
     /// Returns an empty `Vec` when the subscriber has no filters set (wildcard)
     /// or is not subscribed at all.  Works while the contract is paused.
-    pub fn get_subscriber_filters(
-        env: Env,
-        subscriber: Address,
-        topic: Symbol,
-    ) -> Vec<Symbol> {
+    pub fn get_subscriber_filters(env: Env, subscriber: Address, topic: Symbol) -> Vec<Symbol> {
         env.storage()
             .persistent()
             .get(&DataKey::SubscriptionFilters(subscriber, topic))
@@ -566,8 +557,7 @@ impl EventManagerContract {
             // ── Filter check ────────��───────────────────────────────────
             // Load this subscriber's filter list.  An absent key or an
             // empty vec means wildcard — the callback always fires.
-            let filter_key =
-                DataKey::SubscriptionFilters(sub.subscriber.clone(), topic.clone());
+            let filter_key = DataKey::SubscriptionFilters(sub.subscriber.clone(), topic.clone());
             let filters: Vec<Symbol> = env
                 .storage()
                 .persistent()
@@ -1241,13 +1231,21 @@ mod tests {
 
         // Index event 1: topic = "match_win"  → both subscribers should fire.
         env.ledger().set_timestamp(100);
-        let id_win =
-            client.index_event(&caller, &player, &Symbol::new(&env, "match_win"), &Bytes::new(&env));
+        let id_win = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_win"),
+            &Bytes::new(&env),
+        );
 
         // Index event 2: topic = "match_join" → only the wildcard subscriber fires.
         env.ledger().set_timestamp(110);
-        let id_join =
-            client.index_event(&caller, &player, &Symbol::new(&env, "match_join"), &Bytes::new(&env));
+        let id_join = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_join"),
+            &Bytes::new(&env),
+        );
 
         // Dispatch "match_win" event on the sub_topic channel.
         let delivered_win = client.dispatch_event(&caller, &sub_topic, &id_win);
@@ -1279,7 +1277,10 @@ mod tests {
                 .instance()
                 .get(&Symbol::new(&env, "calls"))
                 .unwrap_or(0);
-            assert_eq!(calls, 1, "narrow subscriber should have been called exactly once");
+            assert_eq!(
+                calls, 1,
+                "narrow subscriber should have been called exactly once"
+            );
         });
 
         env.as_contract(&cb_wide_id, || {
@@ -1288,7 +1289,10 @@ mod tests {
                 .instance()
                 .get(&Symbol::new(&env, "calls"))
                 .unwrap_or(0);
-            assert_eq!(calls, 2, "wildcard subscriber should have been called twice");
+            assert_eq!(
+                calls, 2,
+                "wildcard subscriber should have been called twice"
+            );
         });
     }
 
@@ -1322,8 +1326,12 @@ mod tests {
 
         // Index a "match_join" event and dispatch it — should be blocked by filter.
         env.ledger().set_timestamp(100);
-        let id_join =
-            client.index_event(&caller, &player, &Symbol::new(&env, "match_join"), &Bytes::new(&env));
+        let id_join = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_join"),
+            &Bytes::new(&env),
+        );
         let delivered_before = client.dispatch_event(&caller, &sub_topic, &id_join);
         assert_eq!(
             delivered_before, 0,
@@ -1343,8 +1351,12 @@ mod tests {
 
         // Index another "match_join" event and dispatch — now it must fire.
         env.ledger().set_timestamp(200);
-        let id_join2 =
-            client.index_event(&caller, &player, &Symbol::new(&env, "match_join"), &Bytes::new(&env));
+        let id_join2 = client.index_event(
+            &caller,
+            &player,
+            &Symbol::new(&env, "match_join"),
+            &Bytes::new(&env),
+        );
         let delivered_after = client.dispatch_event(&caller, &sub_topic, &id_join2);
         assert_eq!(
             delivered_after, 1,

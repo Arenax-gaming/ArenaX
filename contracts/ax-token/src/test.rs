@@ -1381,7 +1381,9 @@ fn test_approve_transfer_from_flow_decrements_allowance() {
 
     client.approve(&user1, &user2, &500i128);
 
-    client.transfer_from(&user2, &user1, &user3, &300i128).unwrap();
+    client
+        .transfer_from(&user2, &user1, &user3, &300i128)
+        .unwrap();
     assert_eq!(client.balance(&user1), 700);
     assert_eq!(client.balance(&user3), 300);
     assert_eq!(client.allowance(&user1, &user2), 200);

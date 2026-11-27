@@ -26,7 +26,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Playground: Story = {
-  render: (args) => {
+  render: function PlaygroundStory(args) {
     const [checked, setChecked] = useState(args.checked ?? false);
     return (
       <div className="flex items-center gap-3">

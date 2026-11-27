@@ -462,6 +462,7 @@ pub mod keys {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn hit_rate_counts_stale_hits_as_hits() {

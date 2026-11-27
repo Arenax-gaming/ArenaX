@@ -234,7 +234,7 @@ pub async fn test_transaction_retry_on_serialization(pool: &PgPool) -> Result<()
                 Box::pin(async move {
                     // Lock the wallet
                     sqlx::query!(
-                        "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                        "SELECT user_id FROM wallets WHERE user_id = $1 FOR UPDATE",
                         user_id_clone
                     )
                     .fetch_one(&mut **tx)
@@ -322,7 +322,7 @@ pub async fn test_deadlock_detection(pool: &PgPool) -> Result<(), String> {
             Box::pin(async move {
                 // Lock the wallet
                 sqlx::query!(
-                    "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                    "SELECT user_id FROM wallets WHERE user_id = $1 FOR UPDATE",
                     user_id_clone
                 )
                 .fetch_one(&mut **tx)
@@ -347,7 +347,7 @@ pub async fn test_deadlock_detection(pool: &PgPool) -> Result<(), String> {
             execute_transaction(&pool_clone2, &config, move |tx| {
                 Box::pin(async move {
                     sqlx::query!(
-                        "SELECT 1 FROM wallets WHERE user_id = $1 FOR UPDATE",
+                        "SELECT user_id FROM wallets WHERE user_id = $1 FOR UPDATE",
                         user_id_clone2
                     )
                     .fetch_one(&mut **tx)
