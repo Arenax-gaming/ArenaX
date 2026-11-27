@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 use redis::Client as RedisClient;
+use tracing::error;
 use uuid::Uuid;
 
 pub struct MatchService {

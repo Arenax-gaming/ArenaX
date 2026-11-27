@@ -12,7 +12,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal", "migrate", "json"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal", "migrate", "json", "ipnetwork"] }
 validator = { version = "0.20.0", features = ["derive"] }
 rust_decimal = { version = "1.40.0", features = ["db-postgres"] }
 actix-web = "4.12.1"
@@ -34,7 +34,7 @@ sha2 = "0.10"
 hmac = "0.12"
 dotenvy = "0.15"
 actix-cors = "0.6"
-reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls", "multipart"], default-features = false }
 base64 = "0.22"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
@@ -50,6 +50,13 @@ zeroize = { version = "1.8", features = ["derive"] }
 log = "0.4"
 # Async methods in traits (EvidenceStore, TelemetryIndex, IpfsPinner, ...).
 async-trait = "0.1"
+# Response body buffering in the idempotency middleware and CSPRNG-backed API
+# key generation.
+bytes = "1"
+getrandom = "0.2"
+# `INET` columns (api_key_usage_logs.client_ip); must match the version sqlx's
+# `ipnetwork` feature expects.
+ipnetwork = "0.20"
 
 # Stellar Rust SDK (#1283): account management, asset issuance, transaction
 # building/submission, and Soroban contract invocation via Stellar RPC.

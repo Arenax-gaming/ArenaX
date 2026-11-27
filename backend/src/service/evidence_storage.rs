@@ -561,6 +561,7 @@ fn derive_signing_key(secret: &str, date_stamp: &str, region: &str, service: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 

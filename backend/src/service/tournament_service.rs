@@ -515,7 +515,7 @@ impl TournamentService {
             SELECT t.*, COUNT(tp.id) as current_participants
             FROM tournaments t
             LEFT JOIN tournament_participants tp ON t.id = tp.tournament_id
-            WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
+            WHERE ($1::int4 IS NULL OR t.status = $1)
             AND ($2::text IS NULL OR t.game = $2)
             GROUP BY t.id
             ORDER BY t.created_at DESC
@@ -535,7 +535,7 @@ impl TournamentService {
             r#"
             SELECT COUNT(*) as count
             FROM tournaments t
-            WHERE ($1::text IS NULL OR t.status = $1::tournament_status)
+            WHERE ($1::int4 IS NULL OR t.status = $1)
             AND ($2::text IS NULL OR t.game = $2)
             "#,
             status_filter.map(|s| s as i32),
@@ -2783,7 +2783,6 @@ impl TournamentService {
                 "#,
                 tournament_id,
                 participant.user_id,
-                participant.user_id,
                 MatchStatus::Completed as _
             )
             .fetch_one(&self.db_pool)
@@ -3262,10 +3261,11 @@ impl TournamentService {
             MIN(tp.registered_at) as first_registration,
             MAX(tp.registered_at) as last_registration,
             COUNT(CASE WHEN tp.entry_fee_paid THEN 1 END) as paid_registrations,
-            COUNT(CASE WHEN tp.status = 'active' THEN 1 END) as active_participants
+            COUNT(CASE WHEN tp.status = $2 THEN 1 END) as active_participants
             FROM tournament_participants tp
             WHERE tp.tournament_id = $1"#,
-            tournament_id
+            tournament_id,
+            ParticipantStatus::Active as i32
         )
         .fetch_one(&self.db_pool)
         .await

@@ -9,6 +9,7 @@
 
 pub mod encryption;
 pub mod envelope_encryption;
+pub mod rate_limit_abuse;
 
 pub use encryption::{
     EncryptedField, EncryptionAuditEvent, EncryptionAuditLogger, EncryptionError,

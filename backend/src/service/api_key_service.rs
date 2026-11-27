@@ -1,7 +1,7 @@
 use crate::api_error::ApiError;
 use crate::db::DbPool;
 use crate::models::api_key::{
-    ApiKey, ApiKeyRotationHistory, ApiKeySummary, ApiKeyUsageLog, CreateApiKeyRequest,
+    ApiKey, ApiKeyRotationHistory, ApiKeyStats, ApiKeySummary, ApiKeyUsageLog, CreateApiKeyRequest,
     CreateApiKeyResponse, GenerateApiKeyRequest, GenerateApiKeyResponse, GetApiKeyResponse,
     KeyStatus, RevokeApiKeyRequest, RotateApiKeyRequest, RotateApiKeyResponse,
     UpdateApiKeyRequest,

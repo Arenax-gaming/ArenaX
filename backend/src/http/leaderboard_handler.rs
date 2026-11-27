@@ -1,4 +1,5 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -6,8 +7,9 @@ use uuid::Uuid;
 use std::sync::Arc;
 
 use crate::api_error::ApiError;
+use crate::auth::middleware::ClaimsExt;
 use crate::middleware::cache::ResponseCache;
-use crate::models::{PaginatedResponse, PaginationParams};
+use crate::models::{CloseSeasonRequest, PaginatedResponse, PaginationParams};
 use crate::realtime::leaderboard_broadcaster::LeaderboardBroadcaster;
 use crate::service::leaderboard_sync::LeaderboardSync;
 use crate::service::monthly_leaderboard::MonthlyLeaderboardService;
@@ -89,14 +91,14 @@ pub async fn get_leaderboard(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PeriodQuery {
+pub struct WeeklyPeriodQuery {
     pub period: Option<String>,
 }
 
 /// GET /api/leaderboard?period=weekly — real-time weekly rankings from Redis.
 pub async fn get_period_leaderboard(
     redis: web::Data<Arc<redis::Client>>,
-    period: web::Query<PeriodQuery>,
+    period: web::Query<WeeklyPeriodQuery>,
     query: web::Query<PaginationParams>,
 ) -> Result<HttpResponse, ApiError> {
     if period.period.as_deref() != Some("weekly") {
@@ -176,6 +178,25 @@ pub async fn get_rank_history(
         .await?;
 
     Ok(HttpResponse::Ok().json(history))
+}
+
+/// Query parameters for the ELO history endpoint: an optional date range,
+/// defaulting to the last 30 days.
+#[derive(Debug, Deserialize)]
+pub struct EloHistoryQuery {
+    pub start_date: Option<DateTime<Utc>>,
+    pub end_date: Option<DateTime<Utc>>,
+}
+
+/// Return `ApiError::Forbidden` unless the caller has the `admin` role.
+fn require_admin(req: &HttpRequest) -> Result<(), ApiError> {
+    let claims = req
+        .claims()
+        .ok_or_else(|| ApiError::unauthorized("Authentication required"))?;
+    if !claims.roles.contains(&"admin".to_string()) {
+        return Err(ApiError::forbidden("Admin access required"));
+    }
+    Ok(())
 }
 
 /// GET /api/v1/leaderboards/:category/player/:player_id/elo-history

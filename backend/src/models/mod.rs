@@ -34,7 +34,9 @@ pub use idempotency::*;
 pub use leaderboard::*;
 pub use match_authority::*;
 pub use match_models::{
-    CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory, EloResponse,
+    BulkItemStatus, BulkMatchIngestRequest, BulkMatchIngestResponse, BulkMatchItemResult,
+    BulkMatchResultItem, CreateDisputeRequest, DisputeListResponse, DisputeStatus, EloHistory,
+    EloResponse,
     JoinMatchmakingRequest, Match, MatchDispute, MatchResponse, MatchResult, MatchScore,
     MatchStatus, MatchType, MatchmakingQueue, MatchmakingStatusResponse, PlayerInfo, QueueStatus,
     ReportScoreRequest, UserElo,
