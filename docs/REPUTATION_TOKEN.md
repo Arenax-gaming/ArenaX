@@ -58,4 +58,4 @@ change-trust parameters.
 
 Every change is mirrored to the `reputation-tracker` contract
 (`SOROBAN_CONTRACT_REPUTATION`, deployed with
-`scripts/stellar/deploy-reputation-contract.sh`) and the player is notified.
+`scripts/stellar/deploy-reputation-contract.sh`) and the player is notified..
