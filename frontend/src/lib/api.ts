@@ -1144,6 +1144,20 @@ class ApiClient {
     }
   }
 
+  // ── Global search (#1494) ──────────────────────────────────────────────────────
+
+  async search(
+    query: string,
+    filters: { category?: string; sort?: "relevance" | "newest" | "oldest" } = {},
+  ): Promise<{ hits: Array<{ id: string; entity: string; title: string; description?: string; score: number }>; total: number }> {
+    const params = new URLSearchParams({ q: query });
+    if (filters.category && filters.category !== "all") {
+      params.set("entity", filters.category === "players" ? "user" : filters.category.slice(0, -1));
+    }
+    if (filters.sort && filters.sort !== "relevance") params.set("sort", filters.sort);
+    return this.request(`/v1/search?${params.toString()}`);
+  }
+
   // ── Settings ──────────────────────────────────────────────────────────────────
 
   async getSettings(): Promise<any> {

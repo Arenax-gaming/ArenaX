@@ -41,6 +41,7 @@ export interface SearchOptions {
     page?: number;
     pageSize?: number;
     highlight?: boolean;
+    sort?: 'relevance' | 'newest' | 'oldest';
 }
 
 export interface SearchHit {
@@ -115,7 +116,7 @@ class InMemorySearchBackend implements ISearchBackend {
 
     async search(opts: SearchOptions): Promise<SearchResult> {
         const t0 = Date.now();
-        const { query, filters, page = 1, pageSize = 20, highlight = false } = opts;
+        const { query, filters, page = 1, pageSize = 20, highlight = false, sort = 'relevance' } = opts;
         const needle = query.toLowerCase();
 
         let docs = Array.from(this.store.values());
@@ -142,7 +143,11 @@ class InMemorySearchBackend implements ISearchBackend {
             if (score > 0) scored.push({ doc, score });
         }
 
-        scored.sort((a, b) => b.score - a.score);
+        scored.sort((a, b) => {
+            if (sort === 'newest') return b.doc.indexedAt - a.doc.indexedAt;
+            if (sort === 'oldest') return a.doc.indexedAt - b.doc.indexedAt;
+            return b.score - a.score;
+        });
 
         const total = scored.length;
         const start = (page - 1) * pageSize;
@@ -263,7 +268,7 @@ class ElasticsearchBackend implements ISearchBackend {
 
     async search(opts: SearchOptions): Promise<SearchResult> {
         const t0 = Date.now();
-        const { query, filters, page = 1, pageSize = 20, highlight = false } = opts;
+        const { query, filters, page = 1, pageSize = 20, highlight = false, sort = 'relevance' } = opts;
         const from = (page - 1) * pageSize;
 
         const must: unknown[] = [
@@ -287,6 +292,7 @@ class ElasticsearchBackend implements ISearchBackend {
         const esQuery: Record<string, unknown> = {
             from,
             size: pageSize,
+            ...(sort === 'newest' ? { sort: [{ indexedAt: { order: 'desc' } }] } : sort === 'oldest' ? { sort: [{ indexedAt: { order: 'asc' } }] } : {}),
             query: {
                 bool: {
                     must,

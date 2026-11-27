@@ -34,6 +34,10 @@ export class SearchController {
                 Math.max(1, parseInt(String(req.query['pageSize'] ?? '20'), 10) || 20),
             );
             const highlight = req.query['highlight'] === 'true';
+            const requestedSort = String(req.query['sort'] ?? 'relevance');
+            const sort = ['relevance', 'newest', 'oldest'].includes(requestedSort)
+                ? requestedSort as 'relevance' | 'newest' | 'oldest'
+                : 'relevance';
             const entities = parseEntities(req.query['entity']);
             const tags = req.query['tags']
                 ? String(req.query['tags']).split(',').filter(Boolean)
@@ -45,6 +49,7 @@ export class SearchController {
                 page,
                 pageSize,
                 highlight,
+                sort,
             });
 
             res.status(200).json(result);
