@@ -33,7 +33,7 @@ interface UseSearchReturn<T> {
  * Advanced search hook with debouncing, caching, and history
  */
 export function useSearch<T>(
-  searchFn: (query: string) => Promise<T[]>,
+  searchFn: (query: string, filters: { category: string; sort: 'relevance' | 'newest' | 'oldest' }) => Promise<T[]>,
   options: SearchOptions<T> = {}
 ): UseSearchReturn<T> {
   const {
@@ -91,7 +91,8 @@ export function useSearch<T>(
       }
 
       // Check cache first
-      const cached = cacheRef.current.get(debouncedQuery);
+      const cacheId = `${debouncedQuery}:${category}:${sort}`;
+      const cached = cacheRef.current.get(cacheId);
       if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) { // 5 min cache TTL
         setResults(cached.results);
         return;
@@ -102,11 +103,11 @@ export function useSearch<T>(
       abortControllerRef.current = new AbortController();
 
       try {
-        const searchResults = await searchFn(debouncedQuery);
+        const searchResults = await searchFn(debouncedQuery, { category, sort });
         setResults(searchResults);
 
         // Cache results
-        cacheRef.current.set(debouncedQuery, {
+        cacheRef.current.set(cacheId, {
           results: searchResults,
           timestamp: Date.now(),
           query: debouncedQuery,
@@ -148,7 +149,7 @@ export function useSearch<T>(
     };
 
     performSearch();
-  }, [debouncedQuery, searchFn, minSearchLength, maxCacheSize, maxHistorySize]);
+  }, [debouncedQuery, searchFn, minSearchLength, maxCacheSize, maxHistorySize, category, sort]);
 
   const clearHistory = useCallback(() => {
     setSearchHistory([]);
@@ -170,10 +171,10 @@ export function useSearch<T>(
   const refetch = useCallback(() => {
     if (debouncedQuery.length >= minSearchLength) {
       // Force cache invalidation by removing the entry
-      cacheRef.current.delete(debouncedQuery);
+      cacheRef.current.delete(`${debouncedQuery}:${category}:${sort}`);
       // The effect will re-run with the same query
     }
-  }, [debouncedQuery, minSearchLength]);
+  }, [debouncedQuery, minSearchLength, category, sort]);
 
   return {
     query,
