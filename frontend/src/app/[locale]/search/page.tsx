@@ -38,12 +38,16 @@ export default function SearchPage() {
     const result = await api.search(value, filters);
     return result.hits ?? [];
   }, []);
-  const { results, isLoading, error } = useSearch<Hit>(searchFn, {
+  const { results, isLoading, error, setQuery: setSearchQuery } = useSearch<Hit>(searchFn, {
     minSearchLength: 1,
     category,
     sort,
     cacheKey: "global-search",
   });
+
+  useEffect(() => {
+    setSearchQuery(query);
+  }, [query, setSearchQuery]);
 
   useEffect(() => {
     const next = new URLSearchParams();
