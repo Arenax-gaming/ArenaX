@@ -6,3 +6,8 @@ authors = ["ArenaX Team <dev@arenax.gg>"]
 
 [dependencies]
 soroban-sdk = "23.5.2"
+
+[dev-dependencies]
+# `soroban_sdk::testutils::Ledger` (used by the cache TTL tests) is gated
+# behind this feature.
+soroban-sdk = { version = "23.5.2", features = ["testutils"] }

@@ -16,18 +16,19 @@ use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, TryFromVal, Val, 
 
 /// Storage key wrapper so cached entries never collide with a caller
 /// contract's own persistent storage keys.
+///
+/// The cached value and its expiry ledger live under two separate keys
+/// rather than in a single `#[contracttype]` struct: `soroban_sdk::Val` is
+/// not a valid `#[contracttype]` field (the macro cannot build a
+/// `TryFrom<&Val>`-based conversion for it), but it is a perfectly valid
+/// storage *value* (`Val: IntoVal<Env, Val>`), so splitting the record keeps
+/// both the value and the TTL in persistent storage without a lossy
+/// re-encoding.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CacheStorageKey {
-    Entry(Symbol),
-}
-
-/// A single cached cross-contract call result.
-#[contracttype]
-#[derive(Clone, Debug)]
-struct CacheEntry {
-    value: Val,
-    expires_at_ledger: u32,
+    Value(Symbol),
+    Expiry(Symbol),
 }
 
 /// Helper for caching the result of a cross-contract call under a short
@@ -44,20 +45,22 @@ impl CachedCall {
     where
         T: TryFromVal<Env, Val>,
     {
-        let storage_key = CacheStorageKey::Entry(key.clone());
+        let value_key = CacheStorageKey::Value(key.clone());
+        let expiry_key = CacheStorageKey::Expiry(key.clone());
         let current_ledger = env.ledger().sequence();
 
-        if let Some(entry) = env
-            .storage()
-            .persistent()
-            .get::<CacheStorageKey, CacheEntry>(&storage_key)
-        {
-            if entry.expires_at_ledger > current_ledger {
-                Self::emit_cache_event(env, "cache_hit", key);
-                return T::try_from_val(env, &entry.value).ok();
+        let expires_at_ledger: Option<u32> = env.storage().persistent().get(&expiry_key);
+        if let Some(expires_at_ledger) = expires_at_ledger {
+            if expires_at_ledger > current_ledger {
+                if let Some(value) = env.storage().persistent().get::<_, Val>(&value_key) {
+                    Self::emit_cache_event(env, "cache_hit", key);
+                    return T::try_from_val(env, &value).ok();
+                }
             }
-            // Expired: clean up now rather than leaving a dead entry around.
-            env.storage().persistent().remove(&storage_key);
+            // Expired (or the value vanished): clean up now rather than
+            // leaving a dead entry around.
+            env.storage().persistent().remove(&value_key);
+            env.storage().persistent().remove(&expiry_key);
         }
 
         Self::emit_cache_event(env, "cache_miss", key);
@@ -69,17 +72,24 @@ impl CachedCall {
     where
         V: IntoVal<Env, Val>,
     {
-        let storage_key = CacheStorageKey::Entry(key.clone());
+        let value_key = CacheStorageKey::Value(key.clone());
+        let expiry_key = CacheStorageKey::Expiry(key.clone());
         let expires_at_ledger = env.ledger().sequence().saturating_add(ttl_ledgers);
-        let entry = CacheEntry {
-            value: value.into_val(env),
-            expires_at_ledger,
-        };
-        env.storage().persistent().set(&storage_key, &entry);
+
+        env.storage()
+            .persistent()
+            .set(&value_key, &value.into_val(env));
+        env.storage()
+            .persistent()
+            .set(&expiry_key, &expires_at_ledger);
+
         if ttl_ledgers > 0 {
             env.storage()
                 .persistent()
-                .extend_ttl(&storage_key, 1, ttl_ledgers);
+                .extend_ttl(&value_key, 1, ttl_ledgers);
+            env.storage()
+                .persistent()
+                .extend_ttl(&expiry_key, 1, ttl_ledgers);
         }
     }
 
@@ -124,20 +134,23 @@ impl CachedCall {
     /// Manually invalidate a cached entry, removing it immediately
     /// regardless of its remaining TTL.
     pub fn bust_cache(env: &Env, key: &Symbol) {
-        let storage_key = CacheStorageKey::Entry(key.clone());
-        env.storage().persistent().remove(&storage_key);
+        env.storage()
+            .persistent()
+            .remove(&CacheStorageKey::Value(key.clone()));
+        env.storage()
+            .persistent()
+            .remove(&CacheStorageKey::Expiry(key.clone()));
     }
 
     /// True if a live (non-expired) cache entry exists for `key`. Unlike
     /// `get`, this does not emit a `cache_hit`/`cache_miss` event, so it is
     /// safe to use for plain existence checks.
     pub fn is_cached(env: &Env, key: &Symbol) -> bool {
-        let storage_key = CacheStorageKey::Entry(key.clone());
         let current_ledger = env.ledger().sequence();
         env.storage()
             .persistent()
-            .get::<CacheStorageKey, CacheEntry>(&storage_key)
-            .map(|entry| entry.expires_at_ledger > current_ledger)
+            .get::<_, u32>(&CacheStorageKey::Expiry(key.clone()))
+            .map(|expires_at_ledger| expires_at_ledger > current_ledger)
             .unwrap_or(false)
     }
 
@@ -159,19 +172,38 @@ impl CachedCall {
 mod test {
     use super::*;
     use soroban_sdk::testutils::Ledger as _;
+    use soroban_sdk::{contract, contractimpl};
+
+    /// Persistent storage and events are only reachable from a contract
+    /// context, so every test body runs inside this minimal registered
+    /// contract via [`Env::as_contract`].
+    #[contract]
+    pub struct CacheHarness;
+
+    #[contractimpl]
+    impl CacheHarness {
+        pub fn noop() {}
+    }
+
+    fn in_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
+        let contract_id = env.register(CacheHarness, ());
+        env.as_contract(&contract_id, f)
+    }
 
     #[test]
     fn miss_then_set_then_hit() {
         let env = Env::default();
         let key = Symbol::new(&env, "config_value");
 
-        // Nothing cached yet.
-        assert!(CachedCall::get::<u32>(&env, &key).is_none());
-        assert!(!CachedCall::is_cached(&env, &key));
+        in_contract(&env, || {
+            // Nothing cached yet.
+            assert!(CachedCall::get::<u32>(&env, &key).is_none());
+            assert!(!CachedCall::is_cached(&env, &key));
 
-        CachedCall::set(&env, &key, &42u32, 100);
-        assert!(CachedCall::is_cached(&env, &key));
-        assert_eq!(CachedCall::get::<u32>(&env, &key), Some(42u32));
+            CachedCall::set(&env, &key, &42u32, 100);
+            assert!(CachedCall::is_cached(&env, &key));
+            assert_eq!(CachedCall::get::<u32>(&env, &key), Some(42u32));
+        });
     }
 
     #[test]
@@ -179,15 +211,16 @@ mod test {
         let env = Env::default();
         let key = Symbol::new(&env, "ttl_value");
 
-        CachedCall::set(&env, &key, &7u32, 5);
-        assert!(CachedCall::is_cached(&env, &key));
+        in_contract(&env, || CachedCall::set(&env, &key, &7u32, 5));
 
         env.ledger().with_mut(|li| {
             li.sequence_number += 10;
         });
 
-        assert!(!CachedCall::is_cached(&env, &key));
-        assert!(CachedCall::get::<u32>(&env, &key).is_none());
+        in_contract(&env, || {
+            assert!(!CachedCall::is_cached(&env, &key));
+            assert!(CachedCall::get::<u32>(&env, &key).is_none());
+        });
     }
 
     #[test]
@@ -195,11 +228,13 @@ mod test {
         let env = Env::default();
         let key = Symbol::new(&env, "bustable");
 
-        CachedCall::set(&env, &key, &1u32, 1000);
-        assert!(CachedCall::is_cached(&env, &key));
+        in_contract(&env, || {
+            CachedCall::set(&env, &key, &1u32, 1000);
+            assert!(CachedCall::is_cached(&env, &key));
 
-        CachedCall::bust_cache(&env, &key);
-        assert!(!CachedCall::is_cached(&env, &key));
-        assert!(CachedCall::get::<u32>(&env, &key).is_none());
+            CachedCall::bust_cache(&env, &key);
+            assert!(!CachedCall::is_cached(&env, &key));
+            assert!(CachedCall::get::<u32>(&env, &key).is_none());
+        });
     }
 }
