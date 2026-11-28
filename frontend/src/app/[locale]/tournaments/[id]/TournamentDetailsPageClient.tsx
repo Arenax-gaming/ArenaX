@@ -18,10 +18,8 @@ import { api } from "@/lib/api";
 import type { Tournament } from "@/types/tournament";
 import { TOURNAMENT_DETAIL_BANNER_SIZES } from "@/lib/tournamentImageSizes";
 import { TournamentDetailSkeleton } from "@/components/common/PageSkeleton";
-import {
-  getPrimarySponsor,
-  TournamentSponsorRow,
-} from "@/components/sponsors/TournamentSponsorBadges";
+import { getActiveSponsors } from "@/components/sponsors/TournamentSponsorBadges";
+import { SponsorCarousel } from "@/components/sponsors/SponsorCarousel";
 import { StellarPrizePoolCard } from "@/components/stellar/StellarPrizePoolCard";
 
 export function TournamentDetailsPageClient() {
@@ -160,7 +158,7 @@ export function TournamentDetailsPageClient() {
           />
 
           {/* Multiple Sponsors Display (Carousel / Stacked Row) */}
-          <TournamentSponsorRow tournament={tournament} />
+          <SponsorCarousel sponsors={getActiveSponsors(tournament)} tournamentId={tournament.id} />
 
 
           {showBracket && bracketData ? (
