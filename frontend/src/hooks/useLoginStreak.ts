@@ -31,13 +31,13 @@ import { useAuth } from "@/hooks/useAuth";
 export const HISTORY_DAYS = 91;
 
 /** Streak lengths that pay out. */
-export const MILESTONES = [3, 7, 30] as const;
+export const MILESTONES = [7, 30, 100] as const;
 export type Milestone = (typeof MILESTONES)[number];
 
 export const MILESTONE_REWARDS: Record<Milestone, { coins: number; label: string }> = {
-  3: { coins: 50, label: "Warm-up bonus" },
   7: { coins: 200, label: "Week streak" },
   30: { coins: 1500, label: "Monthly dedication" },
+  100: { coins: 5000, label: "Centurion" },
 };
 
 export interface StreakDay {
