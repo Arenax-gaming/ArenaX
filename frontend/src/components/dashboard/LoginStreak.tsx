@@ -216,7 +216,8 @@ export function LoginStreak() {
         </div>
       </CardHeader>
 
-      <CardContent className="relative space-y-5">\n        <AnimatePresence>{celebration !== null && <MilestoneConfetti milestone={celebration} />}</AnimatePresence>
+      <CardContent className="relative space-y-5">
+        <AnimatePresence>{celebration !== null && <MilestoneConfetti milestone={celebration} />}</AnimatePresence>
         {/* Counter */}
         <div className="flex items-baseline gap-2">
           <span className="text-4xl font-extrabold tabular-nums">{current}</span>
