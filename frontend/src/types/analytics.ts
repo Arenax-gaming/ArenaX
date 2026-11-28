@@ -20,6 +20,7 @@ export type AnalyticsEventName =
   | "tournament_joined"
   | "tournament_left"
   | "tournament_win_shared"
+  | "sponsor_clicked"
   | "match_score_reported"
   | "match_disputed"
   | "purchase_initiated"
@@ -181,6 +182,7 @@ export const ALLOWED_EVENT_NAMES: readonly AnalyticsEventName[] = [
   "tournament_joined",
   "tournament_left",
   "tournament_win_shared",
+  "sponsor_clicked",
   "match_score_reported",
   "match_disputed",
   "purchase_initiated",
