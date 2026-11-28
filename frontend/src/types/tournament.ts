@@ -6,6 +6,7 @@ export interface TournamentSponsor {
   brandColor?: string;
   color?: string;
   websiteUrl?: string;
+  url?: string;
   tier?: 'title' | 'presenting' | 'partner' | string;
   isActive?: boolean;
 }
