@@ -9,8 +9,9 @@
  * a three-month heat map, and the redemption UI for rewards earned.
  */
 
-import { useMemo } from "react";
-import { Flame, Gift, Trophy } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Flame, Gift, Trophy, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,43 @@ function hoursUntil(target: Date): number {
  */
 function nextMilestone(current: number): Milestone | null {
   return MILESTONES.find((m) => current < m) ?? null;
+}
+
+function MilestoneConfetti({ milestone }: { milestone: Milestone }) {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
+      aria-live="polite"
+      aria-label={`Congratulations, ${milestone} day login streak milestone reached`}
+    >
+      <div className="absolute inset-x-0 top-0 flex justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: -12, scale: 0.8 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8 }}
+          className="flex items-center gap-2 rounded-full bg-orange-500 px-4 py-2 text-sm font-bold text-white shadow-lg"
+        >
+          <Sparkles className="h-4 w-4" aria-hidden="true" />
+          {milestone}-day milestone!
+        </motion.div>
+      </div>
+      {Array.from({ length: 24 }, (_, index) => (
+        <motion.span
+          key={index}
+          initial={{ opacity: 1, y: -12, x: 0, rotate: 0 }}
+          animate={{
+            opacity: 0,
+            y: 150 + (index % 5) * 22,
+            x: ((index * 37) % 220) - 110,
+            rotate: 360 + index * 19,
+          }}
+          transition={{ duration: 1.35 + (index % 4) * 0.12, ease: "easeOut" }}
+          className="absolute left-1/2 top-3 h-2 w-2 rounded-sm bg-orange-500"
+          style={{ marginLeft: (index % 2 ? 1 : -1) * (index * 9) }}
+        />
+      ))}
+    </div>
+  );
 }
 
 function StreakSkeleton() {
@@ -133,7 +171,28 @@ export function LoginStreak() {
 
   if (loading) return <StreakSkeleton />;
 
+  const [celebration, setCelebration] = useState<Milestone | null>(null);
+
+  useEffect(() => {
+    if (!MILESTONES.includes(current as Milestone)) return;
+    const milestone = current as Milestone;
+    const today = new Date();
+    const dayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const storageKey = `arenax:streak:celebrated:${milestone}:${dayKey}`;
+    try {
+      if (window.localStorage.getItem(storageKey)) return;
+      window.localStorage.setItem(storageKey, "1");
+      setCelebration(milestone);
+      const timeout = window.setTimeout(() => setCelebration(null), 2200);
+      return () => window.clearTimeout(timeout);
+    } catch {
+      // If storage is unavailable, avoid repeatedly animating on re-renders.
+      setCelebration(null);
+    }
+  }, [current]);
+
   const next = nextMilestone(current);
+  const nextProgress = next ? Math.min((current / next) * 100, 100) : 100;
   const hoursLeft = hoursUntil(expiresAt);
 
   return (
@@ -157,7 +216,7 @@ export function LoginStreak() {
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-5">
+      <CardContent className="relative space-y-5">\n        <AnimatePresence>{celebration !== null && <MilestoneConfetti milestone={celebration} />}</AnimatePresence>
         {/* Counter */}
         <div className="flex items-baseline gap-2">
           <span className="text-4xl font-extrabold tabular-nums">{current}</span>
