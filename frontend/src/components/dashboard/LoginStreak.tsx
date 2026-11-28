@@ -240,6 +240,31 @@ export function LoginStreak() {
           )}
         </p>
 
+        {/* Progress to the next reward */}
+        {next !== null && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-muted-foreground">Next reward · Day {next}</span>
+              <span className="tabular-nums text-muted-foreground">{current}/{next} days</span>
+            </div>
+            <div
+              className="h-2 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-valuenow={current}
+              aria-valuemin={0}
+              aria-valuemax={next}
+              aria-label={`Progress to day ${next} milestone`}
+            >
+              <motion.div
+                className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400"
+                initial={{ width: 0 }}
+                animate={{ width: `${nextProgress}%` }}
+                transition={{ duration: 0.7, ease: "easeOut" }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Milestones */}
         <div>
           <p className="mb-2 text-xs font-medium text-muted-foreground">Milestones</p>
