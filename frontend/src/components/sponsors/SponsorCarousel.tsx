@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import { useAnalytics } from "@/hooks/useAnalytics";
 import type { TournamentSponsor } from "@/types/tournament";
@@ -45,7 +45,7 @@ export function SponsorCarousel({
   const showNext = () => {
     setActiveIndex((index) => (index + 1) % sponsors.length);
   };
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       showPrevious();
